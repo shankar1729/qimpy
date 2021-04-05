@@ -1,2 +1,2 @@
-# Qimpy
+# QimPy
 Quantum-Integrated Multi-PhYsics
