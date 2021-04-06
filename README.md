@@ -1,4 +1,4 @@
-![QimPy](doc/qimpy.svg)
+![QimPy](docs/qimpy.svg)
 
 ---
 
