@@ -27,10 +27,17 @@ if __name__ == "__main__":
     # Parse the commandline arguments:
     import argparse
     parser = argparse.ArgumentParser(
+        prog='python -m qimpy.run',
         description='Run a QimPy calculation from an input file')
-    parser.add_argument(
-        'input_file',
+    # --- mutually-exclusive group of either version or input file
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
+        '-v', '--version', action='store_true',
+        help='print version information and quit')
+    group.add_argument(
+        '-i', '--input-file',
         help='input file in YAML format')
+    # ---
     parser.add_argument(
         '-o', '--output-file',
         help='output file (stdout if unspecified)')
@@ -47,14 +54,17 @@ if __name__ == "__main__":
         '-m', '--mpi-log',
         help='file prefix for debug logs from other MPI processes')
     parser.add_argument(
-        '-v', '--version', action='store_true',
-        help='print version information and quit')
-    parser.add_argument(
         '-V', '--verbose', action='store_true',
         help='print extra information in log for debugging')
     args = parser.parse_args()
-    print(args)
-    
+
+    if args.version:
+        # Print version and exit:
+        import qimpy
+        print('QimPy', qimpy.__version__)
+        exit()
+
+    # Parse YAML input file:
     with open(args.input_file) as f:
         allInputs = yaml.safe_load(f)  # dictionary of inputs from yaml file
 
