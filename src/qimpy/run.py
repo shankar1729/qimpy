@@ -1,25 +1,5 @@
+import qimpy as qp
 import yaml
-
-
-class Qimpy(object):
-    def __init__(self, yamlDict):
-        '''
-        Input: dictionary yamlDict generated from yaml read-in
-        Instantiates Qimpy object whose attributes are keys of yamlDict
-        see: https://stackoverflow.com/questions/1305532/
-            convert-nested-python-dict-to-object
-        '''
-        for inputKeyword, inputValue in yamlDict.items():  # for key, value
-            if isinstance(inputValue, (list, tuple)):
-                setattr(
-                    self, inputKeyword,
-                    [(Qimpy(x) if isinstance(x, dict) else x)
-                        for x in inputValue])
-            else:
-                setattr(
-                    self, inputKeyword,
-                    (Qimpy(inputValue) if isinstance(inputValue, dict)
-                        else inputValue))
 
 
 if __name__ == "__main__":
@@ -60,15 +40,16 @@ if __name__ == "__main__":
 
     if args.version:
         # Print version and exit:
-        import qimpy
-        print('QimPy', qimpy.__version__)
+        print('QimPy', qp.__version__)
         exit()
 
-    # Parse YAML input file:
-    with open(args.input_file) as f:
-        allInputs = yaml.safe_load(f)  # dictionary of inputs from yaml file
+    # Version header
+    print('*'*15, 'QimPy', qp.__version__, '*'*15)
 
-    qimpy = Qimpy(allInputs)
-    print(qimpy.__dict__)
-    print(qimpy.lattice)
-    print(qimpy.ions)
+    # Load input parameters from YAML file:
+    with open(args.input_file) as f:
+        inputDict = yaml.safe_load(f)
+
+    # Initialize system with input parameters:
+    system = qp.System(**inputDict)
+

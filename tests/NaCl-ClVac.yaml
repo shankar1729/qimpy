@@ -7,7 +7,9 @@ lattice:
   scale: 21.48 #for 2x2x2 supercell, in bohrs (could be a length 3 list/tuple)
 
 ions:
-  pseudopotentials: ../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
+  pseudopotentials:
+    - ../../../JDFTx/build_testing/pseudopotentials/SG15/Cl_ONCV_PBE-1.0.upf
+    - ../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
   coordinates:
     - [Na, 0.25, 0.25, 0.25]
     - [Na, 0.25, 0.25, 0.75]
