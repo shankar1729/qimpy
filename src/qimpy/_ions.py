@@ -7,7 +7,7 @@ import re
 class Ions:
 
     def __init__(self, *, coordinates, pseudopotentials):
-        print('\n--- Initializing Ions ---')
+        qp.log.info('\n--- Initializing Ions ---')
 
         # Read ionic coordinates:
         assert isinstance(coordinates, list)
@@ -39,10 +39,10 @@ class Ions:
                 'coordinates must group ions of same type together')
 
         # Report ionic positions:
-        print(self.n_ions, 'total ions of', self.n_types, 'types')
-        print('positions:')
+        qp.log.info('{:d} total ions of {:d} types\npositions:'.format(
+            self.n_ions, self.n_types))
         for i_ion, position in enumerate(self.positions):
-            print('- [{:s}, {:11.8f}, {:11.8f}, {:11.8f}]'.format(
+            qp.log.info('- [{:s}, {:11.8f}, {:11.8f}, {:11.8f}]'.format(
                 self.symbols[self.types[i_ion]], *tuple(position)))
         self.positions = torch.tensor(self.positions)
         self.types = torch.tensor(self.types)
@@ -79,8 +79,8 @@ class Ions:
                     break
             # Read pseudopotential file:
             if fname:
-                print('\nReading', fname)
-                print('  TODO: actually read pseudopotential')
+                qp.log.info('\nReading ' + fname)
+                qp.log.info('  TODO: actually read pseudopotential')
             else:
                 raise ValueError(
                     'no pseudopotential found for {:s}'.format(symbol))

@@ -1,17 +1,17 @@
 import qimpy as qp
+import argparse
+import logging
 import yaml
 import sys
-
+import os
 
 if __name__ == "__main__":
 
     # Parse the commandline arguments on main process:
     iProc = qp.MPI.COMM_WORLD.Get_rank()
     if iProc == 0:
-        import argparse
 
         # Set terminal size (used by argparse) if unreasonable:
-        import os
         if os.get_terminal_size().columns < 80:
             os.environ["COLUMNS"] = "80"
 
@@ -21,7 +21,7 @@ if __name__ == "__main__":
                 self.print_usage(sys.stderr)
                 print('{:s}: error: {:s}\n'.format(self.prog, message),
                       file=sys.stderr)
-                self.error_occured = True  # Quit after bcast'ing error
+                raise ValueError(message)  # Quit after bcast'ing error
         parser = ArgumentParser(
             add_help=False,
             prog='python -m qimpy.run',
@@ -56,8 +56,12 @@ if __name__ == "__main__":
         parser.add_argument(
             '-V', '--verbose', action='store_true',
             help='print extra information in log for debugging')
-        args = parser.parse_args()
-        setattr(args, "error_occured", hasattr(parser, "error_occured"))
+        try:
+            args = parser.parse_args()
+            setattr(args, "error_occured", False)
+        except ValueError:
+            args = argparse.Namespace()
+            setattr(args, "error_occured", True)
     else:
         args = None
 
@@ -78,9 +82,22 @@ if __name__ == "__main__":
             parser.print_help()
         exit()
 
-    # TODO: setup logging here
+    # Setup logging:
+    log_params = dict()
+    if iProc == 0 and args.output_file:
+        log_params['filename'] = args.output_file
+    if iProc > 0 and args.mpi_log:
+        log_params['filename'] = args.mpi_log + '.' + str(iProc)
+    log_params['filemode'] = 'w' if args.no_append else 'a'
+    log_params['level'] = (
+        (logging.DEBUG if args.verbose else logging.INFO)
+        if ((iProc == 0) or ((iProc > 0) and args.mpi_log))
+        else logging.WARNING)
+    log_params['format'] = '%(message)s'
+    qp.log.basicConfig(**log_params)
+
     # Print version header
-    print('*'*15, 'QimPy', qp.__version__, '*'*15)
+    qp.log.info('*'*15 + 'QimPy' + qp.__version__ + '*'*15)
 
     # Load input parameters from YAML file:
     with open(args.input_file) as f:
