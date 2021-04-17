@@ -1,0 +1,25 @@
+# https://EditorConfig.org
+
+# top-most EditorConfig file
+root = true
+
+# Unix-style newlines with a newline ending every file
+[*]
+end_of_line = lf
+insert_final_newline = true
+
+# 4 space indentation for Python (PEP8)
+[*.py]
+indent_style = space
+indent_size = 4
+max_line_length = 79
+
+# 2 space indentation for YAML
+[{*.yml,*.yaml}]
+indent_style = space
+indent_size = 2
+
+# Tab indentation for Makefiles
+[Makefile]
+indent_style = tab
+

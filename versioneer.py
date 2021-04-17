@@ -191,10 +191,10 @@ work too.
 Pip-8.1.1 is known to have this problem, but hopefully it will get fixed in
 some later version.
 
-[Bug #38](https://github.com/python-versioneer/python-versioneer/issues/38) is tracking
-this issue. The discussion in
-[PR #61](https://github.com/python-versioneer/python-versioneer/pull/61) describes the
-issue from the Versioneer side in more detail.
+[Bug #38](https://github.com/python-versioneer/python-versioneer/issues/38)
+is tracking this issue. The discussion in
+[PR #61](https://github.com/python-versioneer/python-versioneer/pull/61)
+describes the issue from the Versioneer side in more detail.
 [pip PR#3176](https://github.com/pypa/pip/pull/3176) and
 [pip PR#3615](https://github.com/pypa/pip/pull/3615) contain work to improve
 pip to let Versioneer work correctly.
@@ -221,9 +221,9 @@ regenerated while a different version is checked out. Many setup.py commands
 cause egg_info to be rebuilt (including `sdist`, `wheel`, and installing into
 a different virtualenv), so this can be surprising.
 
-[Bug #83](https://github.com/python-versioneer/python-versioneer/issues/83) describes
-this one, but upgrading to a newer version of setuptools should probably
-resolve it.
+[Bug #83](https://github.com/python-versioneer/python-versioneer/issues/83)
+describes this one, but upgrading to a newer version of setuptools should
+probably resolve it.
 
 
 ## Updating Versioneer
@@ -252,10 +252,10 @@ number of intermediate scripts.
 
 ## Similar projects
 
-* [setuptools_scm](https://github.com/pypa/setuptools_scm/) - a non-vendored build-time
-  dependency
-* [minver](https://github.com/jbweston/miniver) - a lightweight reimplementation of
-  versioneer
+* [setuptools_scm](https://github.com/pypa/setuptools_scm/) - a non-vendored
+  build-time dependency
+* [minver](https://github.com/jbweston/miniver) - a lightweight
+  reimplementation of versioneer
 
 ## License
 
@@ -1501,8 +1501,8 @@ def get_cmdclass(cmdclass=None):
         # sandbox that restores sys.modules to it's pre-build state, so the
         # parent is protected against the child's "import versioneer". By
         # removing ourselves from sys.modules here, before the child build
-        # happens, we protect the child from the parent's versioneer too.
-        # Also see https://github.com/python-versioneer/python-versioneer/issues/52
+        # happens, we protect the child from the parent's versioneer too. Also
+        # see https://github.com/python-versioneer/python-versioneer/issues/52
 
     cmds = {} if cmdclass is None else cmdclass.copy()
 
