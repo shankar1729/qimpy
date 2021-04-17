@@ -9,7 +9,7 @@ end_of_line = lf
 insert_final_newline = true
 
 # 4 space indentation for Python (PEP8)
-[*.py]
+[{*.py,*.cfg}]
 indent_style = space
 indent_size = 4
 max_line_length = 79

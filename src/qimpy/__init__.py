@@ -1,4 +1,5 @@
 # Module import definition
+from mpi4py import MPI
 from ._system import System, fmt
 from ._lattice import Lattice
 from ._ions import Ions
