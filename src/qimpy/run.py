@@ -1,3 +1,38 @@
+'''This module serves as the main executable for stand-alone QimPy calculations
+from input files in the YAML format. A typical usage would look like:
+
+:code:`mpirun [mpi-options] python -m qimpy.run -i INPUT_FILE [qimpy-options]`
+
+Command-line parameters (obtained using :code:`python -m qimpy.run -h`):
+
+.. code-block:: bash
+
+    python -m qimpy.run (-h | -v | -i INPUT_FILE) [-o OUTPUT_FILE]
+                        [-c CORES] [-n] [-d] [-m MPI_LOG] [-V]
+
+Run a QimPy calculation from an input file
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -v, --version         print version information and quit
+  -i INPUT_FILE, --input-file INPUT_FILE
+                        input file in YAML format
+  -o OUTPUT_FILE, --output-file OUTPUT_FILE
+                        output file (stdout if unspecified)
+  -c CORES, --cores CORES
+                        number of cores per process (overridden by SLURM)
+  -n, --dry-run         quit after initialization (to check input file)
+  -d, --no-append       overwrite output file instead of appending
+  -m MPI_LOG, --mpi-log MPI_LOG
+                        file prefix for debug logs from other MPI processes
+  -V, --verbose         print extra information in log for debugging
+
+
+Note that qimpy must be installed to the python path for these to work in any
+directory. For development, run `python setup.py develop --user` in the root
+directory of the source repository to make the above usage possible without
+instaling from pip/conda.'''
+
 import qimpy as qp
 import argparse
 import logging
