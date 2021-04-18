@@ -83,21 +83,15 @@ if __name__ == "__main__":
         exit()
 
     # Setup logging:
-    log_params = dict()
-    if iProc == 0 and args.output_file:
-        log_params['filename'] = args.output_file
-    if iProc > 0 and args.mpi_log:
-        log_params['filename'] = args.mpi_log + '.' + str(iProc)
-    log_params['filemode'] = 'w' if args.no_append else 'a'
-    log_params['level'] = (
-        (logging.DEBUG if args.verbose else logging.INFO)
-        if ((iProc == 0) or ((iProc > 0) and args.mpi_log))
-        else logging.WARNING)
-    log_params['format'] = '%(message)s'
-    qp.log.basicConfig(**log_params)
+    qp.log_config(
+        output_file=args.output_file,
+        mpi_log=args.mpi_log,
+        mpi_comm=qp.MPI.COMM_WORLD,
+        append=(not args.no_append),
+        verbose=args.verbose)
 
     # Print version header
-    qp.log.info('*'*15 + 'QimPy' + qp.__version__ + '*'*15)
+    qp.log.info('*'*15 + ' QimPy' + qp.__version__ + ' ' + '*'*15)
 
     # Load input parameters from YAML file:
     with open(args.input_file) as f:

@@ -15,8 +15,10 @@ class Lattice:
             scale = torch.tensor(scale).flatten()
             assert((len(scale) == 1) or (len(scale) == 3))
             self.Rbasis = scale[:, None] * self.Rbasis
-        qp.log.info('Rbasis (real-space basis):\n' + qp.fmt(self.Rbasis))
+        qp.log.info('Rbasis (real-space basis in columns):\n'
+                    + qp.fmt(self.Rbasis))
 
         # Compute reciprocal lattice vectors:
         self.Gbasis = torch.linalg.inv(self.Rbasis.T)
-        qp.log.info('Gbasis (reciprocal-space basis):\n' + qp.fmt(self.Gbasis))
+        qp.log.info('Gbasis (reciprocal-space basis in columns):\n'
+                    + qp.fmt(self.Gbasis))

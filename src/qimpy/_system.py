@@ -28,5 +28,4 @@ def fmt(tensor):
     return np.array2string(
         tensor.numpy(),
         precision=8,
-        separator=', ',
-        prefix=' ')
+        separator=', ')

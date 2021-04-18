@@ -3,7 +3,7 @@ from mpi4py import MPI
 from ._system import System, fmt
 from ._lattice import Lattice
 from ._ions import Ions
-import logging as log
+from ._log import log, log_config
 
 # Automatic versioning added by versioneer
 from ._version import get_versions

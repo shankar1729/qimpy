@@ -39,7 +39,7 @@ class Ions:
                 'coordinates must group ions of same type together')
 
         # Report ionic positions:
-        qp.log.info('{:d} total ions of {:d} types\npositions:'.format(
+        qp.log.info('{:d} total ions of {:d} types; positions:'.format(
             self.n_ions, self.n_types))
         for i_ion, position in enumerate(self.positions):
             qp.log.info('- [{:s}, {:11.8f}, {:11.8f}, {:11.8f}]'.format(
