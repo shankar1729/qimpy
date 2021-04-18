@@ -3,9 +3,6 @@ import logging
 import sys
 
 
-log = logging.getLogger('qimpy')
-
-
 def log_config(*, output_file=None, mpi_log=None, mpi_comm=None,
                append=True, verbose=False):
     '''Configure logging globally for the qimpy library. It should typically
@@ -14,11 +11,24 @@ def log_config(*, output_file=None, mpi_log=None, mpi_comm=None,
     and errors will from all processes to stdout.
 
     For further customization, directly modify the :class:`logging.Logger`
-    object qimpy.log, as required.
+    object :attr:`~qimpy.log`, as required.
 
-    :param output_file: Output file to write from MPI rank 0,
-        defaults to None i.e. log to stdout.
-    :type output_file: str, optional
+    Parameters
+    ----------
+    output_file : str or None, optional
+        Output file to write from MPI rank 0.
+        Default = None implies log to stdout.
+    mpi_log : str or None, optional
+        Higher-rank MPI processes will log to <mpi_log>.<process> if given.
+        Default = None implies log only from head (rank=0) process.
+    mpi_comm : mpi4py.MPI.Intracomm or None, optional
+        MPI communicator whose rank determines logging behavior.
+        Default = None implies use COMM_WORLD.
+    append : bool, optional
+        Whether log files should be appended or overwritten. Default: True.
+    verbose : bool, optional
+        Whether to log debug information including module/line numbers of code.
+        Default: False.
     '''
 
     # Create handler with appropriate output file and mode, if any:
@@ -38,11 +48,11 @@ def log_config(*, output_file=None, mpi_log=None, mpi_comm=None,
         ('[%(module)s:%(lineno)d] ' if verbose else '') + '%(message)s'))
 
     # Set handler:
-    log.handlers.clear()
-    log.addHandler(handler)
+    qp.log.handlers.clear()
+    qp.log.addHandler(handler)
 
     # Select log level:
     if(isHead or ((not isHead) and mpi_log)):
-        log.setLevel(logging.DEBUG if verbose else logging.INFO)
+        qp.log.setLevel(logging.DEBUG if verbose else logging.INFO)
     else:
-        log.setLevel(logging.WARNING)
+        qp.log.setLevel(logging.WARNING)

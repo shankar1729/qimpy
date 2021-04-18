@@ -1,8 +1,3 @@
-.. QimPy documentation master file, created by
-   sphinx-quickstart on Thu Apr 15 14:41:39 2021.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
-
 Welcome to QimPy's documentation!
 =================================
 
@@ -10,7 +5,8 @@ Welcome to QimPy's documentation!
    :maxdepth: 2
    :caption: Contents:
 
-
+   qimpy
+   modules
 
 Indices and tables
 ==================
