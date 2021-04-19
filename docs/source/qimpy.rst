@@ -1,6 +1,14 @@
 qimpy package
 =============
 
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   qimpy.ions
+
 Submodules
 ----------
 

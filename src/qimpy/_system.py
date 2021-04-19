@@ -16,11 +16,11 @@ class System:
 
         # Initialize ions:
         if isinstance(ions, dict):
-            self.ions = qp.Ions(**ions)
-        elif isinstance(ions, qp.Ions):
+            self.ions = qp.ions.Ions(**ions)
+        elif isinstance(ions, qp.ions.Ions):
             self.ions = ions
         else:
-            raise TypeError("ions must be dict or qimpy.Ions")
+            raise TypeError("ions must be dict or qimpy.ions.Ions")
 
 
 def fmt(tensor):

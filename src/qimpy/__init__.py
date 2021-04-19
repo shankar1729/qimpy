@@ -1,15 +1,15 @@
 # List exported symbols for doc generation
 __all__ = [
     'MPI', 'System', 'fmt',
-    'Lattice', 'Ions',
+    'Lattice', 'ions',
     'log', 'log_config']
 
 # Module import definition
 from mpi4py import MPI
 from ._system import System, fmt
 from ._lattice import Lattice
-from ._ions import Ions
 from ._log import log_config
+from . import ions
 import logging
 
 # Automatic versioning added by versioneer

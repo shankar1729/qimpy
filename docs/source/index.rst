@@ -5,7 +5,6 @@ Welcome to QimPy's documentation!
    :maxdepth: 2
    :caption: Contents:
 
-   qimpy
    modules
 
 Indices and tables

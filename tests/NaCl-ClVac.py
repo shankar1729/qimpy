@@ -1,6 +1,7 @@
 # Calculation analogous to NaCl-ClVac.py with Python input:
 import qimpy as qp
 qp.log_config()  # default set up to log from MPI head alone
+qp.log.info('Using QimPy '+qp.__version__)
 
 # Create lattice object explicitly (eg. shared between two systems)
 lattice = qp.Lattice(
