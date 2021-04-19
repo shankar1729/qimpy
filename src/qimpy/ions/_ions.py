@@ -5,6 +5,7 @@ import re
 
 
 class Ions:
+    """TODO: document class Ions"""
 
     def __init__(self, *, coordinates, pseudopotentials):
         qp.log.info('\n--- Initializing Ions ---')
@@ -79,8 +80,7 @@ class Ions:
                     break
             # Read pseudopotential file:
             if fname:
-                qp.log.info('\nReading ' + fname)
-                qp.log.info('  TODO: actually read pseudopotential')
+                self.pseudopotentials.append(qp.ions.Pseudopotential(fname))
             else:
                 raise ValueError(
                     'no pseudopotential found for {:s}'.format(symbol))
