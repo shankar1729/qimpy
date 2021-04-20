@@ -259,34 +259,47 @@ Yarr = [
     [Y36, Y37, Y38, Y39, Y40, Y41, Y42, Y43, Y44, Y45, Y46, Y47, Y48]]
 
 
-def Ylm(l, m, x, y, z):
-    return Yarr[l][l+m](x, y, z)
+def get_harmonics(l_max, x, y, z):
+    assert(l_max <= 6)
+    results = []
+    for l in range(l_max+1):
+        result = np.zeros((2*l + 1,) + x.shape)
+        for lm in range(2*l + 1):
+            result[lm] = Yarr[l][lm](x, y, z)
+        results.append(result)
+    return results
 
 
 if __name__ == "__main__":
     import numpy as np
     from scipy.special import sph_harm
 
-    def YlmRef(l, m, x, y, z):
+    def get_harmonics_ref(l_max, x, y, z):
         r = np.sqrt(x*x + y*y + z*z)
         theta = np.arccos(z/r)
         phi = np.arctan2(y, x)
         phi += np.where(phi < 0., 2*np.pi, 0)
-        result = (r**l) * sph_harm(np.abs(m), l, phi, theta)
-        if m == 0:
-            return result.real
-        elif m > 0:
-            return np.sqrt(2) * ((-1)**m) * result.real
-        else:
-            return np.sqrt(2) * ((-1)**m) * result.imag
+        results = []
+        for l in range(l_max+1):
+            result = np.zeros((2*l + 1,) + x.shape)
+            for m in range(0, l + 1):
+                ylm = ((-1)**m) * (r**l) * sph_harm(m, l, phi, theta)
+                if m == 0:
+                    result[l] = ylm.real
+                else:
+                    result[l+m] = np.sqrt(2) * ylm.real
+                    result[l-m] = np.sqrt(2) * ylm.imag
+            results.append(result)
+        return results
 
     x, y, z = np.random.randn(3, 1000)
     rel_err_all = []
-    for l in range(7):
-        for m in range(-l, l+1):
-            ylm = Ylm(l, m, x, y, z)
-            ylm_ref = YlmRef(l, m, x, y, z)
-            rel_err = np.linalg.norm(ylm - ylm_ref) / np.linalg.norm(ylm_ref)
-            rel_err_all.append(rel_err)
-            print("{:d} {:+d} Err: {:9.3e}".format(l, m, rel_err))
-    print('RMS error:', np.sqrt((np.array(rel_err_all)**2).mean()))
+    l_max = 6
+    ylm = get_harmonics(l_max, x, y, z)
+    ylm_ref = get_harmonics_ref(l_max, x, y, z)
+    for l in range(l_max+1):
+        err = np.linalg.norm(ylm[l] - ylm_ref[l])
+        rel_err = err / np.linalg.norm(ylm_ref[l])
+        rel_err_all.append(rel_err)
+        print("l: {:d} Err: {:9.3e}".format(l, rel_err))
+    print('Overall Err:', np.sqrt((np.array(rel_err_all)**2).mean()))
