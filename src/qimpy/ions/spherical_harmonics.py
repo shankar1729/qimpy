@@ -241,17 +241,17 @@ Yarr = [
     [Y36, Y37, Y38, Y39, Y40, Y41, Y42, Y43, Y44, Y45, Y46, Y47, Y48]]
 
 
-def get_harmonics(l_max, x, y, z):
+def get_harmonics(l_max, r):
     assert(l_max <= 6)
     results = []
     if l_max >= 0:
-        results.append(0.28209479177387814 * np.ones(x.shape))
+        results.append(0.28209479177387814 * np.ones(r.shape[:-1]))
     if l_max >= 1:
-        results.append(0.4886025119029199 * np.array([y, z, x]))
+        results.append(0.4886025119029199 * r[..., (1, 2, 0)].T)
     for l in range(2, l_max+1):
-        result = np.zeros((2*l + 1,) + x.shape)
+        result = np.zeros((2*l + 1,) + r.shape[:-1])
         for lm in range(2*l + 1):
-            result[lm] = Yarr[l][lm](x, y, z)
+            result[lm] = Yarr[l][lm](r[..., 0], r[..., 1], r[..., 2])
         results.append(result)
     return results
 
@@ -260,16 +260,16 @@ if __name__ == "__main__":
     import numpy as np
     from scipy.special import sph_harm
 
-    def get_harmonics_ref(l_max, x, y, z):
-        r = np.sqrt(x*x + y*y + z*z)
-        theta = np.arccos(z/r)
-        phi = np.arctan2(y, x)
+    def get_harmonics_ref(l_max, r):
+        rMag = np.linalg.norm(r, axis=-1)
+        theta = np.arccos(r[..., 2]/rMag)
+        phi = np.arctan2(r[..., 1], r[..., 0])
         phi += np.where(phi < 0., 2*np.pi, 0)
         results = []
         for l in range(l_max+1):
-            result = np.zeros((2*l + 1,) + x.shape)
+            result = np.zeros((2*l + 1,) + r.shape[:-1])
             for m in range(0, l + 1):
-                ylm = ((-1)**m) * (r**l) * sph_harm(m, l, phi, theta)
+                ylm = ((-1)**m) * (rMag**l) * sph_harm(m, l, phi, theta)
                 if m == 0:
                     result[l] = ylm.real
                 else:
@@ -278,11 +278,11 @@ if __name__ == "__main__":
             results.append(result)
         return results
 
-    x, y, z = np.random.randn(3, 1000)
+    r = np.random.randn(1000, 3)
     rel_err_all = []
     l_max = 6
-    ylm = get_harmonics(l_max, x, y, z)
-    ylm_ref = get_harmonics_ref(l_max, x, y, z)
+    ylm = get_harmonics(l_max, r)
+    ylm_ref = get_harmonics_ref(l_max, r)
     for l in range(l_max+1):
         err = np.linalg.norm(ylm[l] - ylm_ref[l])
         rel_err = err / np.linalg.norm(ylm_ref[l])
