@@ -1,21 +1,3 @@
-
-
-def Y0(x, y, z):
-    return 0.28209479177387814
-
-
-def Y1(x, y, z):
-    return 0.4886025119029199*y
-
-
-def Y2(x, y, z):
-    return 0.4886025119029199*z
-
-
-def Y3(x, y, z):
-    return 0.4886025119029199*x
-
-
 def Y4(x, y, z):
     return 1.0925484305920792*x*y
 
@@ -250,8 +232,8 @@ def Y48(x, y, z):
 
 
 Yarr = [
-    [Y0],
-    [Y1, Y2, Y3],
+    [],
+    [],
     [Y4, Y5, Y6, Y7, Y8],
     [Y9, Y10, Y11, Y12, Y13, Y14, Y15],
     [Y16, Y17, Y18, Y19, Y20, Y21, Y22, Y23, Y24],
@@ -262,7 +244,11 @@ Yarr = [
 def get_harmonics(l_max, x, y, z):
     assert(l_max <= 6)
     results = []
-    for l in range(l_max+1):
+    if l_max >= 0:
+        results.append(0.28209479177387814 * np.ones(x.shape))
+    if l_max >= 1:
+        results.append(0.4886025119029199 * np.array([y, z, x]))
+    for l in range(2, l_max+1):
         result = np.zeros((2*l + 1,) + x.shape)
         for lm in range(2*l + 1):
             result[lm] = Yarr[l][lm](x, y, z)
