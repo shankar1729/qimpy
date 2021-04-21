@@ -1,4 +1,4 @@
-from qimpy.ions._spherical_harmonics_data import YLM_PROD
+import qimpy.ions._spherical_harmonics_data as shdata
 
 
 def Y4(x, y, z):
@@ -311,12 +311,11 @@ if __name__ == "__main__":
             return line.rstrip(', ') + ']'
 
     def generate_harmonic_coefficients(l_max_hlf):
-        '''Generate tables of recurrence coefficients for computing
-        real solid harmonics up to l_max = 2 * l_max_hlf, as well as
-        tables of product coefficients (Clebsch-Gordon coefficients)
-        for real solid harmonics up to order l_max_hlf.
-        for real solid harmonics till l_max used above.
-        Print results formatted as the Python code above.'''
+        '''Generate tables of recursion coefficients for computing real
+        solid harmonics up to l_max = 2 * l_max_hlf, as well as tables of
+        product coefficients (Clebsch-Gordon coefficients) for real solid
+        harmonics up to order l_max_hlf. Print results formatted as Python
+        code that can be pasted into _spherical_harmonics_data.py.'''
         l_max = 2 * l_max_hlf
         lm_all = get_lm(l_max)
         lm_hlf = get_lm(l_max_hlf)
@@ -324,19 +323,73 @@ if __name__ == "__main__":
         grids1d = 3 * (np.linspace(-1., 1., 2*l_max), )  # avoids zero
         r = np.array(np.meshgrid(*grids1d)).reshape(3, -1).T
         r_sq = (r**2).sum(axis=-1)
-        ylm = np.vstack(get_harmonics_ref(l_max, r))
+        ylm = get_harmonics_ref(l_max, r)
+        # Calculate recursion coefficients:
+        ERR_TOL = 1e-14
+        COEFF_TOL = 1e-8
+        print('# Recursion coefficients for computing real harmonics at l>1')
+        print('# from products of those at l = 1 and l-1. The integers index')
+        print('# a sparse matrix with (2l+1) rows and 3*(2l-1) columns.')
+        line = 'YLM_RECUR = ['
+        for l in range(2, l_max + 1):
+            y_product = ylm[l-1][:, None, :] * ylm[1][None, :, :]
+            y_product = y_product.reshape((2*l - 1) * 3, -1)
+            index_row = []
+            index_col = []
+            values = []
+            for m in range(-l, l + 1):
+                # List pairs of m at l = 1 and l-1 that can add up to m:
+                m_pairs = set([(sign*m + dsign*dm, dm)
+                               for sign in (-1, 1)
+                               for dsign in (-1, 1)
+                               for dm in (-1, 0, 1)])
+                m_pairs = [m_pair for m_pair in m_pairs if abs(m_pair[0]) < l]
+                m_pair_indices = [3*(l - 1 + m) + (1 + dm)
+                                  for m, dm in m_pairs]
+                # Solve for coefficients of the linear combination:
+                for n_sel in range(1, len(m_pair_indices)+1):
+                    # Try increasing numbers till we get one:
+                    y_product_allowed = y_product[m_pair_indices[:n_sel]]
+                    y_target = ylm[l][l + m]
+                    coeff = np.linalg.lstsq(y_product_allowed.T, y_target,
+                                            rcond=None)[0]
+                    residual = np.dot(coeff, y_product_allowed) - y_target
+                    err = np.linalg.norm(residual) / np.linalg.norm(y_target)
+                    if err < ERR_TOL:
+                        break
+                assert(err < ERR_TOL)
+                # Select non-zero coefficients to form product expansion:
+                sel = np.where(np.abs(coeff)
+                               > COEFF_TOL * np.linalg.norm(coeff))[0]
+                indices = np.array(m_pair_indices)[sel]
+                coeff = coeff[sel]
+                # Sort by index and add to lists for current l:
+                sort_index = indices.argsort()
+                index_row += [l + m] * len(sort_index)
+                index_col += list(indices[sort_index])
+                values += list(coeff[sort_index])
+            # Format as python code:
+            print(line)  # pending data from previous entry
+            line = '    ('
+            padding = len(line)
+            line = print_array(index_row, line, padding, '{:d}') + ', '
+            line = print_array(index_col, line, padding, '{:d}') + ', '
+            line = print_array(values, line, padding, '{:.16f}') + '),'
+        print(line.rstrip(', ') + ']')
+        print()
         # Calculate Clebsch-Gordon coefficients:
+        ylm = np.vstack(ylm)  # flatten into a single array with all (l,m)
         print('# Clebsch-Gordon coefficients for products of real harmonics.')
         print('# The integer indices correspond to l*(l+1)+m for each (l,m).')
         line = 'YLM_PROD = {'
         for ilm1, (l1, m1) in enumerate(lm_hlf):
             for ilm2, (l2, m2) in enumerate(lm_hlf[:ilm1+1]):
                 # List (l,m) pairs allowed by angular momentum addition rules:
-                m_all = {m1 + m2, m1 - m2, m2 - m1, -(m1 + m2)}
-                l_all = range(l1 - l2, l1 + l2 + 1, 2)
+                m_allowed = {m1 + m2, m1 - m2, m2 - m1, -(m1 + m2)}
+                l_allowed = range(l1 - l2, l1 + l2 + 1, 2)
                 lm_all = np.array([(l, m)
-                                   for l in l_all
-                                   for m in m_all
+                                   for l in l_allowed
+                                   for m in m_allowed
                                    if (abs(m) <= l)])
                 l_all = lm_all[:, 0]
                 m_all = lm_all[:, 1]
@@ -348,9 +401,10 @@ if __name__ == "__main__":
                 results = np.linalg.lstsq(y_terms.T, y_product, rcond=None)
                 coeff = results[0]
                 err = np.sqrt(results[1][0]) / np.linalg.norm(y_product)
-                assert(err < 1e-14)
+                assert(err < ERR_TOL)
                 # Select non-zero coefficients to form product expansion:
-                sel = np.where(np.abs(coeff) > 1e-8 * np.linalg.norm(coeff))[0]
+                sel = np.where(np.abs(coeff)
+                               > COEFF_TOL * np.linalg.norm(coeff))[0]
                 ilm = ilm[sel]
                 coeff = coeff[sel]
                 # Sort by (l,m):
