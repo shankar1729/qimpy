@@ -282,6 +282,34 @@ if __name__ == "__main__":
             results.append(result)
         return results
 
+    def get_lm(l_max):
+        'Get list of all (l,m) in order up to (and including) l_max'
+        return [(l, m)
+                for l in range(l_max + 1)
+                for m in range(-l, l+1)]
+
+    def print_array(array, line, padding, fmt, width=79):
+        '''PEP8-compatible printing of array, where line is pending text yet to
+        be printed, and padding controls where array starts if wrapped to next
+        lien based on width. Each entry will be formatted according to fmt.'''
+        # Convert all entries to strings and compute total length:
+        fmt += ', '
+        strings = [fmt.format(elem) for elem in array]
+        total_len = sum([len(string) for string in strings]) + 3
+        if len(line) + total_len < width:
+            # Will fit on same line:
+            return line + '[' + ''.join(strings).rstrip(', ') + ']'
+        else:
+            # Need multiple lines:
+            print(line.rstrip())
+            line = (' '*padding) + '['
+            for string in strings:
+                if len(line) + len(string) >= width:  # wrap
+                    print(line.rstrip())
+                    line = ' '*(padding+1)
+                line += string
+            return line.rstrip(', ') + ']'
+
     def generate_harmonic_coefficients(l_max_hlf):
         '''Generate tables of recurrence coefficients for computing
         real solid harmonics up to l_max = 2 * l_max_hlf, as well as
@@ -290,12 +318,8 @@ if __name__ == "__main__":
         for real solid harmonics till l_max used above.
         Print results formatted as the Python code above.'''
         l_max = 2 * l_max_hlf
-        lm_all = [(l, m)
-                  for l in range(l_max + 1)
-                  for m in range(-l, l+1)]
-        lm_hlf = [(l, m)
-                  for l in range(l_max_hlf + 1)
-                  for m in range(-l, l+1)]
+        lm_all = get_lm(l_max)
+        lm_hlf = get_lm(l_max_hlf)
         # Calculate solid harmonics on a mesh covering unit cube:
         grids1d = 3 * (np.linspace(-1., 1., 2*l_max), )  # avoids zero
         r = np.array(np.meshgrid(*grids1d)).reshape(3, -1).T
@@ -304,7 +328,7 @@ if __name__ == "__main__":
         # Calculate Clebsch-Gordon coefficients:
         print('# Clebsch-Gordon coefficients for products of real harmonics.')
         print('# The integer indices correspond to l*(l+1)+m for each (l,m).')
-        print('YLM_PROD = {')
+        line = 'YLM_PROD = {'
         for ilm1, (l1, m1) in enumerate(lm_hlf):
             for ilm2, (l2, m2) in enumerate(lm_hlf[:ilm1+1]):
                 # List (l,m) pairs allowed by angular momentum addition rules:
@@ -334,26 +358,12 @@ if __name__ == "__main__":
                 ilm = ilm[sort_index]
                 coeff = coeff[sort_index]
                 # Format as python code:
-                prefix = '    ({:d}, {:d}): ('.format(ilm1, ilm2)
-                indices = '[' + ', '.join([str(i) for i in ilm]) + '],'
-                len_available = 79 - len(prefix) - len(indices)
-                single_line = (len_available > 21*len(coeff) + 5)
-                if single_line:
-                    indices += ' ['
-                    indices += ', '.join(['{:.16f}'.format(c) for c in coeff])
-                    indices += ']),'
-                else:
-                    padding = len(prefix)
-                    line = (' '*padding) + '['
-                    for c in coeff:
-                        if len(line) + 22 >= 79:  # wrap
-                            indices += '\n' + line
-                            line = ' '*padding
-                        line += '' if (line[-1] == '[') else ' '
-                        line += '{:.16f},'.format(c)
-                    indices += '\n' + line[:-1] + ']),'
-                print(prefix + indices)
-        print('}')
+                print(line)  # pending data from previous entry
+                line = '    ({:d}, {:d}): ('.format(ilm1, ilm2)
+                padding = len(line)
+                line = print_array(ilm, line, padding, '{:d}') + ', '
+                line = print_array(coeff, line, padding, '{:.16f}') + '),'
+        print(line.rstrip(', ') + '}')
     generate_harmonic_coefficients(3)
     exit()
 
