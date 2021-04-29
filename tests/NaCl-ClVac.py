@@ -38,3 +38,5 @@ system = qp.System(
     rc=rc,
     lattice=lattice,
     ions=ion_params)
+
+rc.report_end()

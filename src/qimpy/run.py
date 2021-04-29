@@ -137,3 +137,6 @@ if __name__ == "__main__":
 
     # Initialize system with input parameters:
     system = qp.System(rc=rc, **inputDict)
+
+    # Report end time and duration:
+    rc.report_end()

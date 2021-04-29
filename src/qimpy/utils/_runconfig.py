@@ -1,4 +1,6 @@
 import os
+import time
+import datetime
 import torch
 import qimpy as qp
 import numpy as np
@@ -29,6 +31,10 @@ class RunConfig:
             between processes on each node.
             Note that the environment variable SLURM_CPUS_PER_TASK (typically
             set by SLURM) will override cores, if set."""
+
+        # Set and report start time:
+        self.t_start = time.time()  # start time used by clock()
+        qp.log.info('Start time: ' + time.ctime(self.t_start))
 
         # MPI initialization:
         self.comm = MPI.COMM_WORLD if (comm is None) else comm
@@ -91,5 +97,16 @@ class RunConfig:
         run_totals = np.array([self.n_threads,  n_gpus])
         self.comm.Allreduce(MPI.IN_PLACE, run_totals, op=MPI.SUM)
         qp.log.info(
-            '\nRun totals: {:g} processes, {:d} threads, {:d} GPUs'.format(
+            'Run totals: {:g} processes, {:d} threads, {:d} GPUs'.format(
                 self.n_procs, int(run_totals[0]), int(run_totals[1])))
+
+    def clock(self):
+        "Time in seconds since start of this run."
+        return time.time() - self.t_start
+
+    def report_end(self):
+        "Report end time and duration."
+        t_stop = time.time()
+        duration = datetime.timedelta(seconds=(t_stop - self.t_start))
+        qp.log.info('\nEnd time: {:s} (Duration: {:s})'.format(
+            time.ctime(t_stop), str(duration)))
