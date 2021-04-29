@@ -4,7 +4,7 @@ import numpy as np
 import re
 
 
-def read_upf(self, filename):
+def read_upf(self, filename, rc):
     '''Read a UPF pseudopotential into a Pseudopotential object.
     Note that only norm-conserving UPF files are currently supported.
 
@@ -14,8 +14,10 @@ def read_upf(self, filename):
         Target pseudopotential object to read data into
     filename : str
         Full path to the UPF file to read.
+    rc : qimpy.utils.RunConfig
+        Current run configuration.
     '''
-
+    watch = qp.utils.StopWatch('read_upf', rc)
     qp.log.info("\nReading '{:s}':".format(filename))
     upf = ET.fromstring(open(filename, 'r').read().replace('&', '&amp;'))
     assert(upf.tag == 'UPF')
@@ -183,6 +185,7 @@ def read_upf(self, filename):
 
         else:
             qp.log.info("  NOTE: ignored section '{:s}'".format(section.tag))
+    watch.stop()
 
 
 if __name__ == '__main__':

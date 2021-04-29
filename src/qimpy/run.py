@@ -138,5 +138,6 @@ if __name__ == "__main__":
     # Initialize system with input parameters:
     system = qp.System(rc=rc, **inputDict)
 
-    # Report end time and duration:
+    # Report timings:
     rc.report_end()
+    qp.utils.StopWatch.print_stats()

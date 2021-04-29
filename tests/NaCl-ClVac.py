@@ -40,3 +40,4 @@ system = qp.System(
     ions=ion_params)
 
 rc.report_end()
+qp.utils.StopWatch.print_stats()

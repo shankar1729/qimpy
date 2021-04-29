@@ -4,3 +4,4 @@ __all__ = [
 
 from ._log import log_config
 from ._runconfig import RunConfig
+from ._stopwatch import StopWatch

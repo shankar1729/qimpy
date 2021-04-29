@@ -5,7 +5,7 @@ from ._read_upf import read_upf
 class Pseudopotential:
     """TODO: document class Pseudopotential"""
 
-    def __init__(self, filename):
+    def __init__(self, filename, rc):
         """Create pseudopotential from file.
 
         Parameters
@@ -16,4 +16,4 @@ class Pseudopotential:
         """
 
         assert(filename[-4:].lower() == '.upf')
-        read_upf(self, filename)
+        read_upf(self, filename, rc)

@@ -81,7 +81,8 @@ class Ions:
                     break
             # Read pseudopotential file:
             if fname:
-                self.pseudopotentials.append(qp.ions.Pseudopotential(fname))
+                self.pseudopotentials.append(
+                    qp.ions.Pseudopotential(fname, rc))
             else:
                 raise ValueError(
                     'no pseudopotential found for {:s}'.format(symbol))
