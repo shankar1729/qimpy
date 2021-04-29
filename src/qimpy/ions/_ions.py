@@ -7,7 +7,8 @@ import re
 class Ions:
     """TODO: document class Ions"""
 
-    def __init__(self, *, coordinates, pseudopotentials):
+    def __init__(self, *, rc, coordinates, pseudopotentials):
+        self.rc = rc
         qp.log.info('\n--- Initializing Ions ---')
 
         # Read ionic coordinates:

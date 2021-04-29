@@ -4,7 +4,8 @@ import torch
 
 class Lattice:
 
-    def __init__(self, *, vector1, vector2, vector3, scale=None):
+    def __init__(self, *, rc, vector1, vector2, vector3, scale=None):
+        self.rc = rc
         qp.log.info('\n--- Initializing Lattice ---')
 
         # Get unscaled lattice vectors:

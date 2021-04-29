@@ -32,14 +32,14 @@ def log_config(*, output_file=None, mpi_log=None, mpi_comm=None,
     '''
 
     # Create handler with appropriate output file and mode, if any:
-    iProc = (mpi_comm if mpi_comm else qp.MPI.COMM_WORLD).Get_rank()
-    isHead = (iProc == 0)
+    i_proc = (mpi_comm if mpi_comm else qp.MPI.COMM_WORLD).Get_rank()
+    is_head = (i_proc == 0)
     filemode = ('a' if append else 'w')
     filename = None
-    if isHead and output_file:
+    if is_head and output_file:
         filename = output_file
-    if (not isHead) and mpi_log:
-        filename = mpi_log + '.' + str(iProc)
+    if (not is_head) and mpi_log:
+        filename = mpi_log + '.' + str(i_proc)
     handler = (logging.FileHandler(filename, mode=filemode) if filename
                else logging.StreamHandler(sys.stdout))
 
@@ -52,7 +52,7 @@ def log_config(*, output_file=None, mpi_log=None, mpi_comm=None,
     qp.log.addHandler(handler)
 
     # Select log level:
-    if(isHead or ((not isHead) and mpi_log)):
+    if(is_head or ((not is_head) and mpi_log)):
         qp.log.setLevel(logging.DEBUG if verbose else logging.INFO)
     else:
         qp.log.setLevel(logging.WARNING)

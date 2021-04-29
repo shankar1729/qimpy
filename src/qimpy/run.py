@@ -128,9 +128,12 @@ if __name__ == "__main__":
     # Print version header
     qp.log.info('*'*15 + ' QimPy' + qp.__version__ + ' ' + '*'*15)
 
+    # Set up run configuration
+    rc = qp.RunConfig()
+
     # Load input parameters from YAML file:
     with open(args.input_file) as f:
         inputDict = yaml.safe_load(f)
 
     # Initialize system with input parameters:
-    system = qp.System(**inputDict)
+    system = qp.System(rc=rc, **inputDict)

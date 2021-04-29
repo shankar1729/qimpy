@@ -4,11 +4,12 @@ import numpy as np
 
 class System:
 
-    def __init__(self, *, lattice, ions):
+    def __init__(self, *, rc, lattice, ions):
+        self.rc = rc
 
         # Initialize lattice:
         if isinstance(lattice, dict):
-            self.lattice = qp.Lattice(**lattice)
+            self.lattice = qp.Lattice(rc=rc, **lattice)
         elif isinstance(lattice, qp.Lattice):
             self.lattice = lattice
         else:
@@ -16,7 +17,7 @@ class System:
 
         # Initialize ions:
         if isinstance(ions, dict):
-            self.ions = qp.ions.Ions(**ions)
+            self.ions = qp.ions.Ions(rc=rc, **ions)
         elif isinstance(ions, qp.ions.Ions):
             self.ions = ions
         else:
