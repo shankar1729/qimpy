@@ -9,11 +9,11 @@ class System:
 
         # Initialize lattice:
         if isinstance(lattice, dict):
-            self.lattice = qp.Lattice(rc=rc, **lattice)
-        elif isinstance(lattice, qp.Lattice):
+            self.lattice = qp.lattice.Lattice(rc=rc, **lattice)
+        elif isinstance(lattice, qp.lattice.Lattice):
             self.lattice = lattice
         else:
-            raise TypeError("lattice must be dict or qimpy.Lattice")
+            raise TypeError("lattice must be dict or qimpy.lattice.Lattice")
 
         # Initialize ions:
         if isinstance(ions, dict):

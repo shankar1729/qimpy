@@ -7,10 +7,10 @@ __all__ = [
 # Module import definition
 from mpi4py import MPI
 from ._system import System, fmt
-from ._lattice import Lattice
 from ._log import log_config
 from ._runconfig import RunConfig
 from . import ions
+from . import lattice
 import logging
 
 # Automatic versioning added by versioneer
