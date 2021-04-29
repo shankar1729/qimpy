@@ -118,7 +118,7 @@ if __name__ == "__main__":
         exit()
 
     # Setup logging:
-    qp.log_config(
+    qp.utils.log_config(
         output_file=args.output_file,
         mpi_log=args.mpi_log,
         mpi_comm=qp.MPI.COMM_WORLD,
@@ -129,7 +129,7 @@ if __name__ == "__main__":
     qp.log.info('*'*15 + ' QimPy' + qp.__version__ + ' ' + '*'*15)
 
     # Set up run configuration
-    rc = qp.RunConfig()
+    rc = qp.utils.RunConfig(cores=args.cores)
 
     # Load input parameters from YAML file:
     with open(args.input_file) as f:

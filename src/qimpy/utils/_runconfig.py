@@ -14,14 +14,21 @@ class RunConfig:
     so that a single CUDA context is associated with this process.
     Otherwise, on multi-GPU systems, CUDA MPI will subsequently fail."""
 
-    def __init__(self, comm=None):
+    def __init__(self, *, comm=None, cores=None):
         """Initialize run configuration
 
         Parameters
         ----------
         comm : mpi4py.MPI.COMM or None, optional
-            If provided, use as the top-level MPI communicator.
-            Default (None) corresponds to mpi4py.MPI.COMM_WORLD."""
+            Top-level MPI communicator.
+            Default (None) corresponds to mpi4py.MPI.COMM_WORLD.
+
+        cores : int or None, optional
+            Number of CPU cores (and hence torch threads) to use per process.
+            Default (None) will divide up available physical cores equally
+            between processes on each node.
+            Note that the environment variable SLURM_CPUS_PER_TASK (typically
+            set by SLURM) will override cores, if set."""
 
         # MPI initialization:
         self.comm = MPI.COMM_WORLD if (comm is None) else comm
@@ -69,12 +76,15 @@ class RunConfig:
         slurm_threads = os.environ.get('SLURM_CPUS_PER_TASK')
         if slurm_threads:
             self.n_threads = int(slurm_threads)
-        else:
+        elif cores is None:
             # Divide up threads available on node:
             n_cores = cpu_count(logical=False)
             core_start = (i_proc_node * n_cores) // n_procs_node
             core_stop = ((i_proc_node + 1) * n_cores) // n_procs_node
             self.n_threads = core_stop - core_start
+        else:
+            self.n_threads = cores
+        assert(self.n_threads >= 1)
         torch.set_num_threads(self.n_threads)
 
         # Report total resources:

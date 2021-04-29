@@ -1,10 +1,12 @@
 # Calculation analogous to NaCl-ClVac.py with Python input:
 import qimpy as qp
-qp.log_config()  # default set up to log from MPI head alone
+qp.utils.log_config()  # default set up to log from MPI head alone
 qp.log.info('Using QimPy '+qp.__version__)
+rc = qp.utils.RunConfig()
 
 # Create lattice object explicitly (eg. shared between two systems)
-lattice = qp.Lattice(
+lattice = qp.lattice.Lattice(
+    rc=rc,
     vector1=[0, 0.5, 0.5],  # Note: vectors in rows like other codes.
     vector2=[0.5, 0, 0.5],  # Also, not ambiguous as separate vectors,
     vector3=[0.5, 0.5, 0],  # compared to the 3x3 matrix of JDFTx.
@@ -33,5 +35,6 @@ ion_params = {
      ['Cl', 0.50, 0.50, 0.50]]}
 
 system = qp.System(
+    rc=rc,
     lattice=lattice,
     ions=ion_params)
