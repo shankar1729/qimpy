@@ -3,7 +3,7 @@ import torch
 import qimpy as qp
 import numpy as np
 from mpi4py import MPI
-from multiprocessing import cpu_count
+from psutil import cpu_count
 
 
 class RunConfig:
@@ -71,7 +71,7 @@ class RunConfig:
             self.n_threads = int(slurm_threads)
         else:
             # Divide up threads available on node:
-            n_cores = cpu_count()
+            n_cores = cpu_count(logical=False)
             core_start = (i_proc_node * n_cores) // n_procs_node
             core_stop = ((i_proc_node + 1) * n_cores) // n_procs_node
             self.n_threads = core_stop - core_start
