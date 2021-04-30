@@ -38,6 +38,8 @@ templates_path = ['_templates']
 # This pattern also affects html_static_path and html_extra_path.
 exclude_patterns = []
 
+# Include class and constructor docstring together.
+autoclass_content = 'both'
 
 # -- Options for HTML output -------------------------------------------------
 

@@ -7,7 +7,10 @@ Subpackages
 .. toctree::
    :maxdepth: 4
 
+   qimpy.utils
    qimpy.ions
+   qimpy.lattice
+   qimpy.symmetries
 
 Submodules
 ----------

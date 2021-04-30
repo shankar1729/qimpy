@@ -3,8 +3,14 @@ import numpy as np
 
 
 class System:
+    '''TODO: document class System'''
 
     def __init__(self, *, rc, lattice, ions=None):
+        '''
+        Parameters
+        ----------
+        TODO
+        '''
         self.rc = rc
 
         # Initialize lattice:

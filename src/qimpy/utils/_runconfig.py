@@ -17,8 +17,7 @@ class RunConfig:
     Otherwise, on multi-GPU systems, CUDA MPI will subsequently fail."""
 
     def __init__(self, *, comm=None, cores=None):
-        """Initialize run configuration
-
+        """
         Parameters
         ----------
         comm : mpi4py.MPI.COMM or None, optional

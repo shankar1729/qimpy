@@ -5,6 +5,7 @@ from ._lattice_systems import get_Rbasis
 
 
 class Lattice:
+    '''TODO: document class Lattice'''
 
     def __init__(self, *, rc,
                  system=None, modification=None,
@@ -12,6 +13,11 @@ class Lattice:
                  alpha=None, beta=None, gamma=None,
                  vector1=None, vector2=None, vector3=None,
                  scale=None):
+        '''
+        Parameters
+        ----------
+        TODO
+        '''
         self.rc = rc
         qp.log.info('\n--- Initializing Lattice ---')
 

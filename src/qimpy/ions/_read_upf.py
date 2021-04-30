@@ -4,14 +4,12 @@ import numpy as np
 import re
 
 
-def read_upf(self, filename, rc):
-    '''Read a UPF pseudopotential into a Pseudopotential object.
+def _read_upf(self, filename, rc):
+    '''Read a UPF pseudopotential.
     Note that only norm-conserving UPF files are currently supported.
 
     Parameters
     ----------
-    self : qimpy.ions.Pseudopotential
-        Target pseudopotential object to read data into
     filename : str
         Full path to the UPF file to read.
     rc : qimpy.utils.RunConfig

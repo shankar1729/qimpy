@@ -8,6 +8,11 @@ class Ions:
     """TODO: document class Ions"""
 
     def __init__(self, *, rc, coordinates, pseudopotentials):
+        '''
+        Parameters
+        ----------
+        TODO
+        '''
         self.rc = rc
         qp.log.info('\n--- Initializing Ions ---')
 

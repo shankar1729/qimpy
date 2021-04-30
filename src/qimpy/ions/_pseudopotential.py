@@ -1,13 +1,14 @@
 import qimpy as qp
-from ._read_upf import read_upf
+from ._read_upf import _read_upf
 
 
 class Pseudopotential:
     """TODO: document class Pseudopotential"""
 
-    def __init__(self, filename, rc):
-        """Create pseudopotential from file.
+    read_upf = _read_upf
 
+    def __init__(self, filename, rc):
+        """
         Parameters
         ----------
         filename : str
@@ -16,4 +17,4 @@ class Pseudopotential:
         """
 
         assert(filename[-4:].lower() == '.upf')
-        read_upf(self, filename, rc)
+        self.read_upf(filename, rc)

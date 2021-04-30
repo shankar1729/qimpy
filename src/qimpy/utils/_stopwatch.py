@@ -15,8 +15,7 @@ class StopWatch:
     _cuda_events = []  #: CUDA events for asynchronous timing on GPUs
 
     def __init__(self, name, rc):
-        """Create a named stop watch and record start time
-
+        """
         Parameters
         ----------
         name : str
