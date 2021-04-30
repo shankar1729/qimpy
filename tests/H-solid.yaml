@@ -1,0 +1,5 @@
+# Solid of H atoms
+lattice:
+  system: cubic
+  modification: face-centered
+  a: 5  # bohrs

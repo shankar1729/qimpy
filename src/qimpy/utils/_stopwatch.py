@@ -21,7 +21,6 @@ class StopWatch:
         ----------
         name : str
             Name of function or code block being profiled.
-
         rc : qimpy.utils.RunConfig
             Current run configuration (required for proper GPU profiling)."""
         self.use_cuda = rc.use_cuda

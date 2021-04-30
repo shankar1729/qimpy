@@ -4,7 +4,7 @@ import numpy as np
 
 class System:
 
-    def __init__(self, *, rc, lattice, ions):
+    def __init__(self, *, rc, lattice, ions=None):
         self.rc = rc
 
         # Initialize lattice:
@@ -16,6 +16,11 @@ class System:
             raise TypeError("lattice must be dict or qimpy.lattice.Lattice")
 
         # Initialize ions:
+        if ions is None:
+            # Set-up default of no ions:
+            ions = {
+                'pseudopotentials': [],
+                'coordinates': []}
         if isinstance(ions, dict):
             self.ions = qp.ions.Ions(rc=rc, **ions)
         elif isinstance(ions, qp.ions.Ions):
@@ -29,4 +34,5 @@ def fmt(tensor):
     return np.array2string(
         tensor.numpy(),
         precision=8,
+        suppress_small=True,
         separator=', ')
