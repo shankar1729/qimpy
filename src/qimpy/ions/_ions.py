@@ -51,8 +51,8 @@ class Ions:
         for i_ion, position in enumerate(self.positions):
             qp.log.info('- [{:s}, {:11.8f}, {:11.8f}, {:11.8f}]'.format(
                 self.symbols[self.types[i_ion]], *tuple(position)))
-        self.positions = torch.tensor(self.positions)
-        self.types = torch.tensor(self.types)
+        self.positions = torch.tensor(self.positions, device=rc.device)
+        self.types = torch.tensor(self.types, device=rc.device)
 
         # Initialize pseudopotentials:
         self.pseudopotentials = []

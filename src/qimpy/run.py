@@ -126,7 +126,7 @@ if __name__ == "__main__":
         verbose=args.verbose)
 
     # Print version header
-    qp.log.info('*'*15 + ' QimPy' + qp.__version__ + ' ' + '*'*15)
+    qp.log.info('*'*15 + ' QimPy ' + qp.__version__ + ' ' + '*'*15)
 
     # Set up run configuration
     rc = qp.utils.RunConfig(cores=args.cores)

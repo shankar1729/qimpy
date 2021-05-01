@@ -18,7 +18,8 @@ def _get_lattice_point_group(Rbasis, tolerance):
     metric = Rreduced.T @ Rreduced
     metric_new = matrices.transpose(-2, -1) @ (metric @ matrices)
     metric_err = ((metric_new - metric) ** 2).sum(dim=(1, 2))
-    sym = matrices[torch.where(metric_err < tolerance*(metric**2).sum())[0]]
+    metric_err_limit = (tolerance**2) * (metric**2).sum()
+    sym = matrices[torch.where(metric_err < metric_err_limit)[0]]
 
     # Transform to original (unreduced) coordinates:
     return (T @ sym) @ torch.linalg.inv(T)
@@ -57,13 +58,3 @@ def _reduce_matrix33(M, tolerance):
             norm = norm_new[i_min]
         else:
             return T  # converged
-
-
-if __name__ == '__main__':
-    tol = 1e-6
-    torch.set_default_tensor_type(torch.DoubleTensor)
-    M = torch.tensor([[5, 1, 0], [4, 2, 0], [0, 3, 1]], dtype=float)
-    T = _reduce_matrix33(M, tol)
-    invT = torch.linalg.inv(T)
-    Mnew = M @ T
-    print(T, '\n', invT, '\n', invT @ T)
