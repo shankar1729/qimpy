@@ -97,4 +97,4 @@ def get_Rbasis(system, modification, a, b, c, alpha, beta, gamma):
         else:
             raise KeyError('Unknown lattice modification: ' + modification)
 
-    return Rbasis.mm(M)
+    return Rbasis @ M

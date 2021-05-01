@@ -5,7 +5,7 @@ import numpy as np
 class System:
     '''TODO: document class System'''
 
-    def __init__(self, *, rc, lattice, ions=None):
+    def __init__(self, *, rc, lattice, ions=None, symmetries=None):
         '''
         Parameters
         ----------
@@ -33,6 +33,19 @@ class System:
             self.ions = ions
         else:
             raise TypeError("ions must be dict or qimpy.ions.Ions")
+
+        # Initialize symmetries:
+        if symmetries is None:
+            symmetries = {}
+        if isinstance(symmetries, dict):
+            self.symmetries = qp.symmetries.Symmetries(
+                rc=rc, lattice=self.lattice, ions=self.ions,
+                **symmetries)
+        elif isinstance(symmetries, qp.symmetries.Symmetries):
+            self.symmetries = symmetries
+        else:
+            raise TypeError(
+                "symmetries must be dict or qimpy.symmetries.Symmetries")
 
 
 def fmt(tensor):
