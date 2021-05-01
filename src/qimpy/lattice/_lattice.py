@@ -44,9 +44,14 @@ class Lattice:
             assert((len(scale) == 1) or (len(scale) == 3))
             self.Rbasis = scale[:, None] * self.Rbasis
         qp.log.info('Rbasis (real-space basis in columns):\n'
-                    + qp.fmt(self.Rbasis))
+                    + rc.fmt(self.Rbasis))
+        self.Rbasis = self.Rbasis.to(rc.device)
 
         # Compute reciprocal lattice vectors:
         self.Gbasis = torch.linalg.inv(self.Rbasis.T)
         qp.log.info('Gbasis (reciprocal-space basis in columns):\n'
-                    + qp.fmt(self.Gbasis))
+                    + rc.fmt(self.Gbasis))
+
+        # Compute unit cell volume:
+        self.volume = abs(torch.linalg.det(self.Rbasis).item())
+        qp.log.info('Unit cell volume: {:f}'.format(self.volume))

@@ -46,12 +46,3 @@ class System:
         else:
             raise TypeError(
                 "symmetries must be dict or qimpy.symmetries.Symmetries")
-
-
-def fmt(tensor):
-    'Standardized printing of arrays within QimPy'
-    return np.array2string(
-        tensor.numpy(),
-        precision=8,
-        suppress_small=True,
-        separator=', ')

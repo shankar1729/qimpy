@@ -1,12 +1,12 @@
 # List exported symbols for doc generation
 __all__ = [
-    'MPI', 'System', 'fmt',
+    'MPI', 'System',
     'utils', 'ions', 'lattice',
     'log']
 
 # Module import definition
 from mpi4py import MPI
-from ._system import System, fmt
+from ._system import System
 from . import utils
 from . import ions
 from . import lattice

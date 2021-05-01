@@ -109,3 +109,9 @@ class RunConfig:
         duration = datetime.timedelta(seconds=(t_stop - self.t_start))
         qp.log.info('\nEnd time: {:s} (Duration: {:s})'.format(
             time.ctime(t_stop), str(duration)))
+
+    def fmt(self, tensor):
+        'Standardized conversion of torch tensors for log'
+        return np.array2string(
+            tensor.to(self.cpu).numpy(),
+            precision=8, suppress_small=True, separator=', ')
