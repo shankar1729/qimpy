@@ -58,3 +58,18 @@ def _reduce_matrix33(M, tolerance):
             norm = norm_new[i_min]
         else:
             return T  # converged
+
+
+def _symmetrize_lattice(self, Rbasis):
+    'Symmetrize lattice vectors Rbasis (3x3 tensor)'
+    # Compute symmetrized metric:
+    metric = Rbasis.T @ Rbasis
+    metric_sym = (self.rot.transpose(-2, -1)
+                  @ (metric @ self.rot)).mean(dim=0)
+    # From transformation from matrix square-roots of metrics:
+    E, V = metric.symeig(eigenvectors=True)
+    E_sym, V_sym = metric_sym.symeig(eigenvectors=True)
+    return (
+        Rbasis
+        @ (V @ ((1./E.sqrt()).diag_embed() @ V.T))  # metric^(-1/2)
+        @ (V_sym @ (E_sym.sqrt().diag_embed() @ V_sym.T)))  # metric_sym^(1/2)

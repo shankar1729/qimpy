@@ -55,3 +55,15 @@ class Lattice:
         # Compute unit cell volume:
         self.volume = abs(torch.linalg.det(self.Rbasis).item())
         qp.log.info('Unit cell volume: {:f}'.format(self.volume))
+
+    def update(self, Rbasis):
+        'Update lattice vectors and dependent quantities'
+        Gbasis = torch.linalg.inv(self.Rbasis.T)
+        volume = abs(torch.linalg.det(self.Rbasis).item())
+        qp.log.info('Relative change in Rbasis: {:e} and volume: {:e}'.format(
+            (torch.linalg.norm(Rbasis - self.Rbasis)
+             / torch.linalg.norm(self.Rbasis)),
+            (volume - self.volume) / self.volume))
+        self.Rbasis = Rbasis
+        self.Gbasis = Gbasis
+        self.volume = volume

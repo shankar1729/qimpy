@@ -81,3 +81,15 @@ def _get_space_group(lattice_sym, lattice, ions, tolerance):
             ion_map.append(ion_map_cur)
 
     return torch.stack(rot), torch.stack(trans), torch.stack(ion_map)
+
+
+def _symmetrize_positions(self, positions):
+    'Symmetrize ion positions (n_ions x 3 tensor)'
+    pos_rot = positions @ self.rot.transpose(-2, -1) + self.trans[:, None]
+    pos_mapped = positions[self.ion_map, :]
+    # Correction on rotated positions:
+    dpos_rot = pos_mapped - pos_rot
+    dpos_rot -= torch.floor(0.5 + dpos_rot)  # wrap to [-0.5,0.5)
+    # Transform corrections back and average:
+    dpos = dpos_rot @ torch.linalg.inv(self.rot.transpose(-2, -1))
+    return positions + dpos.mean(dim=0)
