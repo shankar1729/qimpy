@@ -11,6 +11,7 @@ Subpackages
    qimpy.ions
    qimpy.lattice
    qimpy.symmetries
+   qimpy.electrons
 
 Submodules
 ----------

@@ -1,0 +1,26 @@
+import qimpy as qp
+
+
+class Electrons:
+    'TODO: document class Electrons'
+
+    def __init__(self, *, rc, k_mesh=None, k_path=None):
+        '''TODO: document Electrons constructor'''
+        self.rc = rc
+        qp.log.info('\n--- Initializing Electrons ---')
+
+        # Initialize k-points:
+        if k_mesh is None:
+            if k_path is None:
+                self.kpoints = qp.electrons.Kmesh(rc=rc)  # Gamma-only
+            else:
+                self.kpoints = qp.construct(
+                    qp.electrons.Kpath, k_path, 'k_path',
+                    rc=rc)
+        else:
+            if k_path is None:
+                self.kpoints = qp.construct(
+                    qp.electrons.Kmesh, k_mesh, 'k_mesh',
+                    rc=rc)
+            else:
+                raise ValueError('Cannot use both k-mesh and k-path')

@@ -5,7 +5,8 @@ import numpy as np
 class System:
     '''TODO: document class System'''
 
-    def __init__(self, *, rc, lattice, ions=None, symmetries=None):
+    def __init__(self, *, rc, lattice, ions=None, symmetries=None,
+                 electrons=None):
         '''
         Parameters
         ----------
@@ -14,12 +15,8 @@ class System:
         self.rc = rc
 
         # Initialize lattice:
-        if isinstance(lattice, dict):
-            self.lattice = qp.lattice.Lattice(rc=rc, **lattice)
-        elif isinstance(lattice, qp.lattice.Lattice):
-            self.lattice = lattice
-        else:
-            raise TypeError("lattice must be dict or qimpy.lattice.Lattice")
+        self.lattice = qp.construct(qp.lattice.Lattice, lattice, 'lattice',
+                                    rc=rc)
 
         # Initialize ions:
         if ions is None:
@@ -27,22 +24,42 @@ class System:
             ions = {
                 'pseudopotentials': [],
                 'coordinates': []}
-        if isinstance(ions, dict):
-            self.ions = qp.ions.Ions(rc=rc, **ions)
-        elif isinstance(ions, qp.ions.Ions):
-            self.ions = ions
-        else:
-            raise TypeError("ions must be dict or qimpy.ions.Ions")
+        self.ions = qp.construct(qp.ions.Ions, ions, 'ions',
+                                 rc=rc)
 
         # Initialize symmetries:
         if symmetries is None:
             symmetries = {}
-        if isinstance(symmetries, dict):
-            self.symmetries = qp.symmetries.Symmetries(
-                rc=rc, lattice=self.lattice, ions=self.ions,
-                **symmetries)
-        elif isinstance(symmetries, qp.symmetries.Symmetries):
-            self.symmetries = symmetries
-        else:
-            raise TypeError(
-                "symmetries must be dict or qimpy.symmetries.Symmetries")
+        self.symmetries = qp.construct(
+            qp.symmetries.Symmetries, symmetries, 'symmetries',
+            rc=rc, lattice=self.lattice, ions=self.ions)
+
+        # Initialize electrons:
+        self.electrons = qp.construct(
+            qp.electrons.Electrons, electrons, 'electrons',
+            rc=rc)
+
+
+def construct(Class, params, object_name,
+              **kwargs):
+    '''Construct an object of type Class from params and kwargs
+    if params is a dict, and just from kwargs if params is None.
+    Otherwise check that params is already of type Class, and if not,
+    raise an error clearly stating what all types object_name can be.'''
+
+    # Try all the valid possibilities:
+    if isinstance(params, dict):
+        return Class(**kwargs, **params)
+    if params is None:
+        return Class(**kwargs)
+    if isinstance(params, Class):
+        return params
+
+    # Report error with canonicalized class name:
+    module = Class.__module__
+    module_elems = ([] if module is None else (
+        [elem for elem in module.split('.')
+         if not elem.startswith('_')]))  # drop internal module names
+    module_elems.append(Class.__qualname__)
+    class_name = '.'.join(module_elems)
+    raise TypeError(object_name + ' must be dict or ' + class_name)
