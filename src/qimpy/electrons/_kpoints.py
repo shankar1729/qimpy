@@ -6,19 +6,64 @@ import torch
 class Kpoints:
     'Set of k-points in Brillouin zone'
     def __init__(self, rc, k, wk):
-        '''Create Kpoints from explicit list of k and weights wk.
-        Typically use derived classes Kmesh or Kpath instead.'''
+        '''
+        Construct from explicit list of k-points and integration weights.
+        Typically, this should be used only by derived classes
+        such as qimpy.electrons.Kmesh or qimpy.electrons.Kpath
+
+        Parameters
+        ----------
+        rc : qimpy.utils.RunConfig
+            Current run configuration.
+        k : torch.Tensor (N x 3)
+            Explicit list of k-points for Brillouin zone integration.
+        wk : torch.Tensor (N)
+            Corresponding Brillouin zone integration weights (should add to 1).
+
+'''
         self.rc = rc
         self.k = k
         self.wk = wk
-        qp.log.info(rc.fmt(k))
+        assert(abs(wk.sum() - 1.) < 1e-14)
 
 
 class Kmesh(Kpoints):
     'Uniform k-mesh sampling of Brillouin zone'
+
     def __init__(self, *, rc, symmetries, lattice,
                  offset=(0., 0., 0.),
                  size=(1, 1, 1)):
+        '''
+        Parameters
+        ----------
+        rc : qimpy.utils.RunConfig
+            Current run configuration.
+        symmetries : qimpy.symmetries.Symmetries
+            Symmetry group used to reduce k-points to irreducible set.
+        lattice : qimpy.lattice.Lattice
+            Lattice specification used for automatic size determination.
+        offset : list of 3 floats, optional
+            Offset k-point mesh by this amount in k-mesh coordinates
+            i.e. by offset / size in fractional reciprocal coordinates.
+            For example, use [0.5, 0.5, 0.5] for the Monkhorst-Pack scheme.
+            Default: [0., 0., 0.] selects Gamma-centered mesh.
+        size: list of 3 ints, or float, optional
+            If given as a list of 3 integers, number of k-points along each
+            reciprocal lattice direction. Instead, a single float specifies
+            the minimum real-space size of the k-point sampled supercell
+            i.e. pick number of k-points along dimension i = ceil(size / L_i),
+            where L_i is the length of lattice vector i (in bohrs).
+            Default: [1, 1, 1] selects a single k-point = offset.'''
+
+        # Select size from real-space dimension if needed:
+        if isinstance(size, float) or isinstance(size, int):
+            sup_length = float(size)
+            L_i = torch.linalg.norm(lattice.Rbasis, dim=0)  # lattice lengths
+            size = torch.ceil(sup_length / L_i).to(int).tolist()
+            qp.log.info(
+                'Selecting {:d} x {:d} x {:d} k-mesh '.format(*tuple(size))
+                + 'for supercell size >= {:g} bohrs'.format(sup_length))
+
         # Check types and sizes:
         offset = np.array(offset)
         size = np.array(size)
@@ -29,6 +74,7 @@ class Kmesh(Kpoints):
                 'centered at Gamma'
                 if (np.linalg.norm(offset) == 0.)
                 else ('offset by ' + np.array2string(offset, separator=', '))))
+
         # Create mesh:
         # kgrids1d = [ for ]
 
@@ -38,7 +84,22 @@ class Kpath(Kpoints):
     (typically for band structure calculations)'''
 
     def __init__(self, *, rc, lattice, dk, points):
-        '''TODO: document Kpath constructor'''
+        '''
+        Parameters
+        ----------
+        rc : qimpy.utils.RunConfig
+            Current run configuration.
+        lattice : qimpy.lattice.Lattice
+            Lattice specification for converting k-points from
+            reciprocal fractional coordinates (input) to Cartesian
+            for determining path lengths.
+        dk : float
+            Maximum distance (in bohr^-1) between adjacent points on k-path
+        points : list of lists
+            List of special k-points along path: each k-point should contain
+            three fractional coordinates (float) and optionally a string
+            label for this point for use in band structure plots.
+        '''
 
         # Check types, sizes and separate labels from points:
         dk = float(dk)

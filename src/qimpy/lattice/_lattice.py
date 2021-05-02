@@ -42,7 +42,7 @@ class Lattice:
         if scale:
             scale = torch.tensor(scale).flatten()
             assert((len(scale) == 1) or (len(scale) == 3))
-            self.Rbasis = scale[:, None] * self.Rbasis
+            self.Rbasis = scale[None, :] * self.Rbasis
         qp.log.info('Rbasis (real-space basis in columns):\n'
                     + rc.fmt(self.Rbasis))
         self.Rbasis = self.Rbasis.to(rc.device)
