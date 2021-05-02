@@ -1,3 +1,7 @@
+import qimpy as qp
+import numpy as np
+
+
 class Kpoints:
     'Set of k-points in Brillouin zone'
     def __init__(self, rc, k, wk):
@@ -10,13 +14,19 @@ class Kpoints:
 
 class Kmesh(Kpoints):
     'Uniform k-mesh sampling of Brillouin zone'
-    def __init__(self, *, rc, offset=None, folding=None):
-        # Assign defaults:
-        if offset is None:
-            offset = [0., 0., 0.]
-        if folding is None:
-            folding = [1, 1, 1]
-        # TODO
+    def __init__(self, *, rc,
+                 offset=(0., 0., 0.),
+                 folding=(1, 1, 1)):
+        # Check types and sizes:
+        offset = np.array(offset)
+        folding = np.array(folding)
+        assert((offset.shape == (3,)) and (offset.dtype == float))
+        assert((folding.shape == (3,)) and (folding.dtype == int))
+        qp.log.info('Initializing {:d} x {:d} x {:d} uniform k-mesh '.format(
+            *tuple(folding)) + (
+                'centered at Gamma'
+                if (np.linalg.norm(offset) == 0.)
+                else ('offset by ' + np.array2string(offset, separator=', '))))
 
 
 class Kpath(Kpoints):

@@ -44,12 +44,15 @@ def construct(Class, params, object_name,
               **kwargs):
     '''Construct an object of type Class from params and kwargs
     if params is a dict, and just from kwargs if params is None.
+    Any hyphens in keys within params are replaced with _ for convenience.
     Otherwise check that params is already of type Class, and if not,
     raise an error clearly stating what all types object_name can be.'''
 
     # Try all the valid possibilities:
     if isinstance(params, dict):
-        return Class(**kwargs, **params)
+        return Class(
+            **kwargs,
+            **dict((k.replace('-', '_'), v) for k, v in params.items()))
     if params is None:
         return Class(**kwargs)
     if isinstance(params, Class):
