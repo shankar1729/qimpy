@@ -46,6 +46,7 @@ def _get_space_group(lattice_sym, lattice, ions, tolerance):
         rot_cur = lattice_sym[i_sym]
 
         # Compute all translations for each ion that map it back to an ion:
+        # --- positions transform by rot, so transposed on right-multiply
         pos = pos0 @ rot_cur.T  # rotated positions of all ions
         offsets = pos0[None, ...] - pos[:, None, :]  # possible translations
         offsets -= torch.floor(0.5 + offsets)  # wrap to [-0.5,0.5)

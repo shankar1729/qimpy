@@ -19,8 +19,7 @@ class Kpoints:
             Explicit list of k-points for Brillouin zone integration.
         wk : torch.Tensor (N)
             Corresponding Brillouin zone integration weights (should add to 1).
-
-'''
+        '''
         self.rc = rc
         self.k = k
         self.wk = wk
@@ -75,8 +74,55 @@ class Kmesh(Kpoints):
                 if (np.linalg.norm(offset) == 0.)
                 else ('offset by ' + np.array2string(offset, separator=', '))))
 
-        # Create mesh:
-        # kgrids1d = [ for ]
+        # Check that offset is resolvable:
+        min_offset = symmetries.tolerance  # detectable at that threshold
+        if np.any(np.logical_and(offset != 0, np.abs(offset) < min_offset)):
+            raise ValueError(
+                'Nonzero offset < {:g} symmetry tolerance'.format(min_offset))
+
+        # Create full mesh:
+        grids1d = [(offset[i] + torch.arange(size[i], device=rc.device))
+                   / size[i] for i in range(3)]
+        mesh = torch.stack(torch.meshgrid(*tuple(grids1d))).view(3, -1).T
+        mesh -= torch.floor(0.5 + mesh)  # wrap to [-0.5,0.5)
+
+        # Compute mapping of arbitrary k-points to mesh:
+        def mesh_map(k):
+            # Sizes and dimensions on torch:
+            size_i = torch.tensor(size, dtype=int, device=rc.device)
+            size_f = size_i.to(float)  # need as both int and float
+            offset_f = torch.tensor(offset, device=rc.device)
+            stride_i = torch.tensor([size[1]*size[2], size[2], 1],
+                                    dtype=int, device=rc.device)
+            not_found_index = size.prod()
+            # Compute mesh coordinates:
+            mesh_coord = k * size_f - offset_f
+            int_coord = torch.round(mesh_coord)
+            on_mesh = ((mesh_coord - int_coord).abs() < min_offset).all(dim=-1)
+            mesh_index = (int_coord.to(int) % size_i) @ stride_i
+            return on_mesh, torch.where(on_mesh, mesh_index, not_found_index)
+
+        # Transform every k-point under every symmetry:
+        # --- k-points transform by rot.T, so no transpose on right-multiply
+        on_mesh, mesh_index = mesh_map(mesh @ symmetries.rot)
+        if not on_mesh.all():
+            qp.log.info('WARNING: k-mesh symmetries are a subgroup of size '
+                        + str(on_mesh.all(dim=-1).count_nonzero().item()))
+        first_equiv, i_sym = mesh_index.min(dim=0)  # first equiv k and sym
+        reduced_index, i_reduced, reduced_counts = first_equiv.unique(
+            return_inverse=True, return_counts=True)
+        k = mesh[reduced_index]  # k in irreducible wedge
+        wk = reduced_counts / size.prod()  # corresponding weights
+        qp.log.info(
+            'Reduced {:d} points on mesh to {:d} under symmetries.'.format(
+                size.prod(), len(k)))
+        # --- store mapping from full k-mesh to reduced set:
+        size = tuple(size)
+        self.i_reduced = i_reduced.reshape(size)  # index into k
+        self.i_sym = i_sym.reshape(size)  # symmetry number to get to k
+
+        # Initialize base class:
+        super().__init__(rc, k, wk)
 
 
 class Kpath(Kpoints):
