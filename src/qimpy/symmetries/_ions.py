@@ -10,29 +10,33 @@ def _get_space_group(lattice_sym, lattice, ions, tolerance):
             of the ion that each ion maps to after each symmetry operation.'''
 
     # Special case of no ions:
+    device = lattice.rc.device
     n_ions = ions.n_ions
     if not n_ions:
         # space group = point group:
         rot = lattice_sym.clone().detach()
-        trans = torch.zeros((lattice_sym.shape[0], 3),
-                            device=lattice_sym.device)
+        trans = torch.zeros((lattice_sym.shape[0], 3), device=device)
         ion_map = torch.zeros((lattice_sym.shape[0], 0),
-                              dtype=int, device=lattice_sym.device)
+                              dtype=int, device=device)
         return rot, trans, ion_map
 
     # Prepare ion properties needed for space group determination:
     pos0 = ions.positions  # original ionic positions
     type_mask = (ions.types[:, None] == ions.types[None, :])
     # --- magnetization:
-    M0 = torch.zeros_like(pos0)  # TODO: use magnetic moments
-    if M0.shape[-1] == 3:
+    M0 = ions.M_initial
+    if M0 is None:
+        pass  # no handling needed
+    elif len(ions.M_initial.shape) == 1:
+        # Scalar magnetization must be invariant; treat just like type:
+        type_mask = torch.logical_and(
+            type_mask, (M0[:, None] - M0[None, :]).abs() < tolerance)
+        M0 = None  # no more handling of magnetization needed below
+    else:
         # Vector magentization needs Cartesian rotation matrices:
         sym_M = ((lattice.Rbasis @ lattice_sym)
                  @ torch.linalg.inv(lattice.Rbasis))
         sym_M *= torch.linalg.det(lattice_sym).view(-1, 1, 1)  # pseudo-vector
-    else:
-        # Scalar or no magnetization needs no transformation:
-        sym_M = torch.ones((lattice_sym.shape[0], 1, 1), device=M.device)
 
     rot = []
     trans = []
@@ -46,11 +50,14 @@ def _get_space_group(lattice_sym, lattice, ions, tolerance):
         offsets = pos0[None, ...] - pos[:, None, :]  # possible translations
         offsets -= torch.floor(0.5 + offsets)  # wrap to [-0.5,0.5)
 
-        # Select those that map to ion with same type and magnetization:
-        M = M0 @ sym_M[i_sym].T
-        mask = torch.logical_and(
-            (((M0[None, ...] - M[:, None, :])**2).sum(dim=-1) < tol_sq),
-            type_mask)
+        # Select those that map to ion with same type (and magnetization):
+        if M0 is None:  # scalar or no magnetization
+            mask = type_mask
+        else:  # vector magnetization
+            M = M0 @ sym_M[i_sym].T
+            mask = torch.logical_and(
+                (((M0[None, ...] - M[:, None, :])**2).sum(dim=-1) < tol_sq),
+                type_mask)
 
         # Find offsets that work for every ion:
         common_offsets = None
@@ -67,7 +74,7 @@ def _get_space_group(lattice_sym, lattice, ions, tolerance):
                 common_offsets = common_offsets[is_common]
 
         # Determine ion map for each offset and optimize it:
-        index_offset = n_ions * torch.arange(n_ions, device=M.device)
+        index_offset = n_ions * torch.arange(n_ions, device=device)
         for offset in common_offsets:
             doffset = offsets - offset[None, None, :]
             doffset -= torch.floor(0.5 + doffset)  # wrap to [-0.5,0.5)
