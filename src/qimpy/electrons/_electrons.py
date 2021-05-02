@@ -4,7 +4,8 @@ import qimpy as qp
 class Electrons:
     'TODO: document class Electrons'
 
-    def __init__(self, *, rc, k_mesh=None, k_path=None):
+    def __init__(self, *, rc, lattice, symmetries,
+                 k_mesh=None, k_path=None):
         '''TODO: document Electrons constructor'''
         self.rc = rc
         qp.log.info('\n--- Initializing Electrons ---')
@@ -16,11 +17,11 @@ class Electrons:
             else:
                 self.kpoints = qp.construct(
                     qp.electrons.Kpath, k_path, 'k_path',
-                    rc=rc)
+                    rc=rc, lattice=lattice)
         else:
             if k_path is None:
                 self.kpoints = qp.construct(
                     qp.electrons.Kmesh, k_mesh, 'k_mesh',
-                    rc=rc)
+                    rc=rc, symmetries=symmetries, lattice=lattice)
             else:
                 raise ValueError('Cannot use both k-mesh and k-path')

@@ -22,6 +22,7 @@ class Symmetries:
             Ion specification that, with lattice, determines space group.
         '''
         self.rc = rc
+        self.tolerance = tolerance
         qp.log.info('\n--- Initializing Symmetries ---')
 
         # Lattice point group:

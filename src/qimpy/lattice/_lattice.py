@@ -48,7 +48,7 @@ class Lattice:
         self.Rbasis = self.Rbasis.to(rc.device)
 
         # Compute reciprocal lattice vectors:
-        self.Gbasis = torch.linalg.inv(self.Rbasis.T)
+        self.Gbasis = (2*np.pi) * torch.linalg.inv(self.Rbasis.T)
         qp.log.info('Gbasis (reciprocal-space basis in columns):\n'
                     + rc.fmt(self.Gbasis))
 
@@ -58,7 +58,7 @@ class Lattice:
 
     def update(self, Rbasis):
         'Update lattice vectors and dependent quantities'
-        Gbasis = torch.linalg.inv(self.Rbasis.T)
+        Gbasis = (2*np.pi) * torch.linalg.inv(self.Rbasis.T)
         volume = abs(torch.linalg.det(self.Rbasis).item())
         qp.log.info('Relative change in Rbasis: {:e} and volume: {:e}'.format(
             (torch.linalg.norm(Rbasis - self.Rbasis)
