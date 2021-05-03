@@ -55,3 +55,15 @@ class Symmetries:
                 'RMS change in fractional positions of ions: {:e}'.format(
                     ((positions_sym - ions.positions)**2).mean().sqrt()))
             ions.positions = positions_sym
+
+        # Identify location of special entries:
+        # --- identity
+        id = torch.eye(3, device=rc.device)  # identity matrix
+        id_diff = (((self.rot - id)**2).sum(dim=(1, 2))
+                   + (self.trans**2).sum(dim=1))
+        self.i_id = id_diff.argmin().item()
+        if id_diff[self.i_id] > tolerance**2:
+            raise ValueError('Identity operation not found in space group.')
+        # ---  inversion (if present: list of indices, else [])
+        self.i_inv = torch.where(((self.rot + id)**2).sum(dim=(1, 2))
+                                 < tolerance**2)[0].tolist()
