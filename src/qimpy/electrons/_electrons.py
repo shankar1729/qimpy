@@ -13,7 +13,8 @@ class Electrons:
         # Initialize k-points:
         if k_mesh is None:
             if k_path is None:
-                self.kpoints = qp.electrons.Kmesh(rc=rc)  # Gamma-only
+                self.kpoints = qp.electrons.Kmesh(  # Gamma-only
+                    rc=rc, symmetries=symmetries, lattice=lattice)
             else:
                 self.kpoints = qp.construct(
                     qp.electrons.Kpath, k_path, 'k_path',

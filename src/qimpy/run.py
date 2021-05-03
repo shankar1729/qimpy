@@ -7,23 +7,28 @@ Command-line parameters (obtained using :code:`python -m qimpy.run -h`):
 
 .. code-block:: bash
 
-    python -m qimpy.run (-h | -v | -i INPUT_FILE) [-o OUTPUT_FILE]
-                        [-c CORES] [-n] [-d] [-m MPI_LOG] [-V]
+    python -m qimpy.run (-h | -v | -i FILE) [-o FILE] [-c C] [-p Pr Pk Pb]
+                           [-n] [-d] [-m FILE] [-V]
 
 Run a QimPy calculation from an input file
 
 optional arguments:
   -h, --help            show this help message and exit
   -v, --version         print version information and quit
-  -i INPUT_FILE, --input-file INPUT_FILE
+  -i FILE, --input-file FILE
                         input file in YAML format
-  -o OUTPUT_FILE, --output-file OUTPUT_FILE
+  -o FILE, --output-file FILE
                         output file (stdout if unspecified)
-  -c CORES, --cores CORES
-                        number of cores per process (overridden by SLURM)
+  -c C, --cores C       number of cores per process (overridden by SLURM)
+  -p Pr Pk Pb, --process-grid Pr Pk Pb
+                        dimensions of process grid: replicas x kpoints x
+                        bands/basis, whose product must match process count;
+                        any -1 will be set todistribute the product most
+                        equally. Default: 1 -1 -1 i.e. all replicas together,
+                        splitting kpoints and bands/basis equally.
   -n, --dry-run         quit after initialization (to check input file)
   -d, --no-append       overwrite output file instead of appending
-  -m MPI_LOG, --mpi-log MPI_LOG
+  -m FILE, --mpi-log FILE
                         file prefix for debug logs from other MPI processes
   -V, --verbose         print extra information in log for debugging
 
@@ -70,15 +75,22 @@ if __name__ == "__main__":
             '-v', '--version', action='store_true',
             help='print version information and quit')
         group.add_argument(
-            '-i', '--input-file',
+            '-i', '--input-file', metavar='FILE',
             help='input file in YAML format')
         # ---
         parser.add_argument(
-            '-o', '--output-file',
+            '-o', '--output-file', metavar='FILE',
             help='output file (stdout if unspecified)')
         parser.add_argument(
-            '-c', '--cores', type=int,
+            '-c', '--cores', type=int, metavar='C',
             help='number of cores per process (overridden by SLURM)')
+        parser.add_argument(
+            '-p', '--process-grid', type=int, nargs=3,
+            default=[1, -1, -1], metavar=('Pr', 'Pk', 'Pb'),
+            help='dimensions of process grid: replicas x kpoints x bands/basis'
+            + ', whose product must match process count; any -1 will be set to'
+            + 'distribute the product most equally. Default: 1 -1 -1 i.e. all '
+            + 'replicas together, splitting kpoints and bands/basis equally.')
         parser.add_argument(
             '-n', '--dry-run', action='store_true',
             help='quit after initialization (to check input file)')
@@ -86,7 +98,7 @@ if __name__ == "__main__":
             '-d', '--no-append', action='store_true',
             help='overwrite output file instead of appending')
         parser.add_argument(
-            '-m', '--mpi-log',
+            '-m', '--mpi-log', metavar='FILE',
             help='file prefix for debug logs from other MPI processes')
         parser.add_argument(
             '-V', '--verbose', action='store_true',
@@ -129,7 +141,7 @@ if __name__ == "__main__":
     qp.log.info('*'*15 + ' QimPy ' + qp.__version__ + ' ' + '*'*15)
 
     # Set up run configuration
-    rc = qp.utils.RunConfig(cores=args.cores)
+    rc = qp.utils.RunConfig(cores=args.cores, process_grid=args.process_grid)
 
     # Load input parameters from YAML file:
     with open(args.input_file) as f:
