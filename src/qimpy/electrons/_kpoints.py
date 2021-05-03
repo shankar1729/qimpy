@@ -31,7 +31,8 @@ class Kmesh(Kpoints):
 
     def __init__(self, *, rc, symmetries, lattice,
                  offset=(0., 0., 0.),
-                 size=(1, 1, 1)):
+                 size=(1, 1, 1),
+                 use_inversion=True):
         '''
         Parameters
         ----------
@@ -46,13 +47,19 @@ class Kmesh(Kpoints):
             i.e. by offset / size in fractional reciprocal coordinates.
             For example, use [0.5, 0.5, 0.5] for the Monkhorst-Pack scheme.
             Default: [0., 0., 0.] selects Gamma-centered mesh.
-        size: list of 3 ints, or float, optional
+        size : list of 3 ints, or float, optional
             If given as a list of 3 integers, number of k-points along each
             reciprocal lattice direction. Instead, a single float specifies
             the minimum real-space size of the k-point sampled supercell
             i.e. pick number of k-points along dimension i = ceil(size / L_i),
             where L_i is the length of lattice vector i (in bohrs).
-            Default: [1, 1, 1] selects a single k-point = offset.'''
+            Default: [1, 1, 1] selects a single k-point = offset.
+        use_inversion : bool, optional
+            Whether to use inversion in k-space (i.e. complex conjugation
+            in real space) to additionally reduce k-points for systems
+            without inversion symmetry in real space. Default: True;
+            you should need to only disable this when interfacing with
+            codes that do not support this symmetry eg. BerkeleyGW.'''
 
         # Select size from real-space dimension if needed:
         if isinstance(size, float) or isinstance(size, int):
@@ -102,9 +109,17 @@ class Kmesh(Kpoints):
             mesh_index = (int_coord.to(int) % size_i) @ stride_i
             return on_mesh, torch.where(on_mesh, mesh_index, not_found_index)
 
+        # Check whether to add explicit inversion:
+        if use_inversion and not symmetries.i_inv:
+            rot = torch.cat((symmetries.rot, -symmetries.rot))
+            n_inv = 2
+        else:
+            rot = symmetries.rot
+            n_inv = 1
+
         # Transform every k-point under every symmetry:
         # --- k-points transform by rot.T, so no transpose on right-multiply
-        on_mesh, mesh_index = mesh_map(mesh @ symmetries.rot)
+        on_mesh, mesh_index = mesh_map(mesh @ rot)
         if not on_mesh.all():
             qp.log.info('WARNING: k-mesh symmetries are a subgroup of size '
                         + str(on_mesh.all(dim=-1).count_nonzero().item()))
@@ -114,12 +129,17 @@ class Kmesh(Kpoints):
         k = mesh[reduced_index]  # k in irreducible wedge
         wk = reduced_counts / size.prod()  # corresponding weights
         qp.log.info(
-            'Reduced {:d} points on mesh to {:d} under symmetries.'.format(
+            'Reduced {:d} points on k-mesh to {:d} under symmetries'.format(
                 size.prod(), len(k)))
         # --- store mapping from full k-mesh to reduced set:
         size = tuple(size)
         self.i_reduced = i_reduced.reshape(size)  # index into k
         self.i_sym = i_sym.reshape(size)  # symmetry number to get to k
+        # --- seperate combined symmetry index into symmetry and inversion:
+        self.invert = torch.where(self.i_sym > symmetries.n_sym, -1, +1)
+        self.i_sym = self.i_sym % symmetries.n_sym
+        if self.invert.min() < 0:
+            qp.log.info('Note: used k-inversion (conjugation) symmetry')
 
         # Initialize base class:
         super().__init__(rc, k, wk)
