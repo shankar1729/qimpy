@@ -23,9 +23,9 @@ optional arguments:
   -p Pr Pk Pb, --process-grid Pr Pk Pb
                         dimensions of process grid: replicas x kpoints x
                         bands/basis, whose product must match process count;
-                        any -1 will be set todistribute the product most
-                        equally. Default: 1 -1 -1 i.e. all replicas together,
-                        splitting kpoints and bands/basis equally.
+                        any -1 will be set to distribute available tasks for
+                        that dimension most equally. Default: -1 -1 -1 implies
+                        all dimensions set automatically.
   -n, --dry-run         quit after initialization (to check input file)
   -d, --no-append       overwrite output file instead of appending
   -m FILE, --mpi-log FILE
@@ -86,11 +86,11 @@ if __name__ == "__main__":
             help='number of cores per process (overridden by SLURM)')
         parser.add_argument(
             '-p', '--process-grid', type=int, nargs=3,
-            default=[1, -1, -1], metavar=('Pr', 'Pk', 'Pb'),
+            default=[-1, -1, -1], metavar=('Pr', 'Pk', 'Pb'),
             help='dimensions of process grid: replicas x kpoints x bands/basis'
             + ', whose product must match process count; any -1 will be set to'
-            + 'distribute the product most equally. Default: 1 -1 -1 i.e. all '
-            + 'replicas together, splitting kpoints and bands/basis equally.')
+            + ' distribute available tasks for that dimension most equally.'
+            + ' Default: -1 -1 -1 implies all dimensions set automatically.')
         parser.add_argument(
             '-n', '--dry-run', action='store_true',
             help='quit after initialization (to check input file)')

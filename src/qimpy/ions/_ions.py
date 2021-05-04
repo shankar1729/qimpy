@@ -113,6 +113,10 @@ class Ions:
                 raise ValueError(
                     'no pseudopotential found for {:s}'.format(symbol))
 
+        # Initialize / check replica process grid dimension:
+        n_replicas = 1  # this will eventually change for NEB / phonon DFPT
+        rc.provide_n_tasks(0, n_replicas, 'replicas')
+
     def report(self):
         'Report ionic positions and attributes'
         qp.log.info('{:d} total ions of {:d} types; positions:'.format(

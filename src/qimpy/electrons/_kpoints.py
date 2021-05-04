@@ -24,6 +24,10 @@ class Kpoints:
         self.k = k
         self.wk = wk
         assert(abs(wk.sum() - 1.) < 1e-14)
+        self.nk_tot = k.shape[0]
+
+        # Initialize / check k-point process grid dimension:
+        rc.provide_n_tasks(1, self.nk_tot, 'k-points')
 
 
 class Kmesh(Kpoints):
