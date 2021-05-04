@@ -50,6 +50,7 @@ class Ions:
             self.positions.append([float(x) for x in coord[1:4]])
             self.M_initial.append(attrib.get('M', None))
             self.n_ions += 1
+        self.ranges.append(slice(type_start, self.n_ions))  # for last type
 
         # Check order:
         if len(set(self.symbols)) < self.n_types:
@@ -112,6 +113,12 @@ class Ions:
             else:
                 raise ValueError(
                     'no pseudopotential found for {:s}'.format(symbol))
+
+        # Calculate total ionic charge (needed for number of electrons):
+        self.Z_tot = sum(self.pseudopotentials[i_type].Z
+                         * (slice_i.stop - slice_i.start)
+                         for i_type, slice_i in enumerate(self.ranges))
+        qp.log.info('\nTotal ion charge, Z_tot: {:g}'.format(self.Z_tot))
 
         # Initialize / check replica process grid dimension:
         n_replicas = 1  # this will eventually change for NEB / phonon DFPT
