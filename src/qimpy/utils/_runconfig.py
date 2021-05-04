@@ -49,6 +49,7 @@ class RunConfig:
         qp.log.info('Start time: ' + time.ctime(self.t_start))
 
         # MPI initialization:
+        self.MPI = MPI  # avoid having to import from mpi4py in each module
         self.comm = MPI.COMM_WORLD if (comm is None) else comm
         self.i_proc = self.comm.Get_rank()
         self.n_procs = self.comm.Get_size()
