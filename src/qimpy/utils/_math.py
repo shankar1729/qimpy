@@ -1,3 +1,6 @@
+import numpy as np
+
+
 def prime_factorization(N):
     '''Prime factorization of a number
 

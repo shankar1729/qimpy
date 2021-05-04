@@ -155,14 +155,12 @@ class RunConfig:
         self.n_procs_b = self.comm_b.Get_size()
         self.i_proc_b = self.comm_b.Get_rank()
 
-    def provide_n_tasks(self, dim, n_tasks, task_name):
+    def provide_n_tasks(self, dim, n_tasks):
         '''Inform RunConfig of the number of tasks to be split along a given
         dimension of the process grid. If that dimension is undetermined (-1),
         set it to a suitable value that is compatible with the total processes
         and any other known process grid dimensions, and with splitting n_tasks
-        tasks with reasonable load balancing over this dimension. If the
-        dimension is already known, check if n_tasks will be load balanced
-        and report an error if not.
+        tasks with reasonable load balancing over this dimension.
 
         Parameters
         ----------
@@ -171,10 +169,7 @@ class RunConfig:
         n_tasks : int
             Number of tasks available to split on this dimension of the
             process grid, used for setting or checking dimension of process
-            grid for reasonable load balancing.
-        task_name : str
-            Name (plural) used for referring to task type in warning message
-            if load balancing is determined to be poor.'''
+            grid for reasonable load balancing.'''
         def get_imbalance():
             'Compute cpu time% wasted in splitting n_tasks over n_procs_dim'
             n_tasks_each = qp.utils.ceildiv(n_tasks, n_procs_dim)
@@ -197,14 +192,6 @@ class RunConfig:
             # Set selected number of processes:
             self.process_grid[dim] = n_procs_dim
             self._setup_process_grid()
-        else:
-            # Dimension already determined: check load balancing
-            n_procs_dim = self.process_grid[dim]
-            imbalance = get_imbalance()
-            if imbalance > imbalance_threshold:
-                qp.log.info(('Note: dividing {:d} {:s} between {:d} processes'
-                             + ' incurs {:.0f}% load imbalance').format(
-                                 n_tasks, task_name, n_procs_dim, imbalance))
 
     def clock(self):
         "Time in seconds since start of this run."

@@ -3,7 +3,7 @@ import numpy as np
 import torch
 
 
-class Kpoints:
+class Kpoints(qp.utils.TaskDivision):
     'Set of k-points in Brillouin zone'
     def __init__(self, rc, k, wk):
         '''
@@ -26,8 +26,9 @@ class Kpoints:
         assert(abs(wk.sum() - 1.) < 1e-14)
         self.nk_tot = k.shape[0]
 
-        # Initialize / check k-point process grid dimension:
-        rc.provide_n_tasks(1, self.nk_tot, 'k-points')
+        # Initialize process grid dimension (if -1) and split k-points:
+        rc.provide_n_tasks(1, k.shape[0])
+        super().__init__(k.shape[0], rc.n_procs_k, rc.i_proc_k, 'k-point')
 
 
 class Kmesh(Kpoints):

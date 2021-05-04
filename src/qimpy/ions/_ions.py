@@ -115,7 +115,7 @@ class Ions:
 
         # Initialize / check replica process grid dimension:
         n_replicas = 1  # this will eventually change for NEB / phonon DFPT
-        rc.provide_n_tasks(0, n_replicas, 'replicas')
+        rc.provide_n_tasks(0, n_replicas)
 
     def report(self):
         'Report ionic positions and attributes'
