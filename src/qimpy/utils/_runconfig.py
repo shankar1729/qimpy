@@ -224,35 +224,6 @@ class RunConfig:
             precision=8, suppress_small=True, separator=', ')
 
 
-def distribute_product_evenly(product, dims):
-    'Distribute product over any -1 in dims (np.array) as evenly as possible'
-    # Split known and unknown pieces:
-    i_unknown = np.where(dims == -1)[0]
-    i_known = np.where(dims != -1)[0]
-    product_known = np.prod(dims[i_known])
-    product_unknown = product // product_known
-    assert(product % product_known == 0)
-    # Trivial if 0 or 1 unknown:
-    if len(i_unknown) == 0:
-        assert(product_unknown == 1)
-        return dims
-    if len(i_unknown) == 1:
-        dims[i_unknown] = product_unknown
-        return dims
-    # Distribute product_unknown evenly between unknown factors:
-    # --- simple split over prime factors in order to get close to even
-    # --- global optimum split is not required (and not an easy problem)
-    n_unknown = len(i_unknown)
-    factors = [1] + qp.util.prime_factorization(product_unknown)
-    cumulative_product = np.cumprod(factors)
-    cut_ideal = product_unknown ** (np.arange(n_unknown+1) / n_unknown)
-    i_cut = np.abs(np.log(cumulative_product[None, :]
-                          / cut_ideal[:, None])).argmin(axis=-1)
-    cut = cumulative_product[i_cut]
-    dims[i_unknown] = (cut[1:] // cut[:-1])[::-1]
-    return dims  # note smallest prime factors put at end
-
-
 def comm_split_grid(comm, n_procs_o, n_procs_i):
     '''Split a communicator comm into an n_procs_o x n_procs_i grid,
     returning comm_o (with strided process ranks in comm) and
