@@ -118,6 +118,20 @@ class RunConfig:
                                   self.n_procs, *tuple(process_grid)))
         qp.log.info(('Process grid: {:d} replicas x {:d} k-points x {:d} '
                      + 'bands/basis').format(*tuple(process_grid)))
+        # --- split top-level communicator between replicas (outermost):
+        self.comm_r, self.comm_kb = comm_split_grid(
+            self.comm, process_grid[0], process_grid[1:].prod())
+        self.n_procs_r = self.comm_r.Get_size()
+        self.i_proc_r = self.comm_r.Get_rank()
+        self.n_procs_kb = self.comm_kb.Get_size()
+        self.i_proc_kb = self.comm_kb.Get_rank()
+        # --- split intra-replica (kb) communicator to k and b:
+        self.comm_k, self.comm_b = comm_split_grid(
+            self.comm_kb, process_grid[1], process_grid[2])
+        self.n_procs_k = self.comm_k.Get_size()
+        self.i_proc_k = self.comm_k.Get_rank()
+        self.n_procs_b = self.comm_b.Get_size()
+        self.i_proc_b = self.comm_b.Get_rank()
 
     def clock(self):
         "Time in seconds since start of this run."
@@ -178,3 +192,29 @@ def prime_factorization(N):
     if N > 1:  # any left-over factor must be prime itself
         factors.append(N)
     return factors
+
+
+def comm_split_grid(comm, n_procs_o, n_procs_i):
+    '''Split a communicator comm into an n_procs_o x n_procs_i grid,
+    returning comm_o (with strided process ranks in comm) and
+    comm_i (with contiguous process ranks in comm).'''
+    # Check inputs:
+    n_procs = comm.Get_size()
+    i_proc = comm.Get_rank()
+    assert(n_procs_o * n_procs_i == n_procs)
+    # Determine size/ranks of o(uter) and i(nner) dimensions of process grid:
+    i_proc_o = i_proc // n_procs_i
+    i_proc_i = i_proc % n_procs_i
+    # Initialize sub-groups:
+    group = comm.Get_group()
+    group_o = group.Incl(range(i_proc_i, n_procs, n_procs_i))
+    group_i = group.Incl(range(i_proc_o*n_procs_i, (i_proc_o+1)*n_procs_i))
+    # Initialize sub-communicators from groups:
+    comm_o = comm.Create_group(group_o)
+    comm_i = comm.Create_group(group_i)
+    # Check communicator rank assignments and return:
+    assert(comm_o.Get_size() == n_procs_o)
+    assert(comm_i.Get_size() == n_procs_i)
+    assert(comm_o.Get_rank() == i_proc_o)
+    assert(comm_i.Get_rank() == i_proc_i)
+    return comm_o, comm_i
