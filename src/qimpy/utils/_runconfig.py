@@ -137,23 +137,26 @@ class RunConfig:
                      + 'bands/basis{:s}').format(
                          *tuple(self.process_grid),
                          ' (-1\'s determined later)' if n_unknown else ''))
-        if n_unknown:
-            return  # Some dimensions are still undetermined
-        # Initialize all grid communicators:
-        # --- split top-level communicator between replicas (outermost):
-        self.comm_r, self.comm_kb = comm_split_grid(
-            self.comm, self.process_grid[0], self.process_grid[1:].prod())
-        self.n_procs_r = self.comm_r.Get_size()
-        self.i_proc_r = self.comm_r.Get_rank()
-        self.n_procs_kb = self.comm_kb.Get_size()
-        self.i_proc_kb = self.comm_kb.Get_rank()
-        # --- split intra-replica (kb) communicator to k and b:
-        self.comm_k, self.comm_b = comm_split_grid(
-            self.comm_kb, self.process_grid[1], self.process_grid[2])
-        self.n_procs_k = self.comm_k.Get_size()
-        self.i_proc_k = self.comm_k.Get_rank()
-        self.n_procs_b = self.comm_b.Get_size()
-        self.i_proc_b = self.comm_b.Get_rank()
+        # Initialize grid communicators whose dimensions are known:
+        if self.process_grid[0] != -1 and (not hasattr(self, 'comm_r')):
+            # split top-level communicator between replicas:
+            # --- only needs outermost (replica) dimension to be known
+            prod_inner = self.n_procs // self.process_grid[0]
+            self.comm_r, self.comm_kb = comm_split_grid(
+                self.comm, self.process_grid[0], prod_inner)
+            self.n_procs_r = self.comm_r.Get_size()
+            self.i_proc_r = self.comm_r.Get_rank()
+            self.n_procs_kb = self.comm_kb.Get_size()
+            self.i_proc_kb = self.comm_kb.Get_rank()
+        if n_unknown == 0 and (not hasattr(self, 'comm_k')):
+            # split intra-replica (kb) communicator to k and b:
+            # --- needs all dimensions to be known
+            self.comm_k, self.comm_b = comm_split_grid(
+                self.comm_kb, self.process_grid[1], self.process_grid[2])
+            self.n_procs_k = self.comm_k.Get_size()
+            self.i_proc_k = self.comm_k.Get_rank()
+            self.n_procs_b = self.comm_b.Get_size()
+            self.i_proc_b = self.comm_b.Get_rank()
 
     def provide_n_tasks(self, dim, n_tasks):
         '''Inform RunConfig of the number of tasks to be split along a given
