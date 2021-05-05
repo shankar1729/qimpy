@@ -124,8 +124,8 @@ class RunConfig:
         # Check compatibility of known dimensions with total:
         prod_known = self.process_grid[self.process_grid != -1].prod()
         if self.n_procs % prod_known:
-            raise ValueError(('Cannot distribute {:d} processes to'
-                              + ' {:d} x {:d} x {:d} grid').format(
+            raise ValueError('Cannot distribute {:d} processes to'
+                             ' {:d} x {:d} x {:d} grid'.format(
                                 self.n_procs, *tuple(self.process_grid)))
         # Compute a single unknown dimension if present:
         n_unknown = np.count_nonzero(self.process_grid == -1)
@@ -134,10 +134,10 @@ class RunConfig:
                                                           // prod_known)
             n_unknown = 0
         # Report grid as it is now:
-        qp.log.info(('Process grid: {:d} replicas x {:d} k-points x {:d} '
-                     + 'bands/basis{:s}').format(
-                         *tuple(self.process_grid),
-                         ' (-1\'s determined later)' if n_unknown else ''))
+        qp.log.info('Process grid: {:d} replicas x {:d} k-points x {:d} bands'
+                    '/basis{:s}'.format(*tuple(self.process_grid),
+                                        ' (-1\'s determined later)'
+                                        if n_unknown else ''))
         # Initialize grid communicators whose dimensions are known:
         if self.process_grid[0] != -1 and (not hasattr(self, 'comm_r')):
             # split top-level communicator between replicas:

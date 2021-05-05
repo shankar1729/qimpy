@@ -23,7 +23,7 @@ def get_Rbasis(system, modification, a, b, c, alpha, beta, gamma):
         for key, value in kwargs.items():
             if value is not None:
                 raise KeyError(system + ' lattice system does not require'
-                               + ' parameter ' + key)
+                               ' parameter ' + key)
 
     def check_modification(allowed_systems):
         'Check compatibility of modification with lattice system'

@@ -69,7 +69,6 @@ class StopWatch:
         qp.log.info('')
         for name, times in cls._stats.items():
             t = np.array(times)
-            qp.log.info((
-                'StopWatch: {:30s}  {:10.6f} +/- {:10.6f} s, '
-                + '{:4d} calls, {:10.6f} s total').format(
-                    name, t.mean(), t.std(), len(t), t.sum()))
+            qp.log.info('StopWatch: {:30s}  {:10.6f} +/- {:10.6f} s, {:4d}'
+                        ' calls, {:10.6f} s total'.format(
+                            name, t.mean(), t.std(), len(t), t.sum()))

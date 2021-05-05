@@ -7,7 +7,7 @@ class Electrons:
     def __init__(self, *, rc, lattice, ions, symmetries,
                  k_mesh=None, k_path=None,
                  spin_polarized=False, spinorial=False,
-                 fillings=None):
+                 fillings=None, basis=None):
         '''
         Parameters
         ----------
@@ -41,6 +41,9 @@ class Electrons:
         fillings : qimpy.electrons.Fillings or None, optional
             Electron occupations and charge / chemical potential control.
             Default: use default qimpy.electrons.Fillings()
+        basis : qimpy.electrons.Basis or None, optional
+            Wavefunction basis set (plane waves).
+            Default: use default qimpy.electrons.Basis()
         '''
         self.rc = rc
         qp.log.info('\n--- Initializing Electrons ---')
@@ -76,3 +79,8 @@ class Electrons:
         self.fillings = qp.construct(
             qp.electrons.Fillings, fillings, 'fillings',
             rc=rc, ions=ions, electrons=self)
+
+        # Initialize wave-function basis:
+        self.basis = qp.construct(
+            qp.electrons.Basis, basis, 'basis',
+            rc=rc, lattice=lattice, kpoints=self.kpoints, spinorial=spinorial)

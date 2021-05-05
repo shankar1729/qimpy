@@ -50,7 +50,8 @@ class Ions:
             self.positions.append([float(x) for x in coord[1:4]])
             self.M_initial.append(attrib.get('M', None))
             self.n_ions += 1
-        self.ranges.append(slice(type_start, self.n_ions))  # for last type
+        if type_start != self.n_ions:
+            self.ranges.append(slice(type_start, self.n_ions))  # for last type
 
         # Check order:
         if len(set(self.symbols)) < self.n_types:

@@ -71,9 +71,8 @@ class Kmesh(Kpoints):
             sup_length = float(size)
             L_i = torch.linalg.norm(lattice.Rbasis, dim=0)  # lattice lengths
             size = torch.ceil(sup_length / L_i).to(int).tolist()
-            qp.log.info(
-                'Selecting {:d} x {:d} x {:d} k-mesh '.format(*tuple(size))
-                + 'for supercell size >= {:g} bohrs'.format(sup_length))
+            qp.log.info('Selecting {:d} x {:d} x {:d} k-mesh for supercell'
+                        ' size >= {:g} bohrs'.format(*tuple(size), sup_length))
 
         # Check types and sizes:
         offset = np.array(offset)
@@ -177,9 +176,8 @@ class Kpath(Kpoints):
         labels = [(point[3] if (len(point) > 3) else '') for point in points]
         points = torch.tensor([point[:3] for point in points],
                               dtype=float, device=rc.device)
-        qp.log.info('Creating k-path with dk = '
-                    + '{:g} connecting {:d} special points'.format(
-                        dk, points.shape[0]))
+        qp.log.info('Creating k-path with dk = {:g} connecting {:d} special '
+                    'points'.format(dk, points.shape[0]))
 
         # Create path one segment at a time:
         k = [points[:1]]

@@ -38,9 +38,8 @@ class TaskDivision:
         # Optionally report counts and imbalance:
         if name:
             imbalance = 100.*(1. - n_tot / (self.n_each * n_procs))
-            qp.log.info(('{:s} division:  n_tot: {:d}  n_each: {:d}'
-                         + '  imbalance: {:.0f}%').format(
-                             name, n_tot, self.n_each, imbalance))
+            qp.log.info('{:s} division:  n_tot: {:d}  n_each: {:d}  imbalance:'
+                        ' {:.0f}%'.format(name, n_tot, self.n_each, imbalance))
 
     def whose(self, i):
         'Return process index i_proc responsible for task i'
