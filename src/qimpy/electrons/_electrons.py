@@ -6,23 +6,24 @@ class Electrons:
 
     def __init__(self, *, rc, lattice, ions, symmetries,
                  k_mesh=None, k_path=None,
-                 spin_polarized=False, spinorial=False):
+                 spin_polarized=False, spinorial=False,
+                 fillings=None):
         '''
         Parameters
         ----------
-        rc : qp.utils.RunConfig
+        rc : qimpy.utils.RunConfig
             Current run configuration
-        lattice : qp.lattice.Lattice
+        lattice : qimpy.lattice.Lattice
             Lattice (unit cell) to associate with electronic wave functions
-        ions : qp.ions.Ions
+        ions : qimpy.ions.Ions
             Ionic system interacting with the electrons
-        symmetries : qp.symmetries.Symmetries
+        symmetries : qimpy.symmetries.Symmetries
             Symmetries for k-point reduction and density symmetrization
-        k_mesh : qp.electrons.Kmesh or dict, optional
+        k_mesh : qimpy.electrons.Kmesh or dict, optional
             Uniform k-point mesh for Brillouin-zone integration.
             Specify only one of k_mesh or k_path.
-            Default: use default qp.electrons.Kmesh()
-        k_path : qp.electrons.Kpath or dict, optional
+            Default: use default qimpy.electrons.Kmesh()
+        k_path : qimpy.electrons.Kpath or dict, optional
             Path of k-points through Brillouin zone, typically for band
             structure calculations. Specify only one of k_mesh or k_path.
             Default: None
@@ -37,6 +38,9 @@ class Electrons:
             True, if relativistic / spin-orbit calculations which require
             2-component spinorial wavefunctions, else False.
             Default: False
+        fillings : qimpy.electrons.Fillings or None, optional
+            Electron occupations and charge / chemical potential control.
+            Default: use default qimpy.electrons.Fillings()
         '''
         self.rc = rc
         qp.log.info('\n--- Initializing Electrons ---')
@@ -67,3 +71,8 @@ class Electrons:
         self.w_spin = 2 // (self.n_spins * self.n_spinor)  # spin weight
         qp.log.info('n_spins: {:d}  n_spinor: {:d}  w_spin: {:d}'.format(
             self.n_spins, self.n_spinor, self.w_spin))
+
+        # Initialize fillings:
+        self.fillings = qp.construct(
+            qp.electrons.Fillings, fillings, 'fillings',
+            rc=rc, ions=ions, electrons=self)
