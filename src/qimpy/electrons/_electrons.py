@@ -4,9 +4,40 @@ import qimpy as qp
 class Electrons:
     'TODO: document class Electrons'
 
-    def __init__(self, *, rc, lattice, symmetries,
-                 k_mesh=None, k_path=None):
-        '''TODO: document Electrons constructor'''
+    def __init__(self, *, rc, lattice, ions, symmetries,
+                 k_mesh=None, k_path=None,
+                 spin_polarized=False, spinorial=False):
+        '''
+        Parameters
+        ----------
+        rc : qp.utils.RunConfig
+            Current run configuration
+        lattice : qp.lattice.Lattice
+            Lattice (unit cell) to associate with electronic wave functions
+        ions : qp.ions.Ions
+            Ionic system interacting with the electrons
+        symmetries : qp.symmetries.Symmetries
+            Symmetries for k-point reduction and density symmetrization
+        k_mesh : qp.electrons.Kmesh or dict, optional
+            Uniform k-point mesh for Brillouin-zone integration.
+            Specify only one of k_mesh or k_path.
+            Default: use default qp.electrons.Kmesh()
+        k_path : qp.electrons.Kpath or dict, optional
+            Path of k-points through Brillouin zone, typically for band
+            structure calculations. Specify only one of k_mesh or k_path.
+            Default: None
+        spin_polarized : bool, optional
+            True, if electronic system has spin polarization / magnetization
+            (i.e. breaks time reversal symmetry), else False.
+            Spin polarization is treated explicitly with two sets of orbitals
+            for up and down spins if spinorial = False, and implicitly by the
+            spinorial wavefunctions if spinorial = True.
+            Default: False
+        spinorial : bool, optional
+            True, if relativistic / spin-orbit calculations which require
+            2-component spinorial wavefunctions, else False.
+            Default: False
+        '''
         self.rc = rc
         qp.log.info('\n--- Initializing Electrons ---')
 
@@ -26,3 +57,13 @@ class Electrons:
                     rc=rc, symmetries=symmetries, lattice=lattice)
             else:
                 raise ValueError('Cannot use both k-mesh and k-path')
+
+        # Initialize spin:
+        self.spin_polarized = spin_polarized
+        self.spinorial = spinorial
+        # --- set # spinor components, # spin channels and weight
+        self.n_spinor = (2 if spinorial else 1)
+        self.n_spins = (2 if (spin_polarized and not spinorial) else 1)
+        self.w_spin = 2 // (self.n_spins * self.n_spinor)  # spin weight
+        qp.log.info('n_spins: {:d}  n_spinor: {:d}  w_spin: {:d}'.format(
+            self.n_spins, self.n_spinor, self.w_spin))

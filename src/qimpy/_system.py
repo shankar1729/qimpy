@@ -37,7 +37,8 @@ class System:
         # Initialize electrons:
         self.electrons = qp.construct(
             qp.electrons.Electrons, electrons, 'electrons',
-            rc=rc, lattice=self.lattice, symmetries=self.symmetries)
+            rc=rc, lattice=self.lattice, ions=self.ions,
+            symmetries=self.symmetries)
 
 
 def construct(Class, params, object_name,
