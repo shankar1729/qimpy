@@ -41,9 +41,10 @@ class System:
             symmetries=self.symmetries)
 
         # Initialize main (charge-density) grid:
+        qp.log.info('\n--- Initializing Charge-Density Grid ---')
         self.grid = qp.construct(
             qp.grid.Grid, grid, 'grid',
-            ke_cutoff_orbitals=self.electrons.basis.ke_cutoff,
+            ke_cutoff_orbital=self.electrons.basis.ke_cutoff,
             rc=rc, lattice=self.lattice, symmetries=self.symmetries)
 
 

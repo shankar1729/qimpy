@@ -29,3 +29,19 @@ def _check_grid_shape(self, shape):
             'Grid dimensions {:s} commensurate only with a sub-group of '
             'symmetries with indices (0-based): {:s}'.format(
                 str(shape), str(i_sym.tolist())))
+
+
+def _get_grid_shape(self, shape_min):
+    '''Determine smallest FFT-suitable grid dimensions >= shape_min
+    that are compatible with symmetries
+
+    Parameters
+    ----------
+    shape_min : tuple of 3 ints
+        Minimum grid dimensions
+
+    Returns
+    -------
+    tuple of 3 ints
+    '''
+    pass

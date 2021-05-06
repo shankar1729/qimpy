@@ -51,7 +51,8 @@ class Basis:
 
         # Initialize grid to match cutoff:
         self.ke_cutoff = float(ke_cutoff)
+        qp.log.info('Initializing orbital grid:')
         self.grid = qp.grid.Grid(
             rc=rc, lattice=lattice, symmetries=symmetries,
-            ke_cutoff_orbitals=self.ke_cutoff,
+            ke_cutoff_orbital=self.ke_cutoff,
             **(qp.dict_input_cleanup(grid) if grid else {}))
