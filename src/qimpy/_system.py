@@ -6,7 +6,7 @@ class System:
     '''TODO: document class System'''
 
     def __init__(self, *, rc, lattice, ions=None, symmetries=None,
-                 electrons=None):
+                 electrons=None, grid=None):
         '''
         Parameters
         ----------
@@ -40,6 +40,12 @@ class System:
             rc=rc, lattice=self.lattice, ions=self.ions,
             symmetries=self.symmetries)
 
+        # Initialize main (charge-density) grid:
+        self.grid = qp.construct(
+            qp.grid.Grid, grid, 'grid',
+            ke_cutoff_orbitals=self.electrons.basis.ke_cutoff,
+            rc=rc, lattice=lattice, symmetries=symmetries)
+
 
 def construct(Class, params, object_name,
               **kwargs):
@@ -51,9 +57,7 @@ def construct(Class, params, object_name,
 
     # Try all the valid possibilities:
     if isinstance(params, dict):
-        return Class(
-            **kwargs,
-            **dict((k.replace('-', '_'), v) for k, v in params.items()))
+        return Class(**kwargs, **dict_input_cleanup(params))
     if params is None:
         return Class(**kwargs)
     if isinstance(params, Class):
@@ -67,3 +71,11 @@ def construct(Class, params, object_name,
     module_elems.append(Class.__qualname__)
     class_name = '.'.join(module_elems)
     raise TypeError(object_name + ' must be dict or ' + class_name)
+
+
+def dict_input_cleanup(params):
+    '''Clean-up a dict eg. from YAML to make sure the keys are compatible
+    with passing as keyword-only arguments to constructors. Most importantly,
+    replace hyphens (which look nicer) in all keys to underscores internally,
+    so that they become valid identifiers within the code'''
+    return dict((k.replace('-', '_'), v) for k, v in params.items())

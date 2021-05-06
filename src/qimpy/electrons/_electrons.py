@@ -83,4 +83,5 @@ class Electrons:
         # Initialize wave-function basis:
         self.basis = qp.construct(
             qp.electrons.Basis, basis, 'basis',
-            rc=rc, lattice=lattice, kpoints=self.kpoints, spinorial=spinorial)
+            rc=rc, lattice=lattice, symmetries=symmetries,
+            kpoints=self.kpoints, spinorial=spinorial)

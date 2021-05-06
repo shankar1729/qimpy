@@ -1,16 +1,17 @@
 # List exported symbols for doc generation
 __all__ = [
-    'MPI', 'System',
-    'utils', 'ions', 'lattice',
+    'MPI', 'System', 'construct', 'dict_input_cleanup',
+    'utils', 'ions', 'lattice', 'symmetries', 'grid', 'electrons',
     'log']
 
 # Module import definition
 from mpi4py import MPI
-from ._system import System, construct
+from ._system import System, construct, dict_input_cleanup
 from . import utils
 from . import ions
 from . import lattice
 from . import symmetries
+from . import grid
 from . import electrons
 import logging
 

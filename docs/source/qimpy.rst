@@ -10,6 +10,7 @@ Subpackages
    qimpy.utils
    qimpy.ions
    qimpy.lattice
+   qimpy.grid
    qimpy.symmetries
    qimpy.electrons
 
