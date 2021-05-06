@@ -77,3 +77,5 @@ class Grid:
             if shape_min is None:
                 raise KeyError('At least one of ke-cutoff, ke-cutoff-orbital '
                                'or shape must be specified')
+            self.shape = tuple(symmetries.get_grid_shape(shape_min))
+        qp.log.info('selected shape: [{:d}, {:d}, {:d}]'.format(*self.shape))
