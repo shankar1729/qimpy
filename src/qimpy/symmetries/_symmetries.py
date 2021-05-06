@@ -2,6 +2,7 @@ import qimpy as qp
 import torch
 from ._lattice import _get_lattice_point_group, _symmetrize_lattice
 from ._ions import _get_space_group, _symmetrize_positions
+from ._grid import _check_grid_shape
 
 
 class Symmetries:
@@ -9,6 +10,7 @@ class Symmetries:
 
     symmetrize_lattice = _symmetrize_lattice
     symmetrize_positions = _symmetrize_positions
+    check_grid_shape = _check_grid_shape
 
     def __init__(self, *, rc, lattice, ions, tolerance=1e-6):
         '''

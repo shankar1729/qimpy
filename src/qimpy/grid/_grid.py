@@ -34,3 +34,7 @@ class Grid:
         qp.log.info('TODO: initialize grid with ke_cutoff_orbitals: {:s}  '
                     'ke_cutoff: {:s}  shape:  {:s}'.format(
                         str(ke_cutoff_orbitals), str(ke_cutoff), str(shape)))
+
+        if shape:
+            self.shape = tuple(shape)
+            symmetries.check_grid_shape(self.shape)

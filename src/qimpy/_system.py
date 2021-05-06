@@ -44,7 +44,7 @@ class System:
         self.grid = qp.construct(
             qp.grid.Grid, grid, 'grid',
             ke_cutoff_orbitals=self.electrons.basis.ke_cutoff,
-            rc=rc, lattice=lattice, symmetries=symmetries)
+            rc=rc, lattice=self.lattice, symmetries=self.symmetries)
 
 
 def construct(Class, params, object_name,
