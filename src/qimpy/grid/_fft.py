@@ -5,7 +5,7 @@ from qimpy.utils import TaskDivision, BufferView
 
 
 def _init_grid_fft(self):
-    '_initialize local or parallel FFTs for class Grid'
+    'Initialize local or parallel FFTs for class Grid'
     # Half-reciprocal space global dimensions (for rfft/irfft):
     self.shapeH = (self.shape[0], self.shape[1], 1+self.shape[2]//2)
     # MPI division:
@@ -14,11 +14,11 @@ def _init_grid_fft(self):
     self.split2H = TaskDivision(self.shapeH[2], self.n_procs, self.i_proc)
     # Overall local grid dimensions:
     self.shapeR_mine = (self.split0.n_mine, self.shape[1], self.shape[2])
-    self.shapeG_mine = (self.split2.n_mine, self.shape[1], self.shape[0])
-    self.shapeH_mine = (self.split2H.n_mine, self.shape[1], self.shape[0])
+    self.shapeG_mine = (self.shape[0], self.shape[1], self.split2.n_mine)
+    self.shapeH_mine = (self.shape[0], self.shape[1], self.split2H.n_mine)
 
-    def unscramble_index(in_prev, n_out_mine):
-        """Index arrays for unscrambling data after MPI rearrangement
+    def unscramble(in_prev, n_out_mine):
+        """Get index arrays for unscrambling data after MPI rearrangement.
 
         A common operation below is taking an array split along axis
         'in' and doing an MPI all-to-all to split it along axis 'out'.
@@ -73,32 +73,22 @@ def _init_grid_fft(self):
         return index_1, index_i_batch, index_n_batch
 
     # Pre-calculate these arrays for each of the transforms:
-    self.unscramble_fft = unscramble_index(self.split0.n_prev,
-                                           self.split2.n_mine)
-    self.unscramble_ifft = unscramble_index(self.split2.n_prev,
-                                            self.split0.n_mine)
-    self.unscramble_rfft = unscramble_index(self.split0.n_prev,
-                                            self.split2H.n_mine)
-    self.unscramble_irfft = unscramble_index(self.split2H.n_prev,
-                                             self.split0.n_mine)
-
-
-def __get_index(unscramble, n_batch):
-    "Compute the net unscrambling index for a given batch size"
-    index_1, index_i_batch, index_n_batch = unscramble
-    if n_batch == 1:
-        return index_1 + index_n_batch
-    else:
-        i_batch = torch.arange(n_batch, device=index_1.device).view(n_batch,
-                                                                    1, 1, 1)
-        return index_1 + index_i_batch * i_batch + index_n_batch * n_batch
+    self.unscramble_fft = unscramble(self.split0.n_prev, self.split2.n_mine)
+    self.unscramble_ifft = unscramble(self.split2.n_prev, self.split0.n_mine)
+    self.unscramble_rfft = unscramble(self.split0.n_prev, self.split2H.n_mine)
+    self.unscramble_irfft = unscramble(self.split2H.n_prev, self.split0.n_mine)
 
 
 def parallel_transform(rc, comm, v, norm, shape_in, shape_out,
                        fft_before, fft_after, in_prev, out_prev,
                        index_1, index_i_batch, index_n_batch):
     """Helper function that performs the work of all the parallel
-    FFT functions in class qimpy.grid.Grid
+    FFT functions in class qimpy.grid.Grid. This function should
+    be called only for n_procs > 1 i.e. when actually parallelized.
+    Also note that this function exchanges order of first and last
+    trasnformed dimensions; the driver routine needs to locally
+    transpose these dimensions of the input arrays for forward
+    transforms, and for the output arrays for inverse transforms.
 
     Parameters
     ----------
@@ -179,12 +169,13 @@ def _fft(self, v, norm='forward'):
         preceded by any batch dimensions in the input.
     """
     if self.n_procs == 1:
-        return torch.fft.fftn(v, s=self.shape, norm=norm).swapaxes(-1, -3)
+        return torch.fft.fftn(v, s=self.shape, norm=norm)
     assert(v.dtype.is_complex)
     return parallel_transform(
-        self.rc, self.comm, v, norm, self.shapeR_mine, self.shapeG_mine,
+        self.rc, self.comm, v, norm,
+        self.shapeR_mine, self.shapeG_mine[::-1],
         safe_fft2, safe_fft, self.split2.n_prev, self.split0.n_prev,
-        *self.unscramble_fft)
+        *self.unscramble_fft).swapaxes(-1, -3)
 
 
 def _ifft(self, v, norm='forward'):
@@ -206,10 +197,11 @@ def _ifft(self, v, norm='forward'):
         preceded by any batch dimensions in the input.
     """
     if self.n_procs == 1:
-        return torch.fft.ifftn(v.swapaxes(-1, -3), s=self.shape, norm=norm)
+        return torch.fft.ifftn(v, s=self.shape, norm=norm)
     assert(v.dtype.is_complex)
     return parallel_transform(
-        self.rc, self.comm, v, norm, self.shapeG_mine, self.shapeR_mine,
+        self.rc, self.comm, v.swapaxes(-1, -3), norm,
+        self.shapeG_mine[::-1], self.shapeR_mine,
         safe_ifft, safe_ifft2, self.split0.n_prev, self.split2.n_prev,
         *self.unscramble_ifft)
 
@@ -233,12 +225,13 @@ def _rfft(self, v, norm='forward'):
         preceded by any batch dimensions in the input.
     """
     if self.n_procs == 1:
-        return torch.fft.rfftn(v, s=self.shape, norm=norm).swapaxes(-1, -3)
+        return torch.fft.rfftn(v, s=self.shape, norm=norm)
     assert(v.dtype.is_floating_point)
     return parallel_transform(
-        self.rc, self.comm, v, norm, self.shapeR_mine, self.shapeH_mine,
+        self.rc, self.comm, v, norm,
+        self.shapeR_mine, self.shapeH_mine[::-1],
         safe_rfft, safe_fft2, self.split2H.n_prev, self.split0.n_prev,
-        *self.unscramble_rfft)
+        *self.unscramble_rfft).swapaxes(-1, -3)
 
 
 def _irfft(self, v, norm='forward'):
@@ -260,11 +253,12 @@ def _irfft(self, v, norm='forward'):
         preceded by any batch dimensions in the input.
     """
     if self.n_procs == 1:
-        return torch.fft.irfftn(v.swapaxes(-1, -3), s=self.shape, norm=norm)
+        return torch.fft.irfftn(v, s=self.shape, norm=norm)
     assert(v.dtype.is_complex)
     shapeR_mine_complex = (self.split0.n_mine, self.shape[1], self.shapeH[2])
     return parallel_transform(
-        self.rc, self.comm, v, norm, self.shapeH_mine, shapeR_mine_complex,
+        self.rc, self.comm, v.swapaxes(-1, -3), norm,
+        self.shapeH_mine[::-1], shapeR_mine_complex,
         safe_ifft2, safe_irfft, self.split0.n_prev, self.split2H.n_prev,
         *self.unscramble_irfft)
 
@@ -347,30 +341,28 @@ if __name__ == "__main__":
             # --- transform locally:
             if i_repeat:
                 watch = qp.utils.StopWatch(name + '(torch)', rc)
-            v_tilde = torchfunc(v_ref, dim=(-3, -2, -1), norm='forward')
+            v_tld = torchfunc(v_ref, dim=(-3, -2, -1), norm='forward')
             if i_repeat:
                 watch.stop()
             # --- extract MPI split piece of input and output:
             if inverse:
-                v = v_ref[..., in_start:in_stop].swapaxes(-1, -3).contiguous()
-                v_tilde_ref = v_tilde[
-                    ..., out_start:out_stop, :, :].contiguous()
+                v = v_ref[..., in_start:in_stop].contiguous()
+                v_tld_ref = v_tld[..., out_start:out_stop, :, :].contiguous()
             else:
                 v = v_ref[..., in_start:in_stop, :, :].contiguous()
-                v_tilde_ref = v_tilde[
-                    ..., out_start:out_stop].swapaxes(-1, -3).contiguous()
+                v_tld_ref = v_tld[..., out_start:out_stop].contiguous()
             # --- transform with MPI version:
             rc.comm.Barrier()  # for accurate timing
             if i_repeat:
                 watch = qp.utils.StopWatch(name+'(qimpy)', rc)
-            v_tilde = gridfunc(v)
+            v_tld = gridfunc(v)
             if i_repeat:
                 watch.stop()
             # --- check accuracy:
             if not i_repeat:
                 errors = np.array([
-                    (torch.abs(v_tilde - v_tilde_ref)**2).sum().item(),
-                    (torch.abs(v_tilde_ref)**2).sum().item()])
+                    (torch.abs(v_tld - v_tld_ref)**2).sum().item(),
+                    (torch.abs(v_tld_ref)**2).sum().item()])
                 rc.comm.Allreduce(qp.MPI.IN_PLACE, errors)
                 rmse = np.sqrt(errors[0]/errors[1])
                 qp.log.info(name + ' RMSE: {:.2e}'.format(rmse))
