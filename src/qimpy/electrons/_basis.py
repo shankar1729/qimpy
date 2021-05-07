@@ -54,5 +54,6 @@ class Basis:
         qp.log.info('Initializing orbital grid:')
         self.grid = qp.grid.Grid(
             rc=rc, lattice=lattice, symmetries=symmetries,
+            comm=None,  # always process-local
             ke_cutoff_orbital=self.ke_cutoff,
             **(qp.dict_input_cleanup(grid) if grid else {}))

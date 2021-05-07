@@ -4,7 +4,6 @@ import datetime
 import torch
 import qimpy as qp
 import numpy as np
-from mpi4py import MPI
 from psutil import cpu_count
 
 
@@ -49,22 +48,21 @@ class RunConfig:
         qp.log.info('Start time: ' + time.ctime(self.t_start))
 
         # MPI initialization:
-        self.MPI = MPI  # avoid having to import from mpi4py in each module
-        self.comm = MPI.COMM_WORLD if (comm is None) else comm
+        self.comm = qp.MPI.COMM_WORLD if (comm is None) else comm
         self.i_proc = self.comm.Get_rank()
         self.n_procs = self.comm.Get_size()
         self.is_head = (self.i_proc == 0)
         self.mpi_type = {  # Map from relevant torch to MPI datatypes
-            torch.int32: MPI.INT,
-            torch.int64: MPI.LONG,
-            torch.float32: MPI.FLOAT,
-            torch.float64: MPI.DOUBLE,
-            torch.complex64: MPI.COMPLEX,
-            torch.complex128: MPI.DOUBLE_COMPLEX
+            torch.int32: qp.MPI.INT,
+            torch.int64: qp.MPI.LONG,
+            torch.float32: qp.MPI.FLOAT,
+            torch.float64: qp.MPI.DOUBLE,
+            torch.complex64: qp.MPI.COMPLEX,
+            torch.complex128: qp.MPI.DOUBLE_COMPLEX
         }
 
         # Select GPU before initializing torch:
-        self.comm_node = self.comm.Split_type(MPI.COMM_TYPE_SHARED)
+        self.comm_node = self.comm.Split_type(qp.MPI.COMM_TYPE_SHARED)
         i_proc_node = self.comm_node.Get_rank()
         n_procs_node = self.comm_node.Get_size()
         cuda_devs = os.environ.get('CUDA_VISIBLE_DEVICES')
@@ -108,7 +106,7 @@ class RunConfig:
 
         # Report total resources:
         run_totals = np.array([self.n_threads,  n_gpus])
-        self.comm.Allreduce(MPI.IN_PLACE, run_totals, op=MPI.SUM)
+        self.comm.Allreduce(qp.MPI.IN_PLACE, run_totals, op=qp.MPI.SUM)
         qp.log.info(
             'Run totals: {:g} processes, {:d} threads, {:d} GPUs'.format(
                 self.n_procs, int(run_totals[0]), int(run_totals[1])))

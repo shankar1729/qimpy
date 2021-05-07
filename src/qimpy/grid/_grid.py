@@ -1,12 +1,19 @@
 import qimpy as qp
 import numpy as np
 import torch
+from ._fft import _init_grid_fft, _fft, _ifft, _rfft, _irfft
 
 
 class Grid:
     'TODO: document class Grid'
 
-    def __init__(self, *, rc, lattice, symmetries, ke_cutoff_orbital=None,
+    fft = _fft
+    ifft = _ifft
+    rfft = _rfft
+    irfft = _irfft
+
+    def __init__(self, *,
+                 rc, lattice, symmetries, comm, ke_cutoff_orbital=None,
                  ke_cutoff=None, shape=None):
         '''
         Parameters
@@ -18,6 +25,8 @@ class Grid:
         symmetries : qimpy.symmetries.Symmetries
             Symmetries with which grid dimensions will be made commensurate,
             or checked if specified explicitly by shape below.
+        comm : mpi4py.MPI.COMM or None
+            Communicator to split grid (and its FFTs) over, if provided.
         ke_cutoff_orbital : float, optional
             Plane-wave kinetic-energy cutoff in :math:`E_h` for any electronic
             orbitals to be used with this grid. This is an internally set
@@ -33,6 +42,12 @@ class Grid:
             either ke_cutoff and ke_cutoff_orbital, if specified
         '''
         self.rc = rc
+
+        # MPI settings (identify local or split):
+        self.comm = comm
+        self.n_procs, self.i_proc = ((1, 0) if (comm is None)
+                                     else (comm.Get_size(), comm.Get_rank()))
+        self.is_split = (self.n_procs == 1)
 
         # Select the relevant ke-cutoff:
         self.ke_cutoff = ke_cutoff
@@ -79,3 +94,16 @@ class Grid:
                                'or shape must be specified')
             self.shape = tuple(symmetries.get_grid_shape(shape_min))
         qp.log.info('selected shape: [{:d}, {:d}, {:d}]'.format(*self.shape))
+        _init_grid_fft(self)
+
+    def get_iG(self):
+        '''Get list of reciprocal lattice vectors in reciprocal
+        lattice coordinates
+
+        Returns
+        -------
+        Tensor
+            Integer tensor with dimensions shape + (3,)
+        '''
+        # TODO
+        pass

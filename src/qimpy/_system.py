@@ -44,8 +44,9 @@ class System:
         qp.log.info('\n--- Initializing Charge-Density Grid ---')
         self.grid = qp.construct(
             qp.grid.Grid, grid, 'grid',
-            ke_cutoff_orbital=self.electrons.basis.ke_cutoff,
-            rc=rc, lattice=self.lattice, symmetries=self.symmetries)
+            rc=rc, lattice=self.lattice, symmetries=self.symmetries,
+            comm=rc.comm_kb,  # parallelized on intra-replica comm
+            ke_cutoff_orbital=self.electrons.basis.ke_cutoff)
 
 
 def construct(Class, params, object_name,
