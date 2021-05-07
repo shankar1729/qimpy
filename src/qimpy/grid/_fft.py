@@ -6,8 +6,11 @@ from qimpy.utils import TaskDivision, BufferView
 
 def _init_grid_fft(self):
     'Initialize local or parallel FFTs for class Grid'
+    def report_shape(name, shape):
+        qp.log.info('{:s}: [{:d}, {:d}, {:d}]'.format(name, *shape))
     # Half-reciprocal space global dimensions (for rfft/irfft):
     self.shapeH = (self.shape[0], self.shape[1], 1+self.shape[2]//2)
+    qp.log.info('real-fft shape: [{:d}, {:d}, {:d}]'.format(*self.shapeH))
     # MPI division:
     self.split0 = TaskDivision(self.shape[0], self.n_procs, self.i_proc)
     self.split2 = TaskDivision(self.shape[2], self.n_procs, self.i_proc)
@@ -16,6 +19,11 @@ def _init_grid_fft(self):
     self.shapeR_mine = (self.split0.n_mine, self.shape[1], self.shape[2])
     self.shapeG_mine = (self.shape[0], self.shape[1], self.split2.n_mine)
     self.shapeH_mine = (self.shape[0], self.shape[1], self.split2H.n_mine)
+    if self.n_procs > 1:
+        qp.log.info('split over {:d} processes:'.format(self.n_procs))
+        report_shape('  local selected shape', self.shapeR_mine)
+        report_shape('  local full-fft shape', self.shapeG_mine)
+        report_shape('  local real-fft shape', self.shapeH_mine)
 
     def unscramble(in_prev, n_out_mine):
         """Get index arrays for unscrambling data after MPI rearrangement.
@@ -319,19 +327,24 @@ if __name__ == "__main__":
     shape = tuple(int(arg) for arg in sys.argv[-3:])
     n_batch = tuple(int(arg) for arg in sys.argv[1:-3])
 
-    # Create grid with all prerequisites:
+    # Prerequisites for creating grid:
     lattice = qp.lattice.Lattice(
         rc=rc, system='triclinic', a=2.1, b=2.2, c=2.3,
         alpha=75, beta=80, gamma=85)  # pick one with no symmetries
     ions = qp.ions.Ions(rc=rc, pseudopotentials=[], coordinates=[])
     symmetries = qp.symmetries.Symmetries(rc=rc, lattice=lattice, ions=ions)
-    grid = qp.grid.Grid(rc=rc, lattice=lattice, symmetries=symmetries,
-                        shape=shape, comm=rc.comm)
 
-    def test(name, dtype_in, torchfunc, gridfunc,
+    # Create grids with and without parallelization:
+    grid_par = qp.grid.Grid(rc=rc, lattice=lattice, symmetries=symmetries,
+                            shape=shape, comm=rc.comm)  # parallel version
+    grid_seq = qp.grid.Grid(rc=rc, lattice=lattice, symmetries=symmetries,
+                            shape=shape, comm=None)  # sequential version
+
+    def test(name, dtype_in, seq_func, par_func,
              in_start, in_stop, out_start, out_stop,
              shape_in, inverse):
-        'Helper function to test each Grid.fft against direct torch version'
+        '''Helper function to test parallel and sequential versions
+        of each Grid.fft routine against each other'''
         # Create test data:
         v_ref = torch.randn(n_batch + shape_in, dtype=dtype_in,
                             device=rc.device)
@@ -340,8 +353,8 @@ if __name__ == "__main__":
         for i_repeat in range(n_repeats):
             # --- transform locally:
             if i_repeat:
-                watch = qp.utils.StopWatch(name + '(torch)', rc)
-            v_tld = torchfunc(v_ref, dim=(-3, -2, -1), norm='forward')
+                watch = qp.utils.StopWatch(name + '(seq)', rc)
+            v_tld = seq_func(v_ref)
             if i_repeat:
                 watch.stop()
             # --- extract MPI split piece of input and output:
@@ -354,8 +367,8 @@ if __name__ == "__main__":
             # --- transform with MPI version:
             rc.comm.Barrier()  # for accurate timing
             if i_repeat:
-                watch = qp.utils.StopWatch(name+'(qimpy)', rc)
-            v_tld = gridfunc(v)
+                watch = qp.utils.StopWatch(name+'(par)', rc)
+            v_tld = par_func(v)
             if i_repeat:
                 watch.stop()
             # --- check accuracy:
@@ -368,20 +381,20 @@ if __name__ == "__main__":
                 qp.log.info(name + ' RMSE: {:.2e}'.format(rmse))
 
     # Run tests for all four transform types:
-    test('fft', torch.complex128, torch.fft.fftn, grid.fft,
-         grid.split0.i_start, grid.split0.i_stop,
-         grid.split2.i_start, grid.split2.i_stop,
-         grid.shape, False)
-    test('ifft', torch.complex128, torch.fft.ifftn, grid.ifft,
-         grid.split2.i_start, grid.split2.i_stop,
-         grid.split0.i_start, grid.split0.i_stop,
-         grid.shape, True)
-    test('rfft', torch.double, torch.fft.rfftn, grid.rfft,
-         grid.split0.i_start, grid.split0.i_stop,
-         grid.split2H.i_start, grid.split2H.i_stop,
-         grid.shape, False)
-    test('irfft', torch.complex128, torch.fft.irfftn, grid.irfft,
-         grid.split2H.i_start, grid.split2H.i_stop,
-         grid.split0.i_start, grid.split0.i_stop,
-         grid.shapeH, True)
+    test('fft', torch.complex128, grid_seq.fft, grid_par.fft,
+         grid_par.split0.i_start, grid_par.split0.i_stop,
+         grid_par.split2.i_start, grid_par.split2.i_stop,
+         grid_par.shape, False)
+    test('ifft', torch.complex128, grid_seq.ifft, grid_par.ifft,
+         grid_par.split2.i_start, grid_par.split2.i_stop,
+         grid_par.split0.i_start, grid_par.split0.i_stop,
+         grid_par.shape, True)
+    test('rfft', torch.double, grid_seq.rfft, grid_par.rfft,
+         grid_par.split0.i_start, grid_par.split0.i_stop,
+         grid_par.split2H.i_start, grid_par.split2H.i_stop,
+         grid_par.shape, False)
+    test('irfft', torch.complex128, grid_seq.irfft, grid_par.irfft,
+         grid_par.split2H.i_start, grid_par.split2H.i_stop,
+         grid_par.split0.i_start, grid_par.split0.i_stop,
+         grid_par.shapeH, True)
     qp.utils.StopWatch.print_stats()
