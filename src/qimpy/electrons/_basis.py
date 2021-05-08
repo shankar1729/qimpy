@@ -1,7 +1,9 @@
 import qimpy as qp
+import numpy as np
+import torch
 
 
-class Basis:
+class Basis(qp.utils.TaskDivision):
     'TODO: document class Basis'
 
     def __init__(self, *, rc, lattice, symmetries, kpoints, spinorial,
@@ -33,6 +35,8 @@ class Basis:
             of the grid (qimpy.grid.Grid) used for wavefunction operations.
         '''
         self.rc = rc
+        self.lattice = lattice
+        self.kpoints = kpoints
 
         # Select subset of k-points relevant on this process:
         k_mine = slice(kpoints.i_start, kpoints.i_stop)
@@ -57,3 +61,42 @@ class Basis:
             comm=None,  # always process-local
             ke_cutoff_orbital=self.ke_cutoff,
             **(qp.dict_input_cleanup(grid) if grid else {}))
+
+        # Initialize basis:
+        self.iG = self.grid.get_mesh('H' if self.real_orbitals
+                                     else 'G').reshape((3, -1)).T
+        within_cutoff = (self.get_ke() < ke_cutoff)  # mask of which iG to keep
+        # --- determine max and avg n_basis across all k:
+        n_basis = within_cutoff.count_nonzero(dim=1)
+        n_basis_max = rc.comm_k.allreduce(n_basis.max().item(), qp.MPI.MAX)
+        n_basis_avg = rc.comm_k.allreduce((n_basis.to(float) @ self.wk).item(),
+                                          qp.MPI.SUM)
+        n_basis_ideal = ((2.*ke_cutoff)**1.5) * lattice.volume / (6 * np.pi**2)
+        qp.log.info('n_basis:  max: {:d}  avg: {:.3f}  ideal: {:.3f}'.format(
+            n_basis_max, n_basis_avg, n_basis_ideal))
+        # --- create indices from basis set to FFT grid:
+        n_fft = self.iG.shape[0]  # number of points on FFT grid
+        fft_range = torch.arange(n_fft, device=self.rc.device)
+        fft_index = (torch.where(within_cutoff, 0, n_fft)
+                     + fft_range[None, :]).argsort(  # ke < cutoff to front
+                         dim=1)[:, :n_basis_max]  # keep same count for all k
+        pad_index = torch.where(fft_range[None, :n_basis_max]
+                                > n_basis[:, None])  # extra entries (kept 0)
+        # --- store required quantities:
+        self.n_basis_max = n_basis_max  # max across all k
+        self.n_basis = n_basis  # for each k (total over comm_b split, if any)
+        self.fft_index = fft_index  # index to FFT grid
+        self.pad_index = pad_index  # index pointing out padded entries above
+        self.iG = self.iG[fft_index]  # basis plane waves for each k
+        # --- divide basis on comm_b:
+        super().__init__(n_basis_max, rc.n_procs_b, rc.i_proc_b, 'basis')
+
+    def get_ke(self):
+        '''Kinetic energy of each plane wave in basis in :math:`E_h`
+
+        Returns
+        -------
+        torch.Tensor (nk_mine x n_basis_max, float)
+        '''
+        return 0.5 * (((self.iG + self.k[:, None, :])
+                       @ self.lattice.Gbasis.T) ** 2).sum(dim=-1)
