@@ -24,6 +24,16 @@ def _init_grid_fft(self):
         report_shape('  local selected shape', self.shapeR_mine)
         report_shape('  local full-fft shape', self.shapeG_mine)
         report_shape('  local real-fft shape', self.shapeH_mine)
+    # Create 1D grids for real and reciprocal spaces:
+    # --- global versions first
+    iv1D = tuple(torch.arange(s, device=self.rc.device) for s in self.shape)
+    iG1D = tuple(torch.where(iv <= self.shape[dim]//2, iv, iv-self.shape[dim])
+                 for dim, iv in enumerate(iv1D))
+    # --- slice local parts of Real, G-space and Half g-space for self.mesh():
+    self.mesh1D = {
+        'R': (iv1D[0][self.split0.i_start:self.split0.i_stop],) + iv1D[1:],
+        'G': iG1D[:2] + (iG1D[2][self.split2.i_start:self.split2.i_stop],),
+        'H': iG1D[:2] + (iG1D[2][self.split2H.i_start:self.split2H.i_stop],)}
 
     def unscramble(in_prev, n_out_mine):
         """Get index arrays for unscrambling data after MPI rearrangement.
@@ -313,6 +323,7 @@ def safe_irfft(v, norm):
         return torch.fft.irfft(v, norm=norm)
 
 
+# Test / benchmark parallelization of FFTs:
 if __name__ == "__main__":
     qp.utils.log_config()
     qp.log.info('*'*15 + ' QimPy ' + qp.__version__ + ' ' + '*'*15)

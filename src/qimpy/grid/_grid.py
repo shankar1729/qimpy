@@ -96,14 +96,20 @@ class Grid:
         qp.log.info('selected shape: [{:d}, {:d}, {:d}]'.format(*self.shape))
         _init_grid_fft(self)
 
-    def get_iG(self):
-        '''Get list of reciprocal lattice vectors in reciprocal
-        lattice coordinates
+    def get_mesh(self, space):
+        '''Get mesh integer coordinates for real or reciprocal space
+
+        Parameters
+        ----------
+        space : {'R', 'G', 'H'}
+            Which space to compute mesh coordinates for: 'R' = real space,
+            'G' = full reciprocal space and 'H' = half or Hermitian-symmetric
+            recipocal space resulting from FFT of real functions on grid.
 
         Returns
         -------
         Tensor
-            Integer tensor with dimensions shape + (3,)
+            Integer tensor with dimensions (3,) + shape_mine, where
+            shape_mine is the relevant local dimensions of requested space
         '''
-        # TODO
-        pass
+        return torch.stack(torch.meshgrid(*self.mesh1D[space]))
