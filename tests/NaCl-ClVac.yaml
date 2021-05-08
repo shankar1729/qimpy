@@ -26,3 +26,7 @@ ions:
     - [Cl, 0.00, 0.50, 0.00]
     - [Cl, 0.00, 0.00, 0.50]
     - [Cl, 0.50, 0.50, 0.50]
+
+electrons:
+  basis:
+    real-orbitals: yes

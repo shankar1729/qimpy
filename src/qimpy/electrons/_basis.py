@@ -91,6 +91,30 @@ class Basis(qp.utils.TaskDivision):
         # --- divide basis on comm_b:
         super().__init__(n_basis_max, rc.n_procs_b, rc.i_proc_b, 'basis')
 
+        # Extra book-keeping for real-orbital basis:
+        if self.real_orbitals and kpoints.n_mine:
+            # Find conjugate pairs with iG_z = 0:
+            self.index_z0 = torch.where(self.iG[0, :, 2] == 0)[0]
+            # --- compute index of each point and conjugate in iG_z = 0 plane:
+            shapeH = self.grid.shapeH_mine
+            plane_index = self.fft_index[0, self.index_z0].div(
+                shapeH[2], rounding_mode='floor')
+            iG_conj = (-self.iG[0, self.index_z0, :2]) % torch.tensor(
+                shapeH[:2], device=rc.device)[None, :]
+            plane_index_conj = iG_conj[:, 0] * shapeH[1] + iG_conj[:, 1]
+            # --- map plane_index_conj to basis using full plane for look-up:
+            plane = torch.zeros(shapeH[0] * shapeH[1],
+                                dtype=int, device=rc.device)
+            plane[plane_index] = self.index_z0
+            self.index_z0_conj = plane[plane_index_conj].clone().detach()
+            # Weight by element for overlaps (only for this process portion):
+            self.Gweight_mine = torch.zeros(self.n_each, device=self.rc.device)
+            self.Gweight_mine[:self.n_mine] = torch.where(
+                self.iG[0, self.i_start:self.i_stop, 2] == 0, 1., 2.)
+            qp.log.info('basis weight sum: {:g}'.format(
+                rc.comm_b.allreduce(self.Gweight_mine.sum().item(),
+                                    qp.MPI.SUM)))
+
     def get_ke(self):
         '''Kinetic energy of each plane wave in basis in :math:`E_h`
 
