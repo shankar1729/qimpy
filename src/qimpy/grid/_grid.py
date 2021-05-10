@@ -13,7 +13,7 @@ class Grid:
     irfft = _irfft
 
     def __init__(self, *,
-                 rc, lattice, symmetries, comm, ke_cutoff_orbital=None,
+                 rc, lattice, symmetries, comm, ke_cutoff_wavefunction=None,
                  ke_cutoff=None, shape=None):
         '''
         Parameters
@@ -27,19 +27,19 @@ class Grid:
             or checked if specified explicitly by shape below.
         comm : mpi4py.MPI.COMM or None
             Communicator to split grid (and its FFTs) over, if provided.
-        ke_cutoff_orbital : float, optional
+        ke_cutoff_wavefunction : float, optional
             Plane-wave kinetic-energy cutoff in :math:`E_h` for any electronic
-            orbitals to be used with this grid. This is an internally set
+            wavefunctions to be used with this grid. This is an internally set
             parameter (should not be specified in dict / YAML input) that
             effectively sets the default for ke_cutoff.
-        ke_cutoff : float, default: 4 * ke_cutoff_orbital (if available)
+        ke_cutoff : float, default: 4 * ke_cutoff_wavefunction (if available)
             Plane-wave kinetic-energy cutoff in :math:`E_h` for the grid
             (i.e. the charge-density cutoff). This supercedes the default
-            set by ke_cutoff_orbital (if any), but may be superceded in turn
-            by shape, if explicitly specified
+            set by ke_cutoff_wavefunction (if any), but may be superceded
+            by explicitly specified shape
         shape : list of 3 ints, optional
-            Explicit grid dimensions. Highest precedence, and will supercede
-            either ke_cutoff and ke_cutoff_orbital, if specified
+            Explicit grid dimensions. Highest precedence, and if specified,
+            will supercede ke_cutoff
         '''
         self.rc = rc
 
@@ -51,19 +51,20 @@ class Grid:
 
         # Select the relevant ke-cutoff:
         self.ke_cutoff = ke_cutoff
-        if ke_cutoff_orbital:
+        if ke_cutoff_wavefunction:
             if not ke_cutoff:  # note that ke_cutoff takes precedence
-                self.ke_cutoff = 4*ke_cutoff_orbital
-            # Make sure specified cutoff is sufficient to resolve orbitals:
-            if self.ke_cutoff < ke_cutoff_orbital:
+                self.ke_cutoff = 4*ke_cutoff_wavefunction
+            # Make sure cutoff is sufficient to resolve wavefunctions:
+            if self.ke_cutoff < ke_cutoff_wavefunction:
                 raise ValueError('ke_cutoff (={:g}) must be >= '
-                                 'ke_cutoff_orbital (={:g})'.format(
-                                    self.ke_cutoff, ke_cutoff_orbital))
-            elif self.ke_cutoff < 4*ke_cutoff_orbital:
-                qp.log.info('Note: ke_cutoff (={:g}) < 4*ke_cutoff_orbital '
-                            '(={:g}) truncates high wave vectors in density '
-                            'calculation'.format(self.ke_cutoff,
-                                                 4*ke_cutoff_orbital))
+                                 'ke_cutoff_wavefunction (={:g})'.format(
+                                    self.ke_cutoff, ke_cutoff_wavefunction))
+            elif self.ke_cutoff < 4*ke_cutoff_wavefunction:
+                qp.log.info(
+                    'Note: ke_cutoff (={:g}) < 4*ke_cutoff_wavefunction '
+                    '(={:g}) truncates high wave vectors in density '
+                    'calculation'.format(
+                        self.ke_cutoff, 4*ke_cutoff_wavefunction))
 
         # Compute minimum grid dimensions for cutoff:
         shape_min = None
@@ -90,8 +91,8 @@ class Grid:
                                  'minimum shape'.format(*self.shape))
         else:
             if shape_min is None:
-                raise KeyError('At least one of ke-cutoff, ke-cutoff-orbital '
-                               'or shape must be specified')
+                raise KeyError('At least one of ke-cutoff-wavefunction, '
+                               'ke-cutoff or shape must be specified')
             self.shape = tuple(symmetries.get_grid_shape(shape_min))
         qp.log.info('selected shape: [{:d}, {:d}, {:d}]'.format(*self.shape))
         _init_grid_fft(self)

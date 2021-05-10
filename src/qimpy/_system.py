@@ -46,7 +46,7 @@ class System:
             qp.grid.Grid, grid, 'grid',
             rc=rc, lattice=self.lattice, symmetries=self.symmetries,
             comm=rc.comm_kb,  # parallelized on intra-replica comm
-            ke_cutoff_orbital=self.electrons.basis.ke_cutoff)
+            ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff)
 
 
 def construct(Class, params, object_name,

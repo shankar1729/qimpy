@@ -7,7 +7,7 @@ class Basis(qp.utils.TaskDivision):
     'TODO: document class Basis'
 
     def __init__(self, *, rc, lattice, symmetries, kpoints, spinorial,
-                 ke_cutoff=20., real_orbitals=False, grid=None):
+                 ke_cutoff=20., real_wavefunctions=False, grid=None):
         '''
         Parameters
         ----------
@@ -16,17 +16,17 @@ class Basis(qp.utils.TaskDivision):
         lattice : qimpy.lattice.Lattice
             Lattice whose reciprocal lattice vectors define plane-wave basis.
         symmetries : qimpy.symmetries.Symmetries
-            Symmetries with which the orbital grid should be commensurate
+            Symmetries with which the wavefunction grid should be commensurate
         kpoints : qimpy.electrons.Kpoints
             Set of k-points to initialize basis for. Note that the basis is
             only initialized for k-points to be operated on by current process
             i.e. for k = kpoints.k[kpoints.i_start : kpoints.i_stop]
         spinorial : bool
             Whether the basis should support spinorial calculations.
-            This is essentially used only to check real_orbitals.
+            This is essentially used only to check real_wavefunctions.
         ke_cutoff : float, default: 20
-            Plane-wave kinetic-energy cutoff in :math:`E_h`
-        real_orbitals : bool, default: False
+            Plane-wave kinetic-energy cutoff for wavefunctions in :math:`E_h`
+        real_wavefunctions : bool, default: False
             If True, use wavefunctions that are real, instead of the
             default complex wavefunctions. This is only supported for
             non-spinorial, Gamma-point-only calculations.
@@ -43,27 +43,27 @@ class Basis(qp.utils.TaskDivision):
         self.k = kpoints.k[k_mine]
         self.wk = kpoints.wk[k_mine]
 
-        # Check real orbital support:
-        self.real_orbitals = real_orbitals
-        if self.real_orbitals:
+        # Check real wavefunction support:
+        self.real_wavefunctions = real_wavefunctions
+        if self.real_wavefunctions:
             if spinorial:
-                raise ValueError('real-orbitals not compatible'
+                raise ValueError('real-wavefunctions not compatible'
                                  ' with spinorial calculations')
             if kpoints.k.norm().item():  # i.e. not all k = 0 (Gamma)
-                raise ValueError('real-orbitals only compatible with'
+                raise ValueError('real-wavefunctions only compatible with'
                                  ' Gamma-point-only calculations')
 
         # Initialize grid to match cutoff:
         self.ke_cutoff = float(ke_cutoff)
-        qp.log.info('Initializing orbital grid:')
+        qp.log.info('Initializing wavefunction grid:')
         self.grid = qp.grid.Grid(
             rc=rc, lattice=lattice, symmetries=symmetries,
             comm=None,  # always process-local
-            ke_cutoff_orbital=self.ke_cutoff,
+            ke_cutoff_wavefunction=self.ke_cutoff,
             **(qp.dict_input_cleanup(grid) if grid else {}))
 
         # Initialize basis:
-        self.iG = self.grid.get_mesh('H' if self.real_orbitals
+        self.iG = self.grid.get_mesh('H' if self.real_wavefunctions
                                      else 'G').reshape((3, -1)).T
         within_cutoff = (self.get_ke() < ke_cutoff)  # mask of which iG to keep
         # --- determine max and avg n_basis across all k:
@@ -91,8 +91,8 @@ class Basis(qp.utils.TaskDivision):
         # --- divide basis on comm_b:
         super().__init__(n_basis_max, rc.n_procs_b, rc.i_proc_b, 'basis')
 
-        # Extra book-keeping for real-orbital basis:
-        if self.real_orbitals and kpoints.n_mine:
+        # Extra book-keeping for real-wavefunction basis:
+        if self.real_wavefunctions and kpoints.n_mine:
             # Find conjugate pairs with iG_z = 0:
             self.index_z0 = torch.where(self.iG[0, :, 2] == 0)[0]
             # --- compute index of each point and conjugate in iG_z = 0 plane:

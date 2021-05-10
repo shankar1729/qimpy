@@ -31,8 +31,8 @@ class Electrons:
             True, if electronic system has spin polarization / magnetization
             (i.e. breaks time reversal symmetry), else False.
             Spin polarization is treated explicitly with two sets of orbitals
-            for up and down spins if spinorial = False, and implicitly by the
-            spinorial wavefunctions if spinorial = True.
+            for up and down spins if spinorial = False, and implicitly by each
+            orbital being spinorial if spinorial = True.
             Default: False
         spinorial : bool, optional
             True, if relativistic / spin-orbit calculations which require

@@ -29,4 +29,4 @@ ions:
 
 electrons:
   basis:
-    real-orbitals: yes
+    real-wavefunctions: yes
