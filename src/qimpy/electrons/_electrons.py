@@ -87,5 +87,11 @@ class Electrons:
             kpoints=self.kpoints, n_spins=self.n_spins, n_spinor=self.n_spinor)
 
         # HACK
-        C = qp.electrons.Wavefunction(self.basis, n_bands=1, randomize=True)
-        print(C.coeff[..., -30:], C.coeff.shape)
+        C = qp.electrons.Wavefunction(self.basis, n_bands=10, randomize=True)
+        print('BEFORE', self.basis.i_proc, C.coeff.shape)
+        Cb = C.split_bands()
+        print('AFTER', self.basis.i_proc, Cb.coeff.shape)
+        CG = Cb.split_basis()
+        print('AFTER2', self.basis.i_proc, CG.coeff.shape)
+        print('Err:', (C.coeff - CG.coeff).norm().item(), 'of',
+              C.coeff.norm().item())

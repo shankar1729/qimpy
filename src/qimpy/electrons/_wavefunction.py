@@ -1,12 +1,15 @@
 import qimpy as qp
 import torch
 from ._wavefunction_init import _randomize
+from ._wavefunction_split import _split_bands, _split_basis
 
 
 class Wavefunction:
     '''TODO: document class Wavefunction'''
 
     randomize = _randomize
+    split_bands = _split_bands
+    split_basis = _split_basis
 
     def __init__(self, basis, coeff=None, proj=None, band_division=None,
                  n_bands=0, n_spins=0, n_spinor=0, randomize=False):
