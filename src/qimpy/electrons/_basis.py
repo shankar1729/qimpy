@@ -125,12 +125,17 @@ class Basis(qp.utils.TaskDivision):
                 rc.comm_b.allreduce(self.Gweight_mine.sum().item(),
                                     qp.MPI.SUM)))
 
-    def get_ke(self):
-        '''Kinetic energy of each plane wave in basis in :math:`E_h`
+    def get_ke(self, basis_slice=slice(None)):
+        '''Kinetic energy (KE) of each plane wave in basis in :math:`E_h`
+
+        Parameters
+        ----------
+        basis_slice : slice, default: slice(None)
+            Selection of basis functions to get KE for (default: full basis)
 
         Returns
         -------
         torch.Tensor (nk_mine x n_basis_max, float)
         '''
-        return 0.5 * (((self.iG + self.k[:, None, :])
+        return 0.5 * (((self.iG[:, basis_slice] + self.k[:, None, :])
                        @ self.lattice.Gbasis.T) ** 2).sum(dim=-1)
