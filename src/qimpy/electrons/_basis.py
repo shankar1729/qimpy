@@ -6,7 +6,8 @@ import torch
 class Basis(qp.utils.TaskDivision):
     'TODO: document class Basis'
 
-    def __init__(self, *, rc, lattice, symmetries, kpoints, spinorial,
+    def __init__(self, *, rc, lattice, ions, symmetries,
+                 kpoints, n_spins, n_spinor,
                  ke_cutoff=20., real_wavefunctions=False, grid=None):
         '''
         Parameters
@@ -15,15 +16,21 @@ class Basis(qp.utils.TaskDivision):
             Current run configuration.
         lattice : qimpy.lattice.Lattice
             Lattice whose reciprocal lattice vectors define plane-wave basis.
+        ions : qimpy.ions.Ions
+            Ions that specify the pseudopotential portion of the basis;
+            the basis implicitly depends on the ion positions for ultrasoft
+            or PAW due to the augmentation of all operators at each ion
         symmetries : qimpy.symmetries.Symmetries
             Symmetries with which the wavefunction grid should be commensurate
         kpoints : qimpy.electrons.Kpoints
             Set of k-points to initialize basis for. Note that the basis is
             only initialized for k-points to be operated on by current process
             i.e. for k = kpoints.k[kpoints.i_start : kpoints.i_stop]
-        spinorial : bool
-            Whether the basis should support spinorial calculations.
-            This is essentially used only to check real_wavefunctions.
+        n_spins : int
+            Default number of spin channels for wavefunctions in this basis
+        n_spinor : int
+            Default number of spinor components for wavefunctions in this
+            basis. Also used only to check support for real_wavefunctions
         ke_cutoff : float, default: 20
             Plane-wave kinetic-energy cutoff for wavefunctions in :math:`E_h`
         real_wavefunctions : bool, default: False
@@ -36,7 +43,10 @@ class Basis(qp.utils.TaskDivision):
         '''
         self.rc = rc
         self.lattice = lattice
+        self.ions = ions
         self.kpoints = kpoints
+        self.n_spins = n_spins
+        self.n_spinor = n_spinor
 
         # Select subset of k-points relevant on this process:
         k_mine = slice(kpoints.i_start, kpoints.i_stop)
@@ -46,7 +56,7 @@ class Basis(qp.utils.TaskDivision):
         # Check real wavefunction support:
         self.real_wavefunctions = real_wavefunctions
         if self.real_wavefunctions:
-            if spinorial:
+            if n_spinor == 2:
                 raise ValueError('real-wavefunctions not compatible'
                                  ' with spinorial calculations')
             if kpoints.k.norm().item():  # i.e. not all k = 0 (Gamma)

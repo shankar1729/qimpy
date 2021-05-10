@@ -83,5 +83,9 @@ class Electrons:
         # Initialize wave-function basis:
         self.basis = qp.construct(
             qp.electrons.Basis, basis, 'basis',
-            rc=rc, lattice=lattice, symmetries=symmetries,
-            kpoints=self.kpoints, spinorial=spinorial)
+            rc=rc, lattice=lattice, ions=ions, symmetries=symmetries,
+            kpoints=self.kpoints, n_spins=self.n_spins, n_spinor=self.n_spinor)
+
+        # HACK
+        C = qp.electrons.Wavefunction(self.basis, n_bands=3)
+        print(C.coeff[..., :4], C.coeff.shape)
