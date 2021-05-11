@@ -1,9 +1,13 @@
 import qimpy as qp
 import numpy as np
+import torch
+from ._hamiltonian import _hamiltonian
 
 
 class Electrons:
     'TODO: document class Electrons'
+
+    hamiltonian = _hamiltonian
 
     def __init__(self, *, rc, lattice, ions, symmetries,
                  k_mesh=None, k_path=None,
@@ -122,3 +126,8 @@ class Electrons:
         self.C = qp.electrons.Wavefunction(self.basis, n_bands=self.n_bands)
         self.C.randomize()
         self.C = self.C.orthonormalize()
+
+        # HACK
+        Hsub = self.C ^ self.hamiltonian(self.C)
+        E, V = torch.linalg.eigh(Hsub)
+        qp.log.info(E)

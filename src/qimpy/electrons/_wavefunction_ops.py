@@ -41,17 +41,21 @@ def _norm(self, mode='all'):
     return result
 
 
-def _overlap(self, other):
-    '''Compute the overlap of this wavefunction (self) with other.
+def _dot(self, other, overlap=False):
+    '''Compute the inner (dot) product of this wavefunction (self) with other.
     For convenience, this can also be invoked as self ^ other.
-    Note that this means xor(self, other) also computes wavefunction overlap
+    Note that this means xor(self, other) also computes wavefunction dot
     instead of logical xor (which is meaningless for wavefunctions anyway)
 
     Parameters
     ----------
     other: qimpy.electrons.Wavefunction
         Dimensions must match self for spinor and basis, can differ for bands,
-        and must be broadcastable for preceding dimensions (spin and k).
+        and must be broadcastable for preceding dimensions (spin and k)
+    overlap: bool, default: False
+        If True, include the overlap operator in the product. This amounts to
+        multiplying by unit cell volume for norm-conserving pseudopotentials,
+        and includes augmentation for ultrasoft and PAW pseudopotentials
 
     Returns
     -------
@@ -70,14 +74,17 @@ def _overlap(self, other):
           else self.coeff).flatten(-2).conj()  # merge spinor & basis dims
     # Prepare right operand:
     C2 = other.coeff.flatten(-2).transpose(-2, -1)  # last dim now band2
-    # Compute local overlap and reduce:
-    result = (C1 @ C2) * basis.lattice.volume
-    # TODO: overlap augmentation goes here when adding ultrasoft / PAW
+    # Compute local inner product and reduce:
+    result = (C1 @ C2)
     if basis.real_wavefunctions:
         result.imag *= 0.  # due to implicit +h.c. terms in C1 and C2
     if basis.n_procs > 1:
         basis.rc.comm_b.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(result),
                                   op=qp.MPI.SUM)
+    # Overlap factor and augmentation:
+    if overlap:
+        result *= basis.lattice.volume
+        # TODO: overlap augmentation goes here when adding ultrasoft / PAW
     watch.stop()
     return result
 
@@ -119,7 +126,8 @@ def _orthonormalize(self, use_cholesky=True):
     using either a Gram-Schmidt scheme (faster) if use_cholesky=True,
     or using symmetric orthonormalization (stabler) if use_cholesky=False.
     See :meth:`qimpy.utils.ortho_matrix` for details'''
-    return self @ qp.utils.ortho_matrix(self ^ self, use_cholesky)
+    return self @ qp.utils.ortho_matrix(self.dot(self, overlap=True),
+                                        use_cholesky)
 
 
 def _mul(self, scale):
