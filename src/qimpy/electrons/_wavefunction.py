@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from ._wavefunction_init import _randomize
 from ._wavefunction_split import _split_bands, _split_basis
-from ._wavefunction_ops import _norm, _overlap, \
+from ._wavefunction_ops import _norm, _overlap, _matmul, _orthonormalize, \
     _mul, _imul, _add, _iadd, _sub, _isub
 
 
@@ -16,6 +16,9 @@ class Wavefunction:
     norm = _norm
     overlap = _overlap  # overlap with another wavefunction
     __xor__ = _overlap  # convenient shorthand C1 ^ C2 for overlap
+    matmul = _matmul  # transform by a matrix in band space
+    __matmul__ = _matmul  # shorthand C @ M for band-space transformation
+    orthonormalize = _orthonormalize
     __mul__ = _mul  # scalar multiply
     __rmul__ = _mul  # scalar multiply is commutative
     __imul__ = _imul  # scale

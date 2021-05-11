@@ -47,6 +47,12 @@ def _overlap(self, other):
     Note that this means xor(self, other) also computes wavefunction overlap
     instead of logical xor (which is meaningless for wavefunctions anyway)
 
+    Parameters
+    ----------
+    other: qimpy.electrons.Wavefunction
+        Dimensions must match self for spinor and basis, can differ for bands,
+        and must be broadcastable for preceding dimensions (spin and k).
+
     Returns
     -------
     torch.Tensor with dimensions
@@ -60,11 +66,10 @@ def _overlap(self, other):
     watch = qp.utils.StopWatch('Wavefunction.overlap', basis.rc)
     # Prepare left operand:
     C1 = (self.coeff * basis.Gweight_mine.view(1, 1, 1, 1, -1)
-          if basis.real_wavefunctions else self.coeff)
-    C1 = C1.view(C1.shape[:-2] + (-1,)).conj()  # merge spinor & basis dims
+          if basis.real_wavefunctions
+          else self.coeff).flatten(-2).conj()  # merge spinor & basis dims
     # Prepare right operand:
-    C2 = other.coeff
-    C2 = C2.view(C2.shape[:-2] + (-1,)).transpose(-2, -1)  # last dim now band2
+    C2 = other.coeff.flatten(-2).transpose(-2, -1)  # last dim now band2
     # Compute local overlap and reduce:
     result = (C1 @ C2) * basis.lattice.volume
     # TODO: overlap augmentation goes here when adding ultrasoft / PAW
@@ -75,6 +80,46 @@ def _overlap(self, other):
                                   op=qp.MPI.SUM)
     watch.stop()
     return result
+
+
+def _matmul(self, mat):
+    '''Compute a matrix transformation (such as rotation) along the band
+    dimension of wavefunction (self). For convenience, this can also be
+    invoked as self @ other, using the standard matrix multiply operator.
+
+    Parameters
+    ----------
+    mat : torch.Tensor
+        Last two dimensions specify transformation in band space,
+        so final dimension should match n_bands of the wavefunction
+        and penultimate dimension determines n_bands of output.
+        Preceding dimensions should be broadcastable with spin and k
+
+    Returns
+    -------
+    qimpy.electrons.Wavefunction
+        The result will have n_bands = mat.shape[-2], same basis and spinor as
+        input, and spin and k determined by broadcasting with mat.shape[:-2]
+    '''
+    if not isinstance(mat, torch.Tensor):
+        return NotImplemented
+    watch = qp.utils.StopWatch('Wavefunction.matmul', self.basis.rc)
+    # Prepare input view:
+    C = self.coeff.flatten(-2)  # merge spinor & basis dims at input
+    C_out = mat.transpose(-2, -1) @ C
+    C_out = C_out.view(C_out.shape[:-1] + self.coeff.shape[-2:])  # un-merge
+    proj_out = ((self.proj @ mat) if self.proj else None)
+    watch.stop()
+    return qp.electrons.Wavefunction(self.basis, C_out, proj_out,
+                                     self.band_division)
+
+
+def _orthonormalize(self, use_cholesky=True):
+    '''Return an orthonormalized version of present wavefunctions,
+    using either a Gram-Schmidt scheme (faster) if use_cholesky=True,
+    or using symmetric orthonormalization (stabler) if use_cholesky=False.
+    See :meth:`qimpy.utils.ortho_matrix` for details'''
+    return self @ qp.utils.ortho_matrix(self ^ self, use_cholesky)
 
 
 def _mul(self, scale):

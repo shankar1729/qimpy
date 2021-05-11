@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 
 
 def prime_factorization(N):
@@ -49,3 +50,38 @@ def fft_suitable(N):
 def ceildiv(num, den):
     'Compute ceil(num/den) with int inputs, output and purely integer ops'
     return (num + den-1) // den
+
+
+def ortho_matrix(O, use_cholesky=True):
+    """Return orthonormalization matrix of a basis, given the overlap matrix
+    (metric) of that basis.
+
+    Parameters
+    ----------
+    O : torch.Tensor
+        Overlap matrix / metric (Hermitian, positive definite) in last
+        two dimensions, and batched over any preceding dimensions
+    use_cholesky : bool, default: True
+        If True, use Cholesky decomposition followed by a triangular solve,
+        essentially amounting to Gram-Schmidt orthonormalization.
+        If False, return the symmetric orthonormalization matrix calculated
+        by diagonalizing O, which may be more stable, but may be an order of
+        magnitude slower than the default Cholesky method
+
+    Returns
+    -------
+    torch.Tensor (same dimensions as O)
+    """
+    assert(O.shape[-2] == O.shape[-1])  # check square
+    if use_cholesky:
+        # Gram-Schmidt orthonormalization matrix:
+        identity = torch.eye(O.shape[-1], device=O.device,
+                             dtype=O.dtype).view((1,) * (len(O.shape) - 2)
+                                                 + O.shape[-2:])
+        return torch.triangular_solve(identity, torch.linalg.cholesky(O),
+                                      upper=False)[0].transpose(-2, -1).conj()
+    else:
+        # Symmetric orthonormalization matrix:
+        lbda, V = torch.linalg.eigh(O)
+        return V @ ((1./torch.sqrt(lbda))[..., None]
+                    * V.transpose(-2, -1).conj())

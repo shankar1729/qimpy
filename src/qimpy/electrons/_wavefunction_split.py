@@ -126,11 +126,15 @@ if __name__ == '__main__':
 
     # Check norm and orthogonalization routines:
     qp.log.info('\n--- Checking Wavefunction.norm and overlaps ---')
-    Cg.randomize()
-    qp.log.info('Norm(band)[selected]: ' + rc.fmt(Cg.norm('band')[0, :2, :5]))
-    qp.log.info('Norm(ke)[selected]: ' + rc.fmt(Cg.norm('ke')[0, :2, :5]))
-    CdagC = Cg ^ Cg
-    qp.log.info('HCerr: {:.3e}'.format(
-        (CdagC - CdagC.conj().swapaxes(-2, -1)).norm().item()))
+    for i_repeat in range(n_repeat):
+        Cg.randomize()
+        Cg = Cg.orthonormalize()
+    Cg_overlap = Cg ^ Cg
+    expected_overlap = torch.eye(Cg_overlap.shape[-1],
+                                 device=Cg.coeff.device)[None, None]
+    qp.log.info('Orthonormality error: {:.3e}'.format(
+        (Cg_overlap - expected_overlap).norm().item()))
+    qp.log.info('Norm(band)[selected]:\n' + rc.fmt(Cg.norm('band')[0, :, :5]))
+    qp.log.info('Norm(ke)[selected]:\n' + rc.fmt(Cg.norm('ke')[0, :, :5]))
 
     qp.utils.StopWatch.print_stats()
