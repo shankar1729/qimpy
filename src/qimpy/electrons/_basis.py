@@ -77,29 +77,38 @@ class Basis(qp.utils.TaskDivision):
                                      else 'G').reshape((3, -1)).T
         within_cutoff = (self.get_ke() < ke_cutoff)  # mask of which iG to keep
         # --- determine max and avg n_basis across all k:
-        n_basis = within_cutoff.count_nonzero(dim=1)
-        n_basis_max = rc.comm_k.allreduce(n_basis.max().item(), qp.MPI.MAX)
-        n_basis_avg = rc.comm_k.allreduce((n_basis.to(float) @ self.wk).item(),
-                                          qp.MPI.SUM)
+        self.n_basis = within_cutoff.count_nonzero(dim=1)
+        self.n_basis_max = rc.comm_k.allreduce(self.n_basis.max().item(),
+                                               qp.MPI.MAX)
+        n_basis_avg = rc.comm_k.allreduce(
+            (self.n_basis.to(float) @ self.wk).item(), qp.MPI.SUM)
         n_basis_ideal = ((2.*ke_cutoff)**1.5) * lattice.volume / (6 * np.pi**2)
         qp.log.info('n_basis:  max: {:d}  avg: {:.3f}  ideal: {:.3f}'.format(
-            n_basis_max, n_basis_avg, n_basis_ideal))
+            self.n_basis_max, n_basis_avg, n_basis_ideal))
         # --- create indices from basis set to FFT grid:
         n_fft = self.iG.shape[0]  # number of points on FFT grid
         fft_range = torch.arange(n_fft, device=self.rc.device)
-        fft_index = (torch.where(within_cutoff, 0, n_fft)
-                     + fft_range[None, :]).argsort(  # ke < cutoff to front
-                         dim=1)[:, :n_basis_max]  # keep same count for all k
-        pad_index = torch.where(fft_range[None, :n_basis_max]
-                                > n_basis[:, None])  # extra entries (kept 0)
-        # --- store required quantities:
-        self.n_basis_max = n_basis_max  # max across all k
-        self.n_basis = n_basis  # for each k (total over comm_b split, if any)
-        self.fft_index = fft_index  # index to FFT grid
-        self.pad_index = pad_index  # index pointing out padded entries above
-        self.iG = self.iG[fft_index]  # basis plane waves for each k
-        # --- divide basis on comm_b:
-        super().__init__(n_basis_max, rc.n_procs_b, rc.i_proc_b, 'basis')
+        self.fft_index = (torch.where(within_cutoff, 0, n_fft)
+                          + fft_range[None, :]).argsort(  # ke<cutoff to front
+                              dim=1)[:, :self.n_basis_max]  # same count all k
+        self.iG = self.iG[self.fft_index]  # basis plane waves for each k
+        self.pad_index = torch.where(
+            fft_range[None, :self.n_basis_max]
+            > self.n_basis[:, None])  # index to padded entries
+        self.pad_index = (
+            slice(None), self.pad_index[0], slice(None), slice(None),
+            self.pad_index[1])  # add spin, band and spinor dims
+
+        # Divide basis on comm_b:
+        super().__init__(self.n_basis_max, rc.n_procs_b, rc.i_proc_b, 'basis')
+        self.mine = slice(self.i_start, self.i_stop)
+        # --- initialize local pad index separately (not trivially sliceable):
+        self.pad_index_mine = torch.where(
+            fft_range[None, self.i_start:self.i_stop]
+            > self.n_basis[:, None])  # index to local padded entries
+        self.pad_index_mine = (
+            slice(None), self.pad_index_mine[0], slice(None), slice(None),
+            self.pad_index_mine[1])  # add spin, band and spinor dims
 
         # Extra book-keeping for real-wavefunction basis:
         if self.real_wavefunctions and kpoints.n_mine:

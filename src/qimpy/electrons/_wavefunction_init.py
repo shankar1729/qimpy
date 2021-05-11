@@ -30,6 +30,7 @@ def _randomize(self, seed=0, b_start=0, b_stop=None):
         n_bands_prev = b_start
         basis_start = basis.i_start
         basis_stop = basis.i_stop
+        pad_index = basis.pad_index_mine
     else:
         b_start_local = max(b_start - self.band_division.i_start, 0)
         b_stop_local = min(b_stop - self.band_division.i_start,
@@ -37,9 +38,11 @@ def _randomize(self, seed=0, b_start=0, b_stop=None):
         n_bands_prev = self.band_division.i_start + b_start_local
         basis_start = 0
         basis_stop = basis.n_tot
+        pad_index = basis.pad_index
     n_basis_mine = basis_stop - basis_start
     if b_start_local >= b_stop_local:
         return  # no bands to randomize on this process
+    coeff_cur = self.coeff[:, :, b_start_local:b_stop_local]
 
     # Initialize random number state based on global coeff index and seed:
     def init_state(basis_index):
@@ -72,8 +75,8 @@ def _randomize(self, seed=0, b_start=0, b_stop=None):
     x = init_state(i_basis)
     for i_discard in range(n_bands_prev + 1):
         randn(x)  # get RNG to position appropriate for starting band
-    for b_local in range(b_start_local, b_stop_local):
-        self.coeff[:, :, b_local, :, :n_basis_mine] = randn(x)
+    for b_local in range(b_stop_local - b_start_local):
+        coeff_cur[:, :, b_local, :, :n_basis_mine] = randn(x)
 
     # Enforce Hermitian symmetry in real case:
     if basis.real_wavefunctions:
@@ -85,15 +88,14 @@ def _randomize(self, seed=0, b_start=0, b_stop=None):
         x = init_state(basis.index_z0_conj[sel])
         for i_discard in range(n_bands_prev + 1):
             randn(x)  # get RNG to position appropriate for starting band
-        for b_local in range(b_start_local, b_stop_local):
-            self.coeff[:, :, b_local, :, index_z0_local] += randn(x).conj()
-        self.coeff[..., index_z0_local] *= np.sqrt(0.5)  # keep variance = 1
+        for b_local in range(b_stop_local - b_start_local):
+            coeff_cur[:, :, b_local, :, index_z0_local] += randn(x).conj()
+        coeff_cur[..., index_z0_local] *= np.sqrt(0.5)  # keep variance = 1
 
     # Mask out inactive basis elements:
-    self.coeff[(slice(None), basis.pad_index[0], slice(None),
-                slice(b_start_local, b_stop_local), basis.pad_index[1])] = 0.
+    coeff_cur[pad_index] = 0.
 
     # Bandwidth limit:
     ke = basis.get_ke(slice(basis_start, basis_stop))[None, :, None, None, :]
     ke_fac = 1. / (1. + ((4./3)*ke) ** 6)  # damp-out high-KE coefficients
-    self.coeff[:, :, b_start_local:b_stop_local, :, :n_basis_mine] *= ke_fac
+    coeff_cur[..., :n_basis_mine] *= ke_fac
