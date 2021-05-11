@@ -115,3 +115,10 @@ class Electrons:
             qp.electrons.Basis, basis, 'basis',
             rc=rc, lattice=lattice, ions=ions, symmetries=symmetries,
             kpoints=self.kpoints, n_spins=self.n_spins, n_spinor=self.n_spinor)
+
+        # Initial wavefunctions:
+        qp.log.info('Initializing wavefunctions:'
+                    ' bandwidth-limited random numbers')
+        self.C = qp.electrons.Wavefunction(self.basis, n_bands=self.n_bands)
+        self.C.randomize()
+        self.C = self.C.orthonormalize()
