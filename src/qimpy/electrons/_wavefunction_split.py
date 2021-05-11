@@ -88,28 +88,33 @@ if __name__ == '__main__':
     qp.utils.log_config()
     rc = qp.utils.RunConfig(process_grid=(1, 1, -1))  # ensure basis-split
     system = qp.System(
-        rc=rc, lattice={'system': 'hexagonal', 'a': 5., 'c': 4.},
-        electrons={'k-mesh': {'size': [4, 4, 5]}})
+        rc=rc, lattice={'system': 'hexagonal', 'a': 9., 'c': 12.},
+        electrons={'k-mesh': {'size': [4, 4, 3]}})
 
     qp.log.info('\n--- Checking Wavefunction.split* ---')
-    n_bands = 17  # deliberately prime!
-    b_random_start = 4
-    b_random_stop = 11  # randpomize only a range of bands for testing
+    n_bands = 37  # deliberately prime!
+    b_random_start = 8
+    b_random_stop = 21  # randomize only a range of bands for testing
+    n_repeat = 50  # number of times to repeat split for benchmarking
 
     # Test random wavefunction created basis-split to band-split and back:
-    Cg = qp.electrons.Wavefunction(system.electrons.basis, n_bands=n_bands,
-                                   randomize=True)
-    Cgb = Cg.split_bands()
-    Cgbg = Cgb.split_basis()
+    Cg = qp.electrons.Wavefunction(system.electrons.basis, n_bands=n_bands)
+    Cg.randomize(b_random_start, b_random_stop)
+    rc.comm_b.Barrier()  # for mroe reliable timing below
+    for i_repeat in range(n_repeat):
+        Cgb = Cg.split_bands()
+        Cgbg = Cgb.split_basis()
     qp.log.info('Norm(G): {:.3f}'.format(Cg.norm()))
     qp.log.info('Norm(G - G->B->G): {:.3e}'.format((Cg - Cgbg).norm()))
 
     # Test random wavefunction created band-split to basis-split and back:
     Cb = qp.electrons.Wavefunction(system.electrons.basis,
-                                   band_division=Cgb.band_division,
-                                   randomize=True)
-    Cbg = Cb.split_basis()
-    Cbgb = Cbg.split_bands()
+                                   band_division=Cgb.band_division)
+    Cb.randomize(b_random_start, b_random_stop)
+    rc.comm_b.Barrier()  # for more reliable timing below
+    for i_repeat in range(n_repeat):
+        Cbg = Cb.split_basis()
+        Cbgb = Cbg.split_bands()
     qp.log.info('Norm(B): {:.3f}'.format(Cb.norm()))
     qp.log.info('Norm(B - B->G->B): {:.3e}'.format((Cb - Cbgb).norm()))
 
