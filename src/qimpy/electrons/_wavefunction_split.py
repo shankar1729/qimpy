@@ -129,5 +129,8 @@ if __name__ == '__main__':
     Cg.randomize()
     qp.log.info('Norm(band)[selected]: ' + rc.fmt(Cg.norm('band')[0, :2, :5]))
     qp.log.info('Norm(ke)[selected]: ' + rc.fmt(Cg.norm('ke')[0, :2, :5]))
+    CdagC = Cg ^ Cg
+    qp.log.info('HCerr: {:.3e}'.format(
+        (CdagC - CdagC.conj().swapaxes(-2, -1)).norm().item()))
 
     qp.utils.StopWatch.print_stats()

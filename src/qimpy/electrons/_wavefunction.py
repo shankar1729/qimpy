@@ -3,7 +3,8 @@ import numpy as np
 import torch
 from ._wavefunction_init import _randomize
 from ._wavefunction_split import _split_bands, _split_basis
-from ._wavefunction_ops import _norm, _sub
+from ._wavefunction_ops import _norm, _overlap, \
+    _mul, _imul, _add, _iadd, _sub, _isub
 
 
 class Wavefunction:
@@ -13,7 +14,15 @@ class Wavefunction:
     split_bands = _split_bands
     split_basis = _split_basis
     norm = _norm
+    overlap = _overlap  # overlap with another wavefunction
+    __xor__ = _overlap  # convenient shorthand C1 ^ C2 for overlap
+    __mul__ = _mul  # scalar multiply
+    __rmul__ = _mul  # scalar multiply is commutative
+    __imul__ = _imul  # scale
+    __add__ = _add
+    __iadd__ = _iadd
     __sub__ = _sub
+    __isub__ = _isub
 
     def __init__(self, basis, coeff=None, proj=None, band_division=None,
                  n_bands=0, n_spins=0, n_spinor=0, randomize=False):
