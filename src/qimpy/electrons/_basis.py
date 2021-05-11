@@ -65,7 +65,7 @@ class Basis(qp.utils.TaskDivision):
 
         # Initialize grid to match cutoff:
         self.ke_cutoff = float(ke_cutoff)
-        qp.log.info('Initializing wavefunction grid:')
+        qp.log.info('\nInitializing wavefunction grid:')
         self.grid = qp.grid.Grid(
             rc=rc, lattice=lattice, symmetries=symmetries,
             comm=None,  # always process-local

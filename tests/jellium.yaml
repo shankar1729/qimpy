@@ -6,6 +6,7 @@ lattice:
   c: 7  # bohrs
 
 electrons:
+  n-bands: 10
   k-path:
     dk: 0.01
     points:

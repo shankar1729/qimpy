@@ -1,4 +1,5 @@
 import qimpy as qp
+import numpy as np
 
 
 class Electrons:
@@ -7,7 +8,7 @@ class Electrons:
     def __init__(self, *, rc, lattice, ions, symmetries,
                  k_mesh=None, k_path=None,
                  spin_polarized=False, spinorial=False,
-                 fillings=None, basis=None):
+                 fillings=None, basis=None, n_bands=None):
         '''
         Parameters
         ----------
@@ -44,6 +45,12 @@ class Electrons:
         basis : qimpy.electrons.Basis or None, optional
             Wavefunction basis set (plane waves).
             Default: use default qimpy.electrons.Basis()
+        n_bands : {'x<scale>', 'atomic', int}, default: 'x1.'
+            Number of bands, specified as a scale relative to the minimum
+            number of bands to accommodate electrons i.e. 'x1.5' implies
+            use 1.5 times the minimum number. Alternately, 'atomic' sets
+            the number of bands to the number of atomic orbitals. Finally,
+            an integer explicitly sets the number of bands.
         '''
         self.rc = rc
         qp.log.info('\n--- Initializing Electrons ---')
@@ -79,6 +86,29 @@ class Electrons:
         self.fillings = qp.construct(
             qp.electrons.Fillings, fillings, 'fillings',
             rc=rc, ions=ions, electrons=self)
+
+        # Determine number of bands:
+        if n_bands is None:
+            n_bands = 'x1'
+        if isinstance(n_bands, int):
+            self.n_bands = n_bands
+            assert(self.n_bands >= 1)
+            n_bands_method = 'set explicitly'
+        else:
+            assert isinstance(n_bands, str)
+            if n_bands == 'atomic':
+                raise NotImplementedError('n_bands from atomic orbitals')
+                n_bands_method = 'atomic'
+            else:
+                assert n_bands.startswith('x')
+                n_bands_scale = float(n_bands[1:])
+                if n_bands_scale < 1.:
+                    raise ValueError('<scale> must be >=1 in n_bands')
+                self.n_bands = max(1, int(np.ceil(self.fillings.n_bands_min
+                                                  * n_bands_scale)))
+                n_bands_method = 'n_bands_min x ' + n_bands[1:]
+        qp.log.info('n_bands: {:d} ({:s})'.format(self.n_bands,
+                                                  n_bands_method))
 
         # Initialize wave-function basis:
         self.basis = qp.construct(
