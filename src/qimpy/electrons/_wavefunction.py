@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from ._wavefunction_init import _randomize
 from ._wavefunction_split import _split_bands, _split_basis
+from ._wavefunction_ops import _norm, _sub
 
 
 class Wavefunction:
@@ -11,6 +12,8 @@ class Wavefunction:
     randomize = _randomize
     split_bands = _split_bands
     split_basis = _split_basis
+    norm = _norm
+    __sub__ = _sub
 
     def __init__(self, basis, coeff=None, proj=None, band_division=None,
                  n_bands=0, n_spins=0, n_spinor=0, randomize=False):
@@ -63,15 +66,3 @@ class Wavefunction:
             self.proj = None  # invalidate any previous projections
             if randomize:
                 self.randomize()
-
-    def norm(self):
-        'Return overall Frobenius norm of wavefunction coefficients'
-        return np.sqrt(self.basis.rc.comm_kb.allreduce(
-            self.coeff.norm().item()**2, qp.MPI.SUM))
-
-    def __sub__(self, other):
-        assert(self.basis is other.basis)
-        coeff = self.coeff - other.coeff
-        proj = ((self.proj - other.proj) if (self.proj and other.proj)
-                else None)
-        return Wavefunction(self.basis, coeff, proj, self.band_division)

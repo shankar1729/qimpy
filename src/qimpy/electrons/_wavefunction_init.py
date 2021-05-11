@@ -1,3 +1,4 @@
+import qimpy as qp
 import numpy as np
 import torch
 
@@ -21,6 +22,7 @@ def _randomize(self, seed=0, b_start=0, b_stop=None):
     '''
     assert(self.coeff is not None)
     basis = self.basis
+    watch = qp.utils.StopWatch('Wavefunction.randomize', basis.rc)
 
     # Range of bands and basis to operate on:
     if self.band_division is None:
@@ -97,3 +99,4 @@ def _randomize(self, seed=0, b_start=0, b_stop=None):
     # Bandwidth limit:
     ke = basis.get_ke(slice(basis_start, basis_stop))[None, :, None, None, :]
     coeff_cur *= 1. / (1. + ((4./3)*ke) ** 6)  # damp-out high-KE coefficients
+    watch.stop()

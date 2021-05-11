@@ -89,7 +89,8 @@ if __name__ == '__main__':
     rc = qp.utils.RunConfig(process_grid=(1, 1, -1))  # ensure basis-split
     system = qp.System(
         rc=rc, lattice={'system': 'hexagonal', 'a': 9., 'c': 12.},
-        electrons={'k-mesh': {'size': [4, 4, 3]}})
+        electrons={'k-mesh': {'size': [4, 4, 3]},
+                   'basis': {'real-wavefunctions': False}})
 
     qp.log.info('\n--- Checking Wavefunction.split* ---')
     n_bands = 37  # deliberately prime!
@@ -99,7 +100,7 @@ if __name__ == '__main__':
 
     # Test random wavefunction created basis-split to band-split and back:
     Cg = qp.electrons.Wavefunction(system.electrons.basis, n_bands=n_bands)
-    Cg.randomize(b_random_start, b_random_stop)
+    Cg.randomize(b_start=b_random_start, b_stop=b_random_stop)
     rc.comm_b.Barrier()  # for mroe reliable timing below
     for i_repeat in range(n_repeat):
         Cgb = Cg.split_bands()
@@ -110,7 +111,7 @@ if __name__ == '__main__':
     # Test random wavefunction created band-split to basis-split and back:
     Cb = qp.electrons.Wavefunction(system.electrons.basis,
                                    band_division=Cgb.band_division)
-    Cb.randomize(b_random_start, b_random_stop)
+    Cb.randomize(b_start=b_random_start, b_stop=b_random_stop)
     rc.comm_b.Barrier()  # for more reliable timing below
     for i_repeat in range(n_repeat):
         Cbg = Cb.split_basis()
@@ -122,4 +123,11 @@ if __name__ == '__main__':
     qp.log.info('\n--- Checking Wavefunction.randomize ---')
     qp.log.info('Norm(G - B->G): {:.3e}'.format((Cg - Cbg).norm()))
     qp.log.info('Norm(B - G->B): {:.3e}'.format((Cb - Cgb).norm()))
+
+    # Check norm and orthogonalization routines:
+    qp.log.info('\n--- Checking Wavefunction.norm and overlaps ---')
+    Cg.randomize()
+    qp.log.info('Norm(band)[selected]: ' + rc.fmt(Cg.norm('band')[0, :2, :5]))
+    qp.log.info('Norm(ke)[selected]: ' + rc.fmt(Cg.norm('ke')[0, :2, :5]))
+
     qp.utils.StopWatch.print_stats()
