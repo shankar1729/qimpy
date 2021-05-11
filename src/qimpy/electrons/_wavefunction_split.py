@@ -79,3 +79,42 @@ def _split_basis(self):
     recv_coeff = recv_coeff.permute(1, 2, 0, 3, 4)
     watch.stop()
     return qp.electrons.Wavefunction(basis, coeff=recv_coeff)
+
+
+# Test wavefunction splitting and randomization:
+if __name__ == '__main__':
+
+    # Create a system to test with:
+    qp.utils.log_config()
+    rc = qp.utils.RunConfig(process_grid=(1, 1, -1))  # ensure basis-split
+    system = qp.System(
+        rc=rc, lattice={'system': 'hexagonal', 'a': 5., 'c': 4.},
+        electrons={'k-mesh': {'size': [4, 4, 5]}})
+
+    qp.log.info('\n--- Checking Wavefunction.split* ---')
+    n_bands = 17  # deliberately prime!
+    b_random_start = 4
+    b_random_stop = 11  # randpomize only a range of bands for testing
+
+    # Test random wavefunction created basis-split to band-split and back:
+    Cg = qp.electrons.Wavefunction(system.electrons.basis, n_bands=n_bands,
+                                   randomize=True)
+    Cgb = Cg.split_bands()
+    Cgbg = Cgb.split_basis()
+    qp.log.info('Norm(G): {:.3f}'.format(Cg.norm()))
+    qp.log.info('Norm(G - G->B->G): {:.3e}'.format((Cg - Cgbg).norm()))
+
+    # Test random wavefunction created band-split to basis-split and back:
+    Cb = qp.electrons.Wavefunction(system.electrons.basis,
+                                   band_division=Cgb.band_division,
+                                   randomize=True)
+    Cbg = Cb.split_basis()
+    Cbgb = Cbg.split_bands()
+    qp.log.info('Norm(B): {:.3f}'.format(Cb.norm()))
+    qp.log.info('Norm(B - B->G->B): {:.3e}'.format((Cb - Cbgb).norm()))
+
+    # Check equivalence of randomization across the two splits:
+    qp.log.info('\n--- Checking Wavefunction.randomize ---')
+    qp.log.info('Norm(G - B->G): {:.3e}'.format((Cg - Cbg).norm()))
+    qp.log.info('Norm(B - G->B): {:.3e}'.format((Cb - Cgb).norm()))
+    qp.utils.StopWatch.print_stats()

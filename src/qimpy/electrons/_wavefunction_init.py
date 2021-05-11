@@ -23,18 +23,18 @@ def _randomize(self, seed=0, b_start=0, b_stop=None):
     basis = self.basis
 
     # Range of bands and basis to operate on:
-    b_stop = (b_stop if b_stop else self.coeff.shape[2])
     if self.band_division is None:
         b_start_local = b_start
-        b_stop_local = b_stop
+        b_stop_local = (b_stop if b_stop else self.coeff.shape[2])
         n_bands_prev = b_start
         basis_start = basis.i_start
         basis_stop = basis.i_stop
         pad_index = basis.pad_index_mine
     else:
         b_start_local = max(b_start - self.band_division.i_start, 0)
-        b_stop_local = min(b_stop - self.band_division.i_start,
-                           self.band_division.n_mine)
+        b_stop_local = (min(b_stop - self.band_division.i_start,
+                            self.band_division.n_mine) if b_stop
+                        else self.band_division.n_mine)
         n_bands_prev = self.band_division.i_start + b_start_local
         basis_start = 0
         basis_stop = basis.n_tot
