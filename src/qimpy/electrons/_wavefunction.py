@@ -56,7 +56,7 @@ class Wavefunction:
             n_bands = (n_bands if n_bands else band_division.n_mine)
             n_spins = (n_spins if n_spins else basis.n_spins)
             n_spinor = (n_spinor if n_spinor else basis.n_spinor)
-            n_basis = basis.n_each * (basis.n_procs if band_division else 1)
+            n_basis = (basis.n_tot if band_division else basis.n_mine)
             self.coeff = torch.zeros(
                 (n_spins, nk_mine, n_bands, n_spinor, n_basis),
                 dtype=torch.cdouble, device=basis.rc.device)

@@ -39,7 +39,6 @@ def _randomize(self, seed=0, b_start=0, b_stop=None):
         basis_start = 0
         basis_stop = basis.n_tot
         pad_index = basis.pad_index
-    n_basis_mine = basis_stop - basis_start
     if b_start_local >= b_stop_local:
         return  # no bands to randomize on this process
     coeff_cur = self.coeff[:, :, b_start_local:b_stop_local]
@@ -76,7 +75,7 @@ def _randomize(self, seed=0, b_start=0, b_stop=None):
     for i_discard in range(n_bands_prev + 1):
         randn(x)  # get RNG to position appropriate for starting band
     for b_local in range(b_stop_local - b_start_local):
-        coeff_cur[:, :, b_local, :, :n_basis_mine] = randn(x)
+        coeff_cur[:, :, b_local] = randn(x)
 
     # Enforce Hermitian symmetry in real case:
     if basis.real_wavefunctions:
@@ -97,5 +96,4 @@ def _randomize(self, seed=0, b_start=0, b_stop=None):
 
     # Bandwidth limit:
     ke = basis.get_ke(slice(basis_start, basis_stop))[None, :, None, None, :]
-    ke_fac = 1. / (1. + ((4./3)*ke) ** 6)  # damp-out high-KE coefficients
-    coeff_cur[..., :n_basis_mine] *= ke_fac
+    coeff_cur *= 1. / (1. + ((4./3)*ke) ** 6)  # damp-out high-KE coefficients
