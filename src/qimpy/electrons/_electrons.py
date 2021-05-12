@@ -12,7 +12,7 @@ class Electrons:
     def __init__(self, *, rc, lattice, ions, symmetries,
                  k_mesh=None, k_path=None,
                  spin_polarized=False, spinorial=False,
-                 fillings=None, basis=None, n_bands=None,
+                 fillings=None, basis=None, n_bands=None, n_bands_extra=None,
                  davidson=None, chefsi=None):
         '''
         Parameters
@@ -56,6 +56,11 @@ class Electrons:
             use 1.5 times the minimum number. Alternately, 'atomic' sets
             the number of bands to the number of atomic orbitals. Finally,
             an integer explicitly sets the number of bands.
+        n_bands_extra : {'x<scale>', int}, default: 'x0.1'
+            Number of extra bands retained by diagonalizers, necessary to
+            converge any degenerate subspaces straddling n_bands. This could
+            be specified as a multiple of n_bands e.g. 'x0.1' = 0.1 x n_bands,
+            or could be specified as an explicit number of extra bands
         davidson : qimpy.electrons.Davidson or dict, optional
             Diagonalize Kohm-Sham Hamiltonian using the Davidson method.
             Specify only one of davidson or chefsi.
@@ -106,7 +111,7 @@ class Electrons:
         if isinstance(n_bands, int):
             self.n_bands = n_bands
             assert(self.n_bands >= 1)
-            n_bands_method = 'set explicitly'
+            n_bands_method = 'explicit'
         else:
             assert isinstance(n_bands, str)
             if n_bands == 'atomic':
@@ -119,9 +124,26 @@ class Electrons:
                     raise ValueError('<scale> must be >=1 in n_bands')
                 self.n_bands = max(1, int(np.ceil(self.fillings.n_bands_min
                                                   * n_bands_scale)))
-                n_bands_method = 'n_bands_min x ' + n_bands[1:]
-        qp.log.info('n_bands: {:d} ({:s})'.format(self.n_bands,
-                                                  n_bands_method))
+                n_bands_method = n_bands[1:] + '*n_bands_min'
+        # --- similarly for extra bands:
+        if n_bands_extra is None:
+            n_bands_extra = 'x0.1'
+        if isinstance(n_bands_extra, int):
+            self.n_bands_extra = n_bands_extra
+            assert(self.n_bands_extra >= 1)
+            n_bands_extra_method = 'explicit'
+        else:
+            assert(isinstance(n_bands_extra, str)
+                   and n_bands_extra.startswith('x'))
+            n_bands_extra_scale = float(n_bands_extra[1:])
+            if n_bands_extra_scale <= 0.:
+                raise ValueError('<scale> must be >0 in n_bands_extra')
+            self.n_bands_extra = max(1, int(np.ceil(self.n_bands
+                                                    * n_bands_extra_scale)))
+            n_bands_extra_method = n_bands_extra[1:] + '*n_bands'
+        qp.log.info('n_bands: {:d} ({:s})  n_bands_extra: {:d} ({:s})'.format(
+            self.n_bands, n_bands_method,
+            self.n_bands_extra, n_bands_extra_method))
 
         # Initialize wave-function basis:
         self.basis = qp.construct(
