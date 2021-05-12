@@ -211,3 +211,11 @@ def _isub(self, other):
     else:
         self.proj = None
     return self
+
+
+def _getitem(self, index):
+    'Propagate slicing to coeff and proj if present'
+    coeff = self.coeff[index]
+    proj = None if (self.proj is None) else self.proj[index]
+    return qp.electrons.Wavefunction(self.basis, coeff, proj,
+                                     self.band_division)

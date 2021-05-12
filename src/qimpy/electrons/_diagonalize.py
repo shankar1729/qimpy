@@ -56,6 +56,10 @@ class Davidson:
         x += torch.exp(-x)  # don't modify x ~ 0
         return Cerr / x
 
+    def _regularize(self, C, C_norm):
+        'Regularize low-norm columns by setting to coordinate vectors'
+        pass  # TODO
+
     def __call__(self, n_iterations=None, eig_threshold=None):
         'Diagonalize Kohn-Sham Hamiltonian in electrons'
         electrons = self.electrons
@@ -88,11 +92,16 @@ class Davidson:
             n_bands_cur = C.n_bands()
 
             # Compute subspace expansion after dropping converged eigenpairs:
-            # TODO: handle converged eigenpairs
-            KEref = C.norm('ke')  # reference KE for preconditioning
-            Cexp = self._precondition(HC - C.overlap() * E[..., None, None],
-                                      KEref)
-            Cexp *= (1./torch.sqrt(Cexp.norm('band')[..., None, None]))
+            # --- select unconverged eigenpairs
+            E_sel = E[:, :, n_eigs_done:, None, None]
+            C_sel = C[:, :, n_eigs_done:] if n_eigs_done else C
+            HC_sel = HC[:, :, n_eigs_done:] if n_eigs_done else HC
+            # --- compute subspace expansion
+            KEref = C_sel.norm('ke')  # reference KE for preconditioning
+            Cexp = self._precondition(HC_sel - C_sel.overlap() * E_sel, KEref)
+            Cexp_norm = Cexp.norm('band')
+            self._regularize(Cexp, Cexp_norm)
+            Cexp *= (1./torch.sqrt(Cexp_norm[..., None, None]))
             n_bands_new = n_bands_cur + Cexp.n_bands()
 
             # Expansion subspace overlaps:
@@ -134,15 +143,18 @@ class Davidson:
             del HCexp
             dE = torch.abs(E - E_new[..., :n_bands_cur])  # change in eigs
             E = E_new[..., :n_bands_next]
+            # print(torch.count_nonzero(dE[..., :n_bands] < eig_threshold,
+            #                          dim=-1), self.rc.i_proc)
 
             # Test convergence and report:
-            Eband = self.rc.comm_k.allreduce(
-                (w_sk * E[..., :n_bands]).sum().item(), qp.MPI.SUM)
-            deig_max = self.rc.comm_kb.allreduce(
-                dE[..., :n_bands].max().item(), qp.MPI.MAX)
-            n_eigs_done = self.rc.comm_kb.allreduce(
-                torch.count_nonzero(dE[..., :n_bands] < eig_threshold,
-                                    dim=-1).min().item(), qp.MPI.MIN)
+            Eband = self.rc.comm_k.allreduce((w_sk * E[..., :n_bands]).sum()
+                                             .item(), qp.MPI.SUM)
+            deig_max = self.rc.comm_kb.allreduce(dE[..., :n_bands].max()
+                                                 .item(), qp.MPI.MAX)
+            eig_done = (dE[..., :n_bands]
+                        < eig_threshold).flatten(0, 1).all(dim=0)
+            n_eigs_done = self.rc.comm_kb.allreduce(np.where(np.concatenate((
+                [True], eig_done.to(self.rc.cpu).numpy())))[0][-1], qp.MPI.MIN)
             converged = (n_eigs_done == n_bands)
             converge_failed = ((not inner_loop) and (not converged)
                                and (i_iter == n_iterations))
