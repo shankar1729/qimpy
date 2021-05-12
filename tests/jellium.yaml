@@ -17,4 +17,4 @@ electrons:
     - [0.00, 0.50,  0.00, N]
     - [0.00, 0.00,  0.00, $\Gamma$]
     - [0.50, 0.50, -0.50, Z]
-  chefsi: { filter-order: 6}
+  #chefsi: { filter-order: 6}

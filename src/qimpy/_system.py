@@ -48,6 +48,9 @@ class System:
             comm=rc.comm_kb,  # parallelized on intra-replica comm
             ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff)
 
+        # HACK: need to systematize selection of what actions to perform
+        self.electrons.diagonalize()
+
 
 def construct(Class, params, object_name,
               **kwargs):

@@ -3,7 +3,8 @@ import numpy as np
 import torch
 from ._wavefunction_init import _randomize
 from ._wavefunction_split import _split_bands, _split_basis
-from ._wavefunction_ops import _norm, _dot, _matmul, _orthonormalize, \
+from ._wavefunction_ops import _norm, _dot, _overlap, \
+    _matmul, _orthonormalize, \
     _mul, _imul, _add, _iadd, _sub, _isub
 
 
@@ -16,6 +17,7 @@ class Wavefunction:
     norm = _norm
     dot = _dot  # dot product with another wavefunction
     __xor__ = _dot  # convenient shorthand C1 ^ C2 for dot product
+    overlap = _overlap  # apply overlap operator to wavefunction
     matmul = _matmul  # transform by a matrix in band space
     __matmul__ = _matmul  # shorthand C @ M for band-space transformation
     orthonormalize = _orthonormalize
@@ -78,3 +80,7 @@ class Wavefunction:
             self.proj = None  # invalidate any previous projections
             if randomize:
                 self.randomize()
+
+    def n_bands(self):
+        'Get number of bands in wavefunction'
+        return 0 if (self.coeff is None) else self.coeff.shape[2]

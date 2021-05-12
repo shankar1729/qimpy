@@ -157,6 +157,7 @@ class Electrons:
         self.C = qp.electrons.Wavefunction(self.basis, n_bands=self.n_bands)
         self.C.randomize()
         self.C = self.C.orthonormalize()
+        self.E = None
 
         # Initialize diagonalizer:
         n_options = np.count_nonzero([(d is not None)
@@ -174,8 +175,3 @@ class Electrons:
                 qp.electrons.CheFSI, chefsi, 'chefsi',
                 electrons=self)
         qp.log.info('diagonalization: ' + repr(self.diagonalize))
-
-        # HACK
-        Hsub = self.C ^ self.hamiltonian(self.C)
-        E, V = torch.linalg.eigh(Hsub)
-        qp.log.info(E)

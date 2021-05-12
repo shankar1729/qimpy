@@ -85,3 +85,29 @@ def ortho_matrix(O, use_cholesky=True):
         lbda, V = torch.linalg.eigh(O)
         return V @ ((1./torch.sqrt(lbda))[..., None]
                     * V.transpose(-2, -1).conj())
+
+
+def eighg(H, O, use_cholesky=True):
+    """Solve Hermitian generalized eigenvalue problem H @ V = O @ V @ E
+
+    Parameters
+    ----------
+    H : torch.Tensor
+        Set of complex Hermitian (in last two dimensions) matrices
+        to diagonalize, all dimensions before last two are batched over
+    O : torch.Tensor
+        Corresponding overlap (metric) matrices, with same size as H.
+        Must additionally be positive-definite.
+    use_cholesky : bool, default: True
+        See :meth:`qimpy.utils.ortho_matrix`
+
+    Returns
+    -------
+    E : torch.Tensor
+        Real eigenvalues (shape = H.shape[:-1])
+    V : torch.Tensor
+        Eigenvectors (same shape as H and O)
+    """
+    U = ortho_matrix(O, use_cholesky)
+    E, V = torch.linalg.eigh(U.transpose(-2, -1).conj() @ (H @ U))
+    return E, U @ V  # transform eigenvectors back to original basis

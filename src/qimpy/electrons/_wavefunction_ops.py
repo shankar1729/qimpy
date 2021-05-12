@@ -89,6 +89,14 @@ def _dot(self, other, overlap=False):
     return result
 
 
+def _overlap(self):
+    '''Return wavefunction with overlap operator applied.
+    This is just a factor of unit cell volume for norm-conserving
+    pseudopotentials, but includes augmentation terms for ultrasoft
+    and PAW pseudopotentials'''
+    return self * self.basis.lattice.volume  # TODO: overlap augmentation
+
+
 def _matmul(self, mat):
     '''Compute a matrix transformation (such as rotation) along the band
     dimension of wavefunction (self). For convenience, this can also be
@@ -131,20 +139,33 @@ def _orthonormalize(self, use_cholesky=True):
 
 
 def _mul(self, scale):
-    if not isinstance(scale, float):
+    is_float = isinstance(scale, float)
+    is_suitable_tensor = (isinstance(scale, torch.Tensor)
+                          and len(scale.shape) == 5)
+    if not (is_float or is_suitable_tensor):
         return NotImplemented
+    # Check whether bands are just scaled overall:
+    is_band_scale = is_float or (scale.shape[-2:] == (1, 1))
     coeff = self.coeff * scale
-    proj = ((self.proj * scale) if self.proj else None)
+    proj = ((self.proj * scale) if (self.proj and is_band_scale) else None)
     return qp.electrons.Wavefunction(self.basis, coeff, proj,
                                      self.band_division)
 
 
 def _imul(self, scale):
-    if not isinstance(scale, float):
+    is_float = isinstance(scale, float)
+    is_suitable_tensor = (isinstance(scale, torch.Tensor)
+                          and len(scale.shape) == 5)
+    if not (is_float or is_suitable_tensor):
         return NotImplemented
+    # Check whether bands are just scaled overall:
+    is_band_scale = is_float or (scale.shape[-2:] == (1, 1))
     self.coeff *= scale
     if self.proj:
-        self.proj *= scale
+        if is_band_scale:
+            self.proj *= scale
+        else:
+            self.proj = None
     return self
 
 
