@@ -12,7 +12,8 @@ class Electrons:
     def __init__(self, *, rc, lattice, ions, symmetries,
                  k_mesh=None, k_path=None,
                  spin_polarized=False, spinorial=False,
-                 fillings=None, basis=None, n_bands=None):
+                 fillings=None, basis=None, n_bands=None,
+                 davidson=None, chefsi=None):
         '''
         Parameters
         ----------
@@ -55,26 +56,34 @@ class Electrons:
             use 1.5 times the minimum number. Alternately, 'atomic' sets
             the number of bands to the number of atomic orbitals. Finally,
             an integer explicitly sets the number of bands.
+        davidson : qimpy.electrons.Davidson or dict, optional
+            Diagonalize Kohm-Sham Hamiltonian using the Davidson method.
+            Specify only one of davidson or chefsi.
+            Default: use default qimpy.electrons.Davidson()
+        chefsi : qimpy.electrons.CheFSI or dict, optional
+            Diagonalize Kohm-Sham Hamiltonian using the Chebyshev Filter
+            Subspace Iteration (CheFSI) method.
+            Specify only one of davidson or chefsi.
+            Default: None
         '''
         self.rc = rc
         qp.log.info('\n--- Initializing Electrons ---')
 
         # Initialize k-points:
-        if k_mesh is None:
-            if k_path is None:
-                self.kpoints = qp.electrons.Kmesh(  # Gamma-only
-                    rc=rc, symmetries=symmetries, lattice=lattice)
-            else:
-                self.kpoints = qp.construct(
-                    qp.electrons.Kpath, k_path, 'k_path',
-                    rc=rc, lattice=lattice)
-        else:
-            if k_path is None:
-                self.kpoints = qp.construct(
-                    qp.electrons.Kmesh, k_mesh, 'k_mesh',
-                    rc=rc, symmetries=symmetries, lattice=lattice)
-            else:
-                raise ValueError('Cannot use both k-mesh and k-path')
+        n_options = np.count_nonzero([(k is not None)
+                                      for k in (k_mesh, k_path)])
+        if n_options == 0:
+            k_mesh = {}  # Gamma-only
+        if n_options > 1:
+            raise ValueError('Cannot use both k-mesh and k-path')
+        if k_mesh is not None:
+            self.kpoints = qp.construct(
+                qp.electrons.Kmesh, k_mesh, 'k_mesh',
+                rc=rc, symmetries=symmetries, lattice=lattice)
+        if k_path is not None:
+            self.kpoints = qp.construct(
+                qp.electrons.Kpath, k_path, 'k_path',
+                rc=rc, lattice=lattice)
 
         # Initialize spin:
         self.spin_polarized = spin_polarized
@@ -126,6 +135,23 @@ class Electrons:
         self.C = qp.electrons.Wavefunction(self.basis, n_bands=self.n_bands)
         self.C.randomize()
         self.C = self.C.orthonormalize()
+
+        # Initialize diagonalizer:
+        n_options = np.count_nonzero([(d is not None)
+                                      for d in (davidson, chefsi)])
+        if n_options == 0:
+            davidson = {}
+        if n_options > 1:
+            raise ValueError('Cannot use both davidson and chefsi')
+        if davidson is not None:
+            self.diagonalize = qp.construct(
+                qp.electrons.Davidson, davidson, 'davidson',
+                electrons=self)
+        if chefsi is not None:
+            self.diagonalize = qp.construct(
+                qp.electrons.CheFSI, chefsi, 'chefsi',
+                electrons=self)
+        qp.log.info('diagonalization: ' + repr(self.diagonalize))
 
         # HACK
         Hsub = self.C ^ self.hamiltonian(self.C)
