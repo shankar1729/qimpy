@@ -30,3 +30,4 @@ ions:
 electrons:
   basis:
     real-wavefunctions: yes
+#  chefsi: {filter-order: 10}

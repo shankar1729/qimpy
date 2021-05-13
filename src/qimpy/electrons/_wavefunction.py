@@ -5,7 +5,7 @@ from ._wavefunction_init import _randomize, _randomize_selected
 from ._wavefunction_split import _split_bands, _split_basis
 from ._wavefunction_ops import _norm, _dot, _overlap, \
     _matmul, _orthonormalize, \
-    _mul, _imul, _add, _iadd, _sub, _isub, _getitem
+    _mul, _imul, _add, _iadd, _sub, _isub, _getitem, _cat
 
 
 class Wavefunction:
@@ -30,6 +30,7 @@ class Wavefunction:
     __sub__ = _sub
     __isub__ = _isub
     __getitem__ = _getitem
+    cat = _cat  # join wavefunctions
 
     def __init__(self, basis, coeff=None, proj=None, band_division=None,
                  n_bands=0, n_spins=0, n_spinor=0, randomize=False):

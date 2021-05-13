@@ -218,3 +218,12 @@ def _getitem(self, index):
     proj = None if (self.proj is None) else self.proj[index]
     return qp.electrons.Wavefunction(self.basis, coeff, proj,
                                      self.band_division)
+
+
+def _cat(self, other, dim=2):
+    'Join wavefunctions along specified dimension (default: 2 => bands)'
+    coeff = torch.cat((self.coeff, other.coeff), dim=dim)
+    proj = (None if ((self.proj is None) or (other.proj is None))
+            else torch.cat((self.proj, other.proj), dim=dim))
+    return qp.electrons.Wavefunction(self.basis, coeff, proj,
+                                     self.band_division)

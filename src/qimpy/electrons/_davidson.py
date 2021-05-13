@@ -77,17 +77,35 @@ class Davidson:
         C.randomize_selected(i_spin, i_k, i_band, seed=i_iter)
         norm[i_spin, i_k, i_band] = 1.
 
-    def __call__(self, n_iterations=None, eig_threshold=None):
+    def _get_Eband(self, E):
+        'Compute the sum over band eigenvalues, averaged over k'
+        electrons = self.electrons
+        return self.rc.comm_k.allreduce((
+            electrons.w_spin * electrons.basis.wk.view(1, -1, 1)
+            * E[..., :electrons.n_bands]).sum().item(), qp.MPI.SUM)
+
+    def _check_deigs(self, dE, eig_threshold):
+        '''Return maximum change in eigenvalues and how many
+        eigenvalues are converged at all spin and k'''
+        n_bands = self.electrons.n_bands
+        deig_max = self.rc.comm_kb.allreduce(dE[..., :n_bands].max().item(),
+                                             qp.MPI.MAX)
+        eigs_pending = torch.where((dE[..., :n_bands] > eig_threshold)
+                                   .flatten(0, 1).any(dim=0))[0]
+        n_eigs_done = self.rc.comm_kb.allreduce(
+            eigs_pending[0].item() if len(eigs_pending) else n_bands,
+            qp.MPI.MIN)
+        return deig_max, n_eigs_done
+
+    def __call__(self, n_iterations=None, eig_threshold=None, helper=False):
         'Diagonalize Kohn-Sham Hamiltonian in electrons'
         electrons = self.electrons
         C, electrons.C = electrons.C, None  # don't keep copy to save memory
-        E = electrons.E
         n_spins = electrons.n_spins
         nk_mine = electrons.kpoints.n_mine
-        w_sk = electrons.w_spin * electrons.basis.wk.view(1, -1, 1)
         n_bands = electrons.n_bands
         n_bands_max = electrons.n_bands + electrons.n_bands_extra
-        inner_loop = n_iterations or eig_threshold
+        inner_loop = (n_iterations or eig_threshold) and (not helper)
         n_iterations = n_iterations if n_iterations else self.n_iterations
         eig_threshold = eig_threshold if eig_threshold else self.eig_threshold
 
@@ -100,8 +118,7 @@ class Davidson:
         E, V = torch.linalg.eigh(C ^ HC)  # diagonalize subspace Hamiltonian
         C = C @ V  # switch to eigen-basis
         HC = HC @ V  # switch to eigen-basis
-        Eband = self.rc.comm_k.allreduce(
-            (w_sk * E[..., :n_bands]).sum().item(), qp.MPI.SUM)
+        Eband = self._get_Eband(E)
         self._report(0, Eband, inner_loop=inner_loop)
         n_eigs_done = 0
 
@@ -160,27 +177,22 @@ class Davidson:
             del HCexp
             dE = torch.abs(E - E_new[..., :n_bands_cur])  # change in eigs
             E = E_new[..., :n_bands_next]
-            # print(torch.count_nonzero(dE[..., :n_bands] < eig_threshold,
-            #                          dim=-1), self.rc.i_proc)
 
             # Test convergence and report:
-            Eband = self.rc.comm_k.allreduce((w_sk * E[..., :n_bands]).sum()
-                                             .item(), qp.MPI.SUM)
-            deig_max = self.rc.comm_kb.allreduce(dE[..., :n_bands].max()
-                                                 .item(), qp.MPI.MAX)
-            eigs_pending = torch.where((dE[..., :n_bands] > eig_threshold)
-                                       .flatten(0, 1).any(dim=0))[0]
-            n_eigs_done = self.rc.comm_kb.allreduce(
-                eigs_pending[0].item() if len(eigs_pending) else n_bands,
-                qp.MPI.MIN)
+            Eband = self._get_Eband(E)
+            deig_max, n_eigs_done = self._check_deigs(dE, eig_threshold)
             converged = (n_eigs_done == n_bands)
-            converge_failed = ((not inner_loop) and (not converged)
-                               and (i_iter == n_iterations))
+            converge_failed = ((i_iter == n_iterations)
+                               and (not (inner_loop or helper or converged)))
             self._report(i_iter, Eband, inner_loop=inner_loop,
                          deig_max=deig_max, n_eigs_done=n_eigs_done,
                          converged=converged, converge_failed=converge_failed)
             if converged:
                 break
+
+        # Pass on results to other solver (CheFSI), if a helper:
+        if helper:
+            return E, C, HC  # Note that electrons.C is still None
 
         # Store results:
         electrons.C = C
