@@ -175,3 +175,8 @@ class Electrons:
                 qp.electrons.CheFSI, chefsi, 'chefsi',
                 electrons=self)
         qp.log.info('diagonalization: ' + repr(self.diagonalize))
+
+    def output(self):
+        'Save any configured outputs (TODO: systematize this)'
+        if isinstance(self.kpoints, qp.electrons.Kpath):
+            self.kpoints.plot(self.E[..., :self.n_bands], 'bandstruct.pdf')

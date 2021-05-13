@@ -52,6 +52,7 @@ class System:
         'Run any actions specified in the input'
         # TODO: systematize selection of what actions to perform
         self.electrons.diagonalize()
+        self.electrons.output()
 
 
 def construct(Class, params, object_name,
