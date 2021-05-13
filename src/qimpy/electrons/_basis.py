@@ -13,7 +13,7 @@ class Basis(qp.utils.TaskDivision):
     def __init__(self, *, rc, lattice, ions, symmetries,
                  kpoints, n_spins, n_spinor,
                  ke_cutoff=20., real_wavefunctions=False, grid=None,
-                 fft_block_size=16):
+                 fft_block_size=1):
         '''
         Parameters
         ----------
@@ -45,10 +45,10 @@ class Basis(qp.utils.TaskDivision):
         grid : dict, optional
             Optionally override parameters (such as shape or ke_cutoff)
             of the grid (qimpy.grid.Grid) used for wavefunction operations.
-        fft_block_size : int, default: 16
-            Number of wavefunction FFTs to perform simultaneously.
-            Higher numbers require more memory, but can achieve better
-            occupancy of GPUs or high-core-count CPUs.
+        fft_block_size : int, default: 1
+            Number of wavefunctionbands to FFT simultaneously.
+            Higher numbers require more memory, but can achieve
+            better occupancy of GPUs or high-core-count CPUs.
         '''
         self.rc = rc
         self.lattice = lattice

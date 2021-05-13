@@ -16,8 +16,6 @@ electrons:
     ##offset: [0.001, 0, 0] #Slightly offset for perturbation
     #offset: [0.5, 0.5, 0.5] #Monkhorst-Pack
     #size: [4, 4, 4]
-  basis:
-    fft-block-size: 1
   n-bands: 10
   n-bands-extra: 5
   k-path:

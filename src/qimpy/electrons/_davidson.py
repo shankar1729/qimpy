@@ -52,11 +52,14 @@ class Davidson:
     def _precondition(self, Cerr, KEref):
         '''Inverse-kinetic preconditioner on the Cerr in eigenpairs,
         using the per-band kinetic energy KEref'''
+        watch = qp.utils.StopWatch('Davidson.precondition', self.rc)
         basis = self.electrons.basis
         x = (basis.get_ke(basis.mine)[None, :, None, None, :]
              / KEref[..., None, None])
         x += torch.exp(-x)  # don't modify x ~ 0
-        return Cerr / x
+        result = Cerr / x
+        watch.stop()
+        return result
 
     def _regularize(self, C, norm, i_iter):
         '''Regularize low-norm bands of C by randomizing them,

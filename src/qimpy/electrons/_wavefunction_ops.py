@@ -67,7 +67,7 @@ def _dot(self, other, overlap=False):
     basis = self.basis
     assert(basis is other.basis)
     assert(not self.band_division)
-    watch = qp.utils.StopWatch('Wavefunction.overlap', basis.rc)
+    watch = qp.utils.StopWatch('Wavefunction.dot', basis.rc)
     # Prepare left operand:
     C1 = (self.coeff * basis.Gweight_mine.view(1, 1, 1, 1, -1)
           if basis.real_wavefunctions

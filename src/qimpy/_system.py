@@ -48,6 +48,9 @@ class System:
             comm=rc.comm_kb,  # parallelized on intra-replica comm
             ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff)
 
+        qp.log.info('\nInitialization completed at t[s]: {:.2f}\n'.format(
+            rc.clock()))
+
     def run(self):
         'Run any actions specified in the input'
         # TODO: systematize selection of what actions to perform
