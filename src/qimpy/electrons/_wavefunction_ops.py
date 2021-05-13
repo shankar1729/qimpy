@@ -14,7 +14,7 @@ def _norm(self, mode='all'):
         If 'band', return a n_spins x nk_mine x n_bands tensor of floats
         containing the norm of each band.
         If 'ke', return a n_spins x nk_mine x n_bands tensor of floats
-        containing the kinetic energy of each band.
+        containing the kinetic energy of each band (assumes pre-normalized)
 
     Returns
     -------
@@ -38,7 +38,7 @@ def _norm(self, mode='all'):
     if basis.n_procs > 1:
         basis.rc.comm_b.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(result),
                                   op=qp.MPI.SUM)
-    return result
+    return result if (mode == 'ke') else result.sqrt()
 
 
 def _dot(self, other, overlap=False):

@@ -102,7 +102,7 @@ class Davidson:
             Cexp = self._precondition(HC_sel - C_sel.overlap() * E_sel, KEref)
             norm_exp = Cexp.norm('band')
             self._regularize(Cexp, norm_exp)
-            Cexp *= (1./torch.sqrt(norm_exp[..., None, None]))
+            Cexp *= (1./norm_exp[..., None, None])
             n_bands_new = n_bands_cur + Cexp.n_bands()
 
             # Expansion subspace overlaps:
