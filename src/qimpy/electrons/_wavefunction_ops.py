@@ -34,7 +34,7 @@ def _norm(self, mode='all'):
 
     result = ((coeff_sq @ basis.Gweight_mine).sum(dim=-1)
               if basis.real_wavefunctions
-              else coeff_sq.sum(dim=(-2, -1))) * basis.lattice.volume
+              else coeff_sq.sum(dim=(-2, -1)))
     if basis.n_procs > 1:
         basis.rc.comm_b.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(result),
                                   op=qp.MPI.SUM)
@@ -53,9 +53,9 @@ def _dot(self, other, overlap=False):
         Dimensions must match self for spinor and basis, can differ for bands,
         and must be broadcastable for preceding dimensions (spin and k)
     overlap: bool, default: False
-        If True, include the overlap operator in the product. This amounts to
-        multiplying by unit cell volume for norm-conserving pseudopotentials,
-        and includes augmentation for ultrasoft and PAW pseudopotentials
+        If True, include the overlap operator in the product. The overlap
+        operator is identity for norm-conserving pseudopotentials, but
+        includes augmentation for ultrasoft and PAW pseudopotentials
 
     Returns
     -------
@@ -81,20 +81,19 @@ def _dot(self, other, overlap=False):
     if basis.n_procs > 1:
         basis.rc.comm_b.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(result),
                                   op=qp.MPI.SUM)
-    # Overlap factor and augmentation:
+    # Overlap augmentation:
     if overlap:
-        result *= basis.lattice.volume
-        # TODO: overlap augmentation goes here when adding ultrasoft / PAW
+        pass  # TODO: augment overlap here when adding ultrasoft / PAW
     watch.stop()
     return result
 
 
 def _overlap(self):
     '''Return wavefunction with overlap operator applied.
-    This is just a factor of unit cell volume for norm-conserving
-    pseudopotentials, but includes augmentation terms for ultrasoft
-    and PAW pseudopotentials'''
-    return self * self.basis.lattice.volume  # TODO: overlap augmentation
+    This is identity and returns a view of the original wavefunction
+    for norm-conserving pseudopotentials, but includes augmentation terms
+    for ultrasoft and PAW pseudopotentials'''
+    return self  # TODO: augment overlap here when adding ultrasoft / PAW
 
 
 def _matmul(self, mat):

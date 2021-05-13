@@ -75,7 +75,7 @@ class Davidson:
         # Randomize select and update the norm (just an estimate):
         basis = self.electrons.basis
         C.randomize_selected(i_spin, i_k, i_band, seed=i_iter)
-        norm[i_spin, i_k, i_band] = np.sqrt(basis.lattice.volume)
+        norm[i_spin, i_k, i_band] = 1.
 
     def __call__(self, n_iterations=None, eig_threshold=None):
         'Diagonalize Kohn-Sham Hamiltonian in electrons'

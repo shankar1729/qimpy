@@ -16,10 +16,9 @@ def _apply_ke(self, C):
     '''
     watch = qp.utils.StopWatch('Basis.apply_ke', self.rc)
     basis_slice = (slice(None) if C.band_division else self.mine)
-    ke_op = (self.lattice.volume
-             * self.get_ke(basis_slice)[None, :, None, None, :])
+    coeff = C.coeff * self.get_ke(basis_slice)[None, :, None, None, :]
     watch.stop()
-    return qp.electrons.Wavefunction(self, coeff=(C.coeff * ke_op),
+    return qp.electrons.Wavefunction(self, coeff,
                                      band_division=C.band_division)
 
 
@@ -82,7 +81,6 @@ def _apply_potential(self, V, C):
         # Advance to next block of data:
         b_start = b_stop
         b_stop += b_size
-    coeff *= self.lattice.volume
 
     # Enforce hermitian conjugacy for real wavefunctions:
     if self.real_wavefunctions:
