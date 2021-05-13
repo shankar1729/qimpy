@@ -1,7 +1,7 @@
 import qimpy as qp
 import numpy as np
 import torch
-from ._wavefunction_init import _randomize
+from ._wavefunction_init import _randomize, _randomize_selected
 from ._wavefunction_split import _split_bands, _split_basis
 from ._wavefunction_ops import _norm, _dot, _overlap, \
     _matmul, _orthonormalize, \
@@ -12,6 +12,7 @@ class Wavefunction:
     '''TODO: document class Wavefunction'''
 
     randomize = _randomize
+    randomize_selected = _randomize_selected
     split_bands = _split_bands
     split_basis = _split_basis
     norm = _norm

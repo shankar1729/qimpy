@@ -25,6 +25,8 @@ class Davidson:
         self.n_iterations = n_iterations
         self.eig_threshold = eig_threshold
         self.line_prefix = 'Davidson'
+        self._norm_cut = np.sqrt(electrons.basis.n_tot  # estimate round-off
+                                 * 1E-15)  # to spot null bands in _regularize
 
     def __repr__(self):
         return 'Davidson(n_iterations: {:d}, eig_threshold: {:g})'.format(
@@ -56,10 +58,21 @@ class Davidson:
         x += torch.exp(-x)  # don't modify x ~ 0
         return Cerr / x
 
-    def _regularize(self, C, norm):
-        'Regularize low-norm bands of C by setting to coordinate vectors'
-        sel = torch.where(norm)
-        pass  # TODO
+    def _regularize(self, C, norm, i_iter):
+        '''Regularize low-norm bands of C by randomizing them,
+        using seed based on current iteration number i_iter'''
+        # Find low-norm bands:
+        if self.rc.n_procs_b > 1:
+            # guard against machine-precision differences between procs
+            self.rc.comm_b.Bcast(qp.utils.BufferView(norm))
+        low_norm = (norm < self._norm_cut)
+        i_spin, i_k, i_band = torch.where(low_norm)
+        if not len(i_spin):
+            return  # no regularization needed
+        # Randomize select and update the norm (just an estimate):
+        basis = self.electrons.basis
+        C.randomize_selected(i_spin, i_k, i_band, seed=i_iter)
+        norm[i_spin, i_k, i_band] = np.sqrt(basis.lattice.volume)
 
     def __call__(self, n_iterations=None, eig_threshold=None):
         'Diagonalize Kohn-Sham Hamiltonian in electrons'
@@ -101,7 +114,7 @@ class Davidson:
             KEref = C_sel.norm('ke')  # reference KE for preconditioning
             Cexp = self._precondition(HC_sel - C_sel.overlap() * E_sel, KEref)
             norm_exp = Cexp.norm('band')
-            self._regularize(Cexp, norm_exp)
+            self._regularize(Cexp, norm_exp, i_iter)
             Cexp *= (1./norm_exp[..., None, None])
             n_bands_new = n_bands_cur + Cexp.n_bands()
 
@@ -152,10 +165,11 @@ class Davidson:
                                              .item(), qp.MPI.SUM)
             deig_max = self.rc.comm_kb.allreduce(dE[..., :n_bands].max()
                                                  .item(), qp.MPI.MAX)
-            eig_done = (dE[..., :n_bands]
-                        < eig_threshold).flatten(0, 1).all(dim=0)
-            n_eigs_done = self.rc.comm_kb.allreduce(np.where(np.concatenate((
-                [True], eig_done.to(self.rc.cpu).numpy())))[0][-1], qp.MPI.MIN)
+            eigs_pending = torch.where((dE[..., :n_bands] > eig_threshold)
+                                       .flatten(0, 1).any(dim=0))[0]
+            n_eigs_done = self.rc.comm_kb.allreduce(
+                eigs_pending[0].item() if len(eigs_pending) else n_bands,
+                qp.MPI.MIN)
             converged = (n_eigs_done == n_bands)
             converge_failed = ((not inner_loop) and (not converged)
                                and (i_iter == n_iterations))
