@@ -159,6 +159,22 @@ class Electrons:
         self.C = self.C.orthonormalize()
         self.E = None
 
+        # Initialize a test Kohn-Sham potential (nearly-free electron model):
+        # NOTE: this is only a placeholder before implementing ion potentials
+        def get_potential():
+            V0 = -0.09  # strength of potential in Eh-a0^3 (per atom)
+            a0 = 1.1  # width of the potential in bohrs
+            lattice = self.basis.lattice
+            grid = self.basis.grid
+            if not ions.n_ions:
+                return torch.zeros(grid.shape, device=self.rc.device)
+            iG = grid.get_mesh('H').to(float)  # half-space
+            Gsq = ((iG @ lattice.Gbasis.T)**2).sum(dim=-1)
+            Vtilde = V0 * torch.exp(-0.5*(a0**2)*Gsq) * torch.exp(
+                (2j*np.pi)*(iG @ ions.positions.T)).sum(dim=-1)
+            return grid.irfft(Vtilde)
+        self.V_ks = get_potential()
+
         # Initialize diagonalizer:
         n_options = np.count_nonzero([(d is not None)
                                       for d in (davidson, chefsi)])

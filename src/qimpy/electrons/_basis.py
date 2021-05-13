@@ -1,14 +1,19 @@
 import qimpy as qp
 import numpy as np
 import torch
+from ._basis_ops import _apply_ke, _apply_potential
 
 
 class Basis(qp.utils.TaskDivision):
     'TODO: document class Basis'
 
+    apply_ke = _apply_ke
+    apply_potential = _apply_potential
+
     def __init__(self, *, rc, lattice, ions, symmetries,
                  kpoints, n_spins, n_spinor,
-                 ke_cutoff=20., real_wavefunctions=False, grid=None):
+                 ke_cutoff=20., real_wavefunctions=False, grid=None,
+                 fft_block_size=16):
         '''
         Parameters
         ----------
@@ -40,6 +45,10 @@ class Basis(qp.utils.TaskDivision):
         grid : dict, optional
             Optionally override parameters (such as shape or ke_cutoff)
             of the grid (qimpy.grid.Grid) used for wavefunction operations.
+        fft_block_size : int, default: 16
+            Number of wavefunction FFTs to perform simultaneously.
+            Higher numbers require more memory, but can achieve better
+            occupancy of GPUs or high-core-count CPUs.
         '''
         self.rc = rc
         self.lattice = lattice
@@ -47,6 +56,7 @@ class Basis(qp.utils.TaskDivision):
         self.kpoints = kpoints
         self.n_spins = n_spins
         self.n_spinor = n_spinor
+        self.fft_block_size = int(fft_block_size)
 
         # Select subset of k-points relevant on this process:
         k_mine = slice(kpoints.i_start, kpoints.i_stop)
@@ -74,7 +84,7 @@ class Basis(qp.utils.TaskDivision):
 
         # Initialize basis:
         self.iG = self.grid.get_mesh('H' if self.real_wavefunctions
-                                     else 'G').reshape((3, -1)).T
+                                     else 'G').view(-1, 3)
         within_cutoff = (self.get_ke() < ke_cutoff)  # mask of which iG to keep
         # --- determine statistics of basis count across all k:
         self.n = within_cutoff.count_nonzero(dim=1)

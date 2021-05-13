@@ -83,6 +83,21 @@ class Wavefunction:
             if randomize:
                 self.randomize()
 
+    def zeros_like(self, n_bands=0):
+        '''Create a zero Wavefunction similar to the present one,
+        optionally changing only the number of bands'''
+        n_bands = (n_bands if n_bands else self.coeff.shape[2])
+        return Wavefunction(self.basis, band_division=self.band_division,
+                            n_bands=n_bands, n_spins=self.coeff.shape[0],
+                            n_spinor=self.coeff.shape[3])
+
+    def clone(self):
+        'Create a copy'
+        return Wavefunction(
+            self.basis, self.coeff.clone().detach(),
+            None if (self.proj is None) else self.proj.clone().detach(),
+            band_division=self.band_division)
+
     def n_bands(self):
         'Get number of bands in wavefunction'
         return 0 if (self.coeff is None) else self.coeff.shape[2]

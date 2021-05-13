@@ -110,7 +110,8 @@ class Grid:
         Returns
         -------
         Tensor
-            Integer tensor with dimensions (3,) + shape_mine, where
+            Integer tensor with dimensions shape_mine + (3,), where
             shape_mine is the relevant local dimensions of requested space
         '''
-        return torch.stack(torch.meshgrid(*self.mesh1D[space]))
+        return torch.stack(
+            torch.meshgrid(*self.mesh1D[space])).permute(1, 2, 3, 0)
