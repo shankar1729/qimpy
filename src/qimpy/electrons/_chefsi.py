@@ -63,9 +63,9 @@ class CheFSI(Davidson):
 
             # Filter parameters:
             b_up = (electrons.basis.ke_cutoff  # upper bound on KE
-                    + electrons.V_ks.max().item())  # upper bound on PE
-            b_lo = E.max().item()  # Lower end of filter suppression interval
-            a_lo = E.min().item()  # Point that sets filter scaling
+                    + electrons.V_ks.max())  # upper bound on PE
+            b_lo = E.max(dim=2)[0]  # Lower end of filter suppression interval
+            a_lo = E.min(dim=2)[0]  # Point that sets filter scaling
 
             # Seperate converged eigenstates, if any:
             if n_eigs_done:
@@ -73,25 +73,25 @@ class CheFSI(Davidson):
                 HCdone, HC = HC[:, :, :n_eigs_done], HC[:, :, n_eigs_done:]
 
             # Apply scaled Chebyshev filter:
-            b_diff = 0.5 * (b_up - b_lo)
-            b_mid = 0.5 * (b_lo + b_up)
-            sigma = b_diff/(b_mid - a_lo)
+            b_diff = 0.5 * (b_up - b_lo).view(1, -1, 1, 1, 1)
+            b_mid = 0.5 * (b_lo + b_up).view(1, -1, 1, 1, 1)
+            sigma = b_diff/(b_mid - a_lo.view(1, -1, 1, 1, 1))
             tau = 2/sigma
             Y = (HC - b_mid*C) * (sigma/b_diff)
             del HC
             Y = Y.split_bands()  # start of operations in band-split mode
             C = C.split_bands()
             for i_filter in range(self.filter_order - 2):
-                sigmaNew = 1/(tau - sigma)
+                sigma_new = 1/(tau - sigma)
                 HY = electrons.hamiltonian(Y)
                 Yt = HY - b_mid * Y
-                Yt *= (2*sigmaNew/b_diff)
-                Yt -= (sigma*sigmaNew) * C
+                Yt *= (2*sigma_new/b_diff)
+                Yt -= (sigma*sigma_new) * C
                 # cycle for next filter iteration:
                 HC = HY
                 C = Y
                 Y = Yt
-                sigma = sigmaNew
+                sigma = sigma_new
             del Yt, HY, HC, C
             # Note that Y is the highest order of the filter above
             # Return to basis-split mode here
