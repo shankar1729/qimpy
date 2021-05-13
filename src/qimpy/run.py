@@ -150,6 +150,16 @@ if __name__ == "__main__":
     # Initialize system with input parameters:
     system = qp.System(rc=rc, **inputDict)
 
+    # Dry-run bypass:
+    if args.dry_run:
+        qp.log.info('Dry run initialization successful: input is valid.')
+        rc.report_end()
+        qp.utils.StopWatch.print_stats()
+        exit()
+
+    # Perform specified actions:
+    system.run()
+
     # Report timings:
     rc.report_end()
     qp.utils.StopWatch.print_stats()
