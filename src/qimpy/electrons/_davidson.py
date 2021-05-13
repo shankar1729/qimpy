@@ -34,7 +34,7 @@ class Davidson:
                 inner_loop=False, converged=False, converge_failed=False):
         'Report iteration progress / convergence in standardized form'
         line_prefix = ('  ' if inner_loop else '') + self.line_prefix
-        line = line_prefix + ':  Iter: {:d}'.format(iteration)
+        line = line_prefix + ': {:d}'.format(iteration)
         line += '  Eband: {:+.11f}'.format(Eband)
         if deig_max:
             line += '  deig_max: {:.2e}'.format(deig_max)
@@ -56,8 +56,9 @@ class Davidson:
         x += torch.exp(-x)  # don't modify x ~ 0
         return Cerr / x
 
-    def _regularize(self, C, C_norm):
-        'Regularize low-norm columns by setting to coordinate vectors'
+    def _regularize(self, C, norm):
+        'Regularize low-norm bands of C by setting to coordinate vectors'
+        sel = torch.where(norm)
         pass  # TODO
 
     def __call__(self, n_iterations=None, eig_threshold=None):
@@ -99,9 +100,9 @@ class Davidson:
             # --- compute subspace expansion
             KEref = C_sel.norm('ke')  # reference KE for preconditioning
             Cexp = self._precondition(HC_sel - C_sel.overlap() * E_sel, KEref)
-            Cexp_norm = Cexp.norm('band')
-            self._regularize(Cexp, Cexp_norm)
-            Cexp *= (1./torch.sqrt(Cexp_norm[..., None, None]))
+            norm_exp = Cexp.norm('band')
+            self._regularize(Cexp, norm_exp)
+            Cexp *= (1./torch.sqrt(norm_exp[..., None, None]))
             n_bands_new = n_bands_cur + Cexp.n_bands()
 
             # Expansion subspace overlaps:
@@ -167,30 +168,3 @@ class Davidson:
         # Store results:
         electrons.C = C
         electrons.E = E
-
-
-class CheFSI(Davidson):
-    '''TODO: document class CheFSI'''
-
-    def __init__(self, *, electrons, n_iterations=100, eig_threshold=1E-8,
-                 filter_order=10):
-        '''
-        Parameters
-        ----------
-        n_iterations: int, default: 100
-            See :class:`Davidson`
-        eig_threshold: float, default: 1E-9
-            See :class:`Davidson`
-        filter_order: int, default: 10
-            Order of the Chebyshev filter, which amountd to the number of
-            Hamiltonian evaluations per band per eigenvalue iteration
-        '''
-        super().__init__(electrons=electrons, n_iterations=n_iterations,
-                         eig_threshold=eig_threshold)
-        self.filter_order = filter_order
-        self.line_prefix = 'CheFSI'
-
-    def __repr__(self):
-        return ('CheFSI(n_iterations: {:d}, eig_threshold: {:g}, filter_order:'
-                ' {:d})'.format(self.n_iterations, self.eig_threshold,
-                                self.filter_order))

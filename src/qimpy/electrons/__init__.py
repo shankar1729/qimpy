@@ -10,4 +10,5 @@ from ._kpoints import Kpoints, Kmesh, Kpath
 from ._fillings import Fillings
 from ._basis import Basis
 from ._wavefunction import Wavefunction
-from ._diagonalize import Davidson, CheFSI
+from ._davidson import Davidson
+from ._chefsi import CheFSI
