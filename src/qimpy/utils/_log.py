@@ -1,10 +1,13 @@
 import qimpy as qp
 import logging
 import sys
+from typing import Optional
 
 
-def log_config(*, output_file=None, mpi_log=None, mpi_comm=None,
-               append=True, verbose=False):
+def log_config(*, output_file: Optional[str] = None,
+               mpi_log: Optional[str] = None,
+               mpi_comm: Optional[qp.MPI.Comm] = None,
+               append: bool = True, verbose: bool = False):
     '''Configure logging globally for the qimpy library. It should typically
     only be necessary to call this once during start-up. Note that the default
     log configuration before calling this function is to print only warnings
@@ -15,20 +18,19 @@ def log_config(*, output_file=None, mpi_log=None, mpi_comm=None,
 
     Parameters
     ----------
-    output_file : str or None, optional
+    output_file
         Output file to write from MPI rank 0.
         Default = None implies log to stdout.
-    mpi_log : str or None, optional
+    mpi_log
         Higher-rank MPI processes will log to <mpi_log>.<process> if given.
         Default = None implies log only from head (rank=0) process.
-    mpi_comm : mpi4py.MPI.Intracomm or None, optional
+    mpi_comm
         MPI communicator whose rank determines logging behavior.
         Default = None implies use COMM_WORLD.
-    append : bool, optional
-        Whether log files should be appended or overwritten. Default: True.
-    verbose : bool, optional
+    append
+        Whether log files should be appended or overwritten.
+    verbose
         Whether to log debug information including module/line numbers of code.
-        Default: False.
     '''
 
     # Create handler with appropriate output file and mode, if any:

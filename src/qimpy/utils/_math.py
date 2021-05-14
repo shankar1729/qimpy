@@ -39,10 +39,10 @@ def ortho_matrix(O: torch.Tensor, use_cholesky: bool = True) -> torch.Tensor:
 
     Parameters
     ----------
-    O : torch.Tensor
+    O
         Overlap matrix / metric (Hermitian, positive definite) in last
         two dimensions, and batched over any preceding dimensions
-    use_cholesky : bool, default: True
+    use_cholesky
         If True, use Cholesky decomposition followed by a triangular solve,
         essentially amounting to Gram-Schmidt orthonormalization.
         If False, return the symmetric orthonormalization matrix calculated
@@ -71,13 +71,13 @@ def eighg(H: torch.Tensor, O: torch.Tensor,
 
     Parameters
     ----------
-    H : torch.Tensor
+    H
         Set of complex Hermitian (in last two dimensions) matrices
         to diagonalize, all dimensions before last two are batched over
-    O : torch.Tensor
+    O
         Corresponding overlap (metric) matrices, with same size as H.
         Must additionally be positive-definite.
-    use_cholesky : bool, default: True
+    use_cholesky
         See :meth:`qimpy.utils.ortho_matrix`
 
     Returns

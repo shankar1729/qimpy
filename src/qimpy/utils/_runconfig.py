@@ -16,22 +16,45 @@ class RunConfig:
     so that a single CUDA context is associated with this process.
     Otherwise, on multi-GPU systems, CUDA MPI will subsequently fail."""
 
+    comm: qp.MPI.Comm  #: Global communicator for QimPy
+    comm_r: qp.MPI.Comm  #: Inter-replica communicator
+    comm_kb: qp.MPI.Comm  #: Intra-replica (k and bands/basis) communicator
+    comm_k: qp.MPI.Comm  #: Inter k-point communicator
+    comm_b: qp.MPI.Comm  #: Inter bands/basis communicator
+    i_proc: int  #: Rank within `comm`
+    n_procs: int  #: Size of `comm`
+    is_head: bool  #: whether head of `comm`
+    process_grid: np.array  #: contains (`n_procs_r`, `n_procs_k`, `n_procs_b`)
+    n_procs_r: int  #: size of `comm_r`
+    i_proc_r: int  #: rank within `comm_r`
+    n_procs_kb: int  #: size of `comm_kb`
+    i_proc_kb: int  #: rank within `comm_kb`
+    n_procs_k: int  #: size of `comm_k`
+    i_proc_k: int  #: rank within `comm_k`
+    n_procs_b: int  #: size of `comm_b`
+    i_proc_b: int  #: rank within `comm_b`
+
+    cpu: torch.device  #: torch CPU device
+    device: torch.device \
+        #: torch device to be preferred for calculation (could be GPU)
+    use_cuda: bool  #: whether `device` is a CUDA GPU
+
     def __init__(self, *, comm: Optional[qp.MPI.Comm] = None,
                  cores: Optional[int] = None,
-                 process_grid: Tuple[int] = (-1, -1, -1)):
+                 process_grid: Tuple[int, int, int] = (-1, -1, -1)):
         """
         Parameters
         ----------
-        comm : mpi4py.MPI.Comm or None, optional
+        comm
             Top-level MPI communicator.
             Default (None) corresponds to mpi4py.MPI.COMM_WORLD.
-        cores : int or None, optional
+        cores
             Number of CPU cores (and hence torch threads) to use per process.
             Default (None) will divide up available physical cores equally
             between processes on each node.
             Note that the environment variable SLURM_CPUS_PER_TASK (typically
             set by SLURM) will override cores, if set.
-        process_grid : tuple of 3 ints, optional
+        process_grid
             Division of processes into a grid, where the dimensions in order
             are replicas (eg. in NEB or phonon perturbations), k-points and
             bands/basis (split over basis usually, and over bands for FFTs).
@@ -47,25 +70,27 @@ class RunConfig:
             determined from the number of available replicas / k-points."""
 
         # Set and report start time:
-        self.t_start = time.time()  # start time used by clock()
+        self.t_start: float = time.time()  #: start time used by :meth:`clock`
         qp.log.info('Start time: ' + time.ctime(self.t_start))
 
         # MPI initialization:
-        self.comm = qp.MPI.COMM_WORLD if (comm is None) else comm
+        self.comm = (qp.MPI.COMM_WORLD if (comm is None) else comm)
         self.i_proc = self.comm.Get_rank()
         self.n_procs = self.comm.Get_size()
         self.is_head = (self.i_proc == 0)
-        self.mpi_type = {  # Map from relevant torch to MPI datatypes
+        self.mpi_type: dict = {
             torch.int32: qp.MPI.INT,
             torch.int64: qp.MPI.LONG,
             torch.float32: qp.MPI.FLOAT,
             torch.float64: qp.MPI.DOUBLE,
             torch.complex64: qp.MPI.COMPLEX,
             torch.complex128: qp.MPI.DOUBLE_COMPLEX
-        }
+        }  #: Mapping from torch dtypes to MPI datatypes
 
         # Select GPU before initializing torch:
-        self.comm_node = self.comm.Split_type(qp.MPI.COMM_TYPE_SHARED)
+        self.comm_node: qp.MPI.Comm = self.comm.Split_type(
+            qp.MPI.COMM_TYPE_SHARED
+        )  #: Communicator for processes on same shared-memory node
         i_proc_node = self.comm_node.Get_rank()
         n_procs_node = self.comm_node.Get_size()
         cuda_devs = os.environ.get('CUDA_VISIBLE_DEVICES')
@@ -95,7 +120,8 @@ class RunConfig:
         # Threads:
         slurm_threads = os.environ.get('SLURM_CPUS_PER_TASK')
         if slurm_threads:
-            self.n_threads = int(slurm_threads)
+            self.n_threads: int = int(slurm_threads)  \
+                #: number of threads to use on each process
         elif cores is None:
             # Divide up threads available on node:
             n_cores = cpu_count(logical=False)
