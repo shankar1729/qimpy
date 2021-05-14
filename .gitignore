@@ -113,6 +113,9 @@ venv.bak/
 # KDevelop projects
 *.kdev4
 
+# PyCharm projects
+.idea
+
 # Spyder project settings
 .spyderproject
 .spyproject

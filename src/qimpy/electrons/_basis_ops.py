@@ -1,19 +1,14 @@
 import qimpy as qp
 import numpy as np
 import torch
+if False:
+    # Imports for type annotations:
+    from ._basis import Basis
+    from ._wavefunction import Wavefunction
 
 
-def _apply_ke(self, C):
-    '''Apply kinetic energy (KE) operator to wavefunction
-
-    Parameters
-    ----------
-    C : qp.electrons.Wavefunction
-
-    Returns
-    -------
-    qp.electrons.Wavefunction
-    '''
+def _apply_ke(self: 'Basis', C: 'Wavefunction') -> 'Wavefunction':
+    'Apply kinetic energy (KE) operator to wavefunction `C`'
     watch = qp.utils.StopWatch('Basis.apply_ke', self.rc)
     basis_slice = (slice(None) if C.band_division else self.mine)
     coeff = C.coeff * self.get_ke(basis_slice)[None, :, None, None, :]
@@ -22,19 +17,9 @@ def _apply_ke(self, C):
                                      band_division=C.band_division)
 
 
-def _apply_potential(self, V, C):
-    '''Apply potential to wavefunction
-
-    Parameters
-    ----------
-    V : torch.Tensor
-        Potential with dimensions C.basis.grid.shape
-    C : qp.electrons.Wavefunction
-
-    Returns
-    -------
-    qp.electrons.Wavefunction
-    '''
+def _apply_potential(self: 'Basis', V: torch.Tensor,
+                     C: 'Wavefunction') -> 'Wavefunction':
+    'Apply potential `V` to wavefunction `C`'
     shape = self.grid.shape
     assert V.shape == shape
 
