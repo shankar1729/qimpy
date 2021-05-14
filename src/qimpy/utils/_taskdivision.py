@@ -1,5 +1,6 @@
 import numpy as np
 import qimpy as qp
+from typing import Optional
 
 
 class TaskDivision:
@@ -24,7 +25,8 @@ class TaskDivision:
     n_mine : int
         number of tasks on current process"""
 
-    def __init__(self, n_tot, n_procs, i_proc, name=None):
+    def __init__(self, n_tot: int, n_procs: int, i_proc: int,
+                 name: Optional[str] = None):
         # Store inputs:
         self.n_tot = n_tot
         self.n_procs = n_procs
@@ -41,10 +43,10 @@ class TaskDivision:
             qp.log.info('{:s} division:  n_tot: {:d}  n_each: {:d}  imbalance:'
                         ' {:.0f}%'.format(name, n_tot, self.n_each, imbalance))
 
-    def whose(self, i):
+    def whose(self, i: int):
         'Return process index i_proc responsible for task i'
         return i // self.n_each
 
-    def is_mine(self, i):
+    def is_mine(self, i: int):
         'Return True if current process is responsible for task i, else False'
         return (i // self.n_each == self.i_proc)

@@ -1,8 +1,9 @@
 import qimpy as qp
 import numpy as np
 import torch
+
+# Imports for type annotations:
 if False:
-    # Imports for type annotations:
     from ._basis import Basis
     from ._wavefunction import Wavefunction
 

@@ -1,19 +1,10 @@
 import numpy as np
 import torch
+from typing import List, Tuple
 
 
-def prime_factorization(N):
-    '''Prime factorization of a number
-
-    Parameters
-    ----------
-    N : int
-        Number to factorize
-
-    Returns
-    -------
-    list of int
-        List of prime factors in ascending order'''
+def prime_factorization(N: int) -> List[int]:
+    'Get list of prime factors of `N` in ascending order'
     factors = []
     p = 2
     while p*p <= N:
@@ -26,19 +17,9 @@ def prime_factorization(N):
     return factors
 
 
-def fft_suitable(N):
-    '''Determine whether the prime factorization of N is suitable for
-    efficient FFTs, that is contains only 2, 3, 5 and 7.
-
-    Parameters
-    ----------
-    N : int
-        Candidate FFT dimension
-
-    Returns
-    -------
-    bool
-        True, if 2, 3, 5 and 7 are only prime factors, else False'''
+def fft_suitable(N: int) -> bool:
+    '''Check whether the prime factorization of `N` is suitable for
+    efficient FFTs, that is contains only 2, 3, 5 and 7.'''
     for p in [2, 3, 5, 7]:
         while N % p == 0:
             N /= p
@@ -47,14 +28,14 @@ def fft_suitable(N):
     return (N == 1)
 
 
-def ceildiv(num, den):
-    'Compute ceil(num/den) with int inputs, output and purely integer ops'
+def ceildiv(num: int, den: int) -> int:
+    'Compute ceil(num/den) with purely integer operations'
     return (num + den-1) // den
 
 
-def ortho_matrix(O, use_cholesky=True):
+def ortho_matrix(O: torch.Tensor, use_cholesky: bool = True) -> torch.Tensor:
     """Return orthonormalization matrix of a basis, given the overlap matrix
-    (metric) of that basis.
+    (metric) `O` of that basis.
 
     Parameters
     ----------
@@ -67,10 +48,6 @@ def ortho_matrix(O, use_cholesky=True):
         If False, return the symmetric orthonormalization matrix calculated
         by diagonalizing O, which may be more stable, but may be an order of
         magnitude slower than the default Cholesky method
-
-    Returns
-    -------
-    torch.Tensor (same dimensions as O)
     """
     assert(O.shape[-2] == O.shape[-1])  # check square
     if use_cholesky:
@@ -87,8 +64,10 @@ def ortho_matrix(O, use_cholesky=True):
                     * V.transpose(-2, -1).conj())
 
 
-def eighg(H, O, use_cholesky=True):
-    """Solve Hermitian generalized eigenvalue problem H @ V = O @ V @ E
+def eighg(H: torch.Tensor, O: torch.Tensor,
+          use_cholesky: bool = True) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Solve Hermitian generalized eigenvalue problem
+    `H` @ `V` = `O` @ `V` @ `E`
 
     Parameters
     ----------

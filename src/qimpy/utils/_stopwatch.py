@@ -2,6 +2,7 @@ import time
 import torch
 import qimpy as qp
 import numpy as np
+from ._runconfig import RunConfig
 
 
 class StopWatch:
@@ -14,7 +15,7 @@ class StopWatch:
     _stats = {}  #: timing statistics: list of durations by name
     _cuda_events = []  #: CUDA events for asynchronous timing on GPUs
 
-    def __init__(self, name, rc):
+    def __init__(self, name: str, rc: RunConfig):
         """
         Parameters
         ----------
@@ -45,7 +46,7 @@ class StopWatch:
             self.t_start = None  # prevents repeated stopping
 
     @classmethod
-    def _add_stat(cls, name, duration):
+    def _add_stat(cls, name: str, duration: float):
         "Add a single entry to the timing statistics"
         stats_entry = cls._stats.get(name)
         if stats_entry:

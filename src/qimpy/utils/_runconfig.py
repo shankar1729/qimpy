@@ -5,6 +5,7 @@ import torch
 import qimpy as qp
 import numpy as np
 from psutil import cpu_count
+from typing import Optional, Tuple
 
 
 class RunConfig:
@@ -15,11 +16,13 @@ class RunConfig:
     so that a single CUDA context is associated with this process.
     Otherwise, on multi-GPU systems, CUDA MPI will subsequently fail."""
 
-    def __init__(self, *, comm=None, cores=None, process_grid=(-1, -1, -1)):
+    def __init__(self, *, comm: Optional[qp.MPI.Comm] = None,
+                 cores: Optional[int] = None,
+                 process_grid: Tuple[int] = (-1, -1, -1)):
         """
         Parameters
         ----------
-        comm : mpi4py.MPI.COMM or None, optional
+        comm : mpi4py.MPI.Comm or None, optional
             Top-level MPI communicator.
             Default (None) corresponds to mpi4py.MPI.COMM_WORLD.
         cores : int or None, optional
@@ -157,7 +160,7 @@ class RunConfig:
             self.n_procs_b = self.comm_b.Get_size()
             self.i_proc_b = self.comm_b.Get_rank()
 
-    def provide_n_tasks(self, dim, n_tasks):
+    def provide_n_tasks(self, dim: int, n_tasks: int):
         '''Inform RunConfig of the number of tasks to be split along a given
         dimension of the process grid. If that dimension is undetermined (-1),
         set it to a suitable value that is compatible with the total processes
@@ -206,14 +209,15 @@ class RunConfig:
         qp.log.info('\nEnd time: {:s} (Duration: {:s})'.format(
             time.ctime(t_stop), str(duration)))
 
-    def fmt(self, tensor):
+    def fmt(self, tensor: torch.Tensor) -> str:
         'Standardized conversion of torch tensors for log'
         return np.array2string(
             tensor.to(self.cpu).numpy(),
             precision=8, suppress_small=True, separator=', ')
 
 
-def comm_split_grid(comm, n_procs_o, n_procs_i):
+def comm_split_grid(comm: qp.MPI.Comm, n_procs_o: int,
+                    n_procs_i: int) -> Tuple[qp.MPI.Comm, qp.MPI.Comm]:
     '''Split a communicator comm into an n_procs_o x n_procs_i grid,
     returning comm_o (with strided process ranks in comm) and
     comm_i (with contiguous process ranks in comm).'''

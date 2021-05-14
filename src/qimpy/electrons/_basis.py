@@ -5,7 +5,7 @@ from ._basis_ops import _apply_ke, _apply_potential
 
 
 class Basis(qp.utils.TaskDivision):
-    'TODO: document class Basis'
+    '''TODO: document class Basis'''
 
     apply_ke = _apply_ke
     apply_potential = _apply_potential
