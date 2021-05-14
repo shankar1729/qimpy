@@ -22,6 +22,5 @@ __version__ = get_versions()['version']
 del get_versions
 
 # Module-level attributes
-log = logging.getLogger('qimpy')
-'''logging.Logger : Logging by the qimpy module,
-which can be configured using :func:`~qimpy.log_config`'''
+log: logging.Logger = logging.getLogger('qimpy')
+'Log for the qimpy module, configurable using :func:`qimpy.utils.log_config`'
