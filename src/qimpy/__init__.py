@@ -6,13 +6,14 @@ __all__ = [
 
 # Module import definition
 from mpi4py import MPI
-from ._system import System, construct, dict_input_cleanup
+from ._input import construct, dict_input_cleanup
 from . import utils
 from . import ions
 from . import lattice
 from . import symmetries
 from . import grid
 from . import electrons
+from ._system import System
 import logging
 
 # Automatic versioning added by versioneer

@@ -41,6 +41,12 @@ exclude_patterns = []
 # Include class and constructor docstring together.
 autoclass_content = 'both'
 
+# Move type hints from call signature to description
+autodoc_typehints = "description"
+
+# Order entries by type:
+autodoc_member_order = 'groupwise'
+
 # -- Options for HTML output -------------------------------------------------
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for

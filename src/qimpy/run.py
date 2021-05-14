@@ -48,8 +48,8 @@ import os
 if __name__ == "__main__":
 
     # Parse the commandline arguments on main process:
-    iProc = qp.MPI.COMM_WORLD.Get_rank()
-    if iProc == 0:
+    i_proc = qp.MPI.COMM_WORLD.Get_rank()
+    if i_proc == 0:
 
         # Set terminal size (used by argparse) if unreasonable:
         if os.get_terminal_size().columns < 80:
@@ -119,13 +119,13 @@ if __name__ == "__main__":
 
     if args.version:
         # Print version and exit:
-        if iProc == 0:
+        if i_proc == 0:
             print('QimPy', qp.__version__)
         exit()
 
     if args.help:
         # Print help and exit:
-        if iProc == 0:
+        if i_proc == 0:
             parser.print_help()
         exit()
 

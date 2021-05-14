@@ -8,7 +8,7 @@ import re
 class Ions:
     """TODO: document class Ions"""
 
-    def __init__(self, *, rc, coordinates, pseudopotentials):
+    def __init__(self, *, rc, coordinates=None, pseudopotentials=None):
         '''
         Parameters
         ----------
@@ -18,6 +18,8 @@ class Ions:
         qp.log.info('\n--- Initializing Ions ---')
 
         # Read ionic coordinates:
+        if coordinates is None:
+            coordinates = []
         assert isinstance(coordinates, list)
         self.n_ions = 0      # number of ions
         self.n_types = 0     # number of distinct ion types
@@ -79,6 +81,8 @@ class Ions:
 
         # Initialize pseudopotentials:
         self.pseudopotentials = []
+        if pseudopotentials is None:
+            pseudopotentials = []
         if isinstance(pseudopotentials, str):
             pseudopotentials = [pseudopotentials]
         for i_type, symbol in enumerate(self.symbols):

@@ -2,7 +2,7 @@ import qimpy as qp
 import numpy as np
 import torch
 
-# Imports for type annotations:
+# Imports for type annotations alone:
 if False:
     from ._basis import Basis
     from ._wavefunction import Wavefunction

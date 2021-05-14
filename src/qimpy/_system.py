@@ -1,52 +1,51 @@
 import qimpy as qp
 import numpy as np
+from typing import Union
+
+# Imports for type annotations alone:
+if False:
+    from .utils import RunConfig
+    from .lattice import Lattice
+    from .ions import Ions
+    from .symmetries import Symmetries
+    from .electrons import Electrons
+    from .grid import Grid
 
 
 class System:
-    '''TODO: document class System'''
-
-    def __init__(self, *, rc, lattice, ions=None, symmetries=None,
-                 electrons=None, grid=None):
-        '''
-        Parameters
-        ----------
-        TODO
-        '''
-        self.rc = rc
-
-        # Initialize lattice:
-        self.lattice = qp.construct(qp.lattice.Lattice, lattice, 'lattice',
-                                    rc=rc)
-
-        # Initialize ions:
-        if ions is None:
-            # Set-up default of no ions:
-            ions = {
-                'pseudopotentials': [],
-                'coordinates': []}
-        self.ions = qp.construct(qp.ions.Ions, ions, 'ions',
-                                 rc=rc)
-
-        # Initialize symmetries:
-        if symmetries is None:
-            symmetries = {}
-        self.symmetries = qp.construct(
+    def __init__(self, *, rc: 'RunConfig',
+                 lattice: Union['Lattice', dict],
+                 ions: Union['Ions', dict, None] = None,
+                 symmetries: Union['Symmetries', dict, None] = None,
+                 electrons: Union['Electrons', dict, None] = None,
+                 grid: Union['Grid', dict, None] = None):
+        '''Compose a System to calculate from its pieces, each of which
+        could be provided as an object or a dictionary of parameters
+        suitable for initializing that object'''
+        self.rc: 'RunConfig' = rc  #: current run configuration
+        self.lattice: 'Lattice' = qp.construct(
+            qp.lattice.Lattice, lattice, 'lattice',
+            rc=rc)  #: lattice vectors / unit cell definition
+        self.ions: 'Ions' = qp.construct(
+            qp.ions.Ions, ions, 'ions',
+            rc=rc)  #: ionic positions and pseudopotentials
+        self.symmetries: 'Symmetries' = qp.construct(
             qp.symmetries.Symmetries, symmetries, 'symmetries',
-            rc=rc, lattice=self.lattice, ions=self.ions)
-
-        # Initialize electrons:
-        self.electrons = qp.construct(
+            rc=rc, lattice=self.lattice,
+            ions=self.ions)  #: point and space group symmetries
+        self.electrons: 'Electrons' = qp.construct(
             qp.electrons.Electrons, electrons, 'electrons',
             rc=rc, lattice=self.lattice, ions=self.ions,
-            symmetries=self.symmetries)
+            symmetries=self.symmetries
+        )  #: electronic wavefunctions and related quantities
 
-        # Initialize main (charge-density) grid:
         qp.log.info('\n--- Initializing Charge-Density Grid ---')
-        self.grid = qp.construct(
+        self.grid: 'Grid' = qp.construct(
             qp.grid.Grid, grid, 'grid',
             rc=rc, lattice=self.lattice, symmetries=self.symmetries,
             comm=rc.comm_kb,  # parallelized on intra-replica comm
-            ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff)
+            ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff
+        )  #: charge-density grid
 
         qp.log.info('\nInitialization completed at t[s]: {:.2f}\n'.format(
             rc.clock()))
@@ -56,37 +55,3 @@ class System:
         # TODO: systematize selection of what actions to perform
         self.electrons.diagonalize()
         self.electrons.output()
-
-
-def construct(Class, params, object_name,
-              **kwargs):
-    '''Construct an object of type Class from params and kwargs
-    if params is a dict, and just from kwargs if params is None.
-    Any hyphens in keys within params are replaced with _ for convenience.
-    Otherwise check that params is already of type Class, and if not,
-    raise an error clearly stating what all types object_name can be.'''
-
-    # Try all the valid possibilities:
-    if isinstance(params, dict):
-        return Class(**kwargs, **dict_input_cleanup(params))
-    if params is None:
-        return Class(**kwargs)
-    if isinstance(params, Class):
-        return params
-
-    # Report error with canonicalized class name:
-    module = Class.__module__
-    module_elems = ([] if module is None else (
-        [elem for elem in module.split('.')
-         if not elem.startswith('_')]))  # drop internal module names
-    module_elems.append(Class.__qualname__)
-    class_name = '.'.join(module_elems)
-    raise TypeError(object_name + ' must be dict or ' + class_name)
-
-
-def dict_input_cleanup(params):
-    '''Clean-up a dict eg. from YAML to make sure the keys are compatible
-    with passing as keyword-only arguments to constructors. Most importantly,
-    replace hyphens (which look nicer) in all keys to underscores internally,
-    so that they become valid identifiers within the code'''
-    return dict((k.replace('-', '_'), v) for k, v in params.items())
