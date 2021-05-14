@@ -4,26 +4,18 @@ from typing import Optional
 
 
 class TaskDivision:
-    """Division of a number of tasks over MPI.
+    """Division of a number of tasks over MPI"""
+    __slots__ = ('n_tot', 'n_procs', 'i_proc', 'n_each', 'n_prev',
+                 'i_start', 'i_stop', 'n_mine')
 
-    Attributes
-    ----------
-    n_tot : int
-        total number of tasks over all processes (constructor input)
-    n_procs : int
-        number of processes to split over (constructor input)
-    i_proc : int
-        rank of current process (constructor input)
-    n_each : int
-        number of tasks on each process, till we run out on last few processes
-    n_prev : np.array of n_procs+1 ints
-        cumulative task counts on all previous processes
-    i_start : int
-        task start index on current process
-    i_stop : int
-        task stop index on current process
-    n_mine : int
-        number of tasks on current process"""
+    n_tot: int  #: total number of tasks over all processes
+    n_procs: int  #: number of processes to split over
+    i_proc: int  #: rank of current process
+    n_each: int  #: number of tasks on each process (till we run out)
+    n_prev: np.array  #: cumulative task counts (n_procs+1 ints)
+    i_start: int  #: task start index on current process
+    i_stop: int  #: task stop index on current process
+    n_mine: int  #: number of tasks on current process
 
     def __init__(self, n_tot: int, n_procs: int, i_proc: int,
                  name: Optional[str] = None):
@@ -43,10 +35,10 @@ class TaskDivision:
             qp.log.info('{:s} division:  n_tot: {:d}  n_each: {:d}  imbalance:'
                         ' {:.0f}%'.format(name, n_tot, self.n_each, imbalance))
 
-    def whose(self, i: int):
+    def whose(self, i: int) -> int:
         'Return process index i_proc responsible for task i'
         return i // self.n_each
 
-    def is_mine(self, i: int):
-        'Return True if current process is responsible for task i, else False'
+    def is_mine(self, i: int) -> bool:
+        'Return whether current process is responsible for task i'
         return (i // self.n_each == self.i_proc)
