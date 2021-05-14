@@ -2,7 +2,7 @@
 __all__ = [
     'prime_factorization', 'fft_suitable', 'ceildiv',
     'ortho_matrix', 'eighg',
-    'log_config', 'RunConfig', 'StopWatch', 'TaskDivision']
+    'log_config', 'RunConfig', 'StopWatch', 'TaskDivision', 'BufferView']
 
 from ._math import prime_factorization, fft_suitable, ceildiv, \
     ortho_matrix, eighg

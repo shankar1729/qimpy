@@ -41,7 +41,14 @@ struct BufferView
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
+    py::options options;
+    options.disable_function_signatures();
+
 	py::class_<BufferView>(m, "BufferView", py::buffer_protocol())
-		.def(py::init<torch::Tensor>())
+		.def(py::init<torch::Tensor>(),
+            "__init__(self, tensor: torch.Tensor)\n"
+            "Expose a buffer protocol on torch.Tensor for use with mpi4py.\n"
+            "Construct the object inline, using BufferView(tensor) as an argument\n"
+            "to MPI routines. Do not retain variables of type BufferView.")
 		.def_buffer(&BufferView::getBuffer);
 }
