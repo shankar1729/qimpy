@@ -3,6 +3,7 @@ import torch
 import qimpy as qp
 import numpy as np
 from ._runconfig import RunConfig
+from typing import ClassVar, Dict, List, Tuple, Union
 
 
 class StopWatch:
@@ -12,8 +13,17 @@ class StopWatch:
     end of that block. The class collects together statistics of
     execution time by name, which can be logged using print_stats()."""
 
-    _stats = {}  #: timing statistics: list of durations by name
-    _cuda_events = []  #: CUDA events for asynchronous timing on GPUs
+    __slots__ = ['name', 'use_cuda', 't_start']
+    name: str  #: name of code block
+    use_cuda: bool  #: whether profiling is for a GPU device
+    t_start: Union[float, torch.cuda.Event]  #: start time of current event
+
+    #: timing statistics: list of durations by name
+    _stats: ClassVar[Dict[str, List[int]]] = {}
+
+    #: CUDA events for asynchronous timing on GPUs
+    _cuda_events: ClassVar[List[Tuple[str, torch.cuda.Event,
+                                      torch.cuda.Event]]] = []
 
     def __init__(self, name: str, rc: RunConfig):
         """
@@ -70,6 +80,6 @@ class StopWatch:
         qp.log.info('')
         for name, times in cls._stats.items():
             t = np.array(times)
-            qp.log.info('StopWatch: {:30s}  {:10.6f} +/- {:10.6f} s, {:4d}'
-                        ' calls, {:10.6f} s total'.format(
-                            name, t.mean(), t.std(), len(t), t.sum()))
+            qp.log.info(
+                f'StopWatch: {name:30s}  {t.mean():10.6f} +/- {t.std():10.6f}'
+                f' s, {len(t):4d} calls, {t.sum():10.6f} s total')
