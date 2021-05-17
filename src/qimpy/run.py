@@ -59,8 +59,7 @@ if __name__ == "__main__":
         class ArgumentParser(argparse.ArgumentParser):
             def error(self, message):
                 self.print_usage(sys.stderr)
-                print('{:s}: error: {:s}\n'.format(self.prog, message),
-                      file=sys.stderr)
+                print(f'{self.prog}: error: {message}\n', file=sys.stderr)
                 raise ValueError(message)  # Quit after bcast'ing error
         parser = ArgumentParser(
             add_help=False,

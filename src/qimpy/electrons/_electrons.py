@@ -97,8 +97,8 @@ class Electrons:
         self.n_spinor = (2 if spinorial else 1)
         self.n_spins = (2 if (spin_polarized and not spinorial) else 1)
         self.w_spin = 2 // (self.n_spins * self.n_spinor)  # spin weight
-        qp.log.info('n_spins: {:d}  n_spinor: {:d}  w_spin: {:d}'.format(
-            self.n_spins, self.n_spinor, self.w_spin))
+        qp.log.info(f'n_spins: {self.n_spins}  n_spinor: {self.n_spinor}'
+                    f'  w_spin: {self.w_spin}')
 
         # Initialize fillings:
         self.fillings = qp.construct(
@@ -141,9 +141,9 @@ class Electrons:
             self.n_bands_extra = max(1, int(np.ceil(self.n_bands
                                                     * n_bands_extra_scale)))
             n_bands_extra_method = n_bands_extra[1:] + '*n_bands'
-        qp.log.info('n_bands: {:d} ({:s})  n_bands_extra: {:d} ({:s})'.format(
-            self.n_bands, n_bands_method,
-            self.n_bands_extra, n_bands_extra_method))
+        qp.log.info(
+            f'n_bands: {self.n_bands} ({n_bands_method})'
+            f'  n_bands_extra: {self.n_bands_extra} ({n_bands_extra_method})')
 
         # Initialize wave-function basis:
         self.basis = qp.construct(

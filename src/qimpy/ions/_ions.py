@@ -116,14 +116,13 @@ class Ions:
                 self.pseudopotentials.append(
                     qp.ions.Pseudopotential(fname, rc))
             else:
-                raise ValueError(
-                    'no pseudopotential found for {:s}'.format(symbol))
+                raise ValueError(f'no pseudopotential found for {symbol}')
 
         # Calculate total ionic charge (needed for number of electrons):
         self.Z_tot = sum(self.pseudopotentials[i_type].Z
                          * (slice_i.stop - slice_i.start)
                          for i_type, slice_i in enumerate(self.ranges))
-        qp.log.info('\nTotal ion charge, Z_tot: {:g}'.format(self.Z_tot))
+        qp.log.info(f'\nTotal ion charge, Z_tot: {self.Z_tot:g}')
 
         # Initialize / check replica process grid dimension:
         n_replicas = 1  # this will eventually change for NEB / phonon DFPT
@@ -131,8 +130,8 @@ class Ions:
 
     def report(self):
         'Report ionic positions and attributes'
-        qp.log.info('{:d} total ions of {:d} types; positions:'.format(
-            self.n_ions, self.n_types))
+        qp.log.info(f'{self.n_ions} total ions of {self.n_types} types;'
+                    ' positions:')
         # Fetch to CPU for reporting:
         positions = self.positions.to(self.rc.cpu).numpy()
         types = self.types.to(self.rc.cpu).numpy()
@@ -151,5 +150,6 @@ class Ions:
                 attrib_str = ', ' + str(attribs).replace("'", '').replace(
                     'array(', '').replace(')', '')
             # Report:
-            qp.log.info('- [{:s}, {:11.8f}, {:11.8f}, {:11.8f}{:s}]'.format(
-                self.symbols[types[i_ion]], *tuple(position), attrib_str))
+            qp.log.info(
+                f'- [{self.symbols[types[i_ion]]}, {position[0]:11.8f},'
+                f' {position[1]:11.8f}, {position[2]:11.8f}{attrib_str}]')

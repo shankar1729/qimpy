@@ -29,25 +29,24 @@ class Davidson:
                                  * 1E-15)  # to spot null bands in _regularize
 
     def __repr__(self):
-        return 'Davidson(n_iterations: {:d}, eig_threshold: {:g})'.format(
-            self.n_iterations, self.eig_threshold)
+        return (f'Davidson(n_iterations: {self.n_iterations},'
+                f' eig_threshold: {self.eig_threshold:g}')
 
     def _report(self, iteration, Eband, deig_max=None, n_eigs_done=None,
                 inner_loop=False, converged=False, converge_failed=False):
         'Report iteration progress / convergence in standardized form'
         line_prefix = ('  ' if inner_loop else '') + self.line_prefix
-        line = line_prefix + ': {:d}'.format(iteration)
-        line += '  Eband: {:+.11f}'.format(Eband)
+        line = f'{line_prefix}: {iteration}  Eband: {Eband:+.11f}'
         if deig_max:
-            line += '  deig_max: {:.2e}'.format(deig_max)
+            line += f'  deig_max: {deig_max:.2e}'
         if n_eigs_done:
-            line += '  n_eigs_done: {:d}'.format(n_eigs_done)
-        line += '  t[s]: {:.2f}'.format(self.rc.clock())
+            line += f'  n_eigs_done: {n_eigs_done}'
+        line += f'  t[s]: {self.rc.clock():.2f}'
         qp.log.info(line)
         if converged:
-            qp.log.info('{:s}: Converged'.format(line_prefix))
+            qp.log.info(f'{line_prefix}: Converged')
         if converge_failed:
-            qp.log.info('{:s}: Failed to converge'.format(line_prefix))
+            qp.log.info(f'{line_prefix}: Failed to converge')
 
     def _precondition(self, Cerr, KEref):
         '''Inverse-kinetic preconditioner on the Cerr in eigenpairs,
@@ -111,9 +110,9 @@ class Davidson:
 
         # Initialize subspace:
         if(2 * n_bands_max >= electrons.basis.n_min):
-            raise ValueError('n_bands + n_bands_extra = {:d} exceeds '
-                             'min(n_basis)/2 = {:d} in Davidson'.format(
-                                 n_bands_max, electrons.basis.n_min//2))
+            raise ValueError(
+                f'n_bands + n_bands_extra = {n_bands_max} exceeds'
+                f' min(n_basis)/2 = {electrons.basis.n_min//2} in Davidson')
         HC = electrons.hamiltonian(C)
         E, V = torch.linalg.eigh(C ^ HC)  # diagonalize subspace Hamiltonian
         C = C @ V  # switch to eigen-basis

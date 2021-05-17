@@ -27,9 +27,8 @@ def _check_grid_shape(self, shape):
     i_sym = torch.where(err <= self.tolerance)[0]
     if len(i_sym) < self.n_sym:
         raise ValueError(
-            'Grid dimensions {:s} commensurate only with a sub-group of '
-            'symmetries with indices (0-based): {:s}'.format(
-                str(shape), str(i_sym.tolist())))
+            f'Grid dimensions {shape} commensurate only with a sub-group'
+            f' of symmetries with indices (0-based): {i_sym.tolist()}')
 
 
 def _get_grid_shape(self, shape_min):

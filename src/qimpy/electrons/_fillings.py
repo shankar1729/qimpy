@@ -36,8 +36,8 @@ class Fillings:
         # Number of electrons and bands:
         self.n_electrons = ions.Z_tot - charge
         self.n_bands_min = int(np.ceil(self.n_electrons / electrons.w_spin))
-        qp.log.info('n_electrons: {:g}  n_bands_min: {:d}'.format(
-            self.n_electrons, self.n_bands_min))
+        qp.log.info(f'n_electrons: {self.n_electrons:g}'
+                    f'  n_bands_min: {self.n_bands_min}')
 
         # Smearing:
         smear_options = _smearing_funcs.keys()
@@ -53,10 +53,9 @@ class Fillings:
             self.sigma = float(sigma if sigma  # get from sigma
                                else ((2*kT) if kT  # get from kT
                                      else 0.002))  # default value
-        qp.log.info('smearing: {:s}  sigma: {:s}'.format(
-            str(self.smearing),
-            ('{:g} (equivalent kT: {:g})'.format(self.sigma, 0.5*self.sigma)
-             if self.sigma else str(None))))
+        sigma_str = (f'{self.sigma:g} (equivalent kT: {0.5*self.sigma:g})'
+                     if self.sigma else str(None))
+        qp.log.info(f'smearing: {self.smearing}  sigma: {sigma_str}')
 
     def compute(self, E, mu, extra_outputs=False):
         '''Compute occupations using selected smearing scheme, and optionally
@@ -157,8 +156,8 @@ if __name__ == '__main__':
         f, f_E, S = func(E, Ef, 2*kT, extra_outputs=True)
         f_E_num = (f[2:] - f[:-2])/(2*dE)
         f_E_err = (f_E[1:-1] - f_E_num).norm() / f_E_num.norm()
-        print('{:>5s}:  Err(f_E): {:.2e}  integral(S): {:f}'.format(
-            name, f_E_err, S.sum()*dE))
+        print(f'{name:>5s}:  Err(f_E): {f_E_err:.2e}'
+              f'  integral(S): {S.sum()*dE:f}')
         e = (E - Ef)/kT  # dimensionless energy
         for i, (result, result_name) in enumerate([
                 (f, '$f$'), (f_E, '$dF/dE$'), (S, '$S$')]):

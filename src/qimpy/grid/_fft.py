@@ -6,11 +6,9 @@ from qimpy.utils import TaskDivision, BufferView
 
 def _init_grid_fft(self):
     'Initialize local or parallel FFTs for class Grid'
-    def report_shape(name, shape):
-        qp.log.info('{:s}: [{:d}, {:d}, {:d}]'.format(name, *shape))
     # Half-reciprocal space global dimensions (for rfft/irfft):
     self.shapeH = (self.shape[0], self.shape[1], 1+self.shape[2]//2)
-    qp.log.info('real-fft shape: [{:d}, {:d}, {:d}]'.format(*self.shapeH))
+    qp.log.info(f'real-fft shape: {self.shapeH}')
     # MPI division:
     self.split0 = TaskDivision(self.shape[0], self.n_procs, self.i_proc)
     self.split2 = TaskDivision(self.shape[2], self.n_procs, self.i_proc)
@@ -20,10 +18,10 @@ def _init_grid_fft(self):
     self.shapeG_mine = (self.shape[0], self.shape[1], self.split2.n_mine)
     self.shapeH_mine = (self.shape[0], self.shape[1], self.split2H.n_mine)
     if self.n_procs > 1:
-        qp.log.info('split over {:d} processes:'.format(self.n_procs))
-        report_shape('  local selected shape', self.shapeR_mine)
-        report_shape('  local full-fft shape', self.shapeG_mine)
-        report_shape('  local real-fft shape', self.shapeH_mine)
+        qp.log.info(f'split over {self.n_procs} processes:')
+        qp.log.info(f'  local selected shape: {self.shapeR_mine}')
+        qp.log.info(f'  local full-fft shape: {self.shapeG_mine}')
+        qp.log.info(f'  local real-fft shape: {self.shapeH_mine}')
     # Create 1D grids for real and reciprocal spaces:
     # --- global versions first
     iv1D = tuple(torch.arange(s, device=self.rc.device) for s in self.shape)
@@ -389,7 +387,7 @@ if __name__ == "__main__":
                     (torch.abs(v_tld_ref)**2).sum().item()])
                 rc.comm.Allreduce(qp.MPI.IN_PLACE, errors)
                 rmse = np.sqrt(errors[0]/errors[1])
-                qp.log.info(name + ' RMSE: {:.2e}'.format(rmse))
+                qp.log.info(f'{name} RMSE: {rmse:.2e}')
 
     # Run tests for all four transform types:
     test('fft', torch.complex128, grid_seq.fft, grid_par.fft,

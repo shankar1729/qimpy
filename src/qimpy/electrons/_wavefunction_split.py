@@ -105,8 +105,8 @@ if __name__ == '__main__':
     for i_repeat in range(n_repeat):
         Cgb = Cg.split_bands()
         Cgbg = Cgb.split_basis()
-    qp.log.info('Norm(G): {:.3f}'.format(Cg.norm()))
-    qp.log.info('Norm(G - G->B->G): {:.3e}'.format((Cg - Cgbg).norm()))
+    qp.log.info(f'Norm(G): {Cg.norm():.3f}')
+    qp.log.info(f'Norm(G - G->B->G): {(Cg - Cgbg).norm():.3e}')
 
     # Test random wavefunction created band-split to basis-split and back:
     Cb = qp.electrons.Wavefunction(system.electrons.basis,
@@ -116,13 +116,13 @@ if __name__ == '__main__':
     for i_repeat in range(n_repeat):
         Cbg = Cb.split_basis()
         Cbgb = Cbg.split_bands()
-    qp.log.info('Norm(B): {:.3f}'.format(Cb.norm()))
-    qp.log.info('Norm(B - B->G->B): {:.3e}'.format((Cb - Cbgb).norm()))
+    qp.log.info(f'Norm(B): {Cb.norm():.3f}')
+    qp.log.info(f'Norm(B - B->G->B): {(Cb - Cbgb).norm():.3e}')
 
     # Check equivalence of randomization across the two splits:
     qp.log.info('\n--- Checking Wavefunction.randomize ---')
-    qp.log.info('Norm(G - B->G): {:.3e}'.format((Cg - Cbg).norm()))
-    qp.log.info('Norm(B - G->B): {:.3e}'.format((Cb - Cgb).norm()))
+    qp.log.info(f'Norm(G - B->G): {(Cg - Cbg).norm():.3e}')
+    qp.log.info(f'Norm(B - G->B): {(Cb - Cgb).norm():.3e}')
 
     # Check norm and orthogonalization routines:
     qp.log.info('\n--- Checking Wavefunction.norm and overlaps ---')
@@ -132,8 +132,8 @@ if __name__ == '__main__':
     Cg_overlap = Cg.dot(Cg, overlap=True)
     expected_overlap = torch.eye(Cg_overlap.shape[-1],
                                  device=Cg.coeff.device)[None, None]
-    qp.log.info('Orthonormality error: {:.3e}'.format(
-        (Cg_overlap - expected_overlap).norm().item()))
+    ortho_err = (Cg_overlap - expected_overlap).norm().item()
+    qp.log.info(f'Orthonormality error: {ortho_err:.3e}')
     qp.log.info('Norm(band)[selected]:\n' + rc.fmt(Cg.norm('band')[0, :, :5]))
     qp.log.info('Norm(ke)[selected]:\n' + rc.fmt(Cg.norm('ke')[0, :, :5]))
 

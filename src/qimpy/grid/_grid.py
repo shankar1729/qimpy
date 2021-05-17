@@ -56,15 +56,14 @@ class Grid:
                 self.ke_cutoff = 4*ke_cutoff_wavefunction
             # Make sure cutoff is sufficient to resolve wavefunctions:
             if self.ke_cutoff < ke_cutoff_wavefunction:
-                raise ValueError('ke_cutoff (={:g}) must be >= '
-                                 'ke_cutoff_wavefunction (={:g})'.format(
-                                    self.ke_cutoff, ke_cutoff_wavefunction))
+                raise ValueError(
+                    f'ke_cutoff (={self.ke_cutoff:g}) must be >= '
+                    f'ke_cutoff_wavefunction (={ke_cutoff_wavefunction:g})')
             elif self.ke_cutoff < 4*ke_cutoff_wavefunction:
                 qp.log.info(
-                    'Note: ke_cutoff (={:g}) < 4*ke_cutoff_wavefunction '
-                    '(={:g}) truncates high wave vectors in density '
-                    'calculation'.format(
-                        self.ke_cutoff, 4*ke_cutoff_wavefunction))
+                    f'Note: ke_cutoff (={self.ke_cutoff:g}) < 4'
+                    f'*ke_cutoff_wavefunction (={4*ke_cutoff_wavefunction:g})'
+                    ' truncates high wave vectors in density calculation')
 
         # Compute minimum grid dimensions for cutoff:
         shape_min = None
@@ -74,12 +73,11 @@ class Grid:
             # corresponding spacing between reciprocal lattice planes (2pi/R).
             # Therefore shape_min >= 2 * Gmax / (2pi/R)
             shape_min = (lattice.Rbasis.norm(dim=0) * (Gmax / np.pi)).tolist()
-            qp.log.info('minimum shape for ke-cutoff: '
-                        '[{:.2f}, {:.2f}, {:.2f}]'.format(*tuple(shape_min)))
+            qp.log.info(f'minimum shape for ke-cutoff: ({shape_min[0]:.2f},'
+                        f' {shape_min[1]:.2f}, {shape_min[2]:.2f})')
             # Align to multiple of 4 for FFT efficiency:
             shape_min = 4 * np.ceil(np.array(shape_min) / 4).astype(int)
-            qp.log.info('minimum multiple-of-4 shape: '
-                        '[{:d}, {:d}, {:d}]'.format(*tuple(shape_min)))
+            qp.log.info(f'minimum multiple-of-4 shape: {tuple(shape_min)}')
 
         if shape:
             self.shape = tuple(shape)
@@ -87,14 +85,14 @@ class Grid:
             symmetries.check_grid_shape(self.shape)
             if ((shape_min is not None)
                     and np.any(np.array(self.shape) < shape_min)):
-                raise ValueError('Specified shape [{:d}, {:d}, {:d}] < '
-                                 'minimum shape'.format(*self.shape))
+                raise ValueError(
+                    f'Specified shape {self.shape} < minimum shape')
         else:
             if shape_min is None:
                 raise KeyError('At least one of ke-cutoff-wavefunction, '
                                'ke-cutoff or shape must be specified')
             self.shape = tuple(symmetries.get_grid_shape(shape_min))
-        qp.log.info('selected shape: [{:d}, {:d}, {:d}]'.format(*self.shape))
+        qp.log.info(f'selected shape: {self.shape}')
         _init_grid_fft(self)
 
     def get_mesh(self, space):

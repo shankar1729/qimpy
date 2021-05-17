@@ -47,8 +47,7 @@ class System:
             ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff
         )  #: charge-density grid
 
-        qp.log.info('\nInitialization completed at t[s]: {:.2f}\n'.format(
-            rc.clock()))
+        qp.log.info(f'\nInitialization completed at t[s]: {rc.clock():.2f}\n')
 
     def run(self):
         'Run any actions specified in the input'

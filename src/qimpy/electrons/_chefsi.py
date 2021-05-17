@@ -25,9 +25,9 @@ class CheFSI(Davidson):
         self.line_prefix = 'CheFSI'
 
     def __repr__(self):
-        return ('CheFSI(n_iterations: {:d}, eig_threshold: {:g}, filter_order:'
-                ' {:d})'.format(self.n_iterations, self.eig_threshold,
-                                self.filter_order))
+        return (f'CheFSI(n_iterations: {self.n_iterations},'
+                f' eig_threshold: {self.eig_threshold:g},'
+                f' filter_order: {self.filter_order})')
 
     def __call__(self, n_iterations=None, eig_threshold=None):
         'Diagonalize Kohn-Sham Hamiltonian in electrons'

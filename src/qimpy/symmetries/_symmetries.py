@@ -30,16 +30,14 @@ class Symmetries:
 
         # Lattice point group:
         lattice_sym = _get_lattice_point_group(lattice.Rbasis, tolerance)
-        qp.log.info(
-            'Found {:d} point-group symmetries of the Bravais lattice'.format(
-                lattice_sym.shape[0]))
+        qp.log.info(f'Found {lattice_sym.shape[0]} point-group symmetries'
+                    ' of the Bravais lattice')
 
         # Space group:
         self.rot, self.trans, self.ion_map = _get_space_group(
             lattice_sym, lattice, ions, tolerance)
         self.n_sym = self.rot.shape[0]
-        qp.log.info(
-            'Found {:d} space-group symmetries with basis:'.format(self.n_sym))
+        qp.log.info(f'Found {self.n_sym} space-group symmetries with basis:')
         for i_sym in range(self.n_sym):
             sym_str = '- ['
             for row in range(3):
@@ -54,10 +52,9 @@ class Symmetries:
         # Enforce symmetries exactly on ions:
         if ions.n_ions:
             positions_sym = self.symmetrize_positions(ions.positions)
-            qp.log.info(
-                'RMS change in fractional positions of ions: {:e}'.format(
-                    ((positions_sym - ions.positions)**2).mean().sqrt()))
+            rms = ((positions_sym - ions.positions)**2).mean().sqrt()
             ions.positions = positions_sym
+            qp.log.info(f'RMS change in fractional positions of ions: {rms:e}')
 
         # Identify location of special entries:
         # --- identity

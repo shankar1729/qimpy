@@ -136,9 +136,8 @@ class RunConfig:
         # Report total resources:
         run_totals = np.array([self.n_threads,  n_gpus])
         self.comm.Allreduce(qp.MPI.IN_PLACE, run_totals, op=qp.MPI.SUM)
-        qp.log.info(
-            'Run totals: {:g} processes, {:d} threads, {:d} GPUs'.format(
-                self.n_procs, int(run_totals[0]), int(run_totals[1])))
+        qp.log.info(f'Run totals: {self.n_procs:g} processes, '
+                    f'{int(run_totals[0])} threads, {int(run_totals[1])} GPUs')
 
         # Process grid:
         self.process_grid = np.array(process_grid, dtype=int)
@@ -151,9 +150,10 @@ class RunConfig:
         # Check compatibility of known dimensions with total:
         prod_known = self.process_grid[self.process_grid != -1].prod()
         if self.n_procs % prod_known:
-            raise ValueError('Cannot distribute {:d} processes to'
-                             ' {:d} x {:d} x {:d} grid'.format(
-                                self.n_procs, *tuple(self.process_grid)))
+            raise ValueError(
+                f'Cannot distribute {self.n_procs} processes to'
+                f' {self.process_grid[0]} x {self.process_grid[1]}'
+                f' x {self.process_grid[2]} grid')
         # Compute a single unknown dimension if present:
         n_unknown = np.count_nonzero(self.process_grid == -1)
         if n_unknown == 1:
@@ -161,10 +161,10 @@ class RunConfig:
                                                           // prod_known)
             n_unknown = 0
         # Report grid as it is now:
-        qp.log.info('Process grid: {:d} replicas x {:d} k-points x {:d} bands'
-                    '/basis{:s}'.format(*tuple(self.process_grid),
-                                        ' (-1\'s determined later)'
-                                        if n_unknown else ''))
+        qp.log.info(f'Process grid: {self.process_grid[0]} replicas'
+                    f' x {self.process_grid[1]} k-points'
+                    f' x {self.process_grid[2]} bands/basis'
+                    + (' (-1\'s determined later)' if n_unknown else ''))
         # Initialize grid communicators whose dimensions are known:
         if self.process_grid[0] != -1 and (not hasattr(self, 'comm_r')):
             # split top-level communicator between replicas:
@@ -232,8 +232,7 @@ class RunConfig:
         "Report end time and duration."
         t_stop = time.time()
         duration = datetime.timedelta(seconds=(t_stop - self.t_start))
-        qp.log.info('\nEnd time: {:s} (Duration: {:s})'.format(
-            time.ctime(t_stop), str(duration)))
+        qp.log.info(f'\nEnd time: {time.ctime(t_stop)} (Duration: {duration})')
 
     def fmt(self, tensor: torch.Tensor) -> str:
         'Standardized conversion of torch tensors for log'

@@ -70,25 +70,26 @@ class Kmesh(Kpoints):
             sup_length = float(size)
             L_i = torch.linalg.norm(lattice.Rbasis, dim=0)  # lattice lengths
             size = torch.ceil(sup_length / L_i).to(int).tolist()
-            qp.log.info('Selecting {:d} x {:d} x {:d} k-mesh for supercell'
-                        ' size >= {:g} bohrs'.format(*tuple(size), sup_length))
+            qp.log.info(f'Selecting {size[0]} x {size[1]} x {size[2]} k-mesh'
+                        f' for supercell size >= {sup_length:g} bohrs')
 
         # Check types and sizes:
         offset = np.array(offset)
         size = np.array(size)
         assert((offset.shape == (3,)) and (offset.dtype == float))
         assert((size.shape == (3,)) and (size.dtype == int))
-        qp.log.info('Creating {:d} x {:d} x {:d} uniform k-mesh '.format(
-            *tuple(size)) + (
-                'centered at Gamma'
-                if (np.linalg.norm(offset) == 0.)
-                else ('offset by ' + np.array2string(offset, separator=', '))))
+        kmesh_method_str = (
+            'centered at Gamma'
+            if (np.linalg.norm(offset) == 0.)
+            else ('offset by ' + np.array2string(offset, separator=', ')))
+        qp.log.info(f'Creating {size[0]} x {size[1]} x {size[2]} uniform'
+                    f' k-mesh {kmesh_method_str}')
 
         # Check that offset is resolvable:
         min_offset = symmetries.tolerance  # detectable at that threshold
         if np.any(np.logical_and(offset != 0, np.abs(offset) < min_offset)):
             raise ValueError(
-                'Nonzero offset < {:g} symmetry tolerance'.format(min_offset))
+                f'Nonzero offset < {min_offset:g} symmetry tolerance')
 
         # Create full mesh:
         grids1d = [(offset[i] + torch.arange(size[i], device=rc.device))
@@ -131,9 +132,8 @@ class Kmesh(Kpoints):
             return_inverse=True, return_counts=True)
         k = mesh[reduced_index]  # k in irreducible wedge
         wk = reduced_counts / size.prod()  # corresponding weights
-        qp.log.info(
-            'Reduced {:d} points on k-mesh to {:d} under symmetries'.format(
-                size.prod(), len(k)))
+        qp.log.info(f'Reduced {size.prod()} points on k-mesh to'
+                    f' {len(k)} under symmetries')
         # --- store mapping from full k-mesh to reduced set:
         size = tuple(size)
         self.i_reduced = i_reduced.reshape(size)  # index into k
@@ -175,8 +175,8 @@ class Kpath(Kpoints):
         labels = [(point[3] if (len(point) > 3) else '') for point in points]
         points = torch.tensor([point[:3] for point in points],
                               dtype=float, device=rc.device)
-        qp.log.info('Creating k-path with dk = {:g} connecting {:d} special '
-                    'points'.format(dk, points.shape[0]))
+        qp.log.info(f'Creating k-path with dk = {dk:g} connecting'
+                    f' {points.shape[0]} special points')
 
         # Create path one segment at a time:
         k = [points[:1]]
@@ -197,8 +197,8 @@ class Kpath(Kpoints):
         k = torch.cat(k)
         wk = torch.full((nk_tot,),  1./nk_tot, device=rc.device)
         self.k_length = torch.cat(k_length)  # cumulative length on path
-        qp.log.info('Created {:d} k-points on k-path of length {:g}'.format(
-            nk_tot, distance_tot.item()))
+        qp.log.info(f'Created {nk_tot} k-points on k-path of'
+                    f' length {distance_tot.item():g}')
 
         # Initialize base class:
         super().__init__(rc, k, wk)

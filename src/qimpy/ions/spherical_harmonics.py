@@ -96,9 +96,9 @@ if __name__ == "__main__":
         print('# Recursion coefficients for computing real harmonics at l>1')
         print('# from products of those at l = 1 and l-1. The integers index')
         print('# a sparse matrix with (2l+1) rows and 3*(2l-1) columns.')
-        line = 'YLM_RECUR = [\n    {:.16f}, {:.16f},'.format(
-            np.sqrt(0.25/np.pi),  # value of Y_00
-            np.sqrt(0.75/np.pi))  # prefactor in Y_1m
+        Y_00 = np.sqrt(0.25/np.pi)
+        Y_1m_prefac = np.sqrt(0.75/np.pi)
+        line = f'YLM_RECUR = [\n    {Y_00:.16f}, {Y_1m_prefac:.16f},'
         for l in range(2, l_max + 1):
             y_product = ylm[l-1][:, None, :] * ylm[1][None, :, :]
             y_product = y_product.reshape((2*l - 1) * 3, -1)
@@ -182,7 +182,7 @@ if __name__ == "__main__":
                 coeff = coeff[sort_index]
                 # Format as python code:
                 print(line)  # pending data from previous entry
-                line = '    ({:d}, {:d}): ('.format(ilm1, ilm2)
+                line = f'    ({ilm1}, {ilm2}): ('
                 padding = len(line)
                 line = print_array(ilm, line, padding, '{:d}') + ', '
                 line = print_array(coeff, line, padding, '{:.16f}') + '),'
@@ -217,9 +217,9 @@ if __name__ == "__main__":
             err = np.linalg.norm(ylm[l] - ylm_ref[l])
             rel_err = err / np.linalg.norm(ylm_ref[l])
             rel_err_all.append(rel_err)
-            print("  l: {:d} Err: {:9.3e}".format(l, rel_err))
-        print('  Overall Err: {:9.3e}\n'.format(
-            np.sqrt((np.array(rel_err_all)**2).mean())))
+            print(f"  l: {l} Err: {rel_err:9.3e}")
+        rel_err_overall = np.sqrt((np.array(rel_err_all)**2).mean())
+        print(f'  Overall Err: {rel_err_overall:9.3e}\n')
 
         # Test product coefficients:
         print('Testing product coefficients:')
@@ -242,6 +242,6 @@ if __name__ == "__main__":
                 err = np.linalg.norm(product - product_ref)
                 rel_err = err / np.linalg.norm(product_ref)
                 rel_err_all.append(rel_err)
-                print("  l: {:d} {:d} Err: {:9.3e}".format(l1, l2, rel_err))
-        print('  Overall Err: {:9.3e}'.format(
-            np.sqrt((np.array(rel_err_all)**2).mean())))
+                print(f"  l: {l1} {l2} Err: {rel_err:9.3e}")
+        rel_err_overall = np.sqrt((np.array(rel_err_all)**2).mean())
+        print(f'  Overall Err: {rel_err_overall:9.3e}')

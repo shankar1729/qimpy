@@ -94,9 +94,8 @@ class Basis(qp.utils.TaskDivision):
         self.n_avg = rc.comm_k.allreduce((self.n.to(float) @ self.wk).item(),
                                          qp.MPI.SUM)
         self.n_ideal = ((2.*ke_cutoff)**1.5) * lattice.volume / (6 * np.pi**2)
-        qp.log.info('n_basis:  min: {:d}  max: {:d}  avg: {:.3f}  ideal: '
-                    '{:.3f}'.format(self.n_min, self.n_max,
-                                    self.n_avg, self.n_ideal))
+        qp.log.info(f'n_basis:  min: {self.n_min}  max: {self.n_max}'
+                    f'  avg: {self.n_avg:.3f}  ideal: {self.n_ideal:.3f}')
         # --- create indices from basis set to FFT grid:
         n_fft = self.iG.shape[0]  # number of points on FFT grid
         assert(self.n_tot <= n_fft)  # make sure padding doesn't exceed grid
@@ -142,9 +141,9 @@ class Basis(qp.utils.TaskDivision):
             self.Gweight_mine = torch.zeros(self.n_each, device=self.rc.device)
             self.Gweight_mine[:self.n_mine] = torch.where(
                 self.iG[0, self.i_start:self.i_stop, 2] == 0, 1., 2.)
-            qp.log.info('basis weight sum: {:g}'.format(
-                rc.comm_b.allreduce(self.Gweight_mine.sum().item(),
-                                    qp.MPI.SUM)))
+            Gweight_sum = rc.comm_b.allreduce(self.Gweight_mine.sum().item(),
+                                              qp.MPI.SUM)
+            qp.log.info(f'basis weight sum: {Gweight_sum:g}')
 
     def get_ke(self, basis_slice=slice(None)):
         '''Kinetic energy (KE) of each plane wave in basis in :math:`E_h`
