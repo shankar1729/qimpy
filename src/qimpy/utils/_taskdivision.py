@@ -12,7 +12,7 @@ class TaskDivision:
     n_procs: int  #: number of processes to split over
     i_proc: int  #: rank of current process
     n_each: int  #: number of tasks on each process (till we run out)
-    n_prev: np.array  #: cumulative task counts (n_procs+1 ints)
+    n_prev: np.ndarray  #: cumulative task counts (n_procs+1 ints)
     i_start: int  #: task start index on current process
     i_stop: int  #: task stop index on current process
     n_mine: int  #: number of tasks on current process

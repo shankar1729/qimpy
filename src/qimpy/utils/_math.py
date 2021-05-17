@@ -22,7 +22,7 @@ def fft_suitable(N: int) -> bool:
     efficient FFTs, that is contains only 2, 3, 5 and 7.'''
     for p in [2, 3, 5, 7]:
         while N % p == 0:
-            N /= p
+            N //= p
     # All suitable prime factors taken out
     # --- a suitable N should be left with just 1
     return (N == 1)

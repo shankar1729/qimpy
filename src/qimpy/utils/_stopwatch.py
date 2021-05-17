@@ -19,7 +19,7 @@ class StopWatch:
     t_start: Union[float, torch.cuda.Event]  #: start time of current event
 
     #: timing statistics: list of durations by name
-    _stats: ClassVar[Dict[str, List[int]]] = {}
+    _stats: ClassVar[Dict[str, List[float]]] = {}
 
     #: CUDA events for asynchronous timing on GPUs
     _cuda_events: ClassVar[List[Tuple[str, torch.cuda.Event,

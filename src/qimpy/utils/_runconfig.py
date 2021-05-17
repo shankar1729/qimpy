@@ -4,7 +4,7 @@ import datetime
 import torch
 import qimpy as qp
 import numpy as np
-from psutil import cpu_count
+from psutil import cpu_count  # type: ignore
 from typing import Optional, Tuple
 
 
@@ -24,7 +24,7 @@ class RunConfig:
     i_proc: int  #: Rank within `comm`
     n_procs: int  #: Size of `comm`
     is_head: bool  #: whether head of `comm`
-    process_grid: np.array  #: contains (`n_procs_r`, `n_procs_k`, `n_procs_b`)
+    process_grid: np.ndarray  #: (`n_procs_r`, `n_procs_k`, `n_procs_b`)
     n_procs_r: int  #: size of `comm_r`
     i_proc_r: int  #: rank within `comm_r`
     n_procs_kb: int  #: size of `comm_kb`
@@ -93,10 +93,10 @@ class RunConfig:
         )  #: Communicator for processes on same shared-memory node
         i_proc_node = self.comm_node.Get_rank()
         n_procs_node = self.comm_node.Get_size()
-        cuda_devs = os.environ.get('CUDA_VISIBLE_DEVICES')
-        if cuda_devs:
+        cuda_dev_str = os.environ.get('CUDA_VISIBLE_DEVICES')
+        if cuda_dev_str:
             # Select one GPU and make sure it's only one visible to torch:
-            cuda_devs = [int(s) for s in cuda_devs.split(',')]
+            cuda_devs = [int(s) for s in cuda_dev_str.split(',')]
             cuda_dev_selected = cuda_devs[i_proc_node % len(cuda_devs)]
             os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_dev_selected)
             n_gpus = min(1., len(cuda_devs) / n_procs_node)
