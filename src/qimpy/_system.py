@@ -1,9 +1,7 @@
 import qimpy as qp
 import numpy as np
-from typing import Union
-
-# Imports for type annotations alone:
-if False:
+from typing import Union, TYPE_CHECKING
+if TYPE_CHECKING:
     from .utils import RunConfig
     from .lattice import Lattice
     from .ions import Ions

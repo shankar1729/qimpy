@@ -3,12 +3,17 @@ import numpy as np
 import torch
 import pathlib
 import re
+from typing import Optional, Union, List, TYPE_CHECKING
+if TYPE_CHECKING:
+    from ..utils import RunConfig
 
 
 class Ions:
     """TODO: document class Ions"""
 
-    def __init__(self, *, rc, coordinates=None, pseudopotentials=None):
+    def __init__(self, *, rc: 'RunConfig',
+                 coordinates: Optional[List] = None,
+                 pseudopotentials: Optional[Union[str, List[str]]] = None):
         '''
         Parameters
         ----------
@@ -21,12 +26,12 @@ class Ions:
         if coordinates is None:
             coordinates = []
         assert isinstance(coordinates, list)
-        self.n_ions = 0      # number of ions
-        self.n_types = 0     # number of distinct ion types
-        self.symbols = []    # symbol for each ion type
+        self.n_ions: int = 0  #: number of ions
+        self.n_types: int = 0  #: number of distinct ion types
+        self.symbols: List[str] = []  #: symbol for each ion type
         self.positions = []  # position of each ion
         self.types = []      # type of each ion (index into symbols)
-        self.ranges = []     # range / slice to get each ion type
+        self.ranges: List[range] = []     # range / slice to get each ion type
         self.M_initial = []  # initial magnetic moments
         type_start = 0
         for coord in coordinates:
