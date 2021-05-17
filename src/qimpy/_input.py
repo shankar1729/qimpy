@@ -1,5 +1,12 @@
-def construct(Class: type, params: 'Class', object_name: str,
-              **kwargs) -> 'Class':
+from typing import Union, TypeVar, Type
+
+
+ClassType = TypeVar('ClassType')
+
+
+def construct(Class: Type,
+              params: Union[ClassType, dict, None],
+              object_name: str, **kwargs) -> ClassType:
     '''Construct an object of type `Class` from `params` and `kwargs`
     if `params` is a dict, and just from `kwargs` if `params` is None.
     Any hyphens in keys within `params` are replaced with _ for convenience.

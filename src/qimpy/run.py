@@ -110,7 +110,7 @@ if __name__ == "__main__":
             args = argparse.Namespace()
             setattr(args, "error_occured", True)
     else:
-        args = None
+        args = argparse.Namespace()
 
     # Make commandline arguments available on all processes:
     args = qp.MPI.COMM_WORLD.bcast(args, root=0)
