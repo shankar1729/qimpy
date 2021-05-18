@@ -7,7 +7,8 @@ ClassType = TypeVar('ClassType')
 def construct(Class: Type,
               params: Union[ClassType, dict, None],
               object_name: str, **kwargs) -> ClassType:
-    '''Construct an object of type `Class` from `params` and `kwargs`
+    '''Construct object in QimPy heirarchy.
+    Specifically, construct object of type `Class` from `params` and `kwargs`
     if `params` is a dict, and just from `kwargs` if `params` is None.
     Any hyphens in keys within `params` are replaced with _ for convenience.
     Otherwise check that `params` is already of type `Class`, and if not,
@@ -32,7 +33,8 @@ def construct(Class: Type,
 
 
 def dict_input_cleanup(params: dict) -> dict:
-    '''Clean-up a dict eg. from YAML to make sure the keys are compatible
+    '''Clean-up dict for use in constructors.
+    This is required eg. for dicts from YAML to make sure keys are compatible
     with passing as keyword-only arguments to constructors. Most importantly,
     replace hyphens (which look nicer) in all keys to underscores internally,
     so that they become valid identifiers within the code'''

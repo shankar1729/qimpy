@@ -1,4 +1,4 @@
-'''Stand-alone QimPy calculations from YAML input files
+'''Stand-alone QimPy calculation from YAML input file
 
 Typical usage:
 

@@ -11,6 +11,8 @@ if TYPE_CHECKING:
 
 
 class System:
+    '''Overall system to calculate within QimPy'''
+
     def __init__(self, *, rc: 'RunConfig',
                  lattice: Union['Lattice', dict],
                  ions: Union['Ions', dict, None] = None,

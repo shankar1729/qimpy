@@ -1,3 +1,4 @@
+'''QimPy: Quantum-Integrated Multi-PhYsics'''
 # List exported symbols for doc generation
 __all__ = [
     'MPI', 'System', 'construct', 'dict_input_cleanup',

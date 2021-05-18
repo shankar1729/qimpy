@@ -1,3 +1,4 @@
+'''Ionic sub-system'''
 # List exported symbols for doc generation
 __all__ = [
     'Ions', 'Pseudopotential', 'symbols', 'spherical_harmonics']
