@@ -6,10 +6,17 @@ import re
 from typing import Optional, Union, List, TYPE_CHECKING
 if TYPE_CHECKING:
     from ..utils import RunConfig
+    from ._pseudopotential import Pseudopotential
 
 
 class Ions:
-    """TODO: document class Ions"""
+    """Ionic system comprising ionic geometry and the pseudopotentials
+    that specify interaction with the electronic system.
+    """
+
+    positions: torch.Tensor  #: fractional positions of each ion (n_ions x 3)
+    types: torch.Tensor  #: type of each ion (n_ions, int)
+    M_initial: Optional[torch.Tensor]  #: initial magnetic moment for each ion
 
     def __init__(self, *, rc: 'RunConfig',
                  coordinates: Optional[List] = None,
@@ -17,7 +24,21 @@ class Ions:
         '''
         Parameters
         ----------
-        TODO
+        coordinates:
+            List of [symbol, x, y, z, params] for each ion in unit cell,
+            where symbol is the chemical symbol of the element,
+            x, y and z are in the selected coordinate system,
+            and params is an optional dictionary of additional per-ion
+            parameters including initial magnetic moments, relaxation
+            constraints etc. TODO
+            Ions of the same type must be specified consecutively.
+        pseudopotentials:
+            Names of individual pseudopotential files or templates for
+            families of pseudopotentials. Templates are specified by
+            including a $ID in the name which is replaced by the chemical
+            symbol of the element. The list of specified file names and
+            templates is processed in order, and the first match for
+            each element takes precedence.
         '''
         self.rc = rc
         qp.log.info('\n--- Initializing Ions ---')
@@ -29,10 +50,10 @@ class Ions:
         self.n_ions: int = 0  #: number of ions
         self.n_types: int = 0  #: number of distinct ion types
         self.symbols: List[str] = []  #: symbol for each ion type
-        self.positions = []  # position of each ion
-        self.types = []      # type of each ion (index into symbols)
-        self.ranges: List[range] = []     # range / slice to get each ion type
-        self.M_initial = []  # initial magnetic moments
+        self.slices: List[slice] = []  #: slice to get each ion type
+        positions = []  # position of each ion
+        types = []      # type of each ion (index into symbols)
+        M_initial = []  # initial magnetic moments
         type_start = 0
         for coord in coordinates:
             # Check for optional attributes:
@@ -50,27 +71,27 @@ class Ions:
                 self.symbols.append(symbol)
                 self.n_types += 1
                 if type_start != self.n_ions:
-                    self.ranges.append(slice(type_start, self.n_ions))
+                    self.slices.append(slice(type_start, self.n_ions))
                     type_start = self.n_ions
             # Add type and position of current ion:
-            self.types.append(self.n_types-1)
-            self.positions.append([float(x) for x in coord[1:4]])
-            self.M_initial.append(attrib.get('M', None))
+            types.append(self.n_types-1)
+            positions.append([float(x) for x in coord[1:4]])
+            M_initial.append(attrib.get('M', None))
             self.n_ions += 1
         if type_start != self.n_ions:
-            self.ranges.append(slice(type_start, self.n_ions))  # for last type
+            self.slices.append(slice(type_start, self.n_ions))  # for last type
 
         # Check order:
         if len(set(self.symbols)) < self.n_types:
             raise ValueError(
                 'coordinates must group ions of same type together')
 
-        # Convert to tensors:
-        self.positions = torch.tensor(self.positions, device=rc.device)
-        self.types = torch.tensor(self.types, device=rc.device)
+        # Convert to tensors before storing in class object:
+        self.positions = torch.tensor(positions, device=rc.device)
+        self.types = torch.tensor(types, device=rc.device)
         # --- Fill in missing magnetizations (if any specified):
         M_lengths = set([(len(M) if isinstance(M, list) else 1)
-                         for M in self.M_initial if M])
+                         for M in M_initial if M])
         if len(M_lengths) > 1:
             raise ValueError('All M must be same type: 3-vector or scalar')
         elif len(M_lengths) == 1:
@@ -78,14 +99,14 @@ class Ions:
             assert((M_length == 1) or (M_length == 3))
             M_default = ([0., 0., 0.] if (M_length == 3) else 0.)
             self.M_initial = torch.tensor(
-                [(M if M else M_default) for M in self.M_initial],
-                device=rc.device, dtype=float)
+                [(M if M else M_default) for M in M_initial],
+                device=rc.device, dtype=torch.double)
         else:
             self.M_initial = None
         self.report()
 
         # Initialize pseudopotentials:
-        self.pseudopotentials = []
+        self.pseudopotentials: List['Pseudopotential'] = []
         if pseudopotentials is None:
             pseudopotentials = []
         if isinstance(pseudopotentials, str):
@@ -126,7 +147,7 @@ class Ions:
         # Calculate total ionic charge (needed for number of electrons):
         self.Z_tot = sum(self.pseudopotentials[i_type].Z
                          * (slice_i.stop - slice_i.start)
-                         for i_type, slice_i in enumerate(self.ranges))
+                         for i_type, slice_i in enumerate(self.slices))
         qp.log.info(f'\nTotal ion charge, Z_tot: {self.Z_tot:g}')
 
         # Initialize / check replica process grid dimension:
