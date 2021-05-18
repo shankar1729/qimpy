@@ -67,8 +67,8 @@ class Grid:
         ke_cutoff
             Plane-wave kinetic-energy cutoff in :math:`E_h` for the grid
             (i.e. the charge-density cutoff). This supercedes the default
-            of 4 * ke_cutoff_wavefunction (if specified), but may be superceded
-            by explicitly specified shape
+            of `4 * ke_cutoff_wavefunction` (if specified), but may be
+            superceded by explicitly specified shape
         shape
             Explicit grid dimensions. Highest precedence, and if specified,
             will supercede ke_cutoff

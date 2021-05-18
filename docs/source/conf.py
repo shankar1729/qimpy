@@ -27,8 +27,15 @@ author = 'QimPy Collaboration'
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
-extensions = ['sphinx.ext.autodoc', 'sphinx.ext.coverage',
-              'sphinx.ext.napoleon']
+extensions = [
+    'sphinx.ext.autodoc',  # Core library for html generation from docstrings
+    'sphinx.ext.autosummary',  # Create neat summary tables
+    'sphinx.ext.coverage',  # Report missing documentation
+    'sphinx.ext.napoleon'  # NumPy style docstrings
+]
+autosummary_generate = True
+autosummary_imported_members = True
+coverage_show_missing_items = True
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']

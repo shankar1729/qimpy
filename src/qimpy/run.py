@@ -1,5 +1,6 @@
-'''This module serves as the main executable for stand-alone QimPy calculations
-from input files in the YAML format. A typical usage would look like:
+'''Stand-alone QimPy calculations from YAML input files
+
+Typical usage:
 
 :code:`mpirun [mpi-options] python -m qimpy.run -i INPUT_FILE [qimpy-options]`
 
@@ -20,12 +21,14 @@ optional arguments:
   -o FILE, --output-file FILE
                         output file (stdout if unspecified)
   -c C, --cores C       number of cores per process (overridden by SLURM)
+
   -p Pr Pk Pb, --process-grid Pr Pk Pb
                         dimensions of process grid: replicas x kpoints x
                         bands/basis, whose product must match process count;
                         any -1 will be set to distribute available tasks for
                         that dimension most equally. Default: -1 -1 -1 implies
                         all dimensions set automatically.
+
   -n, --dry-run         quit after initialization (to check input file)
   -d, --no-append       overwrite output file instead of appending
   -m FILE, --mpi-log FILE
