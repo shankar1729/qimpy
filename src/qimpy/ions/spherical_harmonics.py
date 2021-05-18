@@ -1,35 +1,74 @@
+# List exported symbols for doc generation
+__all__ = ['L_MAX', 'L_MAX_HLF', 'get_harmonics']
+
 import qimpy.ions._spherical_harmonics_data as shdata
-from scipy.sparse import coo_matrix  # TODO: replace with torch COO tensors
+import torch
+from typing import List, Tuple, Dict, Optional, TYPE_CHECKING
+if TYPE_CHECKING:
+    from ..utils import RunConfig
+
+# Versions of shdata converted to torch.Tensors on appropriate device
+_YLM_RECUR: List[torch.Tensor] = []
+_YLM_PROD: Dict[Tuple[int, int], Tuple[torch.Tensor, torch.Tensor]] = {}
+L_MAX: int = shdata.L_MAX  #: Maximum l for harmonics
+L_MAX_HLF: int = shdata.L_MAX_HLF  #: Maximum l for products
 
 
-def get_harmonics(l_max, r):
+def _initialize_device(device: torch.device) -> None:
+    'Initialize spherical harmonic data as torch tensors on device'
+    global _YLM_RECUR, _YLM_PROD
+    # Recurrence coefficients:
+    _YLM_RECUR.clear()
+    for l, (i1, i2, coeff) in enumerate(shdata.YLM_RECUR):
+        if l < 2:
+            _YLM_RECUR.append(torch.tensor(coeff, device=device))
+        else:
+            indices = torch.tensor((i1, i2), device=device)
+            _YLM_RECUR.append(torch.sparse_coo_tensor(
+                indices, coeff, size=(2*l + 1, 3*(2*l - 1)), device=device))
+    # Product coefficients:
+    _YLM_PROD.clear()
+    for ilm_pair, (ilm, coeff) in shdata.YLM_PROD.items():
+        _YLM_PROD[ilm_pair] = (torch.tensor(ilm, device=device),
+                               torch.tensor(coeff, device=device))
+
+
+def get_harmonics(l_max: int, r: torch.Tensor,
+                  rc: 'RunConfig') -> List[torch.Tensor]:
+    'Compute real solid harmonics for each l <= l_max'
+    if not _YLM_PROD:
+        _initialize_device(r.device)
     assert(l_max <= shdata.L_MAX)
+    watch = qp.utils.StopWatch('get_harmonics', rc)
+    out_shape = (-1,) + r.shape[:-1]  # m, followed by shape of r
     results = []
     if l_max >= 0:
-        results.append(shdata.YLM_RECUR[0] * np.ones((1,) + r.shape[:-1]))
+        # l = 0: constant
+        results.append(_YLM_RECUR[0]
+                       * torch.ones((1,) + r.shape[:-1], device=r.device))
     if l_max >= 1:
-        results.append(shdata.YLM_RECUR[1] * r[..., (1, 2, 0)].T)
+        # l = 1: proportional to (y, z, x) for m = (-1, 0, +1):
+        results.append((_YLM_RECUR[1]
+                        * (r.flatten(0, -2).T)[(1, 2, 0), :]).view(out_shape))
     for l in range(2, l_max+1):
-        # Compute from product of harmonics at l = 1 and l-1:
-        if isinstance(shdata.YLM_RECUR[l], tuple):
-            # Convert to sparse matrix on first use:
-            shdata.YLM_RECUR[l] = coo_matrix(
-                (shdata.YLM_RECUR[l][2],
-                    (shdata.YLM_RECUR[l][0], shdata.YLM_RECUR[l][1])),
-                shape=(2*l + 1, 3*(2*l - 1)))
-        product = results[l-1][:, None, :] * results[1][None, :, :]
-        product = product.reshape(3*(2*l - 1), -1)
-        results.append(shdata.YLM_RECUR[l].dot(product))
+        # l > 1: compute from product of harmonics at l = 1 and l - 1:
+        product = (results[l-1][:, None, :]
+                   * results[1][None, :, :]).view(3*(2*l - 1), -1)
+        results.append((_YLM_RECUR[l] @ product).view(out_shape))
+    watch.stop()
     return results
 
 
 if __name__ == "__main__":
     import argparse
+    import qimpy as qp
     import numpy as np
-    from scipy.special import sph_harm
+    from scipy.special import sph_harm  # type: ignore
+    from typing import Sequence, Any
 
-    def get_harmonics_ref(l_max, r):
+    def get_harmonics_ref(l_max: int, r: np.ndarray) -> List[np.ndarray]:
         'Reference real solid harmonics based on SciPy spherical harmonics'
+        watch = qp.utils.StopWatch('get_harmonics_ref', rc)
         rMag = np.linalg.norm(r, axis=-1)
         theta = np.arccos(r[..., 2]/rMag)
         phi = np.arctan2(r[..., 1], r[..., 0])
@@ -45,15 +84,17 @@ if __name__ == "__main__":
                     result[l+m] = np.sqrt(2) * ylm.real
                     result[l-m] = np.sqrt(2) * ylm.imag
             results.append(result)
+        watch.stop()
         return results
 
-    def get_lm(l_max):
+    def get_lm(l_max: int) -> List[Tuple[int, int]]:
         'Get list of all (l,m) in order up to (and including) l_max'
         return [(l, m)
                 for l in range(l_max + 1)
                 for m in range(-l, l+1)]
 
-    def print_array(array, line, padding, fmt, width=79):
+    def print_array(array: Sequence[Any], line: str, padding: int, fmt: str,
+                    width: int = 79) -> str:
         '''PEP8-compatible printing of array, where line is pending text yet to
         be printed, and padding controls where array starts if wrapped to next
         lien based on width. Each entry will be formatted according to fmt.'''
@@ -66,25 +107,26 @@ if __name__ == "__main__":
             return line + '[' + ''.join(strings).rstrip(', ') + ']'
         else:
             # Need multiple lines:
-            print(line.rstrip())
+            qp.log.info(line.rstrip())
             line = (' '*padding) + '['
             for string in strings:
                 if len(line) + len(string) >= width:  # wrap
-                    print(line.rstrip())
+                    qp.log.info(line.rstrip())
                     line = ' '*(padding+1)
                 line += string
             return line.rstrip(', ') + ']'
 
-    def generate_harmonic_coefficients(l_max_hlf):
+    def generate_harmonic_coefficients(l_max_hlf: int) -> None:
         '''Generate tables of recursion coefficients for computing real
         solid harmonics up to l_max = 2 * l_max_hlf, as well as tables of
         product coefficients (Clebsch-Gordon coefficients) for real solid
         harmonics up to order l_max_hlf. Print results formatted as Python
         code that can be pasted into _spherical_harmonics_data.py.'''
         l_max = 2 * l_max_hlf
-        print('L_MAX =', l_max, '     # Maximum l with harmonics supported')
-        print('L_MAX_HLF =', l_max_hlf, ' # Maximum l with products supported')
-        print()
+        qp.log.info('import torch\n'
+                    'from typing import List, Tuple, Dict, Union\n\n'
+                    f'L_MAX: int = {l_max}  # Maximum l for harmonics\n'
+                    f'L_MAX_HLF: int = {l_max_hlf}  # Maximum l for products')
         # Calculate solid harmonics on a mesh covering unit cube:
         grids1d = 3 * (np.linspace(-1., 1., 2*l_max), )  # avoids zero
         r = np.array(np.meshgrid(*grids1d)).reshape(3, -1).T
@@ -93,12 +135,15 @@ if __name__ == "__main__":
         # Calculate recursion coefficients:
         ERR_TOL = 1e-14
         COEFF_TOL = 1e-8
-        print('# Recursion coefficients for computing real harmonics at l>1')
-        print('# from products of those at l = 1 and l-1. The integers index')
-        print('# a sparse matrix with (2l+1) rows and 3*(2l-1) columns.')
+        qp.log.info(
+            'CooIndices = Tuple[List[int], List[int], List[float]]\n\n'
+            '# Recursion coefficients for computing real harmonics at l>1\n'
+            '# from products of those at l = 1 and l-1. The integers index\n'
+            '# a sparse matrix with (2l+1) rows and 3*(2l-1) columns.\n'
+            'YLM_RECUR: List[CooIndices] = [')
         Y_00 = np.sqrt(0.25/np.pi)
         Y_1m_prefac = np.sqrt(0.75/np.pi)
-        line = f'YLM_RECUR = [\n    {Y_00:.16f}, {Y_1m_prefac:.16f},'
+        line = f'    ([], [], [{Y_00:.16f}]), ([], [], [{Y_1m_prefac:.16f}]),'
         for l in range(2, l_max + 1):
             y_product = ylm[l-1][:, None, :] * ylm[1][None, :, :]
             y_product = y_product.reshape((2*l - 1) * 3, -1)
@@ -107,11 +152,12 @@ if __name__ == "__main__":
             values = []
             for m in range(-l, l + 1):
                 # List pairs of m at l = 1 and l-1 that can add up to m:
-                m_pairs = set([(sign*m + dsign*dm, dm)
-                               for sign in (-1, 1)
-                               for dsign in (-1, 1)
-                               for dm in (-1, 0, 1)])
-                m_pairs = [m_pair for m_pair in m_pairs if abs(m_pair[0]) < l]
+                m_pairs_all = set([(sign*m + dsign*dm, dm)
+                                   for sign in (-1, 1)
+                                   for dsign in (-1, 1)
+                                   for dm in (-1, 0, 1)])
+                m_pairs = [m_pair for m_pair in m_pairs_all
+                           if abs(m_pair[0]) < l]
                 m_pair_indices = [3*(l - 1 + m) + (1 + dm)
                                   for m, dm in m_pairs]
                 # Solve for coefficients of the linear combination:
@@ -137,20 +183,21 @@ if __name__ == "__main__":
                 index_col += list(indices[sort_index])
                 values += list(coeff[sort_index])
             # Format as python code:
-            print(line)  # pending data from previous entry
+            qp.log.info(line)  # pending data from previous entry
             line = '    ('
             padding = len(line)
             line = print_array(index_row, line, padding, '{:d}') + ', '
             line = print_array(index_col, line, padding, '{:d}') + ', '
             line = print_array(values, line, padding, '{:.16f}') + '),'
-        print(line.rstrip(', ') + ']')
-        print()
+        qp.log.info(line.rstrip(', ') + ']\n')
         # Calculate Clebsch-Gordon coefficients:
         lm_hlf = get_lm(l_max_hlf)
-        ylm = np.vstack(ylm)  # flatten into a single array with all (l,m)
-        print('# Clebsch-Gordon coefficients for products of real harmonics.')
-        print('# The integer indices correspond to l*(l+1)+m for each (l,m).')
-        line = 'YLM_PROD = {'
+        ylm_all = np.vstack(ylm)  # flatten into a single array with all (l,m)
+        qp.log.info(
+            '# Clebsch-Gordon coefficients for products of real harmonics.\n'
+            '# The integer indices correspond to l*(l+1)+m for each (l,m).')
+        line = 'YLM_PROD: Dict[Tuple[int, int],' \
+               ' Tuple[List[int], List[float]]] = {'
         for ilm1, (l1, m1) in enumerate(lm_hlf):
             for ilm2, (l2, m2) in enumerate(lm_hlf[:ilm1+1]):
                 # List (l,m) pairs allowed by angular momentum addition rules:
@@ -164,8 +211,8 @@ if __name__ == "__main__":
                 m_all = lm_all[:, 1]
                 ilm = l_all*(l_all + 1) + m_all  # flattened index
                 # Solve for coefficients of the linear combination:
-                y_product = ylm[ilm1] * ylm[ilm2]
-                y_terms = ylm[ilm] * (
+                y_product = ylm_all[ilm1] * ylm_all[ilm2]
+                y_terms = ylm_all[ilm] * (
                     r_sq[None, :] ** ((l1 + l2 - l_all)//2)[:, None])
                 results = np.linalg.lstsq(y_terms.T, y_product, rcond=None)
                 coeff = results[0]
@@ -181,12 +228,12 @@ if __name__ == "__main__":
                 ilm = ilm[sort_index]
                 coeff = coeff[sort_index]
                 # Format as python code:
-                print(line)  # pending data from previous entry
+                qp.log.info(line)  # pending data from previous entry
                 line = f'    ({ilm1}, {ilm2}): ('
                 padding = len(line)
                 line = print_array(ilm, line, padding, '{:d}') + ', '
                 line = print_array(coeff, line, padding, '{:.16f}') + '),'
-        print(line.rstrip(', ') + '}')
+        qp.log.info(line.rstrip(', ') + '}')
 
     # Parse command line:
     parser = argparse.ArgumentParser(
@@ -201,47 +248,62 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.generate:
+        rc = qp.utils.RunConfig()
+        assert (rc.n_procs == 1)
+        qp.utils.log_config()  # after rc to suppress header messages
         l_max_hlf = 3
         generate_harmonic_coefficients(l_max_hlf)
 
     if args.test:
-        r = np.random.randn(1000, 3)
-        r_sq = (r**2).sum(axis=-1)
+        qp.utils.log_config()
+        rc = qp.utils.RunConfig()
+        assert (rc.n_procs == 1)
+        r = torch.randn(10, 10000, 3, device=rc.device)
+        r_sq = (r**2).sum(dim=-1)
 
         # Test spherical harmonics:
-        print('Testing spherical harmonics:')
+        qp.log.info('Testing spherical harmonics:')
         rel_err_all = []
-        ylm = get_harmonics(shdata.L_MAX, r)
-        ylm_ref = get_harmonics_ref(shdata.L_MAX, r)
+        ylm = get_harmonics(shdata.L_MAX, r, rc)
+        ylm_ref = [torch.tensor(y, device=r.device) for y
+                   in get_harmonics_ref(shdata.L_MAX, r.to(rc.cpu).numpy())]
         for l in range(shdata.L_MAX+1):
-            err = np.linalg.norm(ylm[l] - ylm_ref[l])
-            rel_err = err / np.linalg.norm(ylm_ref[l])
+            err = (ylm[l] - ylm_ref[l]).norm().item()
+            rel_err = err / (ylm_ref[l]).norm().item()
             rel_err_all.append(rel_err)
-            print(f"  l: {l} Err: {rel_err:9.3e}")
+            qp.log.info(f"  l: {l} Err: {rel_err:9.3e}")
         rel_err_overall = np.sqrt((np.array(rel_err_all)**2).mean())
-        print(f'  Overall Err: {rel_err_overall:9.3e}\n')
+        qp.log.info(f'  Overall Err: {rel_err_overall:9.3e}\n')
 
         # Test product coefficients:
-        print('Testing product coefficients:')
-        ylm_all = np.vstack(ylm)  # flatten into a single array with all (l,m)
+        qp.log.info('Testing product coefficients:')
+        if not _YLM_PROD:
+            _initialize_device(rc.device)
+        ylm_all = torch.vstack(ylm)  # flatten to single array with all (l,m)
         rel_err_all = []
+        dl_shape = (-1,) + (1,) * len(r_sq.shape)  # to bcast with r_sq[None]
         for l1 in range(shdata.L_MAX_HLF+1):
             for l2 in range(l1+1):
                 product_ref = ylm[l1][:, None, :] * ylm[l2][None, :, :]
-                product = np.zeros_like(product_ref)
+                product = torch.zeros_like(product_ref)
                 for m1 in range(-l1, l1+1):
                     ilm1 = l1*(l1 + 1) + m1
                     for m2 in range(-l2, l2+1):
                         ilm2 = l2*(l2 + 1) + m2
-                        index, coeffs = shdata.YLM_PROD[(max(ilm1, ilm2),
-                                                         min(ilm1, ilm2))]
-                        dl = l1 + l2 - np.floor(np.sqrt(index)).astype(int)
-                        prod_terms = ylm_all[index] * (
-                            r_sq[None, :] ** (dl[:, None]//2))
-                        product[l1+m1, l2+m2] = np.dot(coeffs, prod_terms)
-                err = np.linalg.norm(product - product_ref)
-                rel_err = err / np.linalg.norm(product_ref)
+                        index, coeffs = _YLM_PROD[(max(ilm1, ilm2),
+                                                   min(ilm1, ilm2))]
+                        l_net = torch.floor(torch.sqrt(index)).to(torch.int)
+                        dl_by_2 = (l1 + l2 - l_net).div(2,
+                                                        rounding_mode='floor')
+                        prod_terms = ylm_all[index] * (r_sq[None, ...] **
+                                                       dl_by_2.view(dl_shape))
+                        product[l1+m1, l2+m2] = torch.tensordot(
+                            coeffs, prod_terms, dims=1)
+                err = (product - product_ref).norm().item()
+                rel_err = err / product_ref.norm().item()
                 rel_err_all.append(rel_err)
-                print(f"  l: {l1} {l2} Err: {rel_err:9.3e}")
+                qp.log.info(f"  l: {l1} {l2} Err: {rel_err:9.3e}")
         rel_err_overall = np.sqrt((np.array(rel_err_all)**2).mean())
-        print(f'  Overall Err: {rel_err_overall:9.3e}')
+        qp.log.info(f'  Overall Err: {rel_err_overall:9.3e}')
+
+        qp.utils.StopWatch.print_stats()

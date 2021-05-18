@@ -1,11 +1,15 @@
-L_MAX = 6      # Maximum l with harmonics supported
-L_MAX_HLF = 3  # Maximum l with products supported
+import torch
+from typing import List, Tuple, Dict, Union
+
+L_MAX: int = 6  # Maximum l for harmonics
+L_MAX_HLF: int = 3  # Maximum l for products
+CooIndices = Tuple[List[int], List[int], List[float]]
 
 # Recursion coefficients for computing real harmonics at l>1
 # from products of those at l = 1 and l-1. The integers index
 # a sparse matrix with (2l+1) rows and 3*(2l-1) columns.
-YLM_RECUR = [
-    0.2820947917738781, 0.4886025119029199,
+YLM_RECUR: List[CooIndices] = [
+    ([], [], [0.2820947917738781]), ([], [], [0.4886025119029199]),
     ([0, 1, 2, 2, 2, 3, 4, 4], [2, 1, 0, 4, 8, 5, 0, 8],
      [4.5764561643188433, 4.5764561643188442, -1.3211090992020038,
       2.6422181984040072, -1.3211090992020038, 4.5764561643188442,
@@ -65,7 +69,7 @@ YLM_RECUR = [
 
 # Clebsch-Gordon coefficients for products of real harmonics.
 # The integer indices correspond to l*(l+1)+m for each (l,m).
-YLM_PROD = {
+YLM_PROD: Dict[Tuple[int, int], Tuple[List[int], List[float]]] = {
     (0, 0): ([0], [0.2820947917738784]),
     (1, 0): ([1], [0.2820947917738780]),
     (1, 1): ([0, 6, 8],
