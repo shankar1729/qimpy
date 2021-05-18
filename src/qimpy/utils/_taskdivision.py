@@ -4,7 +4,7 @@ from typing import Optional
 
 
 class TaskDivision:
-    """Division of a number of tasks over MPI"""
+    """Division of a number of tasks over MPI."""
     __slots__ = ('n_tot', 'n_procs', 'i_proc', 'n_each', 'n_prev',
                  'i_start', 'i_stop', 'n_mine')
 

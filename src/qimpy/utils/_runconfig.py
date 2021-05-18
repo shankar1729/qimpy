@@ -9,7 +9,7 @@ from typing import Optional, Tuple
 
 
 class RunConfig:
-    """Run configuration: hardware resources including CPU cores or GPU,
+    """Run configuration / hardware resources. This includes CPU cores or GPU,
     and MPI communicators to be used by current QimPy instance.
 
     RunConfig must be created before any torch CUDA calls,

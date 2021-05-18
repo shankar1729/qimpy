@@ -18,8 +18,9 @@ def prime_factorization(N: int) -> List[int]:
 
 
 def fft_suitable(N: int) -> bool:
-    '''Check whether the prime factorization of `N` is suitable for
-    efficient FFTs, that is contains only 2, 3, 5 and 7.'''
+    '''Check whether `N` has only small prime factors. Return True if
+    the prime factorization of `N` is suitable for efficient FFTs,
+    that is contains only 2, 3, 5 and 7.'''
     for p in [2, 3, 5, 7]:
         while N % p == 0:
             N //= p
@@ -34,8 +35,8 @@ def ceildiv(num: int, den: int) -> int:
 
 
 def ortho_matrix(O: torch.Tensor, use_cholesky: bool = True) -> torch.Tensor:
-    """Return orthonormalization matrix of a basis, given the overlap matrix
-    (metric) `O` of that basis.
+    """Return orthonormalization matrix of a basis.
+    The basis is specified by its overlap matrix or metric, `O`.
 
     Parameters
     ----------
@@ -66,8 +67,8 @@ def ortho_matrix(O: torch.Tensor, use_cholesky: bool = True) -> torch.Tensor:
 
 def eighg(H: torch.Tensor, O: torch.Tensor,
           use_cholesky: bool = True) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Solve Hermitian generalized eigenvalue problem
-    `H` @ `V` = `O` @ `V` @ `E`
+    """Solve Hermitian generalized eigenvalue problem.
+    Specifically, find `E` and `V` that satisfy `H` @ `V` = `O` @ `V` @ `E`.
 
     Parameters
     ----------
