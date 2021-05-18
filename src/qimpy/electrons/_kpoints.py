@@ -110,7 +110,7 @@ class Kmesh(Kpoints):
             mesh_coord = k * size_f - offset_f
             int_coord = torch.round(mesh_coord)
             on_mesh = ((mesh_coord - int_coord).abs() < min_offset).all(dim=-1)
-            mesh_index = (int_coord.to(int) % size_i) @ stride_i
+            mesh_index = ((int_coord.to(int) % size_i) * stride_i).sum(dim=-1)
             return on_mesh, torch.where(on_mesh, mesh_index, not_found_index)
 
         # Check whether to add explicit inversion:
@@ -181,7 +181,7 @@ class Kpath(Kpoints):
         # Create path one segment at a time:
         k = [points[:1]]
         self.labels = {0: labels[0]}
-        k_length = [torch.zeros((1,), dtype=float, device=rc.device)]
+        k_length = [np.zeros((1,), dtype=float)]
         nk_tot = 1
         distance_tot = 0.
         dpoints = points.diff(dim=0)
@@ -192,11 +192,11 @@ class Kpath(Kpoints):
             k.append(points[i] + t[:, None] * dpoints[i])
             nk_tot += nk.item()
             self.labels[nk_tot - 1] = labels[i+1]  # label at end of segment
-            k_length.append(distance_tot + distance * t)
+            k_length.append((distance_tot + distance * t).to(rc.cpu).numpy())
             distance_tot += distance
         k = torch.cat(k)
         wk = torch.full((nk_tot,),  1./nk_tot, device=rc.device)
-        self.k_length = torch.cat(k_length)  # cumulative length on path
+        self.k_length = np.concatenate(k_length)  # cumulative length on path
         qp.log.info(f'Created {nk_tot} k-points on k-path of'
                     f' length {distance_tot.item():g}')
 

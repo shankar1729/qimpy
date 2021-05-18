@@ -138,7 +138,7 @@ class Davidson:
             n_bands_new = n_bands_cur + Cexp.n_bands()
 
             # Expansion subspace overlaps:
-            C_OC = torch.eye(n_bands_cur)[None, None]  # already orthonormal
+            C_OC = torch.eye(n_bands_cur, device=V.device)[None, None]
             C_OCexp = C.dot(Cexp, overlap=True)
             Cexp_OC = C_OCexp.conj().transpose(-2, -1)
             Cexp_OCexp = Cexp.dot(Cexp, overlap=True)
