@@ -1,7 +1,9 @@
 '''Tables connecting chemical symbols, atomic numbers and atomic weights'''
 import numpy as np
+from typing import Dict
 
-ATOMIC_NUMBERS = {
+
+ATOMIC_NUMBERS: Dict[str, int] = {
     # Period 1:
     "H": 1, "He": 2,
     # Period 2:
@@ -34,10 +36,10 @@ ATOMIC_NUMBERS = {
     "Lr": 103, "Rf": 104, "Db": 105, "Sg": 106, "Bh": 107,
     "Hs": 108, "Mt": 109, "Ds": 110, "Rg": 111, "Cn": 112,
     "Nh": 113, "Fl": 114, "Mc": 115, "Lv": 116, "Ts": 117, "Og": 118}
-"""dict : atomic numbers (Z) indexed by chemical symbol"""
+"""Atomic numbers (Z) indexed by chemical symbol"""
 
 
-ATOMIC_WEIGHTS = np.array([
+ATOMIC_WEIGHTS: np.ndarray = np.array([
     0.,  # no element with Z=0
     # Period 1:
     1.007940, 4.002602,
@@ -71,6 +73,6 @@ ATOMIC_WEIGHTS = np.array([
     262.11000, 267.12200, 268.12600, 271.13400, 274.14400,
     277.15200, 278.15600, 281.16500, 282.16900, 285.17700,
     286.18300, 289.19100, 290.19600, 293.20500, 294.21100, 294.2140])
-"""numpy.array : atomic weights indexed by atomic number.
-Note that ATOMIC_WEIGHTS[0] is set to 0, so that ATOMIC_WEIGHTS[1]
+"""Atomic weights indexed by atomic number.
+Note that first entry is set to 0, so that ATOMIC_WEIGHTS[1]
 corresponds to H, ATOMIC_WEIGHTS[2] corresponds to He, etc."""
