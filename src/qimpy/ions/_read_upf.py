@@ -186,7 +186,7 @@ def _read_upf(self: 'Pseudopotential', filename: str, rc: 'RunConfig'):
 
 
 if __name__ == '__main__':
-    import matplotlib.pyplot as plt  # type: ignore
+    import matplotlib.pyplot as plt
     qp.utils.log_config()
     rc = qp.utils.RunConfig()
 

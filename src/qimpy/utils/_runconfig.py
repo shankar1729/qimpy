@@ -4,7 +4,7 @@ import datetime
 import torch
 import qimpy as qp
 import numpy as np
-from psutil import cpu_count  # type: ignore
+from psutil import cpu_count
 from typing import Optional, Tuple
 
 

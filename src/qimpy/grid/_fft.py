@@ -2,9 +2,18 @@ import qimpy as qp
 import numpy as np
 import torch
 from qimpy.utils import TaskDivision, BufferView
+from typing import Tuple, Sequence, Callable, TYPE_CHECKING
+if TYPE_CHECKING:
+    from ._grid import Grid
+    from ..utils import RunConfig
 
 
-def _init_grid_fft(self):
+IndicesType = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+MethodFFT = Callable[['Grid', torch.Tensor, str], torch.Tensor]
+FunctionFFT = Callable[[torch.Tensor, str], torch.Tensor]
+
+
+def _init_grid_fft(self: 'Grid') -> None:
     'Initialize local or parallel FFTs for class Grid'
     # Half-reciprocal space global dimensions (for rfft/irfft):
     self.shapeH = (self.shape[0], self.shape[1], 1+self.shape[2]//2)
@@ -33,7 +42,7 @@ def _init_grid_fft(self):
         'G': iG1D[:2] + (iG1D[2][self.split2.i_start:self.split2.i_stop],),
         'H': iG1D[:2] + (iG1D[2][self.split2H.i_start:self.split2H.i_stop],)}
 
-    def unscramble(in_prev, n_out_mine):
+    def get_indices(in_prev: np.ndarray, n_out_mine: int) -> IndicesType:
         """Get index arrays for unscrambling data after MPI rearrangement.
 
         A common operation below is taking an array split along axis
@@ -89,15 +98,19 @@ def _init_grid_fft(self):
         return index_1, index_i_batch, index_n_batch
 
     # Pre-calculate these arrays for each of the transforms:
-    self.unscramble_fft = unscramble(self.split0.n_prev, self.split2.n_mine)
-    self.unscramble_ifft = unscramble(self.split2.n_prev, self.split0.n_mine)
-    self.unscramble_rfft = unscramble(self.split0.n_prev, self.split2H.n_mine)
-    self.unscramble_irfft = unscramble(self.split2H.n_prev, self.split0.n_mine)
+    self.indices_fft = get_indices(self.split0.n_prev, self.split2.n_mine)
+    self.indices_ifft = get_indices(self.split2.n_prev, self.split0.n_mine)
+    self.indices_rfft = get_indices(self.split0.n_prev, self.split2H.n_mine)
+    self.indices_irfft = get_indices(self.split2H.n_prev, self.split0.n_mine)
 
 
-def parallel_transform(rc, comm, v, norm, shape_in, shape_out,
-                       fft_before, fft_after, in_prev, out_prev,
-                       index_1, index_i_batch, index_n_batch):
+def parallel_transform(
+        rc: 'RunConfig', comm: qp.MPI.Comm, v: torch.Tensor, norm: str,
+        shape_in: Tuple[int, ...], shape_out: Tuple[int, ...],
+        fft_before: FunctionFFT, fft_after: FunctionFFT,
+        in_prev: np.ndarray, out_prev: np.ndarray,
+        index_1: torch.Tensor, index_i_batch: torch.Tensor,
+        index_n_batch: torch.Tensor) -> torch.Tensor:
     """Helper function that performs the work of all the parallel
     FFT functions in class qimpy.grid.Grid. This function should
     be called only for n_procs > 1 i.e. when actually parallelized.
@@ -108,37 +121,37 @@ def parallel_transform(rc, comm, v, norm, shape_in, shape_out,
 
     Parameters
     ----------
-    rc : qimpy.utils.RunConfig
+    rc
         Current run configuration
-    comm : mpi4py.MPI.Comm
+    comm
         Communicator that this transform is split on
-    v : Tensor
+    v
         Input tensor, 3D, real for rfft and complex for all else
     norm :  {'backward', 'forward', 'ortho'}
         Which direction of the transform is the normalization applied to
         (same as norm in the torch.fft routines)
-    shape_in : tuple of 3 ints
+    shape_in
         local spatial dimensions before MPI exchange
-    shape_out : tuple of 3 ints
+    shape_out
         local spatial dimensions after MPI exchange
-    fft_before : function
+    fft_before
         corresponding 2D/1D torch FFT routine before MPI exchange
-    fft_after : function
+    fft_after
         corresponding 1D/2D torch FFT routine after MPI exchange
-    in_prev : numpy.array of ints
+    in_prev
         TaskDivision.n_prev of the dimension together at input, that splits
-    out_prev : numpy.array of ints
+    out_prev
         TaskDivision.n_prev of the dimension initially split, joined at output
-    index_1 : torch.Tensor of ints
+    index_1
         relevant unscramble index (coefficient of 1) from _init_grid_fft
-    index_i_batch : torch.Tensor of ints
+    index_i_batch
         relevant unscramble index (coefficient of i_batch) from _init_grid_fft
-    index_n_batch : torch.Tensor of ints
+    index_n_batch
         relevant unscramble index (coefficient of n_batch) from _init_grid_fft
     """
     assert(v.shape[-3:] == shape_in)
     n_batch = int(np.prod(v.shape[:-3]))
-    v_tilde = fft_before(v, norm=norm)  # Transform 2 or 1 dims here
+    v_tilde = fft_before(v, norm)  # Transform 2 or 1 dims here
     v_tilde = v_tilde.flatten(0, -2).T.contiguous()  # bring last dim to front
 
     # MPI rearrangement:
@@ -160,10 +173,11 @@ def parallel_transform(rc, comm, v, norm, shape_in, shape_out,
         index = index_1 + index_i_batch * i_batch + index_n_batch * n_batch
     v_tilde = v_tmp[index].view(v.shape[:-3] + shape_out)
     del v_tmp
-    return fft_after(v_tilde, norm=norm)  # Transform 1 or 2 dims here
+    return fft_after(v_tilde, norm)  # Transform 1 or 2 dims here
 
 
-def _fft(self, v, norm='forward'):
+def _fft(self: 'Grid', v: torch.Tensor,
+         norm: str = 'forward') -> torch.Tensor:
     """Complex to complex forward transform
 
     Parameters
@@ -191,10 +205,11 @@ def _fft(self, v, norm='forward'):
         self.rc, self.comm, v, norm,
         self.shapeR_mine, self.shapeG_mine[::-1],
         safe_fft2, safe_fft, self.split2.n_prev, self.split0.n_prev,
-        *self.unscramble_fft).swapaxes(-1, -3)
+        *self.indices_fft).swapaxes(-1, -3)
 
 
-def _ifft(self, v, norm='forward'):
+def _ifft(self: 'Grid', v: torch.Tensor,
+          norm: str = 'forward') -> torch.Tensor:
     """Complex to complex inverse transform
 
     Parameters
@@ -219,10 +234,11 @@ def _ifft(self, v, norm='forward'):
         self.rc, self.comm, v.swapaxes(-1, -3), norm,
         self.shapeG_mine[::-1], self.shapeR_mine,
         safe_ifft, safe_ifft2, self.split0.n_prev, self.split2.n_prev,
-        *self.unscramble_ifft)
+        *self.indices_ifft)
 
 
-def _rfft(self, v, norm='forward'):
+def _rfft(self: 'Grid', v: torch.Tensor,
+          norm: str = 'forward') -> torch.Tensor:
     """Real to complex forward transform
 
     Parameters
@@ -247,10 +263,11 @@ def _rfft(self, v, norm='forward'):
         self.rc, self.comm, v, norm,
         self.shapeR_mine, self.shapeH_mine[::-1],
         safe_rfft, safe_fft2, self.split2H.n_prev, self.split0.n_prev,
-        *self.unscramble_rfft).swapaxes(-1, -3)
+        *self.indices_rfft).swapaxes(-1, -3)
 
 
-def _irfft(self, v, norm='forward'):
+def _irfft(self: 'Grid', v: torch.Tensor,
+           norm: str = 'forward') -> torch.Tensor:
     """Complex to real inverse transform
 
     Parameters
@@ -276,7 +293,7 @@ def _irfft(self, v, norm='forward'):
         self.rc, self.comm, v.swapaxes(-1, -3), norm,
         self.shapeH_mine[::-1], shapeR_mine_complex,
         safe_ifft2, safe_irfft, self.split0.n_prev, self.split2H.n_prev,
-        *self.unscramble_irfft)
+        *self.indices_irfft)
 
 
 # Maps between corresponding real and complex types:
@@ -289,23 +306,23 @@ complexType = {
 
 
 # --- Wrappers to torch FFTs that are safe for zero sizes ---
-def safe_fft(v, norm):
+def safe_fft(v: torch.Tensor, norm: str) -> torch.Tensor:
     return v if v.shape.count(0) else torch.fft.fft(v, norm=norm)
 
 
-def safe_fft2(v, norm):
+def safe_fft2(v: torch.Tensor, norm: str) -> torch.Tensor:
     return v if v.shape.count(0) else torch.fft.fft2(v, norm=norm)
 
 
-def safe_ifft(v, norm):
+def safe_ifft(v: torch.Tensor, norm: str) -> torch.Tensor:
     return v if v.shape.count(0) else torch.fft.ifft(v, norm=norm)
 
 
-def safe_ifft2(v, norm):
+def safe_ifft2(v: torch.Tensor, norm: str) -> torch.Tensor:
     return v if v.shape.count(0) else torch.fft.ifft2(v, norm=norm)
 
 
-def safe_rfft(v, norm):
+def safe_rfft(v: torch.Tensor, norm: str) -> torch.Tensor:
     if v.shape.count(0):
         return torch.zeros(v.shape[:-1] + (v.shape[-1]//2+1,),
                            dtype=complexType[v.dtype], device=v.device)
@@ -313,7 +330,7 @@ def safe_rfft(v, norm):
         return torch.fft.rfft(v, norm=norm)
 
 
-def safe_irfft(v, norm):
+def safe_irfft(v: torch.Tensor, norm: str) -> torch.Tensor:
     if v.shape.count(0):
         return torch.zeros(v.shape[:-1] + (2*(v.shape[-1]-1),),
                            dtype=realType[v.dtype], device=v.device)

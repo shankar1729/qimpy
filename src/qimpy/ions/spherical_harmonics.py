@@ -63,7 +63,7 @@ if __name__ == "__main__":
     import argparse
     import qimpy as qp
     import numpy as np
-    from scipy.special import sph_harm  # type: ignore
+    from scipy.special import sph_harm
     from typing import Sequence, Any
 
     def get_harmonics_ref(l_max: int, r: np.ndarray) -> List[np.ndarray]:

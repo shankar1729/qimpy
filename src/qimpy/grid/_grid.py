@@ -1,43 +1,75 @@
 import qimpy as qp
 import numpy as np
 import torch
-from ._fft import _init_grid_fft, _fft, _ifft, _rfft, _irfft
+from ._fft import _init_grid_fft, _fft, _ifft, _rfft, _irfft, \
+    IndicesType, MethodFFT
+from typing import Optional, Sequence, Tuple, Dict, TYPE_CHECKING
+if TYPE_CHECKING:
+    from ..utils import RunConfig, TaskDivision
+    from ..lattice import Lattice
+    from ..symmetries import Symmetries
 
 
 class Grid:
-    'TODO: document class Grid'
+    '''Real and reciprocal space grids for the unit cell of a lattice,
+    and FFT routines for switching between them.
+    '''
+    __slots__ = [
+        'rc', 'comm', 'n_procs', 'i_proc', 'is_split', 'ke_cutoff',
+        'shape', 'shapeH', 'shapeR_mine', 'shapeG_mine', 'shapeH_mine',
+        'split0', 'split2', 'split2H', 'mesh1D',
+        'indices_fft', 'indices_ifft', 'indices_rfft', 'indices_irfft']
+    rc: 'RunConfig'
+    comm: qp.MPI.Comm  #: Communicator to split grid and FFTs over
+    n_procs: int  #: Size of comm
+    i_proc: int  #: Rank within comm
+    is_split: bool  #: Whether the grid is split over MPI
+    ke_cutoff: float  #: Kinetic energy of Nyquist-frequency plane-waves
+    shape: Tuple[int, ...]  #: Global real-space grid dimensions
+    shapeH: Tuple[int, ...]  #: Global half-reciprocal-space grid dimensions
+    shapeR_mine: Tuple[int, ...]  #: Local real grid dimensions
+    shapeG_mine: Tuple[int, ...]  #: Local reciprocal grid dimensions
+    shapeH_mine: Tuple[int, ...]  #: Local half-reciprocal grid dimensions
+    split0: 'TaskDivision'  #: MPI division of real-space dimension 0
+    split2: 'TaskDivision'  #: MPI division of reciprocal dimension 2
+    split2H: 'TaskDivision'  #: MPI division of half-reciprocal dimension 2
+    mesh1D: Dict[str, Tuple[torch.Tensor, ...]]  #: 1D meshes for `get_mesh`
+    indices_fft: IndicesType  #: All-to-all unscramble indices for `fft`
+    indices_ifft: IndicesType  #: All-to-all unscramble indices for `ifft`
+    indices_rfft: IndicesType  #: All-to-all unscramble indices for `rfft`
+    indices_irfft: IndicesType  #: All-to-all unscramble indices for `irfft`
 
-    fft = _fft
-    ifft = _ifft
-    rfft = _rfft
-    irfft = _irfft
+    fft: MethodFFT = _fft
+    ifft: MethodFFT = _ifft
+    rfft: MethodFFT = _rfft
+    irfft: MethodFFT = _irfft
 
-    def __init__(self, *,
-                 rc, lattice, symmetries, comm, ke_cutoff_wavefunction=None,
-                 ke_cutoff=None, shape=None):
+    def __init__(self, *, rc: 'RunConfig', lattice: 'Lattice',
+                 symmetries: 'Symmetries', comm: qp.MPI.Comm,
+                 ke_cutoff_wavefunction: Optional[float] = None,
+                 ke_cutoff: Optional[float] = None,
+                 shape: Optional[Sequence[int]] = None) -> None:
         '''
         Parameters
         ----------
-        rc : qimpy.utils.RunConfig
-            Current run configuration
-        lattice : qimpy.lattice.Lattice
+        lattice
             Lattice whose reciprocal lattice vectors define plane-wave basis
-        symmetries : qimpy.symmetries.Symmetries
+        symmetries
             Symmetries with which grid dimensions will be made commensurate,
             or checked if specified explicitly by shape below.
-        comm : mpi4py.MPI.COMM or None
+        comm
             Communicator to split grid (and its FFTs) over, if provided.
-        ke_cutoff_wavefunction : float, optional
+        ke_cutoff_wavefunction
             Plane-wave kinetic-energy cutoff in :math:`E_h` for any electronic
             wavefunctions to be used with this grid. This is an internally set
             parameter (should not be specified in dict / YAML input) that
             effectively sets the default for ke_cutoff.
-        ke_cutoff : float, default: 4 * ke_cutoff_wavefunction (if available)
+        ke_cutoff
             Plane-wave kinetic-energy cutoff in :math:`E_h` for the grid
             (i.e. the charge-density cutoff). This supercedes the default
-            set by ke_cutoff_wavefunction (if any), but may be superceded
+            of 4 * ke_cutoff_wavefunction (if specified), but may be superceded
             by explicitly specified shape
-        shape : list of 3 ints, optional
+        shape
             Explicit grid dimensions. Highest precedence, and if specified,
             will supercede ke_cutoff
         '''
@@ -50,7 +82,7 @@ class Grid:
         self.is_split = (self.n_procs == 1)
 
         # Select the relevant ke-cutoff:
-        self.ke_cutoff = ke_cutoff
+        self.ke_cutoff = (ke_cutoff if ke_cutoff else 0.)
         if ke_cutoff_wavefunction:
             if not ke_cutoff:  # note that ke_cutoff takes precedence
                 self.ke_cutoff = 4*ke_cutoff_wavefunction
@@ -95,7 +127,7 @@ class Grid:
         qp.log.info(f'selected shape: {self.shape}')
         _init_grid_fft(self)
 
-    def get_mesh(self, space):
+    def get_mesh(self, space: str) -> torch.Tensor:
         '''Get mesh integer coordinates for real or reciprocal space
 
         Parameters
