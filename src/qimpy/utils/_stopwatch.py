@@ -26,13 +26,7 @@ class StopWatch:
                                       torch.cuda.Event]]] = []
 
     def __init__(self, name: str, rc: RunConfig):
-        """
-        Parameters
-        ----------
-        name : str
-            Name of function or code block being profiled.
-        rc : qimpy.utils.RunConfig
-            Current run configuration (required for proper GPU profiling)."""
+        """Start profiling a block of code named `name`."""
         self.use_cuda = rc.use_cuda
         self.name = name
         if self.use_cuda:

@@ -42,7 +42,8 @@ class RunConfig:
     def __init__(self, *, comm: Optional[qp.MPI.Comm] = None,
                  cores: Optional[int] = None,
                  process_grid: Tuple[int, int, int] = (-1, -1, -1)):
-        """
+        """Initialize hardware resources, process grid and communicators.
+
         Parameters
         ----------
         comm
@@ -187,11 +188,11 @@ class RunConfig:
             self.i_proc_b = self.comm_b.Get_rank()
 
     def provide_n_tasks(self, dim: int, n_tasks: int):
-        '''Inform RunConfig of the number of tasks to be split along a given
-        dimension of the process grid. If that dimension is undetermined (-1),
-        set it to a suitable value that is compatible with the total processes
-        and any other known process grid dimensions, and with splitting n_tasks
-        tasks with reasonable load balancing over this dimension.
+        '''Provide task count for a process grid dimension. If that dimension
+        is undetermined (-1), set it to a suitable value that is compatible
+        with the total processes and any other known process grid dimensions,
+        and with splitting n_tasks tasks with reasonable load balancing
+        over this dimension.
 
         Parameters
         ----------
@@ -235,7 +236,7 @@ class RunConfig:
         qp.log.info(f'\nEnd time: {time.ctime(t_stop)} (Duration: {duration})')
 
     def fmt(self, tensor: torch.Tensor) -> str:
-        'Standardized conversion of torch tensors for log'
+        'Standardized conversion of torch tensors for logging.'
         return np.array2string(
             tensor.to(self.cpu).numpy(),
             precision=8, suppress_small=True, separator=', ')

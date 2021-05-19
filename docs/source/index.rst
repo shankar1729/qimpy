@@ -1,9 +1,9 @@
-Welcome to QimPy's documentation!
-=================================
+QimPy Reference
+===============
 
 .. autosummary::
    :toctree: _autosummary
-   :template: custom-module-template.rst
+   :template: module.rst
    :recursive:
 
    qimpy

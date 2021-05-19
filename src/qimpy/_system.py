@@ -12,6 +12,13 @@ if TYPE_CHECKING:
 
 class System:
     '''Overall system to calculate within QimPy'''
+    __slots__ = ('rc', 'lattice', 'ions', 'symmetries', 'electrons', 'grid')
+    rc: 'RunConfig'  #: Current run configuration
+    lattice: 'Lattice'  #: Lattice vectors / unit cell definition
+    ions: 'Ions'  #: Ionic positions and pseudopotentials
+    symmetries: 'Symmetries'  #: Point and space group symmetries
+    electrons: 'Electrons'  #: Electronic sub-system
+    grid: 'Grid'  #: Charge-density grid
 
     def __init__(self, *, rc: 'RunConfig',
                  lattice: Union['Lattice', dict],
@@ -19,38 +26,32 @@ class System:
                  symmetries: Union['Symmetries', dict, None] = None,
                  electrons: Union['Electrons', dict, None] = None,
                  grid: Union['Grid', dict, None] = None):
-        '''Compose a System to calculate from its pieces, each of which
+        '''Compose a System to calculate from its pieces. Each piece
         could be provided as an object or a dictionary of parameters
         suitable for initializing that object'''
-        self.rc: 'RunConfig' = rc  #: current run configuration
-        self.lattice: 'Lattice' = qp.construct(
-            qp.lattice.Lattice, lattice, 'lattice',
-            rc=rc)  #: lattice vectors / unit cell definition
-        self.ions: 'Ions' = qp.construct(
-            qp.ions.Ions, ions, 'ions',
-            rc=rc)  #: ionic positions and pseudopotentials
-        self.symmetries: 'Symmetries' = qp.construct(
+        self.rc = rc
+        self.lattice = qp.construct(qp.lattice.Lattice, lattice, 'lattice',
+                                    rc=rc)
+        self.ions = qp.construct(qp.ions.Ions, ions, 'ions', rc=rc)
+        self.symmetries = qp.construct(
             qp.symmetries.Symmetries, symmetries, 'symmetries',
-            rc=rc, lattice=self.lattice,
-            ions=self.ions)  #: point and space group symmetries
-        self.electrons: 'Electrons' = qp.construct(
+            rc=rc, lattice=self.lattice, ions=self.ions)
+        self.electrons = qp.construct(
             qp.electrons.Electrons, electrons, 'electrons',
             rc=rc, lattice=self.lattice, ions=self.ions,
-            symmetries=self.symmetries
-        )  #: electronic wavefunctions and related quantities
+            symmetries=self.symmetries)
 
         qp.log.info('\n--- Initializing Charge-Density Grid ---')
-        self.grid: 'Grid' = qp.construct(
+        self.grid = qp.construct(
             qp.grid.Grid, grid, 'grid',
             rc=rc, lattice=self.lattice, symmetries=self.symmetries,
             comm=rc.comm_kb,  # parallelized on intra-replica comm
-            ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff
-        )  #: charge-density grid
+            ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff)
 
         qp.log.info(f'\nInitialization completed at t[s]: {rc.clock():.2f}\n')
 
     def run(self):
-        'Run any actions specified in the input'
+        'Run any actions specified in the input.'
         # TODO: systematize selection of what actions to perform
         self.electrons.diagonalize()
         self.electrons.output()
