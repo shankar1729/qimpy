@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 
 
 def _hamiltonian(self: 'Electrons', C: 'Wavefunction') -> 'Wavefunction':
-    '''Apply electronic Hamiltonian applied on wavefunctions `C`'''
+    '''Apply electronic Hamiltonian on wavefunction `C`'''
     basis = C.basis
     HC = basis.apply_ke(C)
     HC += basis.apply_potential(self.V_ks, C)
