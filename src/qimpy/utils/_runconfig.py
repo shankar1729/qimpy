@@ -23,21 +23,20 @@ class RunConfig:
     comm_b: qp.MPI.Comm  #: Inter bands/basis communicator
     i_proc: int  #: Rank within `comm`
     n_procs: int  #: Size of `comm`
-    is_head: bool  #: whether head of `comm`
+    is_head: bool  #: Whether head of `comm`
     process_grid: np.ndarray  #: (`n_procs_r`, `n_procs_k`, `n_procs_b`)
-    n_procs_r: int  #: size of `comm_r`
-    i_proc_r: int  #: rank within `comm_r`
-    n_procs_kb: int  #: size of `comm_kb`
-    i_proc_kb: int  #: rank within `comm_kb`
-    n_procs_k: int  #: size of `comm_k`
-    i_proc_k: int  #: rank within `comm_k`
-    n_procs_b: int  #: size of `comm_b`
-    i_proc_b: int  #: rank within `comm_b`
+    n_procs_r: int  #: Size of `comm_r`
+    i_proc_r: int  #: Rank within `comm_r`
+    n_procs_kb: int  #: Size of `comm_kb`
+    i_proc_kb: int  #: Rank within `comm_kb`
+    n_procs_k: int  #: Size of `comm_k`
+    i_proc_k: int  #: Rank within `comm_k`
+    n_procs_b: int  #: Size of `comm_b`
+    i_proc_b: int  #: Rank within `comm_b`
 
-    cpu: torch.device  #: torch CPU device
-    device: torch.device \
-        #: torch device to be preferred for calculation (could be GPU)
-    use_cuda: bool  #: whether `device` is a CUDA GPU
+    cpu: torch.device  #: CPU torch device
+    device: torch.device  #: Preferred torch device for calculation (CPU / GPU)
+    use_cuda: bool  #: Whether `device` is a CUDA GPU
 
     def __init__(self, *, comm: Optional[qp.MPI.Comm] = None,
                  cores: Optional[int] = None,

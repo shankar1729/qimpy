@@ -169,7 +169,7 @@ class Kpath(Kpoints):
             reciprocal fractional coordinates (input) to Cartesian
             for determining path lengths.
         dk
-            Maximum distance (in :math:`a_0^{-1}') between adjacent points
+            Maximum distance (in :math:`a_0^{-1}`) between adjacent points
             on k-path
         points
             List of special k-points along path: each point should contain
