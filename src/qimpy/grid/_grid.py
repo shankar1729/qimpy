@@ -1,8 +1,7 @@
 import qimpy as qp
 import numpy as np
 import torch
-from ._fft import _init_grid_fft, _fft, _ifft, _rfft, _irfft, \
-    IndicesType, MethodFFT
+from ._fft import _init_grid_fft, _fft, _ifft, IndicesType, MethodFFT
 from typing import Optional, Sequence, Tuple, Dict, TYPE_CHECKING
 if TYPE_CHECKING:
     from ..utils import RunConfig, TaskDivision
@@ -20,7 +19,7 @@ class Grid:
         'rc', 'comm', 'n_procs', 'i_proc', 'is_split', 'ke_cutoff',
         'shape', 'shapeH', 'shapeR_mine', 'shapeG_mine', 'shapeH_mine',
         'split0', 'split2', 'split2H', 'mesh1D',
-        'indices_fft', 'indices_ifft', 'indices_rfft', 'indices_irfft']
+        '_indices_fft', '_indices_ifft', '_indices_rfft', '_indices_irfft']
     rc: 'RunConfig'
     comm: qp.MPI.Comm  #: Communicator to split grid and FFTs over
     n_procs: int  #: Size of comm
@@ -36,15 +35,13 @@ class Grid:
     split2: 'TaskDivision'  #: MPI division of reciprocal dimension 2
     split2H: 'TaskDivision'  #: MPI division of half-reciprocal dimension 2
     mesh1D: Dict[str, Tuple[torch.Tensor, ...]]  #: 1D meshes for `get_mesh`
-    indices_fft: IndicesType  #: All-to-all unscramble indices for `fft`
-    indices_ifft: IndicesType  #: All-to-all unscramble indices for `ifft`
-    indices_rfft: IndicesType  #: All-to-all unscramble indices for `rfft`
-    indices_irfft: IndicesType  #: All-to-all unscramble indices for `irfft`
+    _indices_fft: IndicesType  #: All-to-all unscramble indices for `fft`
+    _indices_ifft: IndicesType  #: All-to-all unscramble indices for `ifft`
+    _indices_rfft: IndicesType  #: All-to-all unscramble indices for `rfft`
+    _indices_irfft: IndicesType  #: All-to-all unscramble indices for `irfft`
 
     fft: MethodFFT = _fft
     ifft: MethodFFT = _ifft
-    rfft: MethodFFT = _rfft
-    irfft: MethodFFT = _irfft
 
     def __init__(self, *, rc: 'RunConfig', lattice: 'Lattice',
                  symmetries: 'Symmetries', comm: qp.MPI.Comm,

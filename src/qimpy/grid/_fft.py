@@ -98,10 +98,10 @@ def _init_grid_fft(self: 'Grid') -> None:
         return index_1, index_i_batch, index_n_batch
 
     # Pre-calculate these arrays for each of the transforms:
-    self.indices_fft = get_indices(self.split0.n_prev, self.split2.n_mine)
-    self.indices_ifft = get_indices(self.split2.n_prev, self.split0.n_mine)
-    self.indices_rfft = get_indices(self.split0.n_prev, self.split2H.n_mine)
-    self.indices_irfft = get_indices(self.split2H.n_prev, self.split0.n_mine)
+    self._indices_fft = get_indices(self.split0.n_prev, self.split2.n_mine)
+    self._indices_ifft = get_indices(self.split2.n_prev, self.split0.n_mine)
+    self._indices_rfft = get_indices(self.split0.n_prev, self.split2H.n_mine)
+    self._indices_irfft = get_indices(self.split2H.n_prev, self.split0.n_mine)
 
 
 def parallel_transform(
@@ -174,7 +174,9 @@ def parallel_transform(
 
 
 def _fft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
-    """Complex to complex forward transform.
+    """Forward Fast Fourier Transform.
+    This method dispatches to complex-to-complex or real-to-complex
+    transforms depending on whether the input `v` is complex or real.
     Note that QimPy applies normalization in forward transforms,
     corresponding to norm='forward' in the torch.fft routines.
     This makes the G=0 components in reciprocal space correspond
@@ -182,28 +184,44 @@ def _fft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
 
     Parameters
     ----------
-    v : torch.Tensor (complex)
+    v : torch.Tensor (complex or real)
         Last 3 dimensions must match `shapeR_mine`,
-        and any preceding dimensions are batched over
+        and any preceding dimensions are batched over.
 
     Returns
     -------
     torch.Tensor (complex)
-        Last 3 dimensions will be `shapeG_mine`,
+        Last 3 dimensions will be `shapeG_mine` or `shapeH_mine`,
+        depending on whether `v` is complex or real respectively,
         preceded by any batch dimensions in the input.
     """
-    if self.n_procs == 1:
-        return torch.fft.fftn(v, s=self.shape, norm='forward')
-    assert(v.dtype.is_complex)
-    return parallel_transform(
-        self.rc, self.comm, v,
-        self.shapeR_mine, self.shapeG_mine[::-1],
-        safe_fft2, safe_fft, self.split2.n_prev, self.split0.n_prev,
-        *self.indices_fft).swapaxes(-1, -3)
+    if v.dtype.is_complex:
+        # Complex to complex forward transform:
+        if self.n_procs == 1:
+            return torch.fft.fftn(v, s=self.shape, norm='forward')
+        return parallel_transform(
+            self.rc, self.comm, v,
+            self.shapeR_mine, self.shapeG_mine[::-1],
+            safe_fft2, safe_fft, self.split2.n_prev, self.split0.n_prev,
+            *self._indices_fft).swapaxes(-1, -3)
+    else:
+        # Real to complex forward transform:
+        assert (v.dtype.is_floating_point)
+        if self.n_procs == 1:
+            return torch.fft.rfftn(v, s=self.shape, norm='forward')
+        assert (v.dtype.is_floating_point)
+        return parallel_transform(
+            self.rc, self.comm, v,
+            self.shapeR_mine, self.shapeH_mine[::-1],
+            safe_rfft, safe_fft2, self.split2H.n_prev, self.split0.n_prev,
+            *self._indices_rfft).swapaxes(-1, -3)
 
 
 def _ifft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
-    """Complex to complex inverse transform.
+    """Inverse Fast Fourier Transform.
+    This method dispatches to complex-to-complex or complex-to-real
+    transforms depending on whether the last three dimensions of `v`
+    match `shapeG_mine` or `shapeH_mine` respectively.
     Note that QimPy applies normalization in forward transforms
     (see :meth:`qimpy.grid.Grid.fft`).
 
@@ -215,73 +233,40 @@ def _ifft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
 
     Returns
     -------
-    torch.Tensor (complex)
+    torch.Tensor (complex or real)
         Last 3 dimensions will be shapeR_mine,
         preceded by any batch dimensions in the input.
+        The result will be complex or real, depending on whether the last
+        three dimensions of `v` match `shapeG_mine` or `shapeH_mine`.
     """
-    if self.n_procs == 1:
-        return torch.fft.ifftn(v, s=self.shape, norm='forward')
+    # Get total size of last dimension to dispatch complex vs real:
     assert(v.dtype.is_complex)
-    return parallel_transform(
-        self.rc, self.comm, v.swapaxes(-1, -3),
-        self.shapeG_mine[::-1], self.shapeR_mine,
-        safe_ifft, safe_ifft2, self.split0.n_prev, self.split2.n_prev,
-        *self.indices_ifft)
+    shape2 = v.shape[-1]
+    if self.n_procs > 1:
+        shape2 = self.comm.allreduce(shape2, qp.MPI.SUM)
 
-
-def _rfft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
-    """Real to complex forward transform.
-    Note that QimPy applies normalization in forward transforms
-    (see :meth:`qimpy.grid.Grid.fft`).
-
-    Parameters
-    ----------
-    v : torch.Tensor (float)
-        Last 3 dimensions must match shapeR_mine,
-        and any preceding dimensions are batched over
-
-    Returns
-    -------
-    torch.Tensor (complex)
-        Last 3 dimensions will be shapeH_mine,
-        preceded by any batch dimensions in the input.
-    """
-    if self.n_procs == 1:
-        return torch.fft.rfftn(v, s=self.shape, norm='forward')
-    assert(v.dtype.is_floating_point)
-    return parallel_transform(
-        self.rc, self.comm, v,
-        self.shapeR_mine, self.shapeH_mine[::-1],
-        safe_rfft, safe_fft2, self.split2H.n_prev, self.split0.n_prev,
-        *self.indices_rfft).swapaxes(-1, -3)
-
-
-def _irfft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
-    """Complex to real inverse transform.
-    Note that QimPy applies normalization in forward transforms
-    (see :meth:`qimpy.grid.Grid.fft`).
-
-    Parameters
-    ----------
-    v : torch.Tensor (float)
-        Last 3 dimensions must match shapeH_mine,
-        and any preceding dimensions are batched over
-
-    Returns
-    -------
-    torch.Tensor (complex)
-        Last 3 dimensions will be shapeR_mine,
-        preceded by any batch dimensions in the input.
-    """
-    if self.n_procs == 1:
-        return torch.fft.irfftn(v, s=self.shape, norm='forward')
-    assert(v.dtype.is_complex)
-    shapeR_mine_complex = (self.split0.n_mine, self.shape[1], self.shapeH[2])
-    return parallel_transform(
-        self.rc, self.comm, v.swapaxes(-1, -3),
-        self.shapeH_mine[::-1], shapeR_mine_complex,
-        safe_ifft2, safe_irfft, self.split0.n_prev, self.split2H.n_prev,
-        *self.indices_irfft)
+    if shape2 == self.shape[2]:
+        # Complex to complex inverse transform:
+        if self.n_procs == 1:
+            return torch.fft.ifftn(v, s=self.shape, norm='forward')
+        return parallel_transform(
+            self.rc, self.comm, v.swapaxes(-1, -3),
+            self.shapeG_mine[::-1], self.shapeR_mine,
+            safe_ifft, safe_ifft2, self.split0.n_prev, self.split2.n_prev,
+            *self._indices_ifft)
+    else:
+        # Complex to real inverse transform:
+        assert shape2 == self.shapeH[2]
+        if self.n_procs == 1:
+            return torch.fft.irfftn(v, s=self.shape, norm='forward')
+        assert (v.dtype.is_complex)
+        shapeR_mine_complex = (self.split0.n_mine,
+                               self.shape[1], self.shapeH[2])
+        return parallel_transform(
+            self.rc, self.comm, v.swapaxes(-1, -3),
+            self.shapeH_mine[::-1], shapeR_mine_complex,
+            safe_ifft2, safe_irfft, self.split0.n_prev, self.split2H.n_prev,
+            *self._indices_irfft)
 
 
 # Maps between corresponding real and complex types:
@@ -395,19 +380,19 @@ if __name__ == "__main__":
                 qp.log.info(f'{name} RMSE: {rmse:.2e}')
 
     # Run tests for all four transform types:
-    test('fft', torch.complex128, grid_seq.fft, grid_par.fft,
+    test('fft(c-c)', torch.complex128, grid_seq.fft, grid_par.fft,
          grid_par.split0.i_start, grid_par.split0.i_stop,
          grid_par.split2.i_start, grid_par.split2.i_stop,
          grid_par.shape, False)
-    test('ifft', torch.complex128, grid_seq.ifft, grid_par.ifft,
+    test('ifft(c-c)', torch.complex128, grid_seq.ifft, grid_par.ifft,
          grid_par.split2.i_start, grid_par.split2.i_stop,
          grid_par.split0.i_start, grid_par.split0.i_stop,
          grid_par.shape, True)
-    test('rfft', torch.double, grid_seq.rfft, grid_par.rfft,
+    test('fft(r-c)', torch.double, grid_seq.fft, grid_par.fft,
          grid_par.split0.i_start, grid_par.split0.i_stop,
          grid_par.split2H.i_start, grid_par.split2H.i_stop,
          grid_par.shape, False)
-    test('irfft', torch.complex128, grid_seq.irfft, grid_par.irfft,
+    test('ifft(c-r)', torch.complex128, grid_seq.ifft, grid_par.ifft,
          grid_par.split2H.i_start, grid_par.split2H.i_stop,
          grid_par.split0.i_start, grid_par.split0.i_stop,
          grid_par.shapeH, True)

@@ -172,7 +172,7 @@ class Electrons:
             Gsq = ((iG @ lattice.Gbasis.T)**2).sum(dim=-1)
             Vtilde = V0 * torch.exp(-0.5*(a0**2)*Gsq) * torch.exp(
                 (2j*np.pi)*(iG @ ions.positions.T)).sum(dim=-1)
-            return grid.irfft(Vtilde)
+            return grid.ifft(Vtilde)
         self.V_ks = get_potential()
 
         # Initialize diagonalizer:
