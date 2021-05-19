@@ -1,3 +1,4 @@
+'''Calculate spherical harmonics and their product expansions.'''
 # List exported symbols for doc generation
 __all__ = ['L_MAX', 'L_MAX_HLF', 'get_harmonics']
 
@@ -10,8 +11,8 @@ if TYPE_CHECKING:
 # Versions of shdata converted to torch.Tensors on appropriate device
 _YLM_RECUR: List[torch.Tensor] = []
 _YLM_PROD: Dict[Tuple[int, int], Tuple[torch.Tensor, torch.Tensor]] = {}
-L_MAX: int = shdata.L_MAX  #: Maximum l for harmonics
-L_MAX_HLF: int = shdata.L_MAX_HLF  #: Maximum l for products
+L_MAX: int = shdata.L_MAX  #: Maximum l for calculation of harmonics
+L_MAX_HLF: int = shdata.L_MAX_HLF  #: Maximum l of harmonics in products
 
 
 def _initialize_device(device: torch.device) -> None:

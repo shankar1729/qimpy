@@ -4,7 +4,9 @@ from ._read_upf import _read_upf
 
 
 class Pseudopotential:
-    """TODO: document class Pseudopotential"""
+    """Specification of electron-ion interactions. Contains radial functions
+    for local potential, nonlocal projectors and atomic orbitals.
+    Currently supports norm-conserving pseudopotentials."""
 
     element: str  #: Chemical symbol of element
     atomic_number: int  #: Atomic number of element
@@ -29,7 +31,8 @@ class Pseudopotential:
     read_upf = _read_upf
 
     def __init__(self, filename, rc):
-        """
+        """Read pseudopotential from file.
+
         Parameters
         ----------
         filename : str

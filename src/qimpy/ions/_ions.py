@@ -10,9 +10,7 @@ if TYPE_CHECKING:
 
 
 class Ions:
-    """Ionic system comprising ionic geometry and the pseudopotentials
-    that specify interaction with the electronic system.
-    """
+    """Ionic system: ionic geometry and pseudopotentials. """
 
     positions: torch.Tensor  #: fractional positions of each ion (n_ions x 3)
     types: torch.Tensor  #: type of each ion (n_ions, int)
@@ -21,7 +19,8 @@ class Ions:
     def __init__(self, *, rc: 'RunConfig',
                  coordinates: Optional[List] = None,
                  pseudopotentials: Optional[Union[str, List[str]]] = None):
-        '''
+        '''Initialize geometry and pseudopotentials.
+
         Parameters
         ----------
         coordinates:
