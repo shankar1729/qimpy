@@ -1,16 +1,16 @@
 import qimpy as qp
 import numpy as np
 import torch
-from ..utils import TaskDivision, RunConfig
 from typing import Union, Sequence, Tuple, TYPE_CHECKING
 if TYPE_CHECKING:
+    from ..utils import RunConfig
     from ..symmetries import Symmetries
     from ..lattice import Lattice
 
 
-class Kpoints(TaskDivision):
+class Kpoints(qp.utils.TaskDivision):
     '''Set of k-points in Brillouin zone.
-    The underlying :class:`TaskDivision` splits k-points over `rc.comm_k`'''
+    The underlying :class:`TaskDivision` splits k-points over `rc.comm_k`.'''
     __slots__ = ('rc', 'k', 'wk')
     rc: 'RunConfig'  #: Current run configuration
     k: torch.Tensor  #: Array of k-points (N x 3)

@@ -9,8 +9,8 @@ if TYPE_CHECKING:
 
 
 IndicesType = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
-MethodFFT = Callable[['Grid', torch.Tensor, str], torch.Tensor]
-FunctionFFT = Callable[[torch.Tensor, str], torch.Tensor]
+MethodFFT = Callable[['Grid', torch.Tensor], torch.Tensor]
+FunctionFFT = Callable[[torch.Tensor], torch.Tensor]
 
 
 def _init_grid_fft(self: 'Grid') -> None:
@@ -105,7 +105,7 @@ def _init_grid_fft(self: 'Grid') -> None:
 
 
 def parallel_transform(
-        rc: 'RunConfig', comm: qp.MPI.Comm, v: torch.Tensor, norm: str,
+        rc: 'RunConfig', comm: qp.MPI.Comm, v: torch.Tensor,
         shape_in: Tuple[int, ...], shape_out: Tuple[int, ...],
         fft_before: FunctionFFT, fft_after: FunctionFFT,
         in_prev: np.ndarray, out_prev: np.ndarray,
@@ -127,9 +127,6 @@ def parallel_transform(
         Communicator that this transform is split on
     v
         Input tensor, 3D, real for rfft and complex for all else
-    norm :  {'backward', 'forward', 'ortho'}
-        Which direction of the transform is the normalization applied to
-        (same as norm in the torch.fft routines)
     shape_in
         local spatial dimensions before MPI exchange
     shape_out
@@ -151,7 +148,7 @@ def parallel_transform(
     """
     assert(v.shape[-3:] == shape_in)
     n_batch = int(np.prod(v.shape[:-3]))
-    v_tilde = fft_before(v, norm)  # Transform 2 or 1 dims here
+    v_tilde = fft_before(v)  # Transform 2 or 1 dims here
     v_tilde = v_tilde.flatten(0, -2).T.contiguous()  # bring last dim to front
 
     # MPI rearrangement:
@@ -173,53 +170,48 @@ def parallel_transform(
         index = index_1 + index_i_batch * i_batch + index_n_batch * n_batch
     v_tilde = v_tmp[index].view(v.shape[:-3] + shape_out)
     del v_tmp
-    return fft_after(v_tilde, norm)  # Transform 1 or 2 dims here
+    return fft_after(v_tilde)  # Transform 1 or 2 dims here
 
 
-def _fft(self: 'Grid', v: torch.Tensor,
-         norm: str = 'forward') -> torch.Tensor:
+def _fft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
     """Complex to complex forward transform.
+    Note that QimPy applies normalization in forward transforms,
+    corresponding to norm='forward' in the torch.fft routines.
+    This makes the G=0 components in reciprocal space correspond
+    to the mean value of the real space version.
 
     Parameters
     ----------
     v : torch.Tensor (complex)
-        Last 3 dimensions must match shapeR_mine,
+        Last 3 dimensions must match `shapeR_mine`,
         and any preceding dimensions are batched over
-    norm :  {'backward', 'forward', 'ortho'}, default: 'forward'
-        Which direction of the transform is the normalization applied to.
-        This is same as norm in the torch.fft routines, but the default
-        is to apply to forward transforms. This makes the G=0 components
-        in reciprocal space correspond to the mean value of the real
-        space version (instead of sum for norm='backward')
 
     Returns
     -------
     torch.Tensor (complex)
-        Last 3 dimensions will be shapeG_mine,
+        Last 3 dimensions will be `shapeG_mine`,
         preceded by any batch dimensions in the input.
     """
     if self.n_procs == 1:
-        return torch.fft.fftn(v, s=self.shape, norm=norm)
+        return torch.fft.fftn(v, s=self.shape, norm='forward')
     assert(v.dtype.is_complex)
     return parallel_transform(
-        self.rc, self.comm, v, norm,
+        self.rc, self.comm, v,
         self.shapeR_mine, self.shapeG_mine[::-1],
         safe_fft2, safe_fft, self.split2.n_prev, self.split0.n_prev,
         *self.indices_fft).swapaxes(-1, -3)
 
 
-def _ifft(self: 'Grid', v: torch.Tensor,
-          norm: str = 'forward') -> torch.Tensor:
+def _ifft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
     """Complex to complex inverse transform.
+    Note that QimPy applies normalization in forward transforms
+    (see :meth:`qimpy.grid.Grid.fft`).
 
     Parameters
     ----------
     v : torch.Tensor (complex)
         Last 3 dimensions must match shapeG_mine,
         and any preceding dimensions are batched over
-    norm :  {'backward', 'forward', 'ortho'}, default: 'forward'
-        Same as in torch.fft routines, but with default normalization
-        to forward transforms (see :meth:`qimpy.grid.Grid.fft`)
 
     Returns
     -------
@@ -228,27 +220,25 @@ def _ifft(self: 'Grid', v: torch.Tensor,
         preceded by any batch dimensions in the input.
     """
     if self.n_procs == 1:
-        return torch.fft.ifftn(v, s=self.shape, norm=norm)
+        return torch.fft.ifftn(v, s=self.shape, norm='forward')
     assert(v.dtype.is_complex)
     return parallel_transform(
-        self.rc, self.comm, v.swapaxes(-1, -3), norm,
+        self.rc, self.comm, v.swapaxes(-1, -3),
         self.shapeG_mine[::-1], self.shapeR_mine,
         safe_ifft, safe_ifft2, self.split0.n_prev, self.split2.n_prev,
         *self.indices_ifft)
 
 
-def _rfft(self: 'Grid', v: torch.Tensor,
-          norm: str = 'forward') -> torch.Tensor:
+def _rfft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
     """Real to complex forward transform.
+    Note that QimPy applies normalization in forward transforms
+    (see :meth:`qimpy.grid.Grid.fft`).
 
     Parameters
     ----------
     v : torch.Tensor (float)
         Last 3 dimensions must match shapeR_mine,
         and any preceding dimensions are batched over
-    norm :  {'backward', 'forward', 'ortho'}, default: 'forward'
-        Same as in torch.fft routines, but with default normalization
-        to forward transforms (see :meth:`qimpy.grid.Grid.fft`)
 
     Returns
     -------
@@ -257,27 +247,25 @@ def _rfft(self: 'Grid', v: torch.Tensor,
         preceded by any batch dimensions in the input.
     """
     if self.n_procs == 1:
-        return torch.fft.rfftn(v, s=self.shape, norm=norm)
+        return torch.fft.rfftn(v, s=self.shape, norm='forward')
     assert(v.dtype.is_floating_point)
     return parallel_transform(
-        self.rc, self.comm, v, norm,
+        self.rc, self.comm, v,
         self.shapeR_mine, self.shapeH_mine[::-1],
         safe_rfft, safe_fft2, self.split2H.n_prev, self.split0.n_prev,
         *self.indices_rfft).swapaxes(-1, -3)
 
 
-def _irfft(self: 'Grid', v: torch.Tensor,
-           norm: str = 'forward') -> torch.Tensor:
+def _irfft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
     """Complex to real inverse transform.
+    Note that QimPy applies normalization in forward transforms
+    (see :meth:`qimpy.grid.Grid.fft`).
 
     Parameters
     ----------
     v : torch.Tensor (float)
         Last 3 dimensions must match shapeH_mine,
         and any preceding dimensions are batched over
-    norm :  {'backward', 'forward', 'ortho'}, default: 'forward'
-        Same as in torch.fft routines, but with default normalization
-        to forward transforms (see :meth:`qimpy.grid.Grid.fft`)
 
     Returns
     -------
@@ -286,11 +274,11 @@ def _irfft(self: 'Grid', v: torch.Tensor,
         preceded by any batch dimensions in the input.
     """
     if self.n_procs == 1:
-        return torch.fft.irfftn(v, s=self.shape, norm=norm)
+        return torch.fft.irfftn(v, s=self.shape, norm='forward')
     assert(v.dtype.is_complex)
     shapeR_mine_complex = (self.split0.n_mine, self.shape[1], self.shapeH[2])
     return parallel_transform(
-        self.rc, self.comm, v.swapaxes(-1, -3), norm,
+        self.rc, self.comm, v.swapaxes(-1, -3),
         self.shapeH_mine[::-1], shapeR_mine_complex,
         safe_ifft2, safe_irfft, self.split0.n_prev, self.split2H.n_prev,
         *self.indices_irfft)
@@ -306,36 +294,36 @@ complexType = {
 
 
 # --- Wrappers to torch FFTs that are safe for zero sizes ---
-def safe_fft(v: torch.Tensor, norm: str) -> torch.Tensor:
-    return v if v.shape.count(0) else torch.fft.fft(v, norm=norm)
+def safe_fft(v: torch.Tensor) -> torch.Tensor:
+    return v if v.shape.count(0) else torch.fft.fft(v, norm='forward')
 
 
-def safe_fft2(v: torch.Tensor, norm: str) -> torch.Tensor:
-    return v if v.shape.count(0) else torch.fft.fft2(v, norm=norm)
+def safe_fft2(v: torch.Tensor) -> torch.Tensor:
+    return v if v.shape.count(0) else torch.fft.fft2(v, norm='forward')
 
 
-def safe_ifft(v: torch.Tensor, norm: str) -> torch.Tensor:
-    return v if v.shape.count(0) else torch.fft.ifft(v, norm=norm)
+def safe_ifft(v: torch.Tensor) -> torch.Tensor:
+    return v if v.shape.count(0) else torch.fft.ifft(v, norm='forward')
 
 
-def safe_ifft2(v: torch.Tensor, norm: str) -> torch.Tensor:
-    return v if v.shape.count(0) else torch.fft.ifft2(v, norm=norm)
+def safe_ifft2(v: torch.Tensor) -> torch.Tensor:
+    return v if v.shape.count(0) else torch.fft.ifft2(v, norm='forward')
 
 
-def safe_rfft(v: torch.Tensor, norm: str) -> torch.Tensor:
+def safe_rfft(v: torch.Tensor) -> torch.Tensor:
     if v.shape.count(0):
         return torch.zeros(v.shape[:-1] + (v.shape[-1]//2+1,),
                            dtype=complexType[v.dtype], device=v.device)
     else:
-        return torch.fft.rfft(v, norm=norm)
+        return torch.fft.rfft(v, norm='forward')
 
 
-def safe_irfft(v: torch.Tensor, norm: str) -> torch.Tensor:
+def safe_irfft(v: torch.Tensor) -> torch.Tensor:
     if v.shape.count(0):
         return torch.zeros(v.shape[:-1] + (2*(v.shape[-1]-1),),
                            dtype=realType[v.dtype], device=v.device)
     else:
-        return torch.fft.irfft(v, norm=norm)
+        return torch.fft.irfft(v, norm='forward')
 
 
 # Test / benchmark parallelization of FFTs:

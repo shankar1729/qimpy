@@ -73,12 +73,12 @@ def get_Rbasis(system: str, modification: Optional[str],
         raise KeyError('Unknown lattice system: ' + system)
 
     # Confirm that all geometry parameters are now available:
-    assert isinstance(a, float)
-    assert isinstance(b, float)
-    assert isinstance(c, float)
-    assert isinstance(alpha, float)
-    assert isinstance(beta, float)
-    assert isinstance(gamma, float)
+    assert isinstance(a, numbers.Number)
+    assert isinstance(b, numbers.Number)
+    assert isinstance(c, numbers.Number)
+    assert isinstance(alpha, numbers.Number)
+    assert isinstance(beta, numbers.Number)
+    assert isinstance(gamma, numbers.Number)
 
     # Compute base lattice vectors:
     cos_alpha = np.cos(np.deg2rad(alpha))

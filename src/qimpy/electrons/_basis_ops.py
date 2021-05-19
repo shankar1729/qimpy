@@ -1,9 +1,8 @@
 import qimpy as qp
 import numpy as np
 import torch
-
-# Imports for type annotations alone:
-if False:
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
     from ._basis import Basis
     from ._wavefunction import Wavefunction
 
@@ -33,14 +32,14 @@ def _apply_potential(self: 'Basis', V: torch.Tensor,
     # Determine FFT type and dimensions:
     watch = qp.utils.StopWatch('Basis.apply_potential', self.rc)
     if self.real_wavefunctions:
-        fft = self.grid.rfft
-        ifft = self.grid.irfft
+        fft = qp.grid.Grid.rfft
+        ifft = qp.grid.Grid.irfft
         shapeG = self.grid.shapeH  # half reciprocal space
     else:
-        fft = self.grid.fft
-        ifft = self.grid.ifft
+        fft = qp.grid.Grid.fft
+        ifft = qp.grid.Grid.ifft
         shapeG = shape  # full reciprocal space
-    fft_nG = np.prod(shapeG)  # total reciprocal space points in FFT grid
+    fft_nG = int(np.prod(shapeG))  # total reciprocal space points in FFT grid
     n_spins, nk, n_bands_mine, n_spinor = coeff.shape[:-1]
     ik = torch.arange(nk, device=coeff.device)[:, None]
     index = (slice(None), ik, slice(None), slice(None), self.fft_index)
@@ -60,9 +59,10 @@ def _apply_potential(self: 'Basis', V: torch.Tensor,
             Cb = Cb[:, :, :b_size]
         # Expand -> ifft -> multiply V -> fft -> reduce back (on block)
         Cb[index] = coeff[:, :, b_start:b_stop].permute(1, 4, 0, 2, 3)
-        VCb = ifft(Cb.view((n_spins, nk, b_size, n_spinor) + shapeG))
+        VCb = ifft(self.grid,
+                   Cb.view((n_spins, nk, b_size, n_spinor) + shapeG))
         VCb *= V
-        VCb = fft(VCb).flatten(-3)
+        VCb = fft(self.grid, VCb).flatten(-3)
         coeff[:, :, b_start:b_stop] = VCb[index].permute(2, 0, 3, 4, 1)
         # Advance to next block of data:
         b_start = b_stop

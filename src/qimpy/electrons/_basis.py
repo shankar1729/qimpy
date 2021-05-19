@@ -2,51 +2,92 @@ import qimpy as qp
 import numpy as np
 import torch
 from ._basis_ops import _apply_ke, _apply_potential
+from typing import Optional, Tuple, Union, TYPE_CHECKING
+if TYPE_CHECKING:
+    from ..utils import RunConfig
+    from ..lattice import Lattice
+    from ..ions import Ions
+    from ..symmetries import Symmetries
+    from ..grid import Grid
+    from ._kpoints import Kpoints
 
 
 class Basis(qp.utils.TaskDivision):
-    '''TODO: document class Basis'''
+    '''Plane-wave basis for electronic wavefunctions. The underlying
+     :class:`qimpy.utils.TaskDivision` splits plane waves over `rc.comm_b`'''
+    __slots__ = ('rc', 'lattice', 'ions', 'kpoints', 'n_spins', 'n_spinor',
+                 'k', 'wk', 'real_wavefunctions', 'ke_cutoff', 'grid',
+                 'iG', 'n', 'n_min', 'n_max', 'n_avg', 'n_ideal', 'mine',
+                 'fft_index', 'pad_index', 'pad_index_mine', 'fft_block_size',
+                 'index_z0', 'index_z0_conj', 'Gweight_mine')
+    rc: 'RunConfig'  #: Current run configuration
+    lattice: 'Lattice'  #: Lattice vectors of unit cell
+    ions: 'Ions'  #: Ionic system: implicit part of basis for ultrasoft / PAW
+    kpoints: 'Kpoints'  #: k-point set for which basis is initialized
+    n_spins: int  #: Default number of spin channels
+    n_spinor: int  #: Default number of spinorial components
+    k: torch.Tensor  #: Subset of k handled by this basis (due to MPI division)
+    wk: torch.Tensor  #: Subset of weights corresponding to `k`
+    real_wavefunctions: bool  #: Whether wavefunctions are real
+    ke_cutoff: float  #: Kinetic energy cutoff
+    grid: 'Grid'  #: Wavefunction grid (always process-local)
+    iG: torch.Tensor  #: Plane waves in reciprocal lattice coordinates
+    n: torch.Tensor  #: Number of plane waves for each `k`
+    n_min: int  #: Minimum of `n` across all `k` (including on other processes)
+    n_max: int  #: Maximum of `n` across all `k` (including on other processes)
+    n_avg: float  #: Average `n` across all `k` (weighted by `wk`)
+    n_ideal: float  #: Ideal `n_avg` based on `ke_cutoff` G-sphere volume
+    fft_index: torch.Tensor  #: Index of each plane wave in reciprocal grid
+    fft_block_size: int  #: Number of bands to FFT together
+    mine: slice  #: Slice of basis entries local to this process
+    PadIndex = Tuple[slice, torch.Tensor, slice, slice, torch.Tensor] \
+        #: Indexing datatype for `pad_index` and `pad_index_mine`
+    pad_index: PadIndex  #: Which basis entries are padding (beyond `n`)
+    pad_index_mine: PadIndex  #: Subset of `pad_index` on this process
+    index_z0: torch.Tensor  #: Index of Gz = 0 points (only for real case)
+    index_z0_conj: torch.Tensor  #: Hermitian conjugate points of `index_z0`
+    Gweight_mine: torch.Tensor  #: Weight of local plane waves (real case only)
 
     apply_ke = _apply_ke
     apply_potential = _apply_potential
 
-    def __init__(self, *, rc, lattice, ions, symmetries,
-                 kpoints, n_spins, n_spinor,
-                 ke_cutoff=20., real_wavefunctions=False, grid=None,
-                 fft_block_size=1):
-        '''
+    def __init__(self, *, rc: 'RunConfig',
+                 lattice: 'Lattice', ions: 'Ions', symmetries: 'Symmetries',
+                 kpoints: 'Kpoints', n_spins: int, n_spinor: int,
+                 ke_cutoff: float = 20., real_wavefunctions: bool = False,
+                 grid: Optional[dict] = None, fft_block_size: int = 1) -> None:
+        '''Initialize plane-wave basis with `ke_cutoff`.
+
         Parameters
         ----------
-        rc : qimpy.utils.RunConfig
-            Current run configuration.
-        lattice : qimpy.lattice.Lattice
+        lattice
             Lattice whose reciprocal lattice vectors define plane-wave basis.
-        ions : qimpy.ions.Ions
+        ions
             Ions that specify the pseudopotential portion of the basis;
             the basis implicitly depends on the ion positions for ultrasoft
             or PAW due to the augmentation of all operators at each ion
-        symmetries : qimpy.symmetries.Symmetries
+        symmetries
             Symmetries with which the wavefunction grid should be commensurate
-        kpoints : qimpy.electrons.Kpoints
+        kpoints
             Set of k-points to initialize basis for. Note that the basis is
             only initialized for k-points to be operated on by current process
             i.e. for k = kpoints.k[kpoints.i_start : kpoints.i_stop]
-        n_spins : int
+        n_spins
             Default number of spin channels for wavefunctions in this basis
-        n_spinor : int
+        n_spinor
             Default number of spinor components for wavefunctions in this
             basis. Also used only to check support for real_wavefunctions
-        ke_cutoff : float, default: 20
+        ke_cutoff
             Plane-wave kinetic-energy cutoff for wavefunctions in :math:`E_h`
-        real_wavefunctions : bool, default: False
+        real_wavefunctions
             If True, use wavefunctions that are real, instead of the
             default complex wavefunctions. This is only supported for
             non-spinorial, Gamma-point-only calculations.
-        grid : dict, optional
+        grid
             Optionally override parameters (such as shape or ke_cutoff)
             of the grid (qimpy.grid.Grid) used for wavefunction operations.
-        fft_block_size : int, default: 1
-            Number of wavefunctionbands to FFT simultaneously.
+        fft_block_size
+            Number of wavefunction bands to FFT simultaneously.
             Higher numbers require more memory, but can achieve
             better occupancy of GPUs or high-core-count CPUs.
         '''
@@ -91,7 +132,7 @@ class Basis(qp.utils.TaskDivision):
         self.n_min = rc.comm_k.allreduce(self.n.min().item(), qp.MPI.MIN)
         self.n_max = rc.comm_k.allreduce(self.n.max().item(), qp.MPI.MAX)
         self.n_tot = qp.utils.ceildiv(self.n_max, rc.n_procs_b) * rc.n_procs_b
-        self.n_avg = rc.comm_k.allreduce((self.n.to(float) @ self.wk).item(),
+        self.n_avg = rc.comm_k.allreduce((self.n * self.wk).sum().item(),
                                          qp.MPI.SUM)
         self.n_ideal = ((2.*ke_cutoff)**1.5) * lattice.volume / (6 * np.pi**2)
         qp.log.info(f'n_basis:  min: {self.n_min}  max: {self.n_max}'
@@ -104,22 +145,19 @@ class Basis(qp.utils.TaskDivision):
                           + fft_range[None, :]).argsort(  # ke<cutoff to front
                               dim=1)[:, :self.n_tot]  # same count all k
         self.iG = self.iG[self.fft_index]  # basis plane waves for each k
-        self.pad_index = torch.where(fft_range[None, :self.n_tot]
-                                     > self.n[:, None])  # padded entries
-        self.pad_index = (
-            slice(None), self.pad_index[0], slice(None), slice(None),
-            self.pad_index[1])  # add spin, band and spinor dims
+        pad_index = torch.where(fft_range[None, :self.n_tot]
+                                > self.n[:, None])  # padded entries
+        self.pad_index = (slice(None), pad_index[0], slice(None), slice(None),
+                          pad_index[1])  # add spin, band and spinor dims
 
         # Divide basis on comm_b:
         super().__init__(self.n_tot, rc.n_procs_b, rc.i_proc_b, 'padded basis')
         self.mine = slice(self.i_start, self.i_stop)
         # --- initialize local pad index separately (not trivially sliceable):
-        self.pad_index_mine = torch.where(
-            fft_range[None, self.i_start:self.i_stop]
-            > self.n[:, None])  # local padded entries
-        self.pad_index_mine = (
-            slice(None), self.pad_index_mine[0], slice(None), slice(None),
-            self.pad_index_mine[1])  # add spin, band and spinor dims
+        pad_index = torch.where(fft_range[None, self.i_start:self.i_stop]
+                                > self.n[:, None])  # local padded entries
+        self.pad_index_mine = (slice(None), pad_index[0], slice(None),
+                               slice(None), pad_index[1])  # add other dims
 
         # Extra book-keeping for real-wavefunction basis:
         if self.real_wavefunctions and kpoints.n_mine:
@@ -134,7 +172,7 @@ class Basis(qp.utils.TaskDivision):
             plane_index_conj = iG_conj[:, 0] * shapeH[1] + iG_conj[:, 1]
             # --- map plane_index_conj to basis using full plane for look-up:
             plane = torch.zeros(shapeH[0] * shapeH[1],
-                                dtype=int, device=rc.device)
+                                dtype=self.index_z0.dtype, device=rc.device)
             plane[plane_index] = self.index_z0
             self.index_z0_conj = plane[plane_index_conj].clone().detach()
             # Weight by element for overlaps (only for this process portion):
@@ -145,17 +183,18 @@ class Basis(qp.utils.TaskDivision):
                                               qp.MPI.SUM)
             qp.log.info(f'basis weight sum: {Gweight_sum:g}')
 
-    def get_ke(self, basis_slice=slice(None)):
+    def get_ke(self, basis_slice: slice = slice(None)) -> torch.Tensor:
         '''Kinetic energy (KE) of each plane wave in basis in :math:`E_h`
 
         Parameters
         ----------
-        basis_slice : slice, default: slice(None)
+        basis_slice
             Selection of basis functions to get KE for (default: full basis)
 
         Returns
         -------
-        torch.Tensor (nk_mine x len(basis_slice), float)
+        torch.Tensor
+            KE for each plane-wave, dimensions: `nk_mine` x len(`basis_slice`)
         '''
         return 0.5 * (((self.iG[:, basis_slice] + self.k[:, None, :])
                        @ self.lattice.Gbasis.T) ** 2).sum(dim=-1)
