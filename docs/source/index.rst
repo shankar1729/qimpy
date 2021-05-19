@@ -2,7 +2,7 @@ QimPy Reference
 ===============
 
 .. autosummary::
-   :toctree: _autosummary
+   :toctree: api
    :template: module.rst
    :recursive:
 
