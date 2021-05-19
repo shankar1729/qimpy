@@ -1,24 +1,25 @@
 import qimpy as qp
 import numpy as np
 import torch
+from ..utils import TaskDivision, RunConfig
+from typing import Union, Sequence, Tuple, TYPE_CHECKING
+if TYPE_CHECKING:
+    from ..symmetries import Symmetries
+    from ..lattice import Lattice
 
 
-class Kpoints(qp.utils.TaskDivision):
-    'Set of k-points in Brillouin zone'
-    def __init__(self, rc, k, wk):
-        '''
-        Construct from explicit list of k-points and integration weights.
-        Typically, this should be used only by derived classes
-        such as qimpy.electrons.Kmesh or qimpy.electrons.Kpath
+class Kpoints(TaskDivision):
+    '''Set of k-points in Brillouin zone.
+    The underlying :class:`TaskDivision` splits k-points over `rc.comm_k`'''
+    __slots__ = ('rc', 'k', 'wk')
+    rc: 'RunConfig'  #: Current run configuration
+    k: torch.Tensor  #: Array of k-points (N x 3)
+    wk: torch.Tensor  #: Integration weights for each k (adds to 1)
 
-        Parameters
-        ----------
-        rc : qimpy.utils.RunConfig
-            Current run configuration.
-        k : torch.Tensor (N x 3)
-            Explicit list of k-points for Brillouin zone integration.
-        wk : torch.Tensor (N)
-            Corresponding Brillouin zone integration weights (should add to 1).
+    def __init__(self, rc: 'RunConfig',
+                 k: torch.Tensor, wk: torch.Tensor) -> None:
+        '''Initialize from list of k-points and weights. Typically, this should
+         be used only by derived classes :class:`Kmesh` or :class:`Kpath`.
         '''
         self.rc = rc
         self.k = k
@@ -32,26 +33,31 @@ class Kpoints(qp.utils.TaskDivision):
 
 class Kmesh(Kpoints):
     'Uniform k-mesh sampling of Brillouin zone'
+    __slots__ = ('size', 'i_reduced', 'i_sym', 'invert')
+    size: Tuple[int, ...]  #: Dimensions of k-mesh
+    i_reduced: torch.Tensor  #: Reduced index of each k-point in mesh
+    i_sym: torch.Tensor  #: Symmetry index that maps mesh points to reduced set
+    invert: torch.Tensor  #: Inversion factor (1, -1) in reduction of each k
 
-    def __init__(self, *, rc, symmetries, lattice,
-                 offset=(0., 0., 0.),
-                 size=(1, 1, 1),
-                 use_inversion=True):
-        '''
+    def __init__(self, *, rc: 'RunConfig',
+                 symmetries: 'Symmetries', lattice: 'Lattice',
+                 offset: Union[Sequence[float], np.ndarray] = (0., 0., 0.),
+                 size: Union[float, Sequence[int], np.ndarray] = (1, 1, 1),
+                 use_inversion: bool = True) -> None:
+        '''Construct k-mesh of specified `size` and `offset`.
+
         Parameters
         ----------
-        rc : qimpy.utils.RunConfig
-            Current run configuration.
-        symmetries : qimpy.symmetries.Symmetries
+        symmetries
             Symmetry group used to reduce k-points to irreducible set.
-        lattice : qimpy.lattice.Lattice
+        lattice
             Lattice specification used for automatic size determination.
-        offset : list of 3 floats, optional
+        offset
             Offset k-point mesh by this amount in k-mesh coordinates
             i.e. by offset / size in fractional reciprocal coordinates.
             For example, use [0.5, 0.5, 0.5] for the Monkhorst-Pack scheme.
             Default: [0., 0., 0.] selects Gamma-centered mesh.
-        size : list of 3 ints, or float, optional
+        size
             If given as a list of 3 integers, number of k-points along each
             reciprocal lattice direction. Instead, a single float specifies
             the minimum real-space size of the k-point sampled supercell
@@ -69,7 +75,7 @@ class Kmesh(Kpoints):
         if isinstance(size, float) or isinstance(size, int):
             sup_length = float(size)
             L_i = torch.linalg.norm(lattice.Rbasis, dim=0)  # lattice lengths
-            size = torch.ceil(sup_length / L_i).to(int).tolist()
+            size = torch.ceil(sup_length / L_i).to(torch.int).tolist()
             qp.log.info(f'Selecting {size[0]} x {size[1]} x {size[2]} k-mesh'
                         f' for supercell size >= {sup_length:g} bohrs')
 
@@ -149,23 +155,24 @@ class Kmesh(Kpoints):
 
 
 class Kpath(Kpoints):
-    '''Path of k-points traversing Brillouin zone
-    (typically for band structure calculations)'''
+    '''Path of k-points traversing Brillouin zone.
+    Typically used only for band structure calculations.'''
 
-    def __init__(self, *, rc, lattice, dk, points):
-        '''
+    def __init__(self, *, rc: 'RunConfig', lattice: 'Lattice',
+                 dk: float, points: list) -> None:
+        '''Initialize k-path with spacing `dk` connecting `points`.
+
         Parameters
         ----------
-        rc : qimpy.utils.RunConfig
-            Current run configuration.
-        lattice : qimpy.lattice.Lattice
+        lattice
             Lattice specification for converting k-points from
             reciprocal fractional coordinates (input) to Cartesian
             for determining path lengths.
-        dk : float
-            Maximum distance (in bohr^-1) between adjacent points on k-path
-        points : list of lists
-            List of special k-points along path: each k-point should contain
+        dk
+            Maximum distance (in :math:`a_0^{-1}') between adjacent points
+            on k-path
+        points
+            List of special k-points along path: each point should contain
             three fractional coordinates (float) and optionally a string
             label for this point for use in band structure plots.
         '''
@@ -173,32 +180,32 @@ class Kpath(Kpoints):
         # Check types, sizes and separate labels from points:
         dk = float(dk)
         labels = [(point[3] if (len(point) > 3) else '') for point in points]
-        points = torch.tensor([point[:3] for point in points],
-                              dtype=float, device=rc.device)
+        kverts = torch.tensor([point[:3] for point in points],
+                              dtype=torch.double, device=rc.device)
         qp.log.info(f'Creating k-path with dk = {dk:g} connecting'
-                    f' {points.shape[0]} special points')
+                    f' {kverts.shape[0]} special points')
 
         # Create path one segment at a time:
-        k = [points[:1]]
+        k_list = [kverts[:1]]
         self.labels = {0: labels[0]}
         k_length = [np.zeros((1,), dtype=float)]
         nk_tot = 1
         distance_tot = 0.
-        dpoints = points.diff(dim=0)
-        distances = torch.sqrt(((dpoints @ lattice.Gbasis.T)**2).sum(dim=1))
+        dkverts = kverts.diff(dim=0)
+        distances = torch.sqrt(((dkverts @ lattice.Gbasis.T)**2).sum(dim=1))
         for i, distance in enumerate(distances):
-            nk = torch.ceil(distance / dk).to(int)  # for this segment
+            nk = int(torch.ceil(distance / dk).item())  # for this segment
             t = torch.arange(1, nk+1, device=rc.device) / nk
-            k.append(points[i] + t[:, None] * dpoints[i])
-            nk_tot += nk.item()
+            k_list.append(kverts[i] + t[:, None] * dkverts[i])
+            nk_tot += nk
             self.labels[nk_tot - 1] = labels[i+1]  # label at end of segment
             k_length.append((distance_tot + distance * t).to(rc.cpu).numpy())
             distance_tot += distance
-        k = torch.cat(k)
+        k = torch.cat(k_list)
         wk = torch.full((nk_tot,),  1./nk_tot, device=rc.device)
         self.k_length = np.concatenate(k_length)  # cumulative length on path
         qp.log.info(f'Created {nk_tot} k-points on k-path of'
-                    f' length {distance_tot.item():g}')
+                    f' length {distance_tot:g}')
 
         # Initialize base class:
         super().__init__(rc, k, wk)
