@@ -1,9 +1,13 @@
 import torch
 import numbers
 import numpy as np
+from typing import Optional
 
 
-def get_Rbasis(system, modification, a, b, c, alpha, beta, gamma):
+def get_Rbasis(system: str, modification: Optional[str],
+               a: Optional[float], b: Optional[float], c: Optional[float],
+               alpha: Optional[float], beta: Optional[float],
+               gamma: Optional[float]) -> torch.Tensor:
     'Create lattice vectors from lattice system and modification'
 
     def check_needed(**kwargs):
@@ -67,6 +71,14 @@ def get_Rbasis(system, modification, a, b, c, alpha, beta, gamma):
         alpha = beta = gamma = 90.
     else:
         raise KeyError('Unknown lattice system: ' + system)
+
+    # Confirm that all geometry parameters are now available:
+    assert isinstance(a, float)
+    assert isinstance(b, float)
+    assert isinstance(c, float)
+    assert isinstance(alpha, float)
+    assert isinstance(beta, float)
+    assert isinstance(gamma, float)
 
     # Compute base lattice vectors:
     cos_alpha = np.cos(np.deg2rad(alpha))
