@@ -1,7 +1,11 @@
 import torch
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ._symmetries import Symmetries
 
 
-def _get_lattice_point_group(Rbasis, tolerance):
+def _get_lattice_point_group(Rbasis: torch.Tensor,
+                             tolerance: float) -> torch.Tensor:
     '''Return point group (n_sym x 3 x 3 tensor in lattice coordinates),
     given lattice vectors Rbasis (3 x 3 tensor).'''
 
@@ -10,7 +14,7 @@ def _get_lattice_point_group(Rbasis, tolerance):
     Rreduced = Rbasis @ T
 
     # Construct all possible matrices with entries from (-1, 0, 1):
-    entries = torch.tensor([-1, 0, 1], device=T.device, dtype=float)
+    entries = torch.tensor([-1, 0, 1], device=T.device, dtype=torch.double)
     matrices = torch.stack(torch.meshgrid([entries]*9))
     matrices = matrices.reshape((9, -1)).T.reshape((-1, 3, 3))
 
@@ -25,24 +29,24 @@ def _get_lattice_point_group(Rbasis, tolerance):
     return (T @ sym) @ torch.linalg.inv(T)
 
 
-def _reduce_matrix33(M, tolerance):
-    '''Return integer transformation matrix T that minimizes norm(M * T)
-    with accuracy set by tolerance. M must be a 3 x 3 tensor.'''
+def _reduce_matrix33(M: torch.Tensor, tolerance: float) -> torch.Tensor:
+    '''Find integer T that minimizes norm(M @ T).
+    All tensors are 3 x 3, and accuracy of minimum is set by tolerance.'''
     assert(M.shape == (3, 3))
 
     # Prepare a list of transformations based on +/-1 offsets:
     direction_combinations = ((0, 1, 2), (1, 2, 0), (2, 0, 1))
     offset_combinations = ((-1, -1), (-1, 0), (-1, 1), (0, -1),
                            (0, 1), (1, -1), (1, 0), (1, 1))
-    D = []
+    D_list = []
     for k0, k1, k2 in direction_combinations:
         for offset1, offset2 in offset_combinations:
             # Propose transformation with +/-1 offsets:
             Dcur = torch.eye(3)
             Dcur[k1, k0] = offset1
             Dcur[k2, k0] = offset2
-            D.append(Dcur)
-    D = torch.stack(D).to(M.device)
+            D_list.append(Dcur)
+    D = torch.stack(D_list).to(M.device)
 
     # Repeatedly transform till norm no longer reduces:
     T = torch.eye(3, device=M.device)
@@ -60,8 +64,9 @@ def _reduce_matrix33(M, tolerance):
             return T  # converged
 
 
-def _symmetrize_lattice(self, Rbasis):
-    'Symmetrize lattice vectors Rbasis (3x3 tensor)'
+def _symmetrize_lattice(self: 'Symmetries',
+                        Rbasis: torch.Tensor) -> torch.Tensor:
+    'Symmetrize lattice vectors `Rbasis` (3 x 3)'
     # Compute symmetrized metric:
     metric = Rbasis.T @ Rbasis
     metric_sym = (self.rot.transpose(-2, -1)

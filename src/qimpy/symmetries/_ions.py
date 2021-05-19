@@ -1,13 +1,27 @@
 import torch
+from typing import Tuple, TYPE_CHECKING
+if TYPE_CHECKING:
+    from ._symmetries import Symmetries
+    from ..lattice import Lattice
+    from ..ions import Ions
 
 
-def _get_space_group(lattice_sym, lattice, ions, tolerance):
-    '''Given lattice point group, lattice, ions and detection tolerance,
-    return space group (rot, trans, ion_map), where:
-        Rotations rot is an n_sym x 3 x 3 tensor in lattice coordinates.
-        Translations trans is an n_sym x 3 tensor in lattice coordinates.
-        ion_map is an n_sym x n_ions int tensor specifying the 0-based index
-            of the ion that each ion maps to after each symmetry operation.'''
+def _get_space_group(lattice_sym: torch.Tensor,
+                     lattice: 'Lattice', ions: 'Ions',
+                     tolerance: float) -> Tuple[torch.Tensor, torch.Tensor,
+                                                torch.Tensor]:
+    '''Find space group given point group `lattice_sym` and `ions`. Accuracy
+    of symmetry detection is specified by relative threshold `tolerance`.
+
+    Returns
+    -------
+    rot
+        Rotations (n_sym x 3 x 3) in fractional coordinates.
+    trans
+        Translations (n_sym x 3) in lattice coordinates.
+    ion_map
+        0-based index (n_sym x n_ions) of the ion that each ion
+         maps to after each symmetry operation.'''
 
     # Special case of no ions:
     device = lattice.rc.device
@@ -17,7 +31,7 @@ def _get_space_group(lattice_sym, lattice, ions, tolerance):
         rot = lattice_sym.clone().detach()
         trans = torch.zeros((lattice_sym.shape[0], 3), device=device)
         ion_map = torch.zeros((lattice_sym.shape[0], 0),
-                              dtype=int, device=device)
+                              dtype=torch.int, device=device)
         return rot, trans, ion_map
 
     # Prepare ion properties needed for space group determination:
@@ -27,7 +41,7 @@ def _get_space_group(lattice_sym, lattice, ions, tolerance):
     M0 = ions.M_initial
     if M0 is None:
         pass  # no handling needed
-    elif len(ions.M_initial.shape) == 1:
+    elif len(M0.shape) == 1:
         # Scalar magnetization must be invariant; treat just like type:
         type_mask = torch.logical_and(
             type_mask, (M0[:, None] - M0[None, :]).abs() < tolerance)
@@ -38,9 +52,9 @@ def _get_space_group(lattice_sym, lattice, ions, tolerance):
                  @ torch.linalg.inv(lattice.Rbasis))
         sym_M *= torch.linalg.det(lattice_sym).view(-1, 1, 1)  # pseudo-vector
 
-    rot = []
-    trans = []
-    ion_map = []
+    rot_list = []
+    trans_list = []
+    ion_map_list = []
     tol_sq = tolerance**2
     for i_sym in range(lattice_sym.shape[0]):
         rot_cur = lattice_sym[i_sym]
@@ -73,6 +87,8 @@ def _get_space_group(lattice_sym, lattice, ions, tolerance):
                 doffset -= torch.floor(0.5 + doffset)  # wrap to [-0.5,0.5)
                 is_common = ((doffset**2).sum(dim=-1) < tol_sq).any(dim=1)
                 common_offsets = common_offsets[is_common]
+        if common_offsets is None:
+            continue
 
         # Determine ion map for each offset and optimize it:
         index_offset = n_ions * torch.arange(n_ions, device=device)
@@ -84,15 +100,19 @@ def _get_space_group(lattice_sym, lattice, ions, tolerance):
             doffset_best = doffset.view(-1, 3)[index_offset + ion_map_cur]
             offset_opt = offset + doffset_best.mean(axis=0)
             # Add to space group:
-            rot.append(rot_cur)
-            trans.append(offset_opt)
-            ion_map.append(ion_map_cur)
+            rot_list.append(rot_cur)
+            trans_list.append(offset_opt)
+            ion_map_list.append(ion_map_cur)
 
-    return torch.stack(rot), torch.stack(trans), torch.stack(ion_map)
+    rot = torch.stack(rot_list)
+    trans = torch.stack(trans_list)
+    ion_map = torch.stack(ion_map_list)
+    return rot, trans, ion_map
 
 
-def _symmetrize_positions(self, positions):
-    'Symmetrize ion positions (n_ions x 3 tensor)'
+def _symmetrize_positions(self: 'Symmetries',
+                          positions: torch.Tensor) -> torch.Tensor:
+    'Symmetrize ionic `positions` (n_ions x 3)'
     pos_rot = positions @ self.rot.transpose(-2, -1) + self.trans[:, None]
     pos_mapped = positions[self.ion_map, :]
     # Correction on rotated positions:

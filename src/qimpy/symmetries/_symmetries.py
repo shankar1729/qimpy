@@ -3,28 +3,42 @@ import torch
 from ._lattice import _get_lattice_point_group, _symmetrize_lattice
 from ._ions import _get_space_group, _symmetrize_positions
 from ._grid import _check_grid_shape, _get_grid_shape
+from typing import List, TYPE_CHECKING
+if TYPE_CHECKING:
+    from ..utils import RunConfig
+    from ..lattice import Lattice
+    from ..ions import Ions
 
 
 class Symmetries:
-    '''TODO: document class Symmetries'''
+    '''Space group symmetries.
+    Detects space group from lattice and ions, and provides methods to
+    symmetrize properties such as positions, forces and densities.'''
+
+    __slots__ = ('rc', 'lattice', 'ions', 'tolerance', 'n_sym',
+                 'rot', 'trans', 'ion_map', 'i_id', 'i_inv')
+    rc: 'RunConfig'  #: Current run configuration
+    lattice: 'Lattice'  #: Corresponding lattice vectors
+    ions: 'Ions'  #: Corresponding ionic geometry
+    tolerance: float  #: Relative error threshold in detecting symmetries
+    n_sym: int  #: Number of space group operations
+    rot: torch.Tensor  #: Rotations in fractional coordinates (n_sym x 3 x 3)
+    trans: torch.Tensor  #: Translations in fractional coordinates (n_sym x 3)
+    ion_map: torch.Tensor  #: Ion index each ion maps to (n_sym x n_ions)
+    i_id: int  #: Index of identity operation within space group
+    i_inv: List[int]  #: Indices of any inversion operations in space group
 
     symmetrize_lattice = _symmetrize_lattice
     symmetrize_positions = _symmetrize_positions
     check_grid_shape = _check_grid_shape
     get_grid_shape = _get_grid_shape
 
-    def __init__(self, *, rc, lattice, ions, tolerance=1e-6):
-        '''
-        Parameters
-        ----------
-        rc : qimpy.utils.RunConfig
-            Current run configuration.
-        lattice : qimpy.lattice.Lattice
-            Bravais lattice / unit cell (determines initial point group).
-        ions : qimpy.ions.Ions
-            Ion specification that, with lattice, determines space group.
-        '''
+    def __init__(self, *, rc: 'RunConfig', lattice: 'Lattice', ions: 'Ions',
+                 tolerance: float = 1e-6) -> None:
+        '''Determine space group from `lattice` and `ions`.'''
         self.rc = rc
+        self.lattice = lattice
+        self.ions = ions
         self.tolerance = tolerance
         qp.log.info('\n--- Initializing Symmetries ---')
 
@@ -41,7 +55,7 @@ class Symmetries:
         for i_sym in range(self.n_sym):
             sym_str = '- ['
             for row in range(3):
-                sym_str += rc.fmt(self.rot[i_sym, row].to(int)) + ', '
+                sym_str += rc.fmt(self.rot[i_sym, row].to(torch.int)) + ', '
             qp.log.info(sym_str + rc.fmt(self.trans[i_sym]) + ']')
         qp.log.debug('Ion map:\n' + rc.fmt(self.ion_map))
 
@@ -61,7 +75,7 @@ class Symmetries:
         id = torch.eye(3, device=rc.device)  # identity matrix
         id_diff = (((self.rot - id)**2).sum(dim=(1, 2))
                    + (self.trans**2).sum(dim=1))
-        self.i_id = id_diff.argmin().item()
+        self.i_id = int(id_diff.argmin().item())
         if id_diff[self.i_id] > tolerance**2:
             raise ValueError('Identity operation not found in space group.')
         # ---  inversion (if present: list of indices, else [])

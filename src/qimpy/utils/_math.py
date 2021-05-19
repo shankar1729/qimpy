@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from typing import List, Tuple
+from typing import List, Tuple, TypeVar
 
 
 def prime_factorization(N: int) -> List[int]:
@@ -29,7 +29,10 @@ def fft_suitable(N: int) -> bool:
     return (N == 1)
 
 
-def ceildiv(num: int, den: int) -> int:
+IntLike = TypeVar('IntLike', int, np.ndarray)
+
+
+def ceildiv(num: IntLike, den: IntLike) -> IntLike:
     'Compute ceil(num/den) with purely integer operations'
     return (num + den-1) // den
 
