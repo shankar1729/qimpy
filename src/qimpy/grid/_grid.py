@@ -11,8 +11,10 @@ if TYPE_CHECKING:
 
 
 class Grid:
-    '''Real and reciprocal space grids for the unit cell of a lattice,
-    and FFT routines for switching between them.
+    '''Real and reciprocal space grids for a unit cell.
+    The grid could either be local or distributed over an MPI communicator,
+    and this class provides FFT routines to switch fields on these grids,
+    and routines to convert fields between grids.
     '''
     __slots__ = [
         'rc', 'comm', 'n_procs', 'i_proc', 'is_split', 'ke_cutoff',
@@ -49,7 +51,8 @@ class Grid:
                  ke_cutoff_wavefunction: Optional[float] = None,
                  ke_cutoff: Optional[float] = None,
                  shape: Optional[Sequence[int]] = None) -> None:
-        '''
+        '''Create local or distributed grid for `lattice`.
+
         Parameters
         ----------
         lattice

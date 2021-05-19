@@ -14,7 +14,7 @@ FunctionFFT = Callable[[torch.Tensor, str], torch.Tensor]
 
 
 def _init_grid_fft(self: 'Grid') -> None:
-    'Initialize local or parallel FFTs for class Grid'
+    'Initialize local or parallel FFTs for class Grid.'
     # Half-reciprocal space global dimensions (for rfft/irfft):
     self.shapeH = (self.shape[0], self.shape[1], 1+self.shape[2]//2)
     qp.log.info(f'real-fft shape: {self.shapeH}')
@@ -178,7 +178,7 @@ def parallel_transform(
 
 def _fft(self: 'Grid', v: torch.Tensor,
          norm: str = 'forward') -> torch.Tensor:
-    """Complex to complex forward transform
+    """Complex to complex forward transform.
 
     Parameters
     ----------
@@ -210,7 +210,7 @@ def _fft(self: 'Grid', v: torch.Tensor,
 
 def _ifft(self: 'Grid', v: torch.Tensor,
           norm: str = 'forward') -> torch.Tensor:
-    """Complex to complex inverse transform
+    """Complex to complex inverse transform.
 
     Parameters
     ----------
@@ -239,7 +239,7 @@ def _ifft(self: 'Grid', v: torch.Tensor,
 
 def _rfft(self: 'Grid', v: torch.Tensor,
           norm: str = 'forward') -> torch.Tensor:
-    """Real to complex forward transform
+    """Real to complex forward transform.
 
     Parameters
     ----------
@@ -268,7 +268,7 @@ def _rfft(self: 'Grid', v: torch.Tensor,
 
 def _irfft(self: 'Grid', v: torch.Tensor,
            norm: str = 'forward') -> torch.Tensor:
-    """Complex to real inverse transform
+    """Complex to real inverse transform.
 
     Parameters
     ----------
