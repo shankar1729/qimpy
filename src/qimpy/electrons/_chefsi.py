@@ -1,49 +1,61 @@
 import qimpy as qp
 import torch
 from ._davidson import Davidson
+from typing import Optional, Tuple, TYPE_CHECKING
+if TYPE_CHECKING:
+    from ._electrons import Electrons
+    from ._wavefunction import Wavefunction
 
 
 class CheFSI(Davidson):
-    '''TODO: document class CheFSI'''
+    '''Chebyshev Filter Subspace Iteration (CheFSI) diagonalization.'''
+    __slots__ = ('filter_order',)
+    filter_order: int  #: Order of Chebyshev filter
 
-    def __init__(self, *, electrons, n_iterations=100, eig_threshold=1E-8,
-                 filter_order=10):
-        '''
+    def __init__(self, *, electrons: 'Electrons', n_iterations: int = 100,
+                 eig_threshold: float = 1E-8, filter_order: int = 10) -> None:
+        '''Initialize with stopping criteria and filter order.
+
         Parameters
         ----------
-        n_iterations: int, default: 100
+        n_iterations
             See :class:`Davidson`
-        eig_threshold: float, default: 1E-9
+        eig_threshold
             See :class:`Davidson`
-        filter_order: int, default: 10
-            Order of the Chebyshev filter, which amountd to the number of
+        filter_order
+            Order of the Chebyshev filter, which amounts to the number of
             Hamiltonian evaluations per band per eigenvalue iteration
         '''
         super().__init__(electrons=electrons, n_iterations=n_iterations,
                          eig_threshold=eig_threshold)
         self.filter_order = filter_order
-        self.line_prefix = 'CheFSI'
+        self._line_prefix = 'CheFSI'
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (f'CheFSI(n_iterations: {self.n_iterations},'
                 f' eig_threshold: {self.eig_threshold:g},'
                 f' filter_order: {self.filter_order})')
 
-    def __call__(self, n_iterations=None, eig_threshold=None):
-        'Diagonalize Kohn-Sham Hamiltonian in electrons'
+    def __call__(self, n_iterations: Optional[int] = None,
+                 eig_threshold: Optional[float] = None,
+                 helper: bool = False) -> Tuple[torch.Tensor, 'Wavefunction',
+                                                'Wavefunction']:
+        '''Diagonalize Kohn-Sham Hamiltonian in electrons.
+        Also available as :meth:`__call__` to make `CheFSI` callable.'''
         electrons = self.electrons
         n_spins = electrons.n_spins
         nk_mine = electrons.kpoints.n_mine
         w_sk = electrons.w_spin * electrons.basis.wk.view(1, -1, 1)
         n_bands = electrons.n_bands
-        inner_loop = n_iterations or eig_threshold
+        inner_loop = not (helper or ((n_iterations is None)
+                                     and (eig_threshold is None)))
         n_iterations = n_iterations if n_iterations else self.n_iterations
         eig_threshold = eig_threshold if eig_threshold else self.eig_threshold
         if electrons.E is None:
             # Get initial wavefunctions and energies from Davidson:
-            self.line_prefix = 'Davidson'
+            self._line_prefix = 'Davidson'
             E, C, HC = super().__call__(1, eig_threshold, helper=True)
-            self.line_prefix = 'CheFSI'
+            self._line_prefix = 'CheFSI'
             n_iterations_done = 1
         else:
             # Initialize subspace:
@@ -106,7 +118,7 @@ class CheFSI(Davidson):
 
             # Subspace orthonormalization and diagonalization:
             E_prev = E
-            E, V = qp.utils.eighg(C ^ HC, C.dot(C, overlap=True))
+            E, V = qp.utils.eighg(C ^ HC, C.dot_O(C))
             C = C @ V
             HC = HC @ V
 
@@ -116,7 +128,7 @@ class CheFSI(Davidson):
             deig_max, n_eigs_done = self._check_deigs(dE, eig_threshold)
             converged = (n_eigs_done == n_bands)
             converge_failed = ((i_iter == n_iterations)
-                               and (not (inner_loop or converged)))
+                               and (not (inner_loop or helper or converged)))
             self._report(i_iter, Eband, inner_loop=inner_loop,
                          deig_max=deig_max, n_eigs_done=n_eigs_done,
                          converged=converged, converge_failed=converge_failed)
@@ -124,5 +136,10 @@ class CheFSI(Davidson):
                 break
 
         # Store results:
-        electrons.C = C
-        electrons.E = E
+        if not helper:
+            electrons.C = C
+            electrons.E = E
+
+        return E, C, HC
+
+    diagonalize = __call__

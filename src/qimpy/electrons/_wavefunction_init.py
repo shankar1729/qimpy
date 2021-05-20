@@ -1,9 +1,12 @@
 import qimpy as qp
 import numpy as np
 import torch
+from typing import Callable, Optional, TYPE_CHECKING
+if TYPE_CHECKING:
+    from ._wavefunction import Wavefunction
 
 
-def _randn(x):
+def _randn(x: torch.Tensor) -> torch.Tensor:
     'Generate a complex standard-normal Tensor using state int Tensor x'
     # Generate two uniform random numbers for each output:
     u = []
@@ -18,24 +21,23 @@ def _randn(x):
             * torch.exp((2j*np.pi) * u[1]))  # Phase
 
 
-def _randomize(self, seed=0, b_start=0, b_stop=None):
-    '''Randomize wavefunction coefficients to bandwidth-limited
-    random numbers in a reproducible way regardless of MPI configuration
-    of the run. This is done by running a separate xor-shift random
-    number generator with a different seed at each combination of spin,
-    k, spinor and G-vector, looping only over the bands to generate
-    the random number.
+def _randomize(self: 'Wavefunction', seed: int = 0, b_start: int = 0,
+               b_stop: Optional[int] = None) -> None:
+    '''Set wavefunction coefficients to bandwidth-limited random numbers.
+    This is done reproducibly, regardless of MPI configuration of the run,
+    by running a separate xor-shift random number generator with a different
+    seed at each combination of spin, k, spinor and G-vector,
+    looping only over the bands to generate the random number.
 
     Parameters
     ----------
-    seed : int, default: 0
+    seed
         Seed offset at each k and iG for xor-shift random number generator
-    b_start : int, default: 0
+    b_start
         Starting band index (global index if MPI-split over bands)
-    b_stop : int, default: None
+    b_stop
         Stopping band index (global index if MPI-split over bands)
     '''
-    assert(self.coeff is not None)
     basis = self.basis
     watch = qp.utils.StopWatch('Wavefunction.randomize', basis.rc)
 
@@ -61,7 +63,7 @@ def _randomize(self, seed=0, b_start=0, b_stop=None):
     coeff_cur = self.coeff[:, :, b_start_local:b_stop_local]
 
     # Initialize random number state based on global coeff index and seed:
-    def init_state(basis_index):
+    def init_state(basis_index: torch.Tensor) -> torch.Tensor:
         i_spinor = torch.arange(basis.n_spinor,
                                 device=self.coeff.device).view(1, 1, -1, 1)
         i_k = torch.arange(basis.kpoints.i_start, basis.kpoints.i_stop,
@@ -102,27 +104,25 @@ def _randomize(self, seed=0, b_start=0, b_stop=None):
     watch.stop()
 
 
-def _randomize_selected(self, i_spin, i_k, i_band, seed=0):
-    '''Randomize wavefunction coefficients of selected bands, indexed
-    as a tuple (i_spin, i_k, i_band) of 1D index tensors with same shape.
-    This is only supported for wavefunctions split over basis
-    (i.e. no band_division)
+_RandomizeSelected = Callable[['Wavefunction', torch.Tensor, torch.Tensor,
+                               torch.Tensor, int], None]
 
-    Parameters
-    ----------
-    i_spin : torch.Tensor[int]
-    i_k : torch.Tensor[int]
-    i_band : torch.Tensor[int]
-    seed : int, default: 0
+
+def _randomize_selected(self: 'Wavefunction', i_spin: torch.Tensor,
+                        i_k: torch.Tensor, i_band: torch.Tensor,
+                        seed: int) -> None:
+    '''Randomize wavefunction coefficients of selected bands.
+    The bands are indexed by a tuple (`i_spin`, `i_k`, `i_band`) of 1D
+    index tensors with same shape. This is only supported for wavefunctions
+    split over basis (i.e. no band_division).
     '''
-    assert(self.coeff is not None)
     assert(self.band_division is None)
     basis = self.basis
     n_bands = self.n_bands()
     watch = qp.utils.StopWatch('Wavefunction.randomize_selected', basis.rc)
 
     # Initialize random number state based on global coeff index and seed:
-    def init_state(basis_index):
+    def init_state(basis_index: torch.Tensor) -> torch.Tensor:
         i_spinor = torch.arange(basis.n_spinor,
                                 device=self.coeff.device).view(1, -1, 1)
         i_k_global = (basis.kpoints.i_start + i_k).view(-1, 1, 1)

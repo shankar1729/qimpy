@@ -1,9 +1,12 @@
 import qimpy as qp
 import numpy as np
 import torch
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ._wavefunction import Wavefunction
 
 
-def _split_bands(self):
+def _split_bands(self: 'Wavefunction') -> 'Wavefunction':
     """Return wavefunction split by bands, bringing all basis coefficients of
     each band together on some process. Note that the result may be a view if
     there is only one process, or if the wavefunction is already split by bands
@@ -42,7 +45,7 @@ def _split_bands(self):
                                      band_division=band_division)
 
 
-def _split_basis(self):
+def _split_basis(self: 'Wavefunction') -> 'Wavefunction':
     """Return wavefunction split by basis, bringing all bands of each basis
     coefficient together on some process. Note that the result may be a view if
     there is only one process, or if the wavefunction is already split by basis
@@ -129,12 +132,12 @@ if __name__ == '__main__':
     for i_repeat in range(n_repeat):
         Cg.randomize()
         Cg = Cg.orthonormalize()
-    Cg_overlap = Cg.dot(Cg, overlap=True)
+    Cg_overlap = Cg.dot_O(Cg)
     expected_overlap = torch.eye(Cg_overlap.shape[-1],
                                  device=Cg.coeff.device)[None, None]
     ortho_err = (Cg_overlap - expected_overlap).norm().item()
     qp.log.info(f'Orthonormality error: {ortho_err:.3e}')
-    qp.log.info('Norm(band)[selected]:\n' + rc.fmt(Cg.norm('band')[0, :, :5]))
-    qp.log.info('Norm(ke)[selected]:\n' + rc.fmt(Cg.norm('ke')[0, :, :5]))
+    qp.log.info('Norm(band)[selected]:\n' + rc.fmt(Cg.band_norm()[0, :, :5]))
+    qp.log.info('Norm(ke)[selected]:\n' + rc.fmt(Cg.band_ke()[0, :, :5]))
 
     qp.utils.StopWatch.print_stats()

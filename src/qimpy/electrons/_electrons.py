@@ -2,19 +2,56 @@ import qimpy as qp
 import numpy as np
 import torch
 from ._hamiltonian import _hamiltonian
+from typing import Union, Optional, TYPE_CHECKING
+if TYPE_CHECKING:
+    from ..utils import RunConfig
+    from ..lattice import Lattice
+    from ..ions import Ions
+    from ..symmetries import Symmetries
+    from ._kpoints import Kpoints, Kmesh, Kpath
+    from ._fillings import Fillings
+    from ._basis import Basis
+    from ._davidson import Davidson
+    from ._chefsi import CheFSI
+    from ._wavefunction import Wavefunction
 
 
 class Electrons:
-    'TODO: document class Electrons'
+    '''Electronic subsystem'''
+    __slots__ = ('rc', 'kpoints', 'spin_polarized', 'spinorial', 'n_spins',
+                 'n_spinor', 'w_spin', 'fillings', 'n_bands', 'n_bands_extra',
+                 'basis', 'diagonalize', 'C', 'E', 'V_ks')
+    rc: 'RunConfig'  #: Current run configuration
+    kpoints: 'Kpoints'  #: Set of kpoints (mesh or path)
+    spin_polarized: bool  #: Whether calculation is spin-polarized
+    spinorial: bool  #: Whether calculation is relativistic / spinorial
+    n_spins: int  #: Number of spin channels
+    n_spinor: int  #: Number of spinor components
+    w_spin: float  #: Spin weight (degeneracy factor)
+    fillings: 'Fillings'  #: Occupation factor / smearing scheme
+    n_bands: int  #: Number of bands to calculate
+    n_bands_extra: int  #: Number of extra bands during diagonalization
+    basis: 'Basis'  #: Plane-wave basis for wavefunctions
+    diagonalize: 'Davidson'  #: Hamiltonian diagonalization method
+    C: 'Wavefunction'  #: Electronic wavefunctions
+    E: Optional[torch.Tensor]  #: Electronic energies
+    V_ks: torch.Tensor  #: Kohn-Sham potential (local part)
 
     hamiltonian = _hamiltonian
 
-    def __init__(self, *, rc, lattice, ions, symmetries,
-                 k_mesh=None, k_path=None,
-                 spin_polarized=False, spinorial=False,
-                 fillings=None, basis=None, n_bands=None, n_bands_extra=None,
-                 davidson=None, chefsi=None):
-        '''
+    def __init__(self, *, rc: 'RunConfig', lattice: 'Lattice', ions: 'Ions',
+                 symmetries: 'Symmetries',
+                 k_mesh: Optional[Union[dict, 'Kmesh']] = None,
+                 k_path: Optional[Union[dict, 'Kpath']] = None,
+                 spin_polarized: bool = False, spinorial: bool = False,
+                 fillings: Optional[Union[dict, 'Fillings']] = None,
+                 basis: Optional[Union[dict, 'Basis']] = None,
+                 n_bands: Optional[Union[int, str]] = None,
+                 n_bands_extra: Optional[Union[int, str]] = None,
+                 davidson: Optional[Union[dict, 'Davidson']] = None,
+                 chefsi:  Optional[Union[dict, 'CheFSI']] = None) -> None:
+        '''Initialize from components and/or dictionary of options.
+
         Parameters
         ----------
         rc : qimpy.utils.RunConfig
@@ -192,7 +229,8 @@ class Electrons:
                 electrons=self)
         qp.log.info('diagonalization: ' + repr(self.diagonalize))
 
-    def output(self):
+    def output(self) -> None:
         'Save any configured outputs (TODO: systematize this)'
+        assert(self.E is not None)
         if isinstance(self.kpoints, qp.electrons.Kpath):
             self.kpoints.plot(self.E[..., :self.n_bands], 'bandstruct.pdf')
