@@ -2,3 +2,4 @@ torch
 pyyaml
 numpy
 psutil
+pybind11
