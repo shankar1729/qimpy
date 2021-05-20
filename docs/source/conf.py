@@ -51,6 +51,9 @@ autodoc_typehints = "description"
 # Order entries by type:
 autodoc_member_order = 'groupwise'
 
+# Options needed for building on readthedocs:
+autodoc_mock_imports = ["mpi4py"]
+
 # -- Options for HTML output -------------------------------------------------
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for

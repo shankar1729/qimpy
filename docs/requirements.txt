@@ -1,5 +1,4 @@
 torch
 pyyaml
 numpy
-mpi4py
 psutil
