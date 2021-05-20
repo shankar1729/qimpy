@@ -20,7 +20,7 @@ class Electrons:
     '''Electronic subsystem'''
     __slots__ = ('rc', 'kpoints', 'spin_polarized', 'spinorial', 'n_spins',
                  'n_spinor', 'w_spin', 'fillings', 'n_bands', 'n_bands_extra',
-                 'basis', 'diagonalize', 'C', 'E', 'V_ks')
+                 'basis', 'diagonalize', 'C', 'eig', 'deig_max', 'V_ks')
     rc: 'RunConfig'  #: Current run configuration
     kpoints: 'Kpoints'  #: Set of kpoints (mesh or path)
     spin_polarized: bool  #: Whether calculation is spin-polarized
@@ -34,7 +34,8 @@ class Electrons:
     basis: 'Basis'  #: Plane-wave basis for wavefunctions
     diagonalize: 'Davidson'  #: Hamiltonian diagonalization method
     C: 'Wavefunction'  #: Electronic wavefunctions
-    E: Optional[torch.Tensor]  #: Electronic energies
+    eig: torch.Tensor  #: Electronic orbital eigenvalues
+    deig_max: float  #: Estimate of accuracy of current `eig`
     V_ks: torch.Tensor  #: Kohn-Sham potential (local part)
 
     hamiltonian = _hamiltonian
@@ -194,7 +195,9 @@ class Electrons:
         self.C = qp.electrons.Wavefunction(self.basis, n_bands=self.n_bands)
         self.C.randomize()
         self.C = self.C.orthonormalize()
-        self.E = None
+        self.eig = torch.zeros(self.C.coeff.shape[:3], dtype=torch.double,
+                               device=rc.device)
+        self.deig_max = np.inf  # note that eigenvalues are completely wrong!
 
         # Initialize a test Kohn-Sham potential (nearly-free electron model):
         # NOTE: this is only a placeholder before implementing ion potentials
@@ -231,6 +234,5 @@ class Electrons:
 
     def output(self) -> None:
         'Save any configured outputs (TODO: systematize this)'
-        assert(self.E is not None)
         if isinstance(self.kpoints, qp.electrons.Kpath):
-            self.kpoints.plot(self.E[..., :self.n_bands], 'bandstruct.pdf')
+            self.kpoints.plot(self.eig[..., :self.n_bands], 'bandstruct.pdf')

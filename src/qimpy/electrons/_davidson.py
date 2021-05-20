@@ -11,13 +11,15 @@ if TYPE_CHECKING:
 class Davidson:
     '''Davidson diagonalization of Hamiltonian in `electrons`.'''
     __slots__ = ('rc', 'electrons', 'n_iterations', 'eig_threshold',
-                 '_line_prefix', '_norm_cut')
+                 '_line_prefix', '_norm_cut', '_i_iter', '_HC')
     rc: 'RunConfig'  #: Current run configuration
     electrons: 'Electrons'  #: Electronic system to diagonalize
     n_iterations: int  #: Number of diagonalization iterations
     eig_threshold: float  #: Eigenvalue convergence threshold (in :math:`E_h`)
     _line_prefix: str
     _norm_cut: float
+    _i_iter: int
+    _HC: 'Wavefunction'  # Used only for coordination with sub-classes
 
     def __init__(self, *, electrons: 'Electrons', n_iterations: int = 100,
                  eig_threshold: float = 1E-8) -> None:
@@ -42,21 +44,21 @@ class Davidson:
         self._line_prefix = 'Davidson'
         self._norm_cut = np.sqrt(electrons.basis.n_tot  # estimate round-off
                                  * 1E-15)  # to spot null bands in _regularize
+        self._i_iter = 0
 
     def __repr__(self) -> str:
         return (f'Davidson(n_iterations: {self.n_iterations},'
                 f' eig_threshold: {self.eig_threshold:g}')
 
-    def _report(self, iteration: int, Eband: float,
-                deig_max: Optional[float] = None,
-                n_eigs_done: Optional[int] = None,
+    def _report(self, n_eigs_done: int = 0,
                 inner_loop: bool = False, converged: bool = False,
                 converge_failed: bool = False) -> None:
         'Report iteration progress / convergence in standardized form'
         line_prefix = ('  ' if inner_loop else '') + self._line_prefix
-        line = f'{line_prefix}: {iteration}  Eband: {Eband:+.11f}'
-        if deig_max:
-            line += f'  deig_max: {deig_max:.2e}'
+        line = f'{line_prefix}: {self._i_iter}' \
+               f'  Eband: {self._get_Eband():+.11f}'
+        if self.electrons.deig_max != np.inf:
+            line += f'  deig_max: {self.electrons.deig_max:.2e}'
         if n_eigs_done:
             line += f'  n_eigs_done: {n_eigs_done}'
         line += f'  t[s]: {self.rc.clock():.2f}'
@@ -96,76 +98,75 @@ class Davidson:
         C.randomize_selected(i_spin, i_k, i_band, i_iter)  # seeded by i_iter
         norm[i_spin, i_k, i_band] = 1.
 
-    def _get_Eband(self, E: torch.Tensor) -> float:
+    def _get_Eband(self) -> float:
         'Compute the sum over band eigenvalues, averaged over k'
         electrons = self.electrons
         return self.rc.comm_k.allreduce((
             electrons.w_spin * electrons.basis.wk.view(1, -1, 1)
-            * E[..., :electrons.n_bands]).sum().item(), qp.MPI.SUM)
+            * electrons.eig[..., :electrons.n_bands]).sum().item(), qp.MPI.SUM)
 
-    def _check_deigs(self, dE: torch.Tensor,
-                     eig_threshold: float) -> Tuple[float, int]:
+    def _check_deig(self, deig: torch.Tensor,
+                    eig_threshold: float) -> Tuple[float, int]:
         '''Return maximum change in eigenvalues and how many
         eigenvalues are converged at all spin and k'''
         n_bands = self.electrons.n_bands
-        deig_max = self.rc.comm_kb.allreduce(dE[..., :n_bands].max().item(),
+        deig_max = self.rc.comm_kb.allreduce(deig[..., :n_bands].max().item(),
                                              qp.MPI.MAX)
-        eigs_pending = torch.where((dE[..., :n_bands] > eig_threshold)
-                                   .flatten(0, 1).any(dim=0))[0]
+        pending = torch.where((deig[..., :n_bands]
+                               > eig_threshold).flatten(0, 1).any(dim=0))[0]
         n_eigs_done = self.rc.comm_kb.allreduce(
-            eigs_pending[0].item() if len(eigs_pending) else n_bands,
-            qp.MPI.MIN)
+            pending[0].item() if len(pending) else n_bands, qp.MPI.MIN)
         return deig_max, n_eigs_done
 
     def __call__(self, n_iterations: Optional[int] = None,
-                 eig_threshold: Optional[float] = None,
-                 helper: bool = False) -> Tuple[torch.Tensor, 'Wavefunction',
-                                                'Wavefunction']:
+                 eig_threshold: Optional[float] = None) -> None:
         '''Diagonalize Kohn-Sham Hamiltonian in electrons.
-        Also available as :meth:`__call__` to make `Davidson` callable.'''
-        electrons = self.electrons
-        C, electrons.C = electrons.C, None  # don't keep copy to save memory
-        n_spins = electrons.n_spins
-        nk_mine = electrons.kpoints.n_mine
-        n_bands = electrons.n_bands
-        n_bands_max = electrons.n_bands + electrons.n_bands_extra
+        Also available as :meth:`__call__` to make `Davidson` callable.
+        '''
+        el = self.electrons
+        n_spins = el.n_spins
+        nk_mine = el.kpoints.n_mine
+        n_bands = el.n_bands
+        n_bands_max = el.n_bands + el.n_bands_extra
+        helper = (type(self) != Davidson)
         inner_loop = not (helper or ((n_iterations is None)
                                      and (eig_threshold is None)))
         n_iterations = n_iterations if n_iterations else self.n_iterations
         eig_threshold = eig_threshold if eig_threshold else self.eig_threshold
 
         # Initialize subspace:
-        if(2 * n_bands_max >= electrons.basis.n_min):
+        if(2 * n_bands_max >= el.basis.n_min):
             raise ValueError(
                 f'n_bands + n_bands_extra = {n_bands_max} exceeds'
-                f' min(n_basis)/2 = {electrons.basis.n_min//2} in Davidson')
-        HC = electrons.hamiltonian(C)
-        E, V = torch.linalg.eigh(C ^ HC)  # diagonalize subspace Hamiltonian
-        C = C @ V  # switch to eigen-basis
+                f' min(n_basis)/2 = {el.basis.n_min//2} in Davidson')
+        HC = el.hamiltonian(el.C)
+        el.eig, V = torch.linalg.eigh(el.C ^ HC)  # subspace eigs
+        el.deig_max = np.inf  # don't know eig accuracy yet
+        el.C = el.C @ V  # switch to eigen-basis
         HC = HC @ V  # switch to eigen-basis
-        Eband = self._get_Eband(E)
-        self._report(0, Eband, inner_loop=inner_loop)
+        self._i_iter = 0
+        self._report(inner_loop=inner_loop)
         n_eigs_done = 0
 
-        for i_iter in range(1, n_iterations + 1):
-            n_bands_cur = C.n_bands()
+        for self._i_iter in range(self._i_iter+1, n_iterations+1):
+            n_bands_cur = el.C.n_bands()
 
             # Compute subspace expansion after dropping converged eigenpairs:
             # --- select unconverged eigenpairs
-            E_sel = E[:, :, n_eigs_done:, None, None]
-            C_sel = C[:, :, n_eigs_done:] if n_eigs_done else C
+            eig_sel = el.eig[:, :, n_eigs_done:, None, None]
+            C_sel = el.C[:, :, n_eigs_done:] if n_eigs_done else el.C
             HC_sel = HC[:, :, n_eigs_done:] if n_eigs_done else HC
             # --- compute subspace expansion
             KEref = C_sel.band_ke()  # reference KE for preconditioning
-            Cexp = self._precondition(HC_sel - C_sel.overlap() * E_sel, KEref)
+            Cexp = self._precondition(HC_sel - C_sel.overlap()*eig_sel, KEref)
             norm_exp = Cexp.band_norm()
-            self._regularize(Cexp, norm_exp, i_iter)
+            self._regularize(Cexp, norm_exp, self._i_iter)
             Cexp *= (1./norm_exp[..., None, None])
             n_bands_new = n_bands_cur + Cexp.n_bands()
 
             # Expansion subspace overlaps:
             C_OC = torch.eye(n_bands_cur, device=V.device)[None, None]
-            C_OCexp = C.dot_O(Cexp)
+            C_OCexp = el.C.dot_O(Cexp)
             Cexp_OC = C_OCexp.conj().transpose(-2, -1)
             Cexp_OCexp = Cexp.dot_O(Cexp)
             dims_new = (n_spins, nk_mine, n_bands_new, n_bands_new)
@@ -176,9 +177,9 @@ class Davidson:
             C_OC_new[:, :, n_bands_cur:, n_bands_cur:] = Cexp_OCexp
 
             # Expansion subspace Hamiltonian:
-            HCexp = electrons.hamiltonian(Cexp)
-            C_HC = torch.diag_embed(E)
-            C_HCexp = C ^ HCexp
+            HCexp = el.hamiltonian(Cexp)
+            C_HC = torch.diag_embed(el.eig)
+            C_HCexp = el.C ^ HCexp
             Cexp_HC = C_HCexp.conj().transpose(-2, -1)
             Cexp_HCexp = Cexp ^ HCexp
             C_HC_new = torch.zeros(dims_new, device=V.device, dtype=V.dtype)
@@ -188,38 +189,31 @@ class Davidson:
             C_HC_new[:, :, n_bands_cur:, n_bands_cur:] = Cexp_HCexp
 
             # Solve expanded subspace generalized eigenvalue problem:
-            E_new, V_new = qp.utils.eighg(C_HC_new, C_OC_new)
+            eig_new, V_new = qp.utils.eighg(C_HC_new, C_OC_new)
             n_bands_next = min(n_bands_new, n_bands_max)  # number to retain
             Vcur = V_new[:, :, :n_bands_cur, :n_bands_next]  # cur -> next C
             Vexp = V_new[:, :, n_bands_cur:, :n_bands_next]  # exp -> next C
 
             # Update C to optimum n_bands_next subspace from [C, Cexp]:
-            C = C @ Vcur
-            C += Cexp @ Vexp
+            el.C = el.C @ Vcur
+            el.C += Cexp @ Vexp
             del Cexp
             HC = HC @ Vcur
             HC += HCexp @ Vexp
             del HCexp
-            dE = torch.abs(E - E_new[..., :n_bands_cur])  # change in eigs
-            E = E_new[..., :n_bands_next]
+            deig = torch.abs(el.eig - eig_new[..., :n_bands_cur])
+            el.eig = eig_new[..., :n_bands_next]
 
             # Test convergence and report:
-            Eband = self._get_Eband(E)
-            deig_max, n_eigs_done = self._check_deigs(dE, eig_threshold)
+            el.deig_max, n_eigs_done = self._check_deig(deig, eig_threshold)
             converged = (n_eigs_done == n_bands)
-            converge_failed = ((i_iter == n_iterations)
+            converge_failed = ((self._i_iter == n_iterations)
                                and (not (inner_loop or helper or converged)))
-            self._report(i_iter, Eband, inner_loop=inner_loop,
-                         deig_max=deig_max, n_eigs_done=n_eigs_done,
+            self._report(inner_loop=inner_loop, n_eigs_done=n_eigs_done,
                          converged=converged, converge_failed=converge_failed)
             if converged:
                 break
-
-        # Store results:
-        if not helper:
-            electrons.C = C
-            electrons.E = E
-
-        return E, C, HC
+        if helper:
+            self._HC = HC  # continue efficiently with another algorithm
 
     diagonalize = __call__
