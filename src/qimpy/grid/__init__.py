@@ -4,3 +4,4 @@ __all__ = [
     'Grid']
 
 from ._grid import Grid
+from ._field import Field, FieldR, FieldC, FieldH, FieldG
