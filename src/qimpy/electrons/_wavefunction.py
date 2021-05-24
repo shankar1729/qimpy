@@ -114,11 +114,13 @@ class Wavefunction:
     UnaryOpS = Callable[['Wavefunction'], float]
     BinaryOp = Callable[['Wavefunction', 'Wavefunction'], 'Wavefunction']
     BinaryOpT = Callable[['Wavefunction', 'Wavefunction'], torch.Tensor]
+    ScaleOp = Callable[['Wavefunction', Union[float, torch.Tensor]],
+                       'Wavefunction']
 
     randomize.__doc__ = _randomize.__doc__  # randomize stub'd above
     randomize_selected: _RandomizeSelected = _randomize_selected
-    split_bands: Callable = _split_bands
-    split_basis: Callable = _split_basis
+    split_bands: UnaryOp = _split_bands
+    split_basis: UnaryOp = _split_basis
     norm: UnaryOpS = _norm
     band_norm: UnaryOpT = _band_norm
     band_ke: UnaryOpT = _band_ke
@@ -129,12 +131,12 @@ class Wavefunction:
     matmul = _matmul  # transform by a matrix in band space
     __matmul__ = _matmul  # shorthand C @ M for matmul
     orthonormalize: UnaryOp = _orthonormalize
-    __mul__ = _mul  # scalar multiply
-    __rmul__ = _mul  # scalar multiply is commutative
-    __imul__ = _imul  # scale
-    __add__ = _add
-    __iadd__ = _iadd
-    __sub__ = _sub
-    __isub__ = _isub
+    __mul__: ScaleOp = _mul  # scalar multiply
+    __rmul__: ScaleOp = _mul  # scalar multiply is commutative
+    __imul__: ScaleOp = _imul  # scale
+    __add__: BinaryOp = _add
+    __iadd__: BinaryOp = _iadd
+    __sub__: BinaryOp = _sub
+    __isub__: BinaryOp = _isub
     __getitem__ = _getitem
     cat = _cat  # join wavefunctions
