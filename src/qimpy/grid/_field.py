@@ -34,7 +34,7 @@ class Field(metaclass=ABCMeta):
     def __init__(self, grid: 'Grid', *,
                  shape_batch: Sequence[int] = tuple(),
                  data: Optional[torch.Tensor] = None) -> None:
-        '''Initialize data common to all Field types.
+        '''Initialize to zeros or specified `data`.
 
         Parameters
         ----------
