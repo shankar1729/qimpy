@@ -1,7 +1,9 @@
 import qimpy as qp
+import numpy as np
 import torch
 from abc import ABCMeta, abstractmethod
 from numbers import Number
+from ._change import _change_real
 from typing import TypeVar, Tuple, Optional, Sequence, TYPE_CHECKING
 if TYPE_CHECKING:
     from ._grid import Grid
@@ -22,23 +24,22 @@ class Field(metaclass=ABCMeta):
     data: torch.Tensor  #: Underlying data, with last three dimensions on grid
 
     @abstractmethod
-    def __init__(self, grid: 'Grid',
-                 dtype: torch.dtype = torch.cdouble,
-                 shape_grid: Tuple[int, ...] = tuple(), *,
+    def dtype(self) -> torch.dtype:
+        'Expected data type for the Field type'
+
+    @abstractmethod
+    def shape_grid(self) -> torch.dtype:
+        'Expected grid shape (last 3 data dimension) for the Field type'
+
+    def __init__(self, grid: 'Grid', *,
                  shape_batch: Sequence[int] = tuple(),
                  data: Optional[torch.Tensor] = None) -> None:
-        '''Initialize data common to all field types. This abstract method
-        should only be called as a helper from subclass initializers.
+        '''Initialize data common to all Field types.
 
         Parameters
         ----------
         grid
             Associated grid, which determines last three dimensions of data
-        dtype
-            Data type, which may be real or complex for real space fields,
-            but will always be complex in reciprocal space
-        shape_grid
-            Last three dimensions of data, based on grid
         shape_batch
             Optional preceding batch dimensions for vector fields, arrays of
             scalar fields etc. Not used if data is provided.
@@ -46,9 +47,11 @@ class Field(metaclass=ABCMeta):
             Initial data if provided; initialize to zero otherwise
         '''
         self.grid = grid
+        shape_grid = self.shape_grid()
+        dtype = self.dtype()
         if data is None:
             # Initialize to zero:
-            self.data = torch.zeros(shape_grid + tuple(shape_batch),
+            self.data = torch.zeros(tuple(shape_batch) + shape_grid,
                                     dtype=dtype, device=grid.rc.device)
         else:
             # Initialize to provided data:
@@ -59,22 +62,26 @@ class Field(metaclass=ABCMeta):
     def __add__(self: FieldType, other: FieldType) -> FieldType:
         if not isinstance(other, type(self)):
             return NotImplemented
+        assert self.grid is other.grid
         return self.__class__(self.grid, data=(self.data + other.data))
 
     def __iadd__(self: FieldType, other: FieldType) -> FieldType:
         if not isinstance(other, type(self)):
             return NotImplemented
+        assert self.grid is other.grid
         self.data += other.data
         return self
 
     def __sub__(self: FieldType, other: FieldType) -> FieldType:
         if not isinstance(other, type(self)):
             return NotImplemented
+        assert self.grid is other.grid
         return self.__class__(self.grid, data=(self.data - other.data))
 
     def __isub__(self: FieldType, other: FieldType) -> FieldType:
         if not isinstance(other, type(self)):
             return NotImplemented
+        assert self.grid is other.grid
         self.data -= other.data
         return self
 
@@ -91,69 +98,62 @@ class Field(metaclass=ABCMeta):
         self.data *= other
         return self
 
+    def norm(self) -> float:
+        norm_sq = self.data.norm().item() ** 2
+        if self.grid.comm is not None:
+            norm_sq = self.grid.comm.allreduce(norm_sq, qp.MPI.SUM)
+        return np.sqrt(norm_sq)
+
 
 class FieldR(Field):
     '''Real fields in real space.'''
-    def __init__(self, grid: 'Grid', *, shape_batch: Sequence[int] = tuple(),
-                 data: Optional[torch.Tensor] = None) -> None:
-        '''Initialize real-space real fields with zeros / specified data.
+    def dtype(self) -> torch.dtype:
+        return torch.double
 
-        Parameters
-        ----------
-        shape_batch
-            Optional preceding batch dimensions for vector fields, arrays of
-            scalar fields etc. Not used if data is provided.
-        data
-            Initial data if provided; initialize to zero otherwise
-        '''
-        super().__init__(grid, torch.double, grid.shapeR_mine,
-                         shape_batch=shape_batch, data=data)
+    def shape_grid(self) -> torch.dtype:
+        return self.grid.shapeR_mine
 
     def __invert__(self) -> 'FieldH':
         'Fourier transform (enables the ~ operator)'
         return FieldH(self.grid, data=self.grid.fft(self.data))
 
+    def to(self, grid: 'Grid') -> 'FieldR':
+        '''Switch field to another `grid`. Note that `grid.shape` must equal
+        `self.grid.shape`, but could differ in the MPI split.'''
+        if grid is self.grid:
+            return self
+        return _change_real(self, grid)
+
 
 class FieldC(Field):
     '''Complex fields in real space.'''
-    def __init__(self, grid: 'Grid', *, shape_batch: Sequence[int] = tuple(),
-                 data: Optional[torch.Tensor] = None) -> None:
-        '''Initialize real-space complex fields with zeros / specified data.
+    def dtype(self) -> torch.dtype:
+        return torch.cdouble
 
-        Parameters
-        ----------
-        shape_batch
-            Optional preceding batch dimensions for vector fields, arrays of
-            scalar fields etc. Not used if data is provided.
-        data
-            Initial data if provided; initialize to zero otherwise
-        '''
-        super().__init__(grid, torch.cdouble, grid.shapeR_mine,
-                         shape_batch=shape_batch, data=data)
+    def shape_grid(self) -> torch.dtype:
+        return self.grid.shapeR_mine
 
     def __invert__(self) -> 'FieldG':
         'Fourier transform (enables the ~ operator)'
         return FieldG(self.grid, data=self.grid.fft(self.data))
+
+    def to(self, grid: 'Grid') -> 'FieldC':
+        '''Switch field to another `grid`. Note that `grid.shape` must equal
+        `self.grid.shape`, but could differ in the MPI split.'''
+        if grid is self.grid:
+            return self
+        return _change_real(self, grid)
 
 
 class FieldH(Field):
     '''Real fields in (half) reciprocal space. Note that the underlying
     data is complex in reciprocal space, but reduced to one half of
     reciprocal space using Hermitian symmetry.'''
-    def __init__(self, grid: 'Grid', *, shape_batch: Sequence[int] = tuple(),
-                 data: Optional[torch.Tensor] = None) -> None:
-        '''Initialize half-reciprocal-space fields with zeros / specified data.
+    def dtype(self) -> torch.dtype:
+        return torch.cdouble
 
-        Parameters
-        ----------
-        shape_batch
-            Optional preceding batch dimensions for vector fields, arrays of
-            scalar fields etc. Not used if data is provided.
-        data
-            Initial data if provided; initialize to zero otherwise
-        '''
-        super().__init__(grid, torch.cdouble, grid.shapeH_mine,
-                         shape_batch=shape_batch, data=data)
+    def shape_grid(self) -> torch.dtype:
+        return self.grid.shapeH_mine
 
     def __invert__(self) -> 'FieldR':
         'Fourier transform (enables the ~ operator)'
@@ -162,41 +162,12 @@ class FieldH(Field):
 
 class FieldG(Field):
     '''Complex fields in (full) reciprocal space.'''
-    def __init__(self, grid: 'Grid', *, shape_batch: Sequence[int] = tuple(),
-                 data: Optional[torch.Tensor] = None) -> None:
-        '''Initialize full-reciprocal-space fields with zeros / specified data.
+    def dtype(self) -> torch.dtype:
+        return torch.cdouble
 
-        Parameters
-        ----------
-        shape_batch
-            Optional preceding batch dimensions for vector fields, arrays of
-            scalar fields etc. Not used if data is provided.
-        data
-            Initial data if provided; initialize to zero otherwise
-        '''
-        super().__init__(grid, torch.cdouble, grid.shapeG_mine,
-                         shape_batch=shape_batch, data=data)
+    def shape_grid(self) -> torch.dtype:
+        return self.grid.shapeG_mine
 
     def __invert__(self) -> 'FieldC':
         'Fourier transform (enables the ~ operator)'
         return FieldC(self.grid, data=self.grid.ifft(self.data))
-
-
-# Test field construction / operations:
-if __name__ == "__main__":
-    qp.utils.log_config()
-    qp.log.info('*'*15 + ' QimPy ' + qp.__version__ + ' ' + '*'*15)
-    rc = qp.utils.RunConfig()
-    # Prepare a grid for testing:
-    lattice = qp.lattice.Lattice(
-        rc=rc, system='triclinic', a=2.1, b=2.2, c=2.3,
-        alpha=75, beta=80, gamma=85)  # pick one with no symmetries
-    ions = qp.ions.Ions(rc=rc, pseudopotentials=[], coordinates=[])
-    symmetries = qp.symmetries.Symmetries(rc=rc, lattice=lattice, ions=ions)
-    grid = qp.grid.Grid(rc=rc, lattice=lattice, symmetries=symmetries,
-                        shape=(96, 108, 112), comm=rc.comm)
-    # Tests:
-    v = FieldH(grid)
-    v += ~FieldR(grid) * 3
-
-    qp.utils.StopWatch.print_stats()

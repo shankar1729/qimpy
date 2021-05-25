@@ -243,6 +243,7 @@ def _ifft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
     assert(v.dtype.is_complex)
     shape2 = v.shape[-1]
     if self.n_procs > 1:
+        assert self.comm is not None
         shape2 = self.comm.allreduce(shape2, qp.MPI.SUM)
 
     if shape2 == self.shape[2]:
