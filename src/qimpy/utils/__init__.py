@@ -3,12 +3,13 @@
 __all__ = [
     'prime_factorization', 'fft_suitable', 'ceildiv',
     'ortho_matrix', 'eighg',
-    'log_config', 'RunConfig', 'StopWatch', 'TaskDivision', 'BufferView']
+    'log_config', 'RunConfig', 'StopWatch',
+    'TaskDivision', 'TaskDivisionCustom', 'BufferView']
 
 from ._math import prime_factorization, fft_suitable, ceildiv, \
     ortho_matrix, eighg
 from ._log import log_config
 from ._runconfig import RunConfig
 from ._stopwatch import StopWatch
-from ._taskdivision import TaskDivision
+from ._taskdivision import TaskDivision, TaskDivisionCustom
 from ._bufferview import BufferView

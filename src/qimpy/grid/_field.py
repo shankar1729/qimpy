@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from abc import ABCMeta, abstractmethod
 from numbers import Number
-from ._change import _change_real
+from ._change import _change_real, _change_recip
 from typing import TypeVar, Tuple, Optional, Sequence, TYPE_CHECKING
 if TYPE_CHECKING:
     from ._grid import Grid
@@ -28,7 +28,7 @@ class Field(metaclass=ABCMeta):
         'Expected data type for the Field type'
 
     @abstractmethod
-    def shape_grid(self) -> torch.dtype:
+    def shape_grid(self) -> Tuple[int, ...]:
         'Expected grid shape (last 3 data dimension) for the Field type'
 
     def __init__(self, grid: 'Grid', *,
@@ -110,7 +110,7 @@ class FieldR(Field):
     def dtype(self) -> torch.dtype:
         return torch.double
 
-    def shape_grid(self) -> torch.dtype:
+    def shape_grid(self) -> Tuple[int, ...]:
         return self.grid.shapeR_mine
 
     def __invert__(self) -> 'FieldH':
@@ -118,8 +118,8 @@ class FieldR(Field):
         return FieldH(self.grid, data=self.grid.fft(self.data))
 
     def to(self, grid: 'Grid') -> 'FieldR':
-        '''Switch field to another `grid`. Note that `grid.shape` must equal
-        `self.grid.shape`, but could differ in the MPI split.'''
+        '''Switch field to another `grid` with same `shape`.
+        The new grid can only differ in the MPI split.'''
         if grid is self.grid:
             return self
         return _change_real(self, grid)
@@ -130,7 +130,7 @@ class FieldC(Field):
     def dtype(self) -> torch.dtype:
         return torch.cdouble
 
-    def shape_grid(self) -> torch.dtype:
+    def shape_grid(self) -> Tuple[int, ...]:
         return self.grid.shapeR_mine
 
     def __invert__(self) -> 'FieldG':
@@ -138,8 +138,8 @@ class FieldC(Field):
         return FieldG(self.grid, data=self.grid.fft(self.data))
 
     def to(self, grid: 'Grid') -> 'FieldC':
-        '''Switch field to another `grid`. Note that `grid.shape` must equal
-        `self.grid.shape`, but could differ in the MPI split.'''
+        '''Switch field to another `grid` with same `shape`.
+        The new grid can only differ in the MPI split.'''
         if grid is self.grid:
             return self
         return _change_real(self, grid)
@@ -152,12 +152,20 @@ class FieldH(Field):
     def dtype(self) -> torch.dtype:
         return torch.cdouble
 
-    def shape_grid(self) -> torch.dtype:
+    def shape_grid(self) -> Tuple[int, ...]:
         return self.grid.shapeH_mine
 
     def __invert__(self) -> 'FieldR':
         'Fourier transform (enables the ~ operator)'
         return FieldR(self.grid, data=self.grid.ifft(self.data))
+
+    def to(self, grid: 'Grid') -> 'FieldH':
+        '''Switch field to another `grid` with possibly different `shape`.
+        This routine will perform Fourier resampling and MPI rearrangements,
+        as necessary.'''
+        if grid is self.grid:
+            return self
+        return _change_recip(self, grid)
 
 
 class FieldG(Field):
@@ -165,9 +173,17 @@ class FieldG(Field):
     def dtype(self) -> torch.dtype:
         return torch.cdouble
 
-    def shape_grid(self) -> torch.dtype:
+    def shape_grid(self) -> Tuple[int, ...]:
         return self.grid.shapeG_mine
 
     def __invert__(self) -> 'FieldC':
         'Fourier transform (enables the ~ operator)'
         return FieldC(self.grid, data=self.grid.ifft(self.data))
+
+    def to(self, grid: 'Grid') -> 'FieldG':
+        '''Switch field to another `grid` with possibly different `shape`.
+        This routine will perform Fourier resampling and MPI rearrangements,
+        as necessary.'''
+        if grid is self.grid:
+            return self
+        return _change_recip(self, grid)
