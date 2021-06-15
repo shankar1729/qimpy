@@ -17,13 +17,15 @@ class HDF5_io:
 
     def create_dataset(self, header: str, shape: tuple):
         '''
-        Creates a datasdet inside the hdf5 file
-        Inputs:
-         - header: the hdf5 dataset header (path).
-                   This should mirror the yaml "path" if yaml path exists
-         - shape:  tuple of the number of elements in each dataset dimension.
-        Outputs:
-          none
+        Creates a datasdet inside the hdf5 file.
+
+        Parameters
+        ----------
+        header
+            dataset header/ path inside hdf5 file to dataset
+            This should mirror the yaml "path" if yaml path exists
+        shape
+            tuple of the number of elements in each dataset dimension.
         '''
 
         # TODO: should there be a note given if dataset already exists?
@@ -35,13 +37,16 @@ class HDF5_io:
     def add_dataset_attribute(self, header: str, attribute_key: str,
                               attribute_value: str):
         '''
-        Adds an attribute to an existing hdf5 dataset
-        Inputs:
-         - header: hdf5 dataset header
-         - attribute_key: attribute name to be attached to hdf5 dataset
-         - attribute_value: attribute description
-        Outputs:
-         none
+        Attaches a dataset attribute to an existing dataset
+
+        Parameters
+        ----------
+        header
+            dataset header/ path inside hdf5 file to dataset
+        attribute_key
+            attribute name to be attached to hdf5 dataset
+        attribute_value
+            attribute description
         '''
 
         dset = self.f[header]
@@ -56,12 +61,15 @@ class HDF5_io:
         to the dataset, which will be a subset of the entire dataset, as
         determined by the mpi parallelization scheme. It is the calling
         object's responsibility to set the offsets appropriately.
-        Inputs:
-         - header: dataset header/ path inside hdf5 file to dataset
-         - data: local data on mpi task to be added to the dataset.
-         - offset: where to start writing the local data inside the dataset
-        Outputs:
-         none
+
+        Parameters
+        ----------
+        header
+            dataset header/ path inside hdf5 file to dataset
+        data
+            local data on mpi task to be added to the dataset.
+        offset
+            where to start writing the local data inside the dataset
         '''
 
         dset = self.f[header]
@@ -75,13 +83,23 @@ class HDF5_io:
     def read_dataset(self, header: str, offset: tuple, size: tuple):
         '''
         Reads a portion (or all) of a dataset into the program.
-        Inputs:
-         - header: dataset header/ path inside hdf5 file to dataset
-         - offset: where to start reading the data inside the dataset
-         - size: how much data is being read in each dimension
-        Outputs:
-         - data: torch tensor of data read from the dataset.
-        Example:
+
+        Parameters
+        ----------
+        header
+            dataset header/ path inside hdf5 file to dataset
+        offset
+            where to start reading the data inside the dataset
+        size
+            how much data is being read in each dimension
+
+        Returns
+        -------
+        data
+            torch tensor of data read from the dataset.
+
+        Example
+        -------
             A 2-dimension dataset of size (100, 100) is located at path header
             inside the hdf5 file. MPI task 0 needs all columns of data for
             the first two rows. So, for MPI task 0, offset = (0, 0)
