@@ -5,17 +5,19 @@ import torch
 import qimpy as qp
 
 class HDF5_io:
+
     '''
     Handles HDF5 file i/o for checkpoint file.
     '''
 
-    def __init__(self, filename: str):
+    def __init__(self, filename: str, rc: 'RunConfig'):
 
         self.filename = filename
         self.f = h5py.File(self.filename, 'a', driver='mpio', comm=MPI.COMM_WORLD)
         # Will read/write if file exists, or create otherwise
 
     def create_dataset(self, header: str, shape: tuple):
+
         '''
         Creates a datasdet inside the hdf5 file.
 
@@ -53,9 +55,10 @@ class HDF5_io:
         dset.attrs[attribute_key] = attribute_value
 
     def write_to_dataset(self, header: str, data: torch.Tensor, offset: tuple):
+
         '''
-        Writes data to an existing hdf5 dataset
-        the dataset can be of arbitrary dimension, but must match the
+        Writes data to an existing hdf5 dataset.
+        The dataset can be of arbitrary dimension, but must match the
         dimensions specified on creation of the hdf5 dataset
         (see create_dataset). Note that this writes ALL of data
         to the dataset, which will be a subset of the entire dataset, as
