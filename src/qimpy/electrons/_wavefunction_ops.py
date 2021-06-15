@@ -1,7 +1,7 @@
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Callable, Union, Optional, TYPE_CHECKING
+from typing import Callable, Union, Optional, Any, TYPE_CHECKING
 from typing_extensions import Protocol
 if TYPE_CHECKING:
     from ._wavefunction import Wavefunction
@@ -150,28 +150,28 @@ def _orthonormalize(self: 'Wavefunction') -> 'Wavefunction':
     return self @ qp.utils.ortho_matrix(self.dot_O(self), use_cholesky=True)
 
 
-def _mul(self, scale):
-    is_float = isinstance(scale, float)
-    is_suitable_tensor = (isinstance(scale, torch.Tensor)
-                          and len(scale.shape) == 5)
-    if not (is_float or is_suitable_tensor):
+def _mul(self: 'Wavefunction',
+         scale: Union[float, torch.Tensor]) -> 'Wavefunction':
+    is_suitable = is_band_scale = isinstance(scale, float)
+    if isinstance(scale, torch.Tensor) and (len(scale.shape) == 5):
+        is_suitable = True
+        is_band_scale = (scale.shape[-2:] == (1, 1))
+    if not is_suitable:
         return NotImplemented
-    # Check whether bands are just scaled overall:
-    is_band_scale = is_float or (scale.shape[-2:] == (1, 1))
     coeff = self.coeff * scale
     proj = ((self.proj * scale) if (self.proj and is_band_scale) else None)
     return qp.electrons.Wavefunction(self.basis, coeff, proj,
                                      self.band_division)
 
 
-def _imul(self, scale):
-    is_float = isinstance(scale, float)
-    is_suitable_tensor = (isinstance(scale, torch.Tensor)
-                          and len(scale.shape) == 5)
-    if not (is_float or is_suitable_tensor):
+def _imul(self: 'Wavefunction',
+          scale: Union[float, torch.Tensor]) -> 'Wavefunction':
+    is_suitable = is_band_scale = isinstance(scale, float)
+    if isinstance(scale, torch.Tensor) and (len(scale.shape) == 5):
+        is_suitable = True
+        is_band_scale = (scale.shape[-2:] == (1, 1))
+    if not is_suitable:
         return NotImplemented
-    # Check whether bands are just scaled overall:
-    is_band_scale = is_float or (scale.shape[-2:] == (1, 1))
     self.coeff *= scale
     if self.proj:
         if is_band_scale:
@@ -181,7 +181,7 @@ def _imul(self, scale):
     return self
 
 
-def _add(self, other):
+def _add(self: 'Wavefunction', other: 'Wavefunction') -> 'Wavefunction':
     if not isinstance(other, qp.electrons.Wavefunction):
         return NotImplemented
     assert(self.basis is other.basis)
@@ -191,7 +191,7 @@ def _add(self, other):
                                      self.band_division)
 
 
-def _iadd(self, other):
+def _iadd(self: 'Wavefunction', other: 'Wavefunction') -> 'Wavefunction':
     if not isinstance(other, qp.electrons.Wavefunction):
         return NotImplemented
     assert(self.basis is other.basis)
@@ -203,7 +203,7 @@ def _iadd(self, other):
     return self
 
 
-def _sub(self, other):
+def _sub(self: 'Wavefunction', other: 'Wavefunction') -> 'Wavefunction':
     if not isinstance(other, qp.electrons.Wavefunction):
         return NotImplemented
     assert(self.basis is other.basis)
@@ -213,7 +213,7 @@ def _sub(self, other):
                                      self.band_division)
 
 
-def _isub(self, other):
+def _isub(self: 'Wavefunction', other: 'Wavefunction') -> 'Wavefunction':
     if not isinstance(other, qp.electrons.Wavefunction):
         return NotImplemented
     assert(self.basis is other.basis)
@@ -225,7 +225,7 @@ def _isub(self, other):
     return self
 
 
-def _getitem(self, index):
+def _getitem(self: 'Wavefunction', index: Any) -> 'Wavefunction':
     'Propagate slicing to coeff and proj if present'
     coeff = self.coeff[index]
     proj = None if (self.proj is None) else self.proj[index]
@@ -233,7 +233,8 @@ def _getitem(self, index):
                                      self.band_division)
 
 
-def _cat(self, other, dim=2):
+def _cat(self: 'Wavefunction', other: 'Wavefunction',
+         dim: int = 2) -> 'Wavefunction':
     'Join wavefunctions along specified dimension (default: 2 => bands)'
     coeff = torch.cat((self.coeff, other.coeff), dim=dim)
     proj = (None if ((self.proj is None) or (other.proj is None))

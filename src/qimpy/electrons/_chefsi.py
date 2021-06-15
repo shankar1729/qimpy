@@ -121,8 +121,10 @@ class CheFSI(Davidson):
 
             # Rejoin converged eigenstates, if any:
             if n_eigs_done:
-                el.C, C0 = C0.cat(el.C), None
-                HC, HC0 = HC0.cat(HC), None
+                el.C = C0.cat(el.C)
+                del C0
+                HC = HC0.cat(HC)
+                del HC0
 
             # Subspace orthonormalization and diagonalization:
             eig_prev = el.eig

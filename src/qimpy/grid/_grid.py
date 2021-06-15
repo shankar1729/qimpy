@@ -21,7 +21,7 @@ class Grid:
         'split0', 'split2', 'split2H', 'mesh1D',
         '_indices_fft', '_indices_ifft', '_indices_rfft', '_indices_irfft']
     rc: 'RunConfig'
-    comm: qp.MPI.Comm  #: Communicator to split grid and FFTs over
+    comm: Optional[qp.MPI.Comm]  #: Communicator to split grid and FFTs over
     n_procs: int  #: Size of comm
     i_proc: int  #: Rank within comm
     is_split: bool  #: Whether the grid is split over MPI
@@ -44,7 +44,7 @@ class Grid:
     ifft: MethodFFT = _ifft
 
     def __init__(self, *, rc: 'RunConfig', lattice: 'Lattice',
-                 symmetries: 'Symmetries', comm: qp.MPI.Comm,
+                 symmetries: 'Symmetries', comm: Optional[qp.MPI.Comm],
                  ke_cutoff_wavefunction: Optional[float] = None,
                  ke_cutoff: Optional[float] = None,
                  shape: Optional[Sequence[int]] = None) -> None:
