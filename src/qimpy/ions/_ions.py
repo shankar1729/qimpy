@@ -7,6 +7,7 @@ from typing import Optional, Union, List, TYPE_CHECKING
 if TYPE_CHECKING:
     from ..utils import RunConfig
     from ._pseudopotential import Pseudopotential
+    from .._system import System
 
 
 class Ions:
@@ -18,7 +19,8 @@ class Ions:
 
     def __init__(self, *, rc: 'RunConfig',
                  coordinates: Optional[List] = None,
-                 pseudopotentials: Optional[Union[str, List[str]]] = None):
+                 pseudopotentials: Optional[Union[str, List[str]]] = None
+                 ) -> None:
         '''Initialize geometry and pseudopotentials.
 
         Parameters
@@ -153,7 +155,7 @@ class Ions:
         n_replicas = 1  # this will eventually change for NEB / phonon DFPT
         rc.provide_n_tasks(0, n_replicas)
 
-    def report(self):
+    def report(self) -> None:
         'Report ionic positions and attributes'
         qp.log.info(f'{self.n_ions} total ions of {self.n_types} types;'
                     ' positions:')
@@ -178,3 +180,9 @@ class Ions:
             qp.log.info(
                 f'- [{self.symbols[types[i_ion]]}, {position[0]:11.8f},'
                 f' {position[1]:11.8f}, {position[2]:11.8f}{attrib_str}]')
+
+    def update(self, system: 'System') -> None:
+        '''Update ionic potentials and energy components.
+        The grids used for the potentials are derived from system,
+        and the energy components are stored within system.E.
+        '''

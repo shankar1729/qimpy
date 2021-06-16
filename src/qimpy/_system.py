@@ -2,6 +2,7 @@ import qimpy as qp
 import numpy as np
 from typing import Union, TYPE_CHECKING
 if TYPE_CHECKING:
+    from ._energy import Energy
     from .utils import RunConfig
     from .lattice import Lattice
     from .ions import Ions
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 class System:
     '''Overall system to calculate within QimPy'''
     __slots__ = ('rc', 'chk', 'lattice', 'ions', 'symmetries', 'electrons',
-                 'grid')
+                 'grid', 'energy')
     rc: 'RunConfig'  #: Current run configuration
     chk: 'HDF5_io'  #: Checkpoint file handler
     lattice: 'Lattice'  #: Lattice vectors / unit cell definition
@@ -22,6 +23,7 @@ class System:
     symmetries: 'Symmetries'  #: Point and space group symmetries
     electrons: 'Electrons'  #: Electronic sub-system
     grid: 'Grid'  #: Charge-density grid
+    energy: 'Energy'  #: Energy components
 
     def __init__(self, *, rc: 'RunConfig',
                  chk: 'HDF5_io',
@@ -53,6 +55,10 @@ class System:
             comm=rc.comm_kb,  # parallelized on intra-replica comm
             ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff)
 
+        # Initialize ionic potentials and energies at initial configuration:
+        self.energy = qp.Energy()
+        self.ions.update(self)
+
         qp.log.info(f'\nInitialization completed at t[s]: {rc.clock():.2f}\n')
 
     def run(self):
@@ -60,3 +66,4 @@ class System:
         # TODO: systematize selection of what actions to perform
         self.electrons.diagonalize()
         self.electrons.output()
+        qp.log.info(f'Energy components:\n{repr(self.energy)}')
