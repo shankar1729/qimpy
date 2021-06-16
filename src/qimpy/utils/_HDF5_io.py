@@ -3,6 +3,10 @@ from mpi4py import MPI
 import numpy as np
 import torch
 import qimpy as qp
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ._runconfig import RunConfig
+
 
 class HDF5_io:
 
@@ -13,7 +17,8 @@ class HDF5_io:
     def __init__(self, filename: str, rc: 'RunConfig'):
 
         self.filename = filename
-        self.f = h5py.File(self.filename, 'a', driver='mpio', comm=MPI.COMM_WORLD)
+        self.f = h5py.File(self.filename, 'a', driver='mpio',
+                           comm=MPI.COMM_WORLD)
         # Will read/write if file exists, or create otherwise
 
     def create_dataset(self, header: str, shape: tuple):
@@ -31,13 +36,13 @@ class HDF5_io:
         '''
 
         # TODO: should there be a note given if dataset already exists?
-        if header in self.f: # dataset exists already
+        if header in self.f:  # dataset exists already
             return
         else:
             self.f.create_dataset(header, shape)
 
     def add_dataset_attribute(self, header: str, attribute_key: str,
-                              attribute_value: str):
+                              attribute_value: str) -> None:
         '''
         Attaches a dataset attribute to an existing dataset
 
@@ -55,7 +60,6 @@ class HDF5_io:
         dset.attrs[attribute_key] = attribute_value
 
     def write_to_dataset(self, header: str, data: torch.Tensor, offset: tuple):
-
         '''
         Writes data to an existing hdf5 dataset.
         The dataset can be of arbitrary dimension, but must match the
@@ -78,8 +82,9 @@ class HDF5_io:
         dset = self.f[header]
         # need to make sure it is on the cpu instead of gpu
         assert len(offset) == len(data.shape)
-        #s_i is the size of the shape dimension indexed by i
-        index = tuple(slice(offset[i], offset[i] + s_i) for i, s_i in enumerate(data.shape))
+        # s_i is the size of the shape dimension indexed by i
+        index = tuple(slice(offset[i], offset[i] + s_i)
+                      for i, s_i in enumerate(data.shape))
 
         dset[index] = data
 
@@ -113,16 +118,16 @@ class HDF5_io:
         dset = self.f[header]
         assert len(dset.shape) == len(offset)
 
-        index = tuple(slice(offset[i], offset[i] + size[i]) for i, s_i in enumerate(dset.shape))
+        index = tuple(slice(offset[i], offset[i] + size[i])
+                      for i, s_i in enumerate(dset.shape))
         data = torch.from_numpy(dset[index])
         return data
 
     def close_file(self):
-
-        self.f.flush() # may be unnecessary
+        self.f.flush()  # may be unnecessary
         self.f.close()
 
     def open_file(self):
-
         # We can add optional argument to set the driver if necessary
-        self.f = h5py.File(self.filename, 'a', driver='mpio', comm=MPI.COMM_WORLD)
+        self.f = h5py.File(self.filename, 'a', driver='mpio',
+                           comm=MPI.COMM_WORLD)
