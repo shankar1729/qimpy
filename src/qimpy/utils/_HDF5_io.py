@@ -62,10 +62,11 @@ class HDF5_io:
     def write_to_dataset(self, header: str, data: torch.Tensor, offset: tuple):
         '''
         Writes data to an existing hdf5 dataset.
-        The dataset can be of arbitrary dimension, but must match the
+        The hdf5 dataset can be of arbitrary dimension, but must match the
         dimensions specified on creation of the hdf5 dataset
-        (see create_dataset). Note that this writes ALL of data
-        to the dataset, which will be a subset of the entire dataset, as
+        (see create_dataset).
+        Note that this writes ALL of data to the dataset,
+        which will be a subset of the entire dataset, as
         determined by the mpi parallelization scheme. It is the calling
         object's responsibility to set the offsets appropriately.
 
@@ -99,7 +100,7 @@ class HDF5_io:
         offset
             where to start reading the data inside the dataset
         size
-            how much data is being read in each dimension
+            how many elements of the dataset are being read in each dimension
 
         Returns
         -------

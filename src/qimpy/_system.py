@@ -8,12 +8,15 @@ if TYPE_CHECKING:
     from .symmetries import Symmetries
     from .electrons import Electrons
     from .grid import Grid
+    from .utils import HDF5_io
 
 
 class System:
     '''Overall system to calculate within QimPy'''
-    __slots__ = ('rc', 'lattice', 'ions', 'symmetries', 'electrons', 'grid')
+    __slots__ = ('rc', 'chk', 'lattice', 'ions', 'symmetries', 'electrons',
+                 'grid')
     rc: 'RunConfig'  #: Current run configuration
+    chk: 'HDF5_io'  #: Checkpoint file handler
     lattice: 'Lattice'  #: Lattice vectors / unit cell definition
     ions: 'Ions'  #: Ionic positions and pseudopotentials
     symmetries: 'Symmetries'  #: Point and space group symmetries
@@ -21,6 +24,7 @@ class System:
     grid: 'Grid'  #: Charge-density grid
 
     def __init__(self, *, rc: 'RunConfig',
+                 chk: 'HDF5_io',
                  lattice: Union['Lattice', dict],
                  ions: Union['Ions', dict, None] = None,
                  symmetries: Union['Symmetries', dict, None] = None,
@@ -30,6 +34,7 @@ class System:
         could be provided as an object or a dictionary of parameters
         suitable for initializing that object'''
         self.rc = rc
+        self.chk = chk
         self.lattice = qp.construct(qp.lattice.Lattice, lattice, 'lattice',
                                     rc=rc)
         self.ions = qp.construct(qp.ions.Ions, ions, 'ions', rc=rc)
