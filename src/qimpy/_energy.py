@@ -8,7 +8,7 @@ class Energy(dict):
 
     def __repr__(self) -> str:
         result = ''
-        for name, value in self:
+        for name, value in self.items():
             if value:
                 result += f'{name:9s} = {value:25.16f}\n'
         result += ('-' * 37)

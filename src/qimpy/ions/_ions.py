@@ -12,10 +12,20 @@ if TYPE_CHECKING:
 
 class Ions:
     """Ionic system: ionic geometry and pseudopotentials. """
-
+    __slots__ = ('rc', 'n_ions', 'n_types', 'symbols', 'slices',
+                 'pseudopotentials', 'positions', 'types', 'M_initial',
+                 'Z', 'Z_tot')
+    rc: 'RunConfig'
+    n_ions: int  #: number of ions
+    n_types: int  #: number of distinct ion types
+    symbols: List[str]  #: symbol for each ion type
+    slices: List[slice]  #: slice to get each ion type
+    pseudopotentials: List['Pseudopotential']  #: pseudopotential for each type
     positions: torch.Tensor  #: fractional positions of each ion (n_ions x 3)
     types: torch.Tensor  #: type of each ion (n_ions, int)
     M_initial: Optional[torch.Tensor]  #: initial magnetic moment for each ion
+    Z: torch.Tensor  #: charge of each ion (n_ions, float)
+    Z_tot: float  #: total ionic charge
 
     def __init__(self, *, rc: 'RunConfig',
                  coordinates: Optional[List] = None,
@@ -48,10 +58,10 @@ class Ions:
         if coordinates is None:
             coordinates = []
         assert isinstance(coordinates, list)
-        self.n_ions: int = 0  #: number of ions
-        self.n_types: int = 0  #: number of distinct ion types
-        self.symbols: List[str] = []  #: symbol for each ion type
-        self.slices: List[slice] = []  #: slice to get each ion type
+        self.n_ions = 0  # number of ions
+        self.n_types = 0  # number of distinct ion types
+        self.symbols = []  # symbol for each ion type
+        self.slices = []  # slice to get each ion type
         positions = []  # position of each ion
         types = []      # type of each ion (index into symbols)
         M_initial = []  # initial magnetic moments
@@ -107,7 +117,7 @@ class Ions:
         self.report()
 
         # Initialize pseudopotentials:
-        self.pseudopotentials: List['Pseudopotential'] = []
+        self.pseudopotentials = []
         if pseudopotentials is None:
             pseudopotentials = []
         if isinstance(pseudopotentials, str):
@@ -146,9 +156,10 @@ class Ions:
                 raise ValueError(f'no pseudopotential found for {symbol}')
 
         # Calculate total ionic charge (needed for number of electrons):
-        self.Z_tot = sum(self.pseudopotentials[i_type].Z
-                         * (slice_i.stop - slice_i.start)
-                         for i_type, slice_i in enumerate(self.slices))
+        self.Z = torch.zeros(self.n_ions, device=rc.device)
+        for i_type, slice_i in enumerate(self.slices):
+            self.Z[slice_i] = self.pseudopotentials[i_type].Z
+        self.Z_tot = self.Z.sum().item()
         qp.log.info(f'\nTotal ion charge, Z_tot: {self.Z_tot:g}')
 
         # Initialize / check replica process grid dimension:
@@ -186,3 +197,5 @@ class Ions:
         The grids used for the potentials are derived from system,
         and the energy components are stored within system.E.
         '''
+        system.energy['Eewald'], _, _ = system.coulomb.ewald(self.positions,
+                                                             self.Z)

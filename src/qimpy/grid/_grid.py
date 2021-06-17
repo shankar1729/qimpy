@@ -16,11 +16,12 @@ class Grid:
     and routines to convert fields between grids.
     '''
     __slots__ = [
-        'rc', 'comm', 'n_procs', 'i_proc', 'is_split', 'ke_cutoff',
+        'rc', 'lattice', 'comm', 'n_procs', 'i_proc', 'is_split', 'ke_cutoff',
         'shape', 'shapeH', 'shapeR_mine', 'shapeG_mine', 'shapeH_mine',
         'split0', 'split2', 'split2H', 'mesh1D',
         '_indices_fft', '_indices_ifft', '_indices_rfft', '_indices_irfft']
     rc: 'RunConfig'
+    lattice: 'Lattice'
     comm: Optional[qp.MPI.Comm]  #: Communicator to split grid and FFTs over
     n_procs: int  #: Size of comm
     i_proc: int  #: Rank within comm
@@ -74,6 +75,7 @@ class Grid:
             will supercede ke_cutoff
         '''
         self.rc = rc
+        self.lattice = lattice
 
         # MPI settings (identify local or split):
         self.comm = comm

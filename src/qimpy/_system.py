@@ -8,14 +8,14 @@ if TYPE_CHECKING:
     from .ions import Ions
     from .symmetries import Symmetries
     from .electrons import Electrons
-    from .grid import Grid
+    from .grid import Grid, Coulomb
     from .utils import HDF5_io
 
 
 class System:
     '''Overall system to calculate within QimPy'''
     __slots__ = ('rc', 'chk', 'lattice', 'ions', 'symmetries', 'electrons',
-                 'grid', 'energy')
+                 'grid', 'coulomb', 'energy')
     rc: 'RunConfig'  #: Current run configuration
     chk: 'HDF5_io'  #: Checkpoint file handler
     lattice: 'Lattice'  #: Lattice vectors / unit cell definition
@@ -23,6 +23,7 @@ class System:
     symmetries: 'Symmetries'  #: Point and space group symmetries
     electrons: 'Electrons'  #: Electronic sub-system
     grid: 'Grid'  #: Charge-density grid
+    coulomb: 'Coulomb'  #: Coulomb interactions on charge-density grid
     energy: 'Energy'  #: Energy components
 
     def __init__(self, *, rc: 'RunConfig',
@@ -54,6 +55,7 @@ class System:
             rc=rc, lattice=self.lattice, symmetries=self.symmetries,
             comm=rc.comm_kb,  # parallelized on intra-replica comm
             ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff)
+        self.coulomb = qp.grid.Coulomb(self.grid, self.ions.n_ions)
 
         # Initialize ionic potentials and energies at initial configuration:
         self.energy = qp.Energy()
@@ -66,4 +68,4 @@ class System:
         # TODO: systematize selection of what actions to perform
         self.electrons.diagonalize()
         self.electrons.output()
-        qp.log.info(f'Energy components:\n{repr(self.energy)}')
+        qp.log.info(f'\nEnergy components:\n{repr(self.energy)}')
