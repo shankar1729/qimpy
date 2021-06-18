@@ -7,3 +7,4 @@ from ._ions import Ions
 from ._pseudopotential import Pseudopotential
 from . import symbols
 from . import spherical_harmonics
+from . import spherical_bessel

@@ -11,7 +11,8 @@ import tempfile
 
 # don't fill in both of these
 select_codes = []
-ignore_codes = []
+ignore_codes = ['E121', 'E123', 'E126', 'E226', 'E24', 'E704', 'E741', 'W503', 'W504']
+
 # Add things like "--max-line-length=120" below
 overrides = []
 
