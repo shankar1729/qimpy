@@ -9,8 +9,9 @@ if TYPE_CHECKING:
 class Coulomb:
     '''Coulomb interactions between fields and point charges.
     TODO: support non-periodic geometries (truncation).'''
-    __slots__ = ('grid', 'sigma', 'iR', 'iG')
+    __slots__ = ('grid', 'ion_width', 'sigma', 'iR', 'iG')
     grid: 'Grid'  #: Grid associated with fields for coulomb interaction
+    ion_width: float  #: Ion-charge gaussian width for embedding and solvation
     sigma: float  #: Ewald range-separation parameter
     iR: torch.Tensor  #: Ewald real-space mesh points
     iG: torch.Tensor  #: Ewald reciprocal-space mesh points
@@ -28,6 +29,12 @@ class Coulomb:
         self.grid = grid
         rc = grid.rc
         lattice = grid.lattice
+
+        # Determine ionic width from maximum grid spacing
+        h_max = (lattice.Rbasis.norm(dim=0).to(rc.cpu)
+                 / torch.tensor(grid.shape)).max().item()
+        self.ion_width = 2.2 * h_max  # Best balance from test_nyquist()
+        qp.log.info(f'Ionic width for embedding / fluids: {self.ion_width:f}')
 
         # Determine optimum gaussian width for Ewald sums:
         # Uses fact that number of reciprocal cells is proportional to lattice
@@ -130,3 +137,41 @@ class Coulomb:
             E_RRT -= Erecip * torch.eye(3, device=Z.device)
 
         return E, E_pos, E_RRT
+
+
+if __name__ == '__main__':
+    def test_nyquist():
+        '''Test dependence of Nyquist frequency with broadening
+        to inform heuristic for best ion width selection'''
+        import matplotlib.pyplot as plt
+        dx = 0.2  # Typical grid spacing at 100 Eh plane-wave spacing
+        rTest = 3.0  # Worst-case ion-fluid spacing (H in H3O+, NonlinearPCM)
+        N = 128
+        x = dx * np.arange(N)
+        L = dx * N
+        G = (2*np.pi/L) * np.concatenate((np.arange(N//2),
+                                          np.arange(N//2-N, 0)))
+        sigma_by_dx = np.arange(1., 4., 0.1)
+        sigma = dx * sigma_by_dx
+        fTilde = np.exp(-0.5*(sigma[:, None] * G[None, :])**2) * (1./L)
+        f = np.fft.fft(fTilde, axis=-1).real
+        # Visualize f near test radius:
+        for i, f_i in enumerate(f):
+            plt.plot(x, np.abs(f_i), label=r'$\sigma$/dx='
+                                           + f'{sigma_by_dx[i]:.1f}')
+        plt.axvline(rTest, color='k', ls='dotted', lw=1)
+        plt.xlim(0, 2*rTest)
+        plt.ylim(1E-14, 1.)
+        plt.yscale('log')
+        plt.legend(bbox_to_anchor=(1, 1), loc='upper left')
+        # MAE between rTest and 2*rTest vs sigma:
+        sel = np.where(np.logical_and(x >= rTest, x <= 2*rTest))
+        mae = np.abs(f[:, sel]).mean(axis=-1)
+        plt.figure(2)
+        plt.plot(sigma_by_dx, mae)
+        plt.yscale('log')
+        plt.ylabel('MAE')
+        plt.xlabel(r'$\sigma$/dx')
+        plt.show()
+
+    test_nyquist()
