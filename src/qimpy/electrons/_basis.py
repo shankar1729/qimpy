@@ -13,8 +13,8 @@ if TYPE_CHECKING:
 
 
 class Basis(qp.utils.TaskDivision):
-    '''Plane-wave basis for electronic wavefunctions. The underlying
-     :class:`qimpy.utils.TaskDivision` splits plane waves over `rc.comm_b`'''
+    """Plane-wave basis for electronic wavefunctions. The underlying
+     :class:`qimpy.utils.TaskDivision` splits plane waves over `rc.comm_b`"""
     __slots__ = ('rc', 'lattice', 'ions', 'kpoints', 'n_spins', 'n_spinor',
                  'k', 'wk', 'real_wavefunctions', 'ke_cutoff', 'grid',
                  'iG', 'n', 'n_min', 'n_max', 'n_avg', 'n_ideal', 'mine',
@@ -56,7 +56,7 @@ class Basis(qp.utils.TaskDivision):
                  kpoints: 'Kpoints', n_spins: int, n_spinor: int,
                  ke_cutoff: float = 20., real_wavefunctions: bool = False,
                  grid: Optional[dict] = None, fft_block_size: int = 1) -> None:
-        '''Initialize plane-wave basis with `ke_cutoff`.
+        """Initialize plane-wave basis with `ke_cutoff`.
 
         Parameters
         ----------
@@ -90,7 +90,7 @@ class Basis(qp.utils.TaskDivision):
             Number of wavefunction bands to FFT simultaneously.
             Higher numbers require more memory, but can achieve
             better occupancy of GPUs or high-core-count CPUs.
-        '''
+        """
         self.rc = rc
         self.lattice = lattice
         self.ions = ions
@@ -184,7 +184,7 @@ class Basis(qp.utils.TaskDivision):
             qp.log.info(f'basis weight sum: {Gweight_sum:g}')
 
     def get_ke(self, basis_slice: slice = slice(None)) -> torch.Tensor:
-        '''Kinetic energy (KE) of each plane wave in basis in :math:`E_h`
+        """Kinetic energy (KE) of each plane wave in basis in :math:`E_h`
 
         Parameters
         ----------
@@ -195,6 +195,6 @@ class Basis(qp.utils.TaskDivision):
         -------
         torch.Tensor
             KE for each plane-wave, dimensions: `nk_mine` x len(`basis_slice`)
-        '''
+        """
         return 0.5 * (((self.iG[:, basis_slice] + self.k[:, None, :])
                        @ self.lattice.Gbasis.T) ** 2).sum(dim=-1)

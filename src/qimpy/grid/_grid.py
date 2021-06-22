@@ -10,11 +10,11 @@ if TYPE_CHECKING:
 
 
 class Grid:
-    '''Real and reciprocal space grids for a unit cell.
+    """Real and reciprocal space grids for a unit cell.
     The grid could either be local or distributed over an MPI communicator,
     and this class provides FFT routines to switch fields on these grids,
     and routines to convert fields between grids.
-    '''
+    """
     __slots__ = [
         'rc', 'lattice', 'comm', 'n_procs', 'i_proc', 'is_split', 'ke_cutoff',
         'shape', 'shapeH', 'shapeR_mine', 'shapeG_mine', 'shapeH_mine',
@@ -49,7 +49,7 @@ class Grid:
                  ke_cutoff_wavefunction: Optional[float] = None,
                  ke_cutoff: Optional[float] = None,
                  shape: Optional[Sequence[int]] = None) -> None:
-        '''Create local or distributed grid for `lattice`.
+        """Create local or distributed grid for `lattice`.
 
         Parameters
         ----------
@@ -73,7 +73,7 @@ class Grid:
         shape
             Explicit grid dimensions. Highest precedence, and if specified,
             will supercede ke_cutoff
-        '''
+        """
         self.rc = rc
         self.lattice = lattice
 
@@ -130,7 +130,7 @@ class Grid:
         _init_grid_fft(self)
 
     def get_mesh(self, space: str) -> torch.Tensor:
-        '''Get mesh integer coordinates for real or reciprocal space
+        """Get mesh integer coordinates for real or reciprocal space
 
         Parameters
         ----------
@@ -144,6 +144,6 @@ class Grid:
         Tensor
             Integer tensor with dimensions shape_mine + (3,), where
             shape_mine is the relevant local dimensions of requested space
-        '''
+        """
         return torch.stack(
             torch.meshgrid(*self.mesh1D[space])).permute(1, 2, 3, 0)

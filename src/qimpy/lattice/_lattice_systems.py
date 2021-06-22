@@ -8,10 +8,10 @@ def get_Rbasis(system: str, modification: Optional[str],
                a: Optional[float], b: Optional[float], c: Optional[float],
                alpha: Optional[float], beta: Optional[float],
                gamma: Optional[float]) -> torch.Tensor:
-    'Create lattice vectors from lattice system and modification'
+    """Create lattice vectors from lattice system and modification"""
 
     def check_needed(**kwargs):
-        'Check if all needed arguments are provided'
+        """Check if all needed arguments are provided"""
         for key, value in kwargs.items():
             if value is None:
                 raise KeyError(system + ' lattice system requires parameter '
@@ -23,14 +23,14 @@ def get_Rbasis(system: str, modification: Optional[str],
                 raise ValueError('Lattice paramater ' + key + ' must be > 0')
 
     def check_spurious(**kwargs):
-        'Check if any spurious arguments are provided'
+        """Check if any spurious arguments are provided"""
         for key, value in kwargs.items():
             if value is not None:
                 raise KeyError(system + ' lattice system does not require'
                                ' parameter ' + key)
 
     def check_modification(allowed_systems):
-        'Check compatibility of modification with lattice system'
+        """Check compatibility of modification with lattice system"""
         if system not in allowed_systems:
             raise KeyError(modification + ' modification not allowed for '
                            + system + ' lattices')

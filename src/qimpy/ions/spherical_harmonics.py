@@ -1,4 +1,4 @@
-'''Calculate spherical harmonics and their product expansions.'''
+"""Calculate spherical harmonics and their product expansions."""
 # List exported symbols for doc generation
 __all__ = ['L_MAX', 'L_MAX_HLF', 'get_harmonics']
 
@@ -16,7 +16,7 @@ L_MAX_HLF: int = shdata.L_MAX_HLF  #: Maximum l of harmonics in products
 
 
 def _initialize_device(device: torch.device) -> None:
-    'Initialize spherical harmonic data as torch tensors on device'
+    """Initialize spherical harmonic data as torch tensors on device"""
     global _YLM_RECUR, _YLM_PROD
     # Recurrence coefficients:
     _YLM_RECUR.clear()
@@ -36,7 +36,7 @@ def _initialize_device(device: torch.device) -> None:
 
 def get_harmonics(l_max: int, r: torch.Tensor,
                   rc: 'RunConfig') -> List[torch.Tensor]:
-    'Compute real solid harmonics for each l <= l_max'
+    """Compute real solid harmonics for each l <= l_max"""
     if not _YLM_PROD:
         _initialize_device(r.device)
     assert(l_max <= shdata.L_MAX)
@@ -68,7 +68,7 @@ if __name__ == "__main__":
     from typing import Sequence, Any
 
     def get_harmonics_ref(l_max: int, r: np.ndarray) -> List[np.ndarray]:
-        'Reference real solid harmonics based on SciPy spherical harmonics'
+        """Reference real solid harmonics based on SciPy spherical harmonics"""
         watch = qp.utils.StopWatch('get_harmonics_ref', rc)
         rMag = np.linalg.norm(r, axis=-1)
         theta = np.arccos(r[..., 2]/rMag)
@@ -89,16 +89,16 @@ if __name__ == "__main__":
         return results
 
     def get_lm(l_max: int) -> List[Tuple[int, int]]:
-        'Get list of all (l,m) in order up to (and including) l_max'
+        """Get list of all (l,m) in order up to (and including) l_max"""
         return [(l, m)
                 for l in range(l_max + 1)
                 for m in range(-l, l+1)]
 
     def print_array(array: Sequence[Any], line: str, padding: int, fmt: str,
                     width: int = 79) -> str:
-        '''PEP8-compatible printing of array, where line is pending text yet to
+        """PEP8-compatible printing of array, where line is pending text yet to
         be printed, and padding controls where array starts if wrapped to next
-        lien based on width. Each entry will be formatted according to fmt.'''
+        lien based on width. Each entry will be formatted according to fmt."""
         # Convert all entries to strings and compute total length:
         fmt += ', '
         strings = [fmt.format(elem) for elem in array]
@@ -118,11 +118,11 @@ if __name__ == "__main__":
             return line.rstrip(', ') + ']'
 
     def generate_harmonic_coefficients(l_max_hlf: int) -> None:
-        '''Generate tables of recursion coefficients for computing real
+        """Generate tables of recursion coefficients for computing real
         solid harmonics up to l_max = 2 * l_max_hlf, as well as tables of
         product coefficients (Clebsch-Gordon coefficients) for real solid
         harmonics up to order l_max_hlf. Print results formatted as Python
-        code that can be pasted into _spherical_harmonics_data.py.'''
+        code that can be pasted into _spherical_harmonics_data.py."""
         l_max = 2 * l_max_hlf
         qp.log.info('import torch\n'
                     'from typing import List, Tuple, Dict, Union\n\n'

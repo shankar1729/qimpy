@@ -31,7 +31,7 @@ class Ions:
                  coordinates: Optional[List] = None,
                  pseudopotentials: Optional[Union[str, List[str]]] = None
                  ) -> None:
-        '''Initialize geometry and pseudopotentials.
+        """Initialize geometry and pseudopotentials.
 
         Parameters
         ----------
@@ -50,7 +50,7 @@ class Ions:
             symbol of the element. The list of specified file names and
             templates is processed in order, and the first match for
             each element takes precedence.
-        '''
+        """
         self.rc = rc
         qp.log.info('\n--- Initializing Ions ---')
 
@@ -167,7 +167,7 @@ class Ions:
         rc.provide_n_tasks(0, n_replicas)
 
     def report(self) -> None:
-        'Report ionic positions and attributes'
+        """Report ionic positions and attributes"""
         qp.log.info(f'{self.n_ions} total ions of {self.n_types} types;'
                     ' positions:')
         # Fetch to CPU for reporting:
@@ -193,9 +193,9 @@ class Ions:
                 f' {position[1]:11.8f}, {position[2]:11.8f}{attrib_str}]')
 
     def update(self, system: 'System') -> None:
-        '''Update ionic potentials and energy components.
+        """Update ionic potentials and energy components.
         The grids used for the potentials are derived from system,
         and the energy components are stored within system.E.
-        '''
+        """
         system.energy['Eewald'], _, _ = system.coulomb.ewald(self.positions,
                                                              self.Z)

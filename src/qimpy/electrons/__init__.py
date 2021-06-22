@@ -1,4 +1,4 @@
-'''Electronic sub-system'''
+"""Electronic sub-system"""
 # List exported symbols for doc generation
 __all__ = [
     'Electrons',

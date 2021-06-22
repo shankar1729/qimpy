@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 class Electrons:
-    '''Electronic subsystem'''
+    """Electronic subsystem"""
     __slots__ = ('rc', 'kpoints', 'spin_polarized', 'spinorial', 'n_spins',
                  'n_spinor', 'w_spin', 'fillings', 'n_bands', 'n_bands_extra',
                  'basis', 'diagonalize', 'C', 'eig', 'deig_max', 'V_ks')
@@ -51,7 +51,7 @@ class Electrons:
                  n_bands_extra: Optional[Union[int, str]] = None,
                  davidson: Optional[Union[dict, 'Davidson']] = None,
                  chefsi:  Optional[Union[dict, 'CheFSI']] = None) -> None:
-        '''Initialize from components and/or dictionary of options.
+        """Initialize from components and/or dictionary of options.
 
         Parameters
         ----------
@@ -108,7 +108,7 @@ class Electrons:
             Subspace Iteration (CheFSI) method.
             Specify only one of davidson or chefsi.
             Default: None
-        '''
+        """
         self.rc = rc
         qp.log.info('\n--- Initializing Electrons ---')
 
@@ -233,6 +233,6 @@ class Electrons:
         qp.log.info('diagonalization: ' + repr(self.diagonalize))
 
     def output(self) -> None:
-        'Save any configured outputs (TODO: systematize this)'
+        """Save any configured outputs (TODO: systematize this)"""
         if isinstance(self.kpoints, qp.electrons.Kpath):
             self.kpoints.plot(self.eig[..., :self.n_bands], 'bandstruct.pdf')

@@ -10,7 +10,7 @@ def _get_space_group(lattice_sym: torch.Tensor,
                      lattice: 'Lattice', ions: 'Ions',
                      tolerance: float) -> Tuple[torch.Tensor, torch.Tensor,
                                                 torch.Tensor]:
-    '''Find space group given point group `lattice_sym` and `ions`. Accuracy
+    """Find space group given point group `lattice_sym` and `ions`. Accuracy
     of symmetry detection is specified by relative threshold `tolerance`.
 
     Returns
@@ -21,7 +21,7 @@ def _get_space_group(lattice_sym: torch.Tensor,
         Translations (n_sym x 3) in lattice coordinates.
     ion_map
         0-based index (n_sym x n_ions) of the ion that each ion
-         maps to after each symmetry operation.'''
+         maps to after each symmetry operation."""
 
     # Special case of no ions:
     device = lattice.rc.device
@@ -112,7 +112,7 @@ def _get_space_group(lattice_sym: torch.Tensor,
 
 def _symmetrize_positions(self: 'Symmetries',
                           positions: torch.Tensor) -> torch.Tensor:
-    'Symmetrize ionic `positions` (n_ions x 3)'
+    """Symmetrize ionic `positions` (n_ions x 3)"""
     pos_rot = positions @ self.rot.transpose(-2, -1) + self.trans[:, None]
     pos_mapped = positions[self.ion_map, :]
     # Correction on rotated positions:

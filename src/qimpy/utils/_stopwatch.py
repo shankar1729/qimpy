@@ -36,7 +36,7 @@ class StopWatch:
             self.t_start = time.time()
 
     def stop(self):
-        "Stop this watch and collect statistics on it."
+        """Stop this watch and collect statistics on it."""
         if self.t_start:
             if self.use_cuda:
                 t_stop = torch.cuda.Event(enable_timing=True)
@@ -51,7 +51,7 @@ class StopWatch:
 
     @classmethod
     def _add_stat(cls, name: str, duration: float):
-        "Add a single entry to the timing statistics"
+        """Add a single entry to the timing statistics"""
         stats_entry = cls._stats.get(name)
         if stats_entry:
             stats_entry.append(duration)
@@ -60,7 +60,7 @@ class StopWatch:
 
     @classmethod
     def _process_cuda_events(cls):
-        "Process pending cuda events"
+        """Process pending cuda events"""
         if cls._cuda_events:
             torch.cuda.synchronize()
             for name, t_start, t_stop in cls._cuda_events:

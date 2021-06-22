@@ -10,9 +10,9 @@ if TYPE_CHECKING:
 
 class HDF5_io:
 
-    '''
+    """
     Handles HDF5 file i/o for checkpoint file.
-    '''
+    """
 
     def __init__(self, filename: str, rc: 'RunConfig'):
 
@@ -23,7 +23,7 @@ class HDF5_io:
 
     def create_dataset(self, header: str, shape: tuple):
 
-        '''
+        """
         Creates a datasdet inside the hdf5 file.
 
         Parameters
@@ -33,7 +33,7 @@ class HDF5_io:
             This should mirror the yaml "path" if yaml path exists
         shape
             tuple of the number of elements in each dataset dimension.
-        '''
+        """
 
         # TODO: should there be a note given if dataset already exists?
         if header in self.f:  # dataset exists already
@@ -43,7 +43,7 @@ class HDF5_io:
 
     def add_dataset_attribute(self, header: str, attribute_key: str,
                               attribute_value: str) -> None:
-        '''
+        """
         Attaches a dataset attribute to an existing dataset
 
         Parameters
@@ -54,13 +54,13 @@ class HDF5_io:
             attribute name to be attached to hdf5 dataset
         attribute_value
             attribute description
-        '''
+        """
 
         dset = self.f[header]
         dset.attrs[attribute_key] = attribute_value
 
     def write_to_dataset(self, header: str, data: torch.Tensor, offset: tuple):
-        '''
+        """
         Writes data to an existing hdf5 dataset.
         The hdf5 dataset can be of arbitrary dimension, but must match the
         dimensions specified on creation of the hdf5 dataset
@@ -78,7 +78,7 @@ class HDF5_io:
             local data on mpi task to be added to the dataset.
         offset
             where to start writing the local data inside the dataset
-        '''
+        """
 
         dset = self.f[header]
         # need to make sure it is on the cpu instead of gpu
@@ -90,7 +90,7 @@ class HDF5_io:
         dset[index] = data
 
     def read_dataset(self, header: str, offset: tuple, size: tuple):
-        '''
+        """
         Reads a portion (or all) of a dataset into the program.
 
         Parameters
@@ -114,7 +114,7 @@ class HDF5_io:
             the first two rows. So, for MPI task 0, offset = (0, 0)
             and size = (2, 100). If MPI task 1 needs the next two rows,
             offset = (2, 0) and size = (2, 100)
-        '''
+        """
 
         dset = self.f[header]
         assert len(dset.shape) == len(offset)

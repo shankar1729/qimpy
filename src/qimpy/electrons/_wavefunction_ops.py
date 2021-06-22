@@ -8,13 +8,13 @@ if TYPE_CHECKING:
 
 
 def _norm(self: 'Wavefunction') -> float:
-    '''Return overall norm of wavefunctions'''
+    """Return overall norm of wavefunctions"""
     return np.sqrt(self.basis.rc.comm_kb.allreduce(self.coeff.norm().item()**2,
                                                    qp.MPI.SUM))
 
 
 def _band_norms(self: 'Wavefunction', mode: str) -> torch.Tensor:
-    '''Shared implementation of _band_norm and _band_ke'''
+    """Shared implementation of _band_norm and _band_ke"""
     assert(mode in ('norm', 'ke'))
     assert(not self.band_division)
     basis = self.basis
@@ -31,17 +31,17 @@ def _band_norms(self: 'Wavefunction', mode: str) -> torch.Tensor:
 
 
 def _band_norm(self: 'Wavefunction') -> torch.Tensor:
-    '''Return per-band norm of wavefunctions'''
+    """Return per-band norm of wavefunctions"""
     return _band_norms(self, 'norm')
 
 
 def _band_ke(self: 'Wavefunction') -> torch.Tensor:
-    '''Return per-band norm of wavefunctions'''
+    """Return per-band norm of wavefunctions"""
     return _band_norms(self, 'ke')
 
 
 def _dot(self: 'Wavefunction', other: 'Wavefunction') -> torch.Tensor:
-    '''Inner (dot) product of `self` with `other`.
+    """Inner (dot) product of `self` with `other`.
     For convenience, this can also be invoked as `self` ^ `other`.
     Note that this means xor(`self`, `other`) also computes wavefunction dot
     instead of logical xor (which is meaningless for wavefunctions anyway).
@@ -61,7 +61,7 @@ def _dot(self: 'Wavefunction', other: 'Wavefunction') -> torch.Tensor:
     -------
     torch.Tensor
         Dimensions: n_spins x nk_mine x n_bands(self) x n_bands(other)
-    '''
+    """
     if not isinstance(other, qp.electrons.Wavefunction):
         return NotImplemented
     basis = self.basis
@@ -86,7 +86,7 @@ def _dot(self: 'Wavefunction', other: 'Wavefunction') -> torch.Tensor:
 
 
 def _dot_O(self: 'Wavefunction', other: 'Wavefunction') -> torch.Tensor:
-    '''Dot product of `self` with O(`other`).
+    """Dot product of `self` with O(`other`).
     Here, the overlap operator O is identity for norm-conserving
     pseudopotentials, but includes augmentation for ultrasoft
     and PAW pseudopotentials.
@@ -95,7 +95,7 @@ def _dot_O(self: 'Wavefunction', other: 'Wavefunction') -> torch.Tensor:
     -------
     torch.Tensor
         Dimensions: n_spins x nk_mine x n_bands(self) x n_bands(other)
-    '''
+    """
     result = _dot(self, other)
     # Overlap augmentation:
     # TODO: augment overlap here when adding ultrasoft / PAW
@@ -103,15 +103,15 @@ def _dot_O(self: 'Wavefunction', other: 'Wavefunction') -> torch.Tensor:
 
 
 def _overlap(self: 'Wavefunction') -> 'Wavefunction':
-    '''Return wavefunction with overlap operator applied.
+    """Return wavefunction with overlap operator applied.
     This is identity and returns a view of the original wavefunction
     for norm-conserving pseudopotentials, but includes augmentation terms
-    for ultrasoft and PAW pseudopotentials'''
+    for ultrasoft and PAW pseudopotentials"""
     return self  # TODO: augment overlap here when adding ultrasoft / PAW
 
 
 def _matmul(self: 'Wavefunction', mat: torch.Tensor) -> 'Wavefunction':
-    '''Compute a matrix transformation (such as rotation) along the band
+    """Compute a matrix transformation (such as rotation) along the band
     dimension of wavefunction (self). For convenience, this can also be
     invoked as self @ other, using the standard matrix multiply operator.
 
@@ -128,7 +128,7 @@ def _matmul(self: 'Wavefunction', mat: torch.Tensor) -> 'Wavefunction':
     qimpy.electrons.Wavefunction
         The result will have n_bands = mat.shape[-2], same basis and spinor as
         input, and spin and k determined by broadcasting with mat.shape[:-2]
-    '''
+    """
     if not isinstance(mat, torch.Tensor):
         return NotImplemented
     watch = qp.utils.StopWatch('Wavefunction.matmul', self.basis.rc)
@@ -143,10 +143,10 @@ def _matmul(self: 'Wavefunction', mat: torch.Tensor) -> 'Wavefunction':
 
 
 def _orthonormalize(self: 'Wavefunction') -> 'Wavefunction':
-    '''Return orthonormalized version of wavefunctions.
+    """Return orthonormalized version of wavefunctions.
     This internally uses Gram-Schmidt scheme using a Cholesky decomposition,
     which is not differentiable. Use a symmetric orthonormalization scheme
-    using :meth:`qimpy.utils.ortho_matrix` for a differentiable scheme.'''
+    using :meth:`qimpy.utils.ortho_matrix` for a differentiable scheme."""
     return self @ qp.utils.ortho_matrix(self.dot_O(self), use_cholesky=True)
 
 
@@ -226,7 +226,7 @@ def _isub(self: 'Wavefunction', other: 'Wavefunction') -> 'Wavefunction':
 
 
 def _getitem(self: 'Wavefunction', index: Any) -> 'Wavefunction':
-    'Propagate slicing to coeff and proj if present'
+    """Propagate slicing to coeff and proj if present"""
     coeff = self.coeff[index]
     proj = None if (self.proj is None) else self.proj[index]
     return qp.electrons.Wavefunction(self.basis, coeff, proj,
@@ -235,7 +235,7 @@ def _getitem(self: 'Wavefunction', index: Any) -> 'Wavefunction':
 
 def _cat(self: 'Wavefunction', other: 'Wavefunction',
          dim: int = 2) -> 'Wavefunction':
-    'Join wavefunctions along specified dimension (default: 2 => bands)'
+    """Join wavefunctions along specified dimension (default: 2 => bands)"""
     coeff = torch.cat((self.coeff, other.coeff), dim=dim)
     proj = (None if ((self.proj is None) or (other.proj is None))
             else torch.cat((self.proj, other.proj), dim=dim))

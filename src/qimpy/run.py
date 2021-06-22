@@ -1,4 +1,4 @@
-'''Stand-alone QimPy calculation from YAML input file
+"""Stand-alone QimPy calculation from YAML input file
 
 Typical usage:
 
@@ -39,7 +39,7 @@ optional arguments:
 Note that qimpy must be installed to the python path for these to work in any
 directory. For development, run `python setup.py develop --user` in the root
 directory of the source repository to make the above usage possible without
-instaling from pip/conda.'''
+instaling from pip/conda."""
 
 import qimpy as qp
 import argparse

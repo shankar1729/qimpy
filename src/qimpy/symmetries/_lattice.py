@@ -6,8 +6,8 @@ if TYPE_CHECKING:
 
 def _get_lattice_point_group(Rbasis: torch.Tensor,
                              tolerance: float) -> torch.Tensor:
-    '''Return point group (n_sym x 3 x 3 tensor in lattice coordinates),
-    given lattice vectors Rbasis (3 x 3 tensor).'''
+    """Return point group (n_sym x 3 x 3 tensor in lattice coordinates),
+    given lattice vectors Rbasis (3 x 3 tensor)."""
 
     # Reduce lattice vectors:
     T = _reduce_matrix33(Rbasis, tolerance)
@@ -30,8 +30,8 @@ def _get_lattice_point_group(Rbasis: torch.Tensor,
 
 
 def _reduce_matrix33(M: torch.Tensor, tolerance: float) -> torch.Tensor:
-    '''Find integer T that minimizes norm(M @ T).
-    All tensors are 3 x 3, and accuracy of minimum is set by tolerance.'''
+    """Find integer T that minimizes norm(M @ T).
+    All tensors are 3 x 3, and accuracy of minimum is set by tolerance."""
     assert(M.shape == (3, 3))
 
     # Prepare a list of transformations based on +/-1 offsets:
@@ -66,7 +66,7 @@ def _reduce_matrix33(M: torch.Tensor, tolerance: float) -> torch.Tensor:
 
 def _symmetrize_lattice(self: 'Symmetries',
                         Rbasis: torch.Tensor) -> torch.Tensor:
-    'Symmetrize lattice vectors `Rbasis` (3 x 3)'
+    """Symmetrize lattice vectors `Rbasis` (3 x 3)"""
     # Compute symmetrized metric:
     metric = Rbasis.T @ Rbasis
     metric_sym = (self.rot.transpose(-2, -1)

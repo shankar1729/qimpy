@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 
 class Wavefunction:
-    '''Electronic wavefunctions including coefficients and projections'''
+    """Electronic wavefunctions including coefficients and projections"""
     basis: 'Basis'  #: Corresponding basis
 
     #: Wavefunction coefficients (n_spins x nk x n_bands x n_spinor x n_basis)
@@ -33,7 +33,7 @@ class Wavefunction:
                  band_division: Optional['TaskDivision'] = None,
                  n_bands: int = 0, n_spins: int = 0, n_spinor: int = 0,
                  randomize: bool = False) -> None:
-        '''Initialize wavefunctions of specified size or with given
+        """Initialize wavefunctions of specified size or with given
         coefficients.
 
         Parameters
@@ -63,7 +63,7 @@ class Wavefunction:
             If non-zero, override the number of spinor components
             in new wavefunctions (instead of the value in basis).
             Used only if coeff is None, and n_bands or band_division is given
-        '''
+        """
         self.basis = basis
         self.proj = proj
         self.band_division = band_division
@@ -86,22 +86,22 @@ class Wavefunction:
             self.coeff = coeff
 
     def zeros_like(self, n_bands: int = 0) -> 'Wavefunction':
-        '''Create a zero Wavefunction similar to the present one.
-        Optionally override the number of bands with `n_bands`.'''
+        """Create a zero Wavefunction similar to the present one.
+        Optionally override the number of bands with `n_bands`."""
         n_bands = (n_bands if n_bands else self.coeff.shape[2])
         return Wavefunction(self.basis, band_division=self.band_division,
                             n_bands=n_bands, n_spins=self.coeff.shape[0],
                             n_spinor=self.coeff.shape[3])
 
     def clone(self) -> 'Wavefunction':
-        'Create a copy'
+        """Create a copy"""
         return Wavefunction(
             self.basis, self.coeff.clone().detach(),
             None if (self.proj is None) else self.proj.clone().detach(),
             band_division=self.band_division)
 
     def n_bands(self) -> int:
-        'Get number of bands in wavefunction'
+        """Get number of bands in wavefunction"""
         return 0 if (self.coeff is None) else self.coeff.shape[2]
 
     def randomize(self: 'Wavefunction', seed: int = 0, b_start: int = 0,

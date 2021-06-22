@@ -14,7 +14,7 @@ FunctionFFT = Callable[[torch.Tensor], torch.Tensor]
 
 
 def _init_grid_fft(self: 'Grid') -> None:
-    'Initialize local or parallel FFTs for class Grid.'
+    """Initialize local or parallel FFTs for class Grid."""
     # Half-reciprocal space global dimensions (for rfft/irfft):
     self.shapeH = (self.shape[0], self.shape[1], 1+self.shape[2]//2)
     qp.log.info(f'real-fft shape: {self.shapeH}')
@@ -343,8 +343,8 @@ if __name__ == "__main__":
     def test(name, dtype_in, seq_func, par_func,
              in_start, in_stop, out_start, out_stop,
              shape_in, inverse):
-        '''Helper function to test parallel and sequential versions
-        of each Grid.fft routine against each other'''
+        """Helper function to test parallel and sequential versions
+        of each Grid.fft routine against each other"""
         # Create test data:
         v_ref = torch.randn(n_batch + shape_in, dtype=dtype_in,
                             device=rc.device)

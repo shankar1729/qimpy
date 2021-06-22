@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 
 class Davidson:
-    '''Davidson diagonalization of Hamiltonian in `electrons`.'''
+    """Davidson diagonalization of Hamiltonian in `electrons`."""
     __slots__ = ('rc', 'electrons', 'n_iterations', 'eig_threshold',
                  '_line_prefix', '_norm_cut', '_i_iter', '_HC')
     rc: 'RunConfig'  #: Current run configuration
@@ -23,7 +23,7 @@ class Davidson:
 
     def __init__(self, *, electrons: 'Electrons', n_iterations: int = 100,
                  eig_threshold: float = 1E-8) -> None:
-        '''Initialize diagonalizer with stopping criteria.
+        """Initialize diagonalizer with stopping criteria.
 
         Parameters
         ----------
@@ -36,7 +36,7 @@ class Davidson:
             to consider as converged for fixed-Hamiltonian calculations;
             the self-consistent field method overrides this when
             diagonalizing in an inner loop
-        '''
+        """
         self.rc = electrons.rc
         self.electrons = electrons
         self.n_iterations = n_iterations
@@ -53,7 +53,7 @@ class Davidson:
     def _report(self, n_eigs_done: int = 0,
                 inner_loop: bool = False, converged: bool = False,
                 converge_failed: bool = False) -> None:
-        'Report iteration progress / convergence in standardized form'
+        """Report iteration progress / convergence in standardized form"""
         line_prefix = ('  ' if inner_loop else '') + self._line_prefix
         line = f'{line_prefix}: {self._i_iter}' \
                f'  Eband: {self._get_Eband():+.11f}'
@@ -70,8 +70,8 @@ class Davidson:
 
     def _precondition(self, Cerr: 'Wavefunction',
                       KEref: torch.Tensor) -> 'Wavefunction':
-        '''Inverse-kinetic preconditioner on the Cerr in eigenpairs,
-        using the per-band kinetic energy KEref'''
+        """Inverse-kinetic preconditioner on the Cerr in eigenpairs,
+        using the per-band kinetic energy KEref"""
         watch = qp.utils.StopWatch('Davidson.precondition', self.rc)
         basis = self.electrons.basis
         x = (basis.get_ke(basis.mine)[None, :, None, None, :]
@@ -83,8 +83,8 @@ class Davidson:
 
     def _regularize(self, C: 'Wavefunction', norm: torch.Tensor,
                     i_iter: int) -> None:
-        '''Regularize low-norm bands of C by randomizing them,
-        using seed based on current iteration number i_iter'''
+        """Regularize low-norm bands of C by randomizing them,
+        using seed based on current iteration number i_iter"""
         # Find low-norm bands:
         if self.rc.n_procs_b > 1:
             # guard against machine-precision differences between procs
@@ -99,7 +99,7 @@ class Davidson:
         norm[i_spin, i_k, i_band] = 1.
 
     def _get_Eband(self) -> float:
-        'Compute the sum over band eigenvalues, averaged over k'
+        """Compute the sum over band eigenvalues, averaged over k"""
         electrons = self.electrons
         return self.rc.comm_k.allreduce((
             electrons.w_spin * electrons.basis.wk.view(1, -1, 1)
@@ -107,8 +107,8 @@ class Davidson:
 
     def _check_deig(self, deig: torch.Tensor,
                     eig_threshold: float) -> Tuple[float, int]:
-        '''Return maximum change in eigenvalues and how many
-        eigenvalues are converged at all spin and k'''
+        """Return maximum change in eigenvalues and how many
+        eigenvalues are converged at all spin and k"""
         n_bands = self.electrons.n_bands
         deig_max = self.rc.comm_kb.allreduce(deig[..., :n_bands].max().item(),
                                              qp.MPI.MAX)
@@ -120,9 +120,9 @@ class Davidson:
 
     def __call__(self, n_iterations: Optional[int] = None,
                  eig_threshold: Optional[float] = None) -> None:
-        '''Diagonalize Kohn-Sham Hamiltonian in electrons.
+        """Diagonalize Kohn-Sham Hamiltonian in electrons.
         Also available as :meth:`__call__` to make `Davidson` callable.
-        '''
+        """
         el = self.electrons
         n_spins = el.n_spins
         nk_mine = el.kpoints.n_mine

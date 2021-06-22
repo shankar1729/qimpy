@@ -13,11 +13,11 @@ FieldType = TypeVar('FieldType', bound='Field')  #: Type for field ops.
 
 
 class Field(metaclass=ABCMeta):
-    '''Abstract base class for scalar/vector fields in real/reciprocal space.
+    """Abstract base class for scalar/vector fields in real/reciprocal space.
     Provides common operators for fields in either space, but any fields
     used must specifically be in real (:class:`FieldR` and :class:`FieldC`),
     full-reciprocal (:class:`FieldG`) or half-reciprocal (:class:`FieldH`)
-    space.'''
+    space."""
 
     __slots__ = ('grid', 'data')
     grid: 'Grid'  #: Associated grid, which determines dimensions of the field
@@ -25,16 +25,16 @@ class Field(metaclass=ABCMeta):
 
     @abstractmethod
     def dtype(self) -> torch.dtype:
-        'Expected data type for the Field type'
+        """Expected data type for the Field type"""
 
     @abstractmethod
     def shape_grid(self) -> Tuple[int, ...]:
-        'Expected grid shape (last 3 data dimension) for the Field type'
+        """Expected grid shape (last 3 data dimension) for the Field type"""
 
     def __init__(self, grid: 'Grid', *,
                  shape_batch: Sequence[int] = tuple(),
                  data: Optional[torch.Tensor] = None) -> None:
-        '''Initialize to zeros or specified `data`.
+        """Initialize to zeros or specified `data`.
 
         Parameters
         ----------
@@ -45,7 +45,7 @@ class Field(metaclass=ABCMeta):
             scalar fields etc. Not used if data is provided.
         data
             Initial data if provided; initialize to zero otherwise
-        '''
+        """
         self.grid = grid
         shape_grid = self.shape_grid()
         dtype = self.dtype()
@@ -106,7 +106,7 @@ class Field(metaclass=ABCMeta):
 
 
 class FieldR(Field):
-    '''Real fields in real space.'''
+    """Real fields in real space."""
     def dtype(self) -> torch.dtype:
         return torch.double
 
@@ -114,19 +114,19 @@ class FieldR(Field):
         return self.grid.shapeR_mine
 
     def __invert__(self) -> 'FieldH':
-        'Fourier transform (enables the ~ operator)'
+        """Fourier transform (enables the ~ operator)"""
         return FieldH(self.grid, data=self.grid.fft(self.data))
 
     def to(self, grid: 'Grid') -> 'FieldR':
-        '''Switch field to another `grid` with same `shape`.
-        The new grid can only differ in the MPI split.'''
+        """Switch field to another `grid` with same `shape`.
+        The new grid can only differ in the MPI split."""
         if grid is self.grid:
             return self
         return _change_real(self, grid)
 
 
 class FieldC(Field):
-    '''Complex fields in real space.'''
+    """Complex fields in real space."""
     def dtype(self) -> torch.dtype:
         return torch.cdouble
 
@@ -134,21 +134,21 @@ class FieldC(Field):
         return self.grid.shapeR_mine
 
     def __invert__(self) -> 'FieldG':
-        'Fourier transform (enables the ~ operator)'
+        """Fourier transform (enables the ~ operator)"""
         return FieldG(self.grid, data=self.grid.fft(self.data))
 
     def to(self, grid: 'Grid') -> 'FieldC':
-        '''Switch field to another `grid` with same `shape`.
-        The new grid can only differ in the MPI split.'''
+        """Switch field to another `grid` with same `shape`.
+        The new grid can only differ in the MPI split."""
         if grid is self.grid:
             return self
         return _change_real(self, grid)
 
 
 class FieldH(Field):
-    '''Real fields in (half) reciprocal space. Note that the underlying
+    """Real fields in (half) reciprocal space. Note that the underlying
     data is complex in reciprocal space, but reduced to one half of
-    reciprocal space using Hermitian symmetry.'''
+    reciprocal space using Hermitian symmetry."""
     def dtype(self) -> torch.dtype:
         return torch.cdouble
 
@@ -156,20 +156,20 @@ class FieldH(Field):
         return self.grid.shapeH_mine
 
     def __invert__(self) -> 'FieldR':
-        'Fourier transform (enables the ~ operator)'
+        """Fourier transform (enables the ~ operator)"""
         return FieldR(self.grid, data=self.grid.ifft(self.data))
 
     def to(self, grid: 'Grid') -> 'FieldH':
-        '''Switch field to another `grid` with possibly different `shape`.
+        """Switch field to another `grid` with possibly different `shape`.
         This routine will perform Fourier resampling and MPI rearrangements,
-        as necessary.'''
+        as necessary."""
         if grid is self.grid:
             return self
         return _change_recip(self, grid)
 
 
 class FieldG(Field):
-    '''Complex fields in (full) reciprocal space.'''
+    """Complex fields in (full) reciprocal space."""
     def dtype(self) -> torch.dtype:
         return torch.cdouble
 
@@ -177,13 +177,13 @@ class FieldG(Field):
         return self.grid.shapeG_mine
 
     def __invert__(self) -> 'FieldC':
-        'Fourier transform (enables the ~ operator)'
+        """Fourier transform (enables the ~ operator)"""
         return FieldC(self.grid, data=self.grid.ifft(self.data))
 
     def to(self, grid: 'Grid') -> 'FieldG':
-        '''Switch field to another `grid` with possibly different `shape`.
+        """Switch field to another `grid` with possibly different `shape`.
         This routine will perform Fourier resampling and MPI rearrangements,
-        as necessary.'''
+        as necessary."""
         if grid is self.grid:
             return self
         return _change_recip(self, grid)

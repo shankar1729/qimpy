@@ -4,7 +4,7 @@ from typing import List, Tuple, TypeVar
 
 
 def prime_factorization(N: int) -> List[int]:
-    'Get list of prime factors of `N` in ascending order'
+    """Get list of prime factors of `N` in ascending order"""
     factors = []
     p = 2
     while p*p <= N:
@@ -18,9 +18,9 @@ def prime_factorization(N: int) -> List[int]:
 
 
 def fft_suitable(N: int) -> bool:
-    '''Check whether `N` has only small prime factors. Return True if
+    """Check whether `N` has only small prime factors. Return True if
     the prime factorization of `N` is suitable for efficient FFTs,
-    that is contains only 2, 3, 5 and 7.'''
+    that is contains only 2, 3, 5 and 7."""
     for p in [2, 3, 5, 7]:
         while N % p == 0:
             N //= p
@@ -33,7 +33,7 @@ IntLike = TypeVar('IntLike', int, np.ndarray)
 
 
 def ceildiv(num: IntLike, den: IntLike) -> IntLike:
-    'Compute ceil(num/den) with purely integer operations'
+    """Compute ceil(num/den) with purely integer operations"""
     return (num + den-1) // den
 
 

@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 
 class CheFSI(Davidson):
-    '''Chebyshev Filter Subspace Iteration (CheFSI) diagonalization.'''
+    """Chebyshev Filter Subspace Iteration (CheFSI) diagonalization."""
     __slots__ = ('filter_order', 'init_threshold')
     filter_order: int  #: Order of Chebyshev filter
     init_threshold: float  #: Threshold for Davidson initialization
@@ -17,7 +17,7 @@ class CheFSI(Davidson):
     def __init__(self, *, electrons: 'Electrons', n_iterations: int = 100,
                  eig_threshold: float = 1E-8, filter_order: int = 10,
                  init_threshold: float = 1E-1) -> None:
-        '''Initialize with stopping criteria and filter order.
+        """Initialize with stopping criteria and filter order.
 
         Parameters
         ----------
@@ -31,7 +31,7 @@ class CheFSI(Davidson):
         init_threshold
             Eigenvalue threshold for the initial Davidson steps used to ensure
             a reasonable starting point for CheFSI (needed for stability)
-        '''
+        """
         super().__init__(electrons=electrons, n_iterations=n_iterations,
                          eig_threshold=eig_threshold)
         self.filter_order = filter_order
@@ -46,9 +46,9 @@ class CheFSI(Davidson):
 
     def __call__(self, n_iterations: Optional[int] = None,
                  eig_threshold: Optional[float] = None) -> None:
-        '''Diagonalize Kohn-Sham Hamiltonian in electrons.
+        """Diagonalize Kohn-Sham Hamiltonian in electrons.
         Also available as :meth:`__call__` to make `CheFSI` callable.
-        '''
+        """
         el = self.electrons
         n_spins = el.n_spins
         nk_mine = el.kpoints.n_mine

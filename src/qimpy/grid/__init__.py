@@ -1,4 +1,4 @@
-'''Grids, fields and their operations'''
+"""Grids, fields and their operations"""
 # List exported symbols for doc generation
 __all__ = [
     'Grid', 'Field', 'FieldR', 'FieldC', 'FieldH', 'FieldG', 'Coulomb'

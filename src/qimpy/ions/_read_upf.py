@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 
 def _read_upf(self: 'Pseudopotential', filename: str, rc: 'RunConfig'):
-    '''Read a UPF pseudopotential.
+    """Read a UPF pseudopotential.
     Note that only norm-conserving UPF files are currently supported.
 
     Parameters
@@ -19,7 +19,7 @@ def _read_upf(self: 'Pseudopotential', filename: str, rc: 'RunConfig'):
         Full path to the UPF file to read.
     rc : qimpy.utils.RunConfig
         Current run configuration.
-    '''
+    """
     watch = qp.utils.StopWatch('read_upf', rc)
     qp.log.info(f"\nReading '{filename}':")
     upf = ET.fromstring(open(filename, 'r').read().replace('&', '&amp;'))

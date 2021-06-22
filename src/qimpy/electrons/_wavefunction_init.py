@@ -7,7 +7,7 @@ if TYPE_CHECKING:
 
 
 def _randn(x: torch.Tensor) -> torch.Tensor:
-    'Generate a complex standard-normal Tensor using state int Tensor x'
+    """Generate a complex standard-normal Tensor using state int Tensor x"""
     # Generate two uniform random numbers for each output:
     u = []
     for i_repeat in range(2):
@@ -23,7 +23,7 @@ def _randn(x: torch.Tensor) -> torch.Tensor:
 
 def _randomize(self: 'Wavefunction', seed: int = 0, b_start: int = 0,
                b_stop: Optional[int] = None) -> None:
-    '''Set wavefunction coefficients to bandwidth-limited random numbers.
+    """Set wavefunction coefficients to bandwidth-limited random numbers.
     This is done reproducibly, regardless of MPI configuration of the run,
     by running a separate xor-shift random number generator with a different
     seed at each combination of spin, k, spinor and G-vector,
@@ -37,7 +37,7 @@ def _randomize(self: 'Wavefunction', seed: int = 0, b_start: int = 0,
         Starting band index (global index if MPI-split over bands)
     b_stop
         Stopping band index (global index if MPI-split over bands)
-    '''
+    """
     basis = self.basis
     watch = qp.utils.StopWatch('Wavefunction.randomize', basis.rc)
 
@@ -111,11 +111,11 @@ _RandomizeSelected = Callable[['Wavefunction', torch.Tensor, torch.Tensor,
 def _randomize_selected(self: 'Wavefunction', i_spin: torch.Tensor,
                         i_k: torch.Tensor, i_band: torch.Tensor,
                         seed: int) -> None:
-    '''Randomize wavefunction coefficients of selected bands.
+    """Randomize wavefunction coefficients of selected bands.
     The bands are indexed by a tuple (`i_spin`, `i_k`, `i_band`) of 1D
     index tensors with same shape. This is only supported for wavefunctions
     split over basis (i.e. no band_division).
-    '''
+    """
     assert(self.band_division is None)
     basis = self.basis
     n_bands = self.n_bands()

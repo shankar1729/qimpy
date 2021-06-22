@@ -1,4 +1,4 @@
-'''Shared utility functions and classes'''
+"""Shared utility functions and classes"""
 # List exported symbols for doc generation
 __all__ = [
     'prime_factorization', 'fft_suitable', 'ceildiv',

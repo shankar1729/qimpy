@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 
 
 class Lattice:
-    '''Real and reciprocal space lattice vectors'''
+    """Real and reciprocal space lattice vectors"""
 
     __slots__ = ('rc', 'Rbasis', 'Gbasis', 'volume')
     rc: 'RunConfig'  #: Current run configuration
@@ -30,7 +30,7 @@ class Lattice:
                  vector3: Optional[Sequence[float]] = None,
                  scale: Optional[Union[float, Sequence[float]]] = None
                  ) -> None:
-        '''Initialize from lattice vectors or lengths and angles.
+        """Initialize from lattice vectors or lengths and angles.
         Either specify a lattice `system` and optional `modification`,
         along with any corresponding required lengths (`a`, `b`, `c`)
         and angles (`alpha`, `beta`, `gamma`), or explicitly specity
@@ -79,7 +79,7 @@ class Lattice:
         scale
             Single scale factor for all lattice vectors, or separate factor
             :math:`[s_1, s_2, s_3]` for each lattice vector
-        '''
+        """
         self.rc = rc
         qp.log.info('\n--- Initializing Lattice ---')
 
@@ -119,7 +119,7 @@ class Lattice:
         qp.log.info(f'Unit cell volume: {self.volume}')
 
     def update(self, Rbasis: torch.Tensor) -> None:
-        'Update lattice vectors and dependent quantities'
+        """Update lattice vectors and dependent quantities"""
         Gbasis = (2*np.pi) * torch.linalg.inv(self.Rbasis.T)
         volume = abs(torch.linalg.det(self.Rbasis).item())
         change_Rbasis = (torch.linalg.norm(Rbasis - self.Rbasis)

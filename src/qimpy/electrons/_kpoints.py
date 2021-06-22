@@ -9,8 +9,8 @@ if TYPE_CHECKING:
 
 
 class Kpoints(qp.utils.TaskDivision):
-    '''Set of k-points in Brillouin zone.
-    The underlying :class:`TaskDivision` splits k-points over `rc.comm_k`.'''
+    """Set of k-points in Brillouin zone.
+    The underlying :class:`TaskDivision` splits k-points over `rc.comm_k`."""
     __slots__ = ('rc', 'k', 'wk')
     rc: 'RunConfig'  #: Current run configuration
     k: torch.Tensor  #: Array of k-points (N x 3)
@@ -18,9 +18,9 @@ class Kpoints(qp.utils.TaskDivision):
 
     def __init__(self, rc: 'RunConfig',
                  k: torch.Tensor, wk: torch.Tensor) -> None:
-        '''Initialize from list of k-points and weights. Typically, this should
+        """Initialize from list of k-points and weights. Typically, this should
          be used only by derived classes :class:`Kmesh` or :class:`Kpath`.
-        '''
+        """
         self.rc = rc
         self.k = k
         self.wk = wk
@@ -32,7 +32,7 @@ class Kpoints(qp.utils.TaskDivision):
 
 
 class Kmesh(Kpoints):
-    'Uniform k-mesh sampling of Brillouin zone'
+    """Uniform k-mesh sampling of Brillouin zone"""
     __slots__ = ('size', 'i_reduced', 'i_sym', 'invert')
     size: Tuple[int, ...]  #: Dimensions of k-mesh
     i_reduced: torch.Tensor  #: Reduced index of each k-point in mesh
@@ -44,7 +44,7 @@ class Kmesh(Kpoints):
                  offset: Union[Sequence[float], np.ndarray] = (0., 0., 0.),
                  size: Union[float, Sequence[int], np.ndarray] = (1, 1, 1),
                  use_inversion: bool = True) -> None:
-        '''Construct k-mesh of specified `size` and `offset`.
+        """Construct k-mesh of specified `size` and `offset`.
 
         Parameters
         ----------
@@ -69,7 +69,7 @@ class Kmesh(Kpoints):
             in real space) to additionally reduce k-points for systems
             without inversion symmetry in real space. Default: True;
             you should need to only disable this when interfacing with
-            codes that do not support this symmetry eg. BerkeleyGW.'''
+            codes that do not support this symmetry eg. BerkeleyGW."""
 
         # Select size from real-space dimension if needed:
         if isinstance(size, float) or isinstance(size, int):
@@ -155,12 +155,12 @@ class Kmesh(Kpoints):
 
 
 class Kpath(Kpoints):
-    '''Path of k-points traversing Brillouin zone.
-    Typically used only for band structure calculations.'''
+    """Path of k-points traversing Brillouin zone.
+    Typically used only for band structure calculations."""
 
     def __init__(self, *, rc: 'RunConfig', lattice: 'Lattice',
                  dk: float, points: list) -> None:
-        '''Initialize k-path with spacing `dk` connecting `points`.
+        """Initialize k-path with spacing `dk` connecting `points`.
 
         Parameters
         ----------
@@ -175,7 +175,7 @@ class Kpath(Kpoints):
             List of special k-points along path: each point should contain
             three fractional coordinates (float) and optionally a string
             label for this point for use in band structure plots.
-        '''
+        """
 
         # Check types, sizes and separate labels from points:
         dk = float(dk)
@@ -211,7 +211,7 @@ class Kpath(Kpoints):
         super().__init__(rc, k, wk)
 
     def plot(self, E, filename):
-        'Save band structure plot to filename given energies E'
+        """Save band structure plot to filename given energies E"""
         if self.rc.i_proc_b:
             return  # only head of each basis group needed below
         # Get the energies to head process:

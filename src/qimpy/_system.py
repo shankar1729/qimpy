@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class System:
-    '''Overall system to calculate within QimPy'''
+    """Overall system to calculate within QimPy"""
     __slots__ = ('rc', 'chk', 'lattice', 'ions', 'symmetries', 'electrons',
                  'grid', 'coulomb', 'energy')
     rc: 'RunConfig'  #: Current run configuration
@@ -33,9 +33,9 @@ class System:
                  symmetries: Union['Symmetries', dict, None] = None,
                  electrons: Union['Electrons', dict, None] = None,
                  grid: Union['Grid', dict, None] = None):
-        '''Compose a System to calculate from its pieces. Each piece
+        """Compose a System to calculate from its pieces. Each piece
         could be provided as an object or a dictionary of parameters
-        suitable for initializing that object'''
+        suitable for initializing that object"""
         self.rc = rc
         self.chk = chk
         self.lattice = qp.construct(qp.lattice.Lattice, lattice, 'lattice',
@@ -64,7 +64,7 @@ class System:
         qp.log.info(f'\nInitialization completed at t[s]: {rc.clock():.2f}\n')
 
     def run(self):
-        'Run any actions specified in the input.'
+        """Run any actions specified in the input."""
         # TODO: systematize selection of what actions to perform
         self.electrons.diagonalize()
         self.electrons.output()

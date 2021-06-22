@@ -7,14 +7,14 @@ if TYPE_CHECKING:
 
 
 def _check_grid_shape(self: 'Symmetries', shape: Sequence[int]) -> None:
-    '''Check whether grid dimensions are compatible with symmetries.
+    """Check whether grid dimensions are compatible with symmetries.
 
     Raises
     ------
     ValueError
         If incommensurate, raise ValueError with the error string
         including the reduced symmetry of specified grid shape
-    '''
+    """
 
     # Compute rotation matrix in mesh coordinates
     S = torch.tensor(shape, dtype=torch.double, device=self.rc.device)
@@ -31,7 +31,7 @@ def _check_grid_shape(self: 'Symmetries', shape: Sequence[int]) -> None:
 
 def _get_grid_shape(self: 'Symmetries',
                     shape_min: np.ndarray) -> np.ndarray:
-    '''Smallest symmetric, FFT-suitable shape >= shape_min.'''
+    """Smallest symmetric, FFT-suitable shape >= shape_min."""
 
     # Determine constraints on S due to symmetries:
     rot = self.rot.to(dtype=torch.int, device=self.rc.cpu).numpy()
@@ -39,9 +39,9 @@ def _get_grid_shape(self: 'Symmetries',
 
     # Recursive function to set grid shapes compatible with one dimension
     def process(Sb, j):
-        '''Given an integer vector Sb where Sb[j] is known to be non-zero,
+        """Given an integer vector Sb where Sb[j] is known to be non-zero,
         return smallest integer vector that would be commensurate with
-        symmetries, by setting connected dimensions to j as appopriate.'''
+        symmetries, by setting connected dimensions to j as appopriate."""
         # Check dimensions constrained to j:
         k_linked = np.logical_or(ratios[j, :], ratios[:, j])
         k_linked[j] = False  # no need to check j against j

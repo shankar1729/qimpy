@@ -145,8 +145,8 @@ class RunConfig:
         self._setup_process_grid()
 
     def _setup_process_grid(self):
-        '''Set up communicators if self.process_grid is fully specified, or
-        report status and mark process grid determination as pending.'''
+        """Set up communicators if self.process_grid is fully specified, or
+        report status and mark process grid determination as pending."""
         # Check compatibility of known dimensions with total:
         prod_known = self.process_grid[self.process_grid != -1].prod()
         if self.n_procs % prod_known:
@@ -187,7 +187,7 @@ class RunConfig:
             self.i_proc_b = self.comm_b.Get_rank()
 
     def provide_n_tasks(self, dim: int, n_tasks: int):
-        '''Provide task count for a process grid dimension. If that dimension
+        """Provide task count for a process grid dimension. If that dimension
         is undetermined (-1), set it to a suitable value that is compatible
         with the total processes and any other known process grid dimensions,
         and with splitting n_tasks tasks with reasonable load balancing
@@ -200,9 +200,10 @@ class RunConfig:
         n_tasks : int
             Number of tasks available to split on this dimension of the
             process grid, used for setting or checking dimension of process
-            grid for reasonable load balancing.'''
+            grid for reasonable load balancing."""
         def get_imbalance():
-            'Compute cpu time% wasted in splitting n_tasks over n_procs_dim'
+            """Compute cpu time% wasted in splitting n_tasks over n_procs_dim
+            """
             n_tasks_each = qp.utils.ceildiv(n_tasks, n_procs_dim)
             return 100.*(1. - n_tasks / (n_tasks_each * n_procs_dim))
         imbalance_threshold = 20.  # max cpu time% waste to tolerate
@@ -225,17 +226,17 @@ class RunConfig:
             self._setup_process_grid()
 
     def clock(self):
-        "Time in seconds since start of this run."
+        """Time in seconds since start of this run."""
         return time.time() - self.t_start
 
     def report_end(self):
-        "Report end time and duration."
+        """Report end time and duration."""
         t_stop = time.time()
         duration = datetime.timedelta(seconds=(t_stop - self.t_start))
         qp.log.info(f'\nEnd time: {time.ctime(t_stop)} (Duration: {duration})')
 
     def fmt(self, tensor: torch.Tensor) -> str:
-        'Standardized conversion of torch tensors for logging.'
+        """Standardized conversion of torch tensors for logging."""
         return np.array2string(
             tensor.to(self.cpu).numpy(),
             precision=8, suppress_small=True, separator=', ')
@@ -243,9 +244,9 @@ class RunConfig:
 
 def comm_split_grid(comm: qp.MPI.Comm, n_procs_o: int,
                     n_procs_i: int) -> Tuple[qp.MPI.Comm, qp.MPI.Comm]:
-    '''Split a communicator comm into an n_procs_o x n_procs_i grid,
+    """Split a communicator comm into an n_procs_o x n_procs_i grid,
     returning comm_o (with strided process ranks in comm) and
-    comm_i (with contiguous process ranks in comm).'''
+    comm_i (with contiguous process ranks in comm)."""
     # Check inputs:
     n_procs = comm.Get_size()
     i_proc = comm.Get_rank()

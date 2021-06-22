@@ -1,4 +1,4 @@
-'''Chemical symbols, atomic numbers and atomic weights.'''
+"""Chemical symbols, atomic numbers and atomic weights."""
 import numpy as np
 from typing import Dict
 

@@ -13,7 +13,7 @@ SmearingResults = collections.namedtuple('SmearingResults', ['f', 'f_E', 'S'])
 
 
 class Fillings:
-    '''Electron occupation factors (smearing)'''
+    """Electron occupation factors (smearing)"""
     __slots__ = ('rc', 'n_electrons', 'n_bands_min', 'smearing',
                  'sigma', '_smearing_func')
     rc: 'RunConfig'  #: Current run configuration
@@ -27,7 +27,7 @@ class Fillings:
                  charge: float = 0., smearing: str = 'gauss',
                  sigma: Optional[float] = None,
                  kT: Optional[float] = None) -> None:
-        '''Initialize occupation factor (smearing) scheme.
+        """Initialize occupation factor (smearing) scheme.
 
         Parameters
         ----------
@@ -48,7 +48,7 @@ class Fillings:
             :math:`k_BT` for Fermi-Dirac occupations, amounting to
             :math:`\\sigma/2` for the other Gaussian-based smearing schemes.
             Specify only one of sigma or kT.
-        '''
+        """
         self.rc = rc
 
         # Number of electrons and bands:
@@ -77,7 +77,7 @@ class Fillings:
 
     def compute(self, E: torch.Tensor, mu: float,
                 extra_outputs=False) -> Union[SmearingResults, torch.Tensor]:
-        '''Compute occupations for energies `E` and chemical potential `mu`.
+        """Compute occupations for energies `E` and chemical potential `mu`.
         Optionally also return the energy derivative of the occupation factors
         and corresponding entropy contributions if `extra_outputs` = True.
 
@@ -99,7 +99,7 @@ class Fillings:
             Energy derivative (df/dE)
         S : Tensor, only if extra_outputs=True
             Entropy contribution
-        '''
+        """
         assert(self.sigma is not None)
         assert(self._smearing_func is not None)
         return self._smearing_func(E, mu, self.sigma, extra_outputs)
@@ -108,9 +108,9 @@ class Fillings:
 def _smearing_fermi(E: torch.Tensor, mu: float, sigma: float,
                     extra_outputs=False) -> Union[SmearingResults,
                                                   torch.Tensor]:
-    '''Compute Fermi-Dirac occupations, and optionally also its
+    """Compute Fermi-Dirac occupations, and optionally also its
     derivative and entropy in a named tuple if extra_outputs=True.
-    Note that sigma is taken as 2 kT to keep width consistent.'''
+    Note that sigma is taken as 2 kT to keep width consistent."""
     f = torch.sigmoid((mu - E)/(0.5*sigma))
     if extra_outputs:
         f_E = f * (1 - f) / (-0.5*sigma)
@@ -122,8 +122,8 @@ def _smearing_fermi(E: torch.Tensor, mu: float, sigma: float,
 def _smearing_gauss(E: torch.Tensor, mu: float, sigma: float,
                     extra_outputs=False) -> Union[SmearingResults,
                                                   torch.Tensor]:
-    '''Compute Gaussian (erfc) occupations, and optionally also its
-    derivative and entropy in a named tuple if extra_outputs=True'''
+    """Compute Gaussian (erfc) occupations, and optionally also its
+    derivative and entropy in a named tuple if extra_outputs=True"""
     x = (E - mu) / sigma
     f = 0.5*torch.erfc(x)
     if extra_outputs:
@@ -135,8 +135,8 @@ def _smearing_gauss(E: torch.Tensor, mu: float, sigma: float,
 
 def _smearing_mp1(E: torch.Tensor, mu: float, sigma: float,
                   extra_outputs=False) -> Union[SmearingResults, torch.Tensor]:
-    '''Compute first-order Methfessel-Paxton occupations, and optionally also
-    its derivative and entropy in a named tuple if extra_outputs=True'''
+    """Compute first-order Methfessel-Paxton occupations, and optionally also
+    its derivative and entropy in a named tuple if extra_outputs=True"""
     x = (E - mu) / sigma
     gaussian = torch.exp(-x*x) / np.sqrt(np.pi)
     f = 0.5*(torch.erfc(x) - x * gaussian)
@@ -150,8 +150,8 @@ def _smearing_mp1(E: torch.Tensor, mu: float, sigma: float,
 def _smearing_cold(E: torch.Tensor, mu: float, sigma: float,
                    extra_outputs=False) -> Union[SmearingResults,
                                                  torch.Tensor]:
-    '''Compute Cold smearing occupations, and optionally also
-    its derivative and entropy in a named tuple if extra_outputs=True'''
+    """Compute Cold smearing occupations, and optionally also
+    its derivative and entropy in a named tuple if extra_outputs=True"""
     x = (E - mu) / sigma + np.sqrt(0.5)  # note: not centered at mu
     sqrt2 = np.sqrt(2.)
     gaussian = torch.exp(-x*x) / np.sqrt(np.pi)

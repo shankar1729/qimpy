@@ -11,9 +11,9 @@ if TYPE_CHECKING:
 
 
 class Symmetries:
-    '''Space group symmetries.
+    """Space group symmetries.
     Detects space group from lattice and ions, and provides methods to
-    symmetrize properties such as positions, forces and densities.'''
+    symmetrize properties such as positions, forces and densities."""
 
     __slots__ = ('rc', 'lattice', 'ions', 'tolerance', 'n_sym',
                  'rot', 'trans', 'ion_map', 'i_id', 'i_inv')
@@ -35,7 +35,7 @@ class Symmetries:
 
     def __init__(self, *, rc: 'RunConfig', lattice: 'Lattice', ions: 'Ions',
                  tolerance: float = 1e-6) -> None:
-        '''Determine space group from `lattice` and `ions`.'''
+        """Determine space group from `lattice` and `ions`."""
         self.rc = rc
         self.lattice = lattice
         self.ions = ions

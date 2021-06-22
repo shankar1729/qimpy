@@ -8,7 +8,7 @@ def log_config(*, output_file: Optional[str] = None,
                mpi_log: Optional[str] = None,
                mpi_comm: Optional[qp.MPI.Comm] = None,
                append: bool = True, verbose: bool = False):
-    '''Configure logging globally for the qimpy library. It should typically
+    """Configure logging globally for the qimpy library. It should typically
     only be necessary to call this once during start-up. Note that the default
     log configuration before calling this function is to print only warnings
     and errors will from all processes to stdout.
@@ -31,7 +31,7 @@ def log_config(*, output_file: Optional[str] = None,
         Whether log files should be appended or overwritten.
     verbose
         Whether to log debug information including module/line numbers of code.
-    '''
+    """
 
     # Create handler with appropriate output file and mode, if any:
     i_proc = (mpi_comm if mpi_comm else qp.MPI.COMM_WORLD).Get_rank()

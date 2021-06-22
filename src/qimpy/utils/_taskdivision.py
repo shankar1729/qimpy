@@ -19,7 +19,7 @@ class TaskDivision:
 
     def __init__(self, n_tot: int, n_procs: int, i_proc: int,
                  name: Optional[str] = None) -> None:
-        '''Divide `n_tot` tasks among `n_procs` processes'''
+        """Divide `n_tot` tasks among `n_procs` processes"""
         # Store inputs:
         self.n_tot = n_tot
         self.n_procs = n_procs
@@ -37,11 +37,11 @@ class TaskDivision:
                         f'n_each: {self.n_each}  imbalance: {imbalance:.0f}%')
 
     def whose(self, i: int) -> int:
-        'Return process index i_proc responsible for task i'
+        """Return process index i_proc responsible for task i"""
         return i // self.n_each
 
     def is_mine(self, i: int) -> bool:
-        'Return whether current process is responsible for task i'
+        """Return whether current process is responsible for task i"""
         return (self.i_start <= i < self.i_stop)
 
 
@@ -51,7 +51,7 @@ class TaskDivisionCustom(TaskDivision):
     n_each_custom: np.ndarray  #: Custom number of tasks on each process
 
     def __init__(self, n_mine: int, comm: Optional[qp.MPI.Comm]) -> None:
-        '''Initialize given local number of tasks on each processes.'''
+        """Initialize given local number of tasks on each processes."""
         # Collect n_mine on each process and store inputs:
         if comm is None:
             self.n_each_custom = np.full(1, n_mine)
@@ -70,5 +70,5 @@ class TaskDivisionCustom(TaskDivision):
         self.i_stop = self.n_prev[self.i_proc+1]
 
     def whose(self, i: int) -> int:
-        'Return process index i_proc responsible for task i'
+        """Return process index i_proc responsible for task i"""
         return int(np.searchsorted(self.n_prev, i, side='right'))

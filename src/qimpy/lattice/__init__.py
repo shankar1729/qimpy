@@ -1,4 +1,4 @@
-'''Bravais lattice and unit cell'''
+"""Bravais lattice and unit cell"""
 # List exported symbols for doc generation
 __all__ = [
     'Lattice']

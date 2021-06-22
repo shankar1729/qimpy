@@ -11,8 +11,8 @@ if TYPE_CHECKING:
 
 def scatter(v: torch.Tensor, split_out: 'TaskDivision',
             dim: int) -> torch.Tensor:
-    '''Return the contents of v, changed from not-split (i.e. fully available
-     on all processes) to split based on split_out along dimension dim.'''
+    """Return the contents of v, changed from not-split (i.e. fully available
+     on all processes) to split based on split_out along dimension dim."""
     dim = dim % len(v.shape)  # handle negative dim correctly
     return v[((slice(None),) * dim
              + (slice(split_out.i_start, split_out.i_stop),))]
@@ -20,9 +20,9 @@ def scatter(v: torch.Tensor, split_out: 'TaskDivision',
 
 def gather(v: torch.Tensor, split_in: 'TaskDivision', comm: qp.MPI.Comm,
            rc: 'RunConfig', dim: int) -> torch.Tensor:
-    '''Return the contents of v, changed from split based on split_in on
+    """Return the contents of v, changed from split based on split_in on
      communicator comm and dimension dim, to not-split i.e. fully available
-     on all processes.'''
+     on all processes."""
     # Bring split dimension to outermost (if necessary):
     sendbuf = (v.swapaxes(0, dim) if dim else v).contiguous()
     prod_rest = np.prod(sendbuf.shape[1:])  # number in all but the split dim
@@ -41,8 +41,8 @@ def gather(v: torch.Tensor, split_in: 'TaskDivision', comm: qp.MPI.Comm,
 def redistribute(v: torch.Tensor, split_in: 'TaskDivision',
                  split_out: 'TaskDivision', comm: qp.MPI.Comm,
                  rc: 'RunConfig', dim: int) -> torch.Tensor:
-    '''Return the contents of v, changed from split based on split_in to split
-    based on split_out, on the same communicator comm and dimension dim.'''
+    """Return the contents of v, changed from split based on split_in to split
+    based on split_out, on the same communicator comm and dimension dim."""
     # Bring split dimension to outermost (if necessary):
     sendbuf = (v.swapaxes(0, dim) if dim else v).contiguous()
     prod_rest = np.prod(sendbuf.shape[1:])  # number in all but the split dim
@@ -67,11 +67,11 @@ def fix_split(v: torch.Tensor,
               split_in: 'TaskDivision', comm_in: Optional[qp.MPI.Comm],
               split_out: 'TaskDivision', comm_out: Optional[qp.MPI.Comm],
               rc: 'RunConfig', dim: int) -> torch.Tensor:
-    '''Fix how v is split along dimension dim, from split_in on comm_in
+    """Fix how v is split along dimension dim, from split_in on comm_in
     at input to split_out on comm_out at output. One or more communicators
     could be None, corresponding to no split in the data at input and/or
     output. If data is split both before and after, comm_in and comm_out
-    must be the same communicator.'''
+    must be the same communicator."""
     if comm_in is None:
         if comm_out is None:
             return v  # No split before or after
@@ -90,7 +90,7 @@ FieldTypeRecip = TypeVar('FieldTypeRecip', 'FieldH', 'FieldG')
 
 
 def _change_real(v: FieldTypeReal, grid_out: 'Grid') -> FieldTypeReal:
-    'Switch real-space field to grid_out'
+    """Switch real-space field to grid_out"""
     grid_in = v.grid
     assert grid_in.shape == grid_out.shape
     data_out = fix_split(v.data, grid_in.split0, grid_in.comm,
@@ -99,7 +99,7 @@ def _change_real(v: FieldTypeReal, grid_out: 'Grid') -> FieldTypeReal:
 
 
 def _change_recip(v: FieldTypeRecip, grid_out: 'Grid') -> FieldTypeRecip:
-    'Switch reciprocal-space field to grid_out'
+    """Switch reciprocal-space field to grid_out"""
     grid_in = v.grid
     is_half = (v.__class__ is qp.grid.FieldH)
     if is_half:
@@ -307,7 +307,8 @@ if __name__ == "__main__":
         grid2 = make_grid((40, 48, 64), None)
 
         def get_test_field(grid: 'Grid'):
-            'A highly oscillatory and non-trivial function to test resampling'
+            """A highly oscillatory and non-trivial function to test resampling
+            """
             x = grid.get_mesh('R') / torch.tensor(grid.shape,
                                                   device=rc.device)
             k1 = (2 * np.pi) * torch.tensor([2, 4, 5], device=rc.device)

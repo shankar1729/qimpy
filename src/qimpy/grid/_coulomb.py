@@ -7,8 +7,8 @@ if TYPE_CHECKING:
 
 
 class Coulomb:
-    '''Coulomb interactions between fields and point charges.
-    TODO: support non-periodic geometries (truncation).'''
+    """Coulomb interactions between fields and point charges.
+    TODO: support non-periodic geometries (truncation)."""
     __slots__ = ('grid', 'ion_width', 'sigma', 'iR', 'iG')
     grid: 'Grid'  #: Grid associated with fields for coulomb interaction
     ion_width: float  #: Ion-charge gaussian width for embedding and solvation
@@ -17,7 +17,7 @@ class Coulomb:
     iG: torch.Tensor  #: Ewald reciprocal-space mesh points
 
     def __init__(self, grid: 'Grid', n_ions: int) -> None:
-        '''Initialize coulomb interactions.
+        """Initialize coulomb interactions.
 
         Parameters
         ----------
@@ -25,7 +25,7 @@ class Coulomb:
             Fields for coulomb interaction will be on this grid.
         n_ions
             Number of point charges to optimize Ewald sums for.
-        '''
+        """
         self.grid = grid
         rc = grid.rc
         lattice = grid.lattice
@@ -47,9 +47,9 @@ class Coulomb:
         # Compute Ewald real and reciprocal meshes:
         def get_mesh(Rbasis: torch.Tensor, Gbasis: torch.Tensor, sigma: float,
                      include_margin: bool, exclude_zero: bool) -> torch.Tensor:
-            '''Create mesh that includes all non-zero terms based on sigma,
+            """Create mesh that includes all non-zero terms based on sigma,
             optionally including a margin of 1 in grid units,
-            and optionaly excluding the zero (origin) point'''
+            and optionaly excluding the zero (origin) point"""
             Rcut = qp.grid.N_SIGMAS_PER_WIDTH * sigma
             # Create parallelopiped mesh:
             RlengthInv = Gbasis.norm(dim=0).to(rc.cpu) / (2*np.pi)
@@ -80,15 +80,17 @@ class Coulomb:
     def ewald(self, positions: torch.Tensor, Z: torch.Tensor,
               compute_stress: bool = False
               ) -> Tuple[float, torch.Tensor, torch.Tensor]:
-        '''Compute Ewald energy, forces and optionally stress.
+        """Compute Ewald energy, forces and optionally stress.
 
         Parameters
         ----------
-        positions:
+        positions
             Positions (fractional coordinates) of point charges
-        Z:
+        Z
             Charges of each point charge
-        '''
+        compute_stress
+            If True, compute stress for the final output (undefined otherwise)
+        """
         sigma = self.sigma
         sigmaSq = sigma**2
         eta = np.sqrt(0.5)/sigma
@@ -141,8 +143,8 @@ class Coulomb:
 
 if __name__ == '__main__':
     def test_nyquist():
-        '''Test dependence of Nyquist frequency with broadening
-        to inform heuristic for best ion width selection'''
+        """Test dependence of Nyquist frequency with broadening
+        to inform heuristic for best ion width selection"""
         import matplotlib.pyplot as plt
         dx = 0.2  # Typical grid spacing at 100 Eh plane-wave spacing
         rTest = 3.0  # Worst-case ion-fluid spacing (H in H3O+, NonlinearPCM)
