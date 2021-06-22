@@ -1,6 +1,7 @@
 import xml.etree.ElementTree as ET
 import qimpy as qp
 import numpy as np
+import torch
 import re
 from typing import TYPE_CHECKING
 
@@ -25,112 +26,120 @@ def _read_upf(self: 'Pseudopotential', filename: str, rc: 'RunConfig'):
     upf = ET.fromstring(open(filename, 'r').read().replace('&', '&amp;'))
     assert(upf.tag == 'UPF')
 
-    # Loop over sections in UPF file:
+    # Read header first:
+    section = upf.find('PP_HEADER')
+    assert section is not None
+
+    # --- Get element:
+    try:
+        self.element = section.attrib["element"].strip()
+        self.atomic_number = \
+            qp.ions.symbols.ATOMIC_NUMBERS[self.element]
+    except KeyError:
+        qp.log.error(
+            "  Could not determine atomic number for element '"
+            + self.element + "'.\n  Please edit pseudopotential to"
+            "use the standard chemical symbol.")
+        raise ValueError('Invalid chemical symbol in '+filename)
+    qp.log.info(f"  '{self.element}' pseudopotential,"
+                f" '{section.attrib['functional']}' functional")
+
+    # --- Non essential info:
+    def optional_attrib(name, prefix='  ', suffix='\n'):
+        attrib = section.attrib.get(name, None)
+        return ((prefix+attrib+suffix) if attrib else '')
+    optionals = (optional_attrib('generated')
+                 + optional_attrib('comment')
+                 + optional_attrib('author', '  Author: ', '')
+                 + optional_attrib('date', '  Date: ', ''))
+    if optionals:
+        qp.log.info(optionals.rstrip('\n'))
+
+    # --- Check for unsupported types:
+    self.is_paw = (
+        str(section.attrib.get("is_paw")).lower() in ['t', 'true'])
+    if self.is_paw:
+        qp.log.error("  PAW datasets are not yet supported.")
+        raise ValueError('PAW dataset in '+filename+' unsupported')
+
+    # --- Valence properties:
+    self.Z = float(section.attrib["z_valence"])
+    self.l_max = int(section.attrib["l_max"])
+    n_grid = int(section.attrib["mesh_size"])
+    n_beta = int(section.attrib["number_of_proj"])
+    n_psi = int(section.attrib["number_of_wfc"])
+    qp.log.info(f"  {self.Z:g} valence electrons, {n_psi}"
+                f" orbitals, {n_beta} projectors, {n_grid}"
+                f" radial grid points, with l_max = {self.l_max}")
+
+    # Get radial grid and integration weight before any radial functions:
+    section = upf.find('PP_MESH')
+    assert section is not None
+    r = None
+    for entry in section:
+        if entry.tag == 'PP_R':
+            r = np.fromstring(entry.text, sep=' ')
+            if not r[0]:  # avoid divide by 0 below
+                r[0] = 1e-3 * r[1]
+            self.r = torch.tensor(r, device=rc.device)
+        elif entry.tag == 'PP_RAB':
+            self.dr = torch.tensor(np.fromstring(entry.text, sep=' '),
+                                   device=rc.device)
+        else:
+            qp.log.info(f"  NOTE: ignored section '{entry.tag}'")
+    assert r is not None
+
+    # Read all remaining sections (order not relevant):
     for section in upf:
 
-        if section.tag == 'PP_INFO':
-            pass
-
-        elif section.tag == 'PP_HEADER':
-            # Get element:
-            try:
-                self.element = section.attrib["element"].strip()
-                self.atomic_number = \
-                    qp.ions.symbols.ATOMIC_NUMBERS[self.element]
-            except KeyError:
-                qp.log.error(
-                    "  Could not determine atomic number for element '"
-                    + self.element + "'.\n  Please edit pseudopotential to"
-                    "use the standard chemical symbol.")
-                raise ValueError('Invalid chemical symbol in '+filename)
-            qp.log.info(f"  '{self.element}' pseudopotential,"
-                        f" '{section.attrib['functional']}' functional")
-
-            # Non essential info:
-            def optional_attrib(name, prefix='  ', suffix='\n'):
-                attrib = section.attrib.get(name, None)
-                return ((prefix+attrib+suffix) if attrib else '')
-            optionals = (optional_attrib('generated')
-                         + optional_attrib('comment')
-                         + optional_attrib('author', '  Author: ', '')
-                         + optional_attrib('date', '  Date: ', ''))
-            if optionals:
-                qp.log.info(optionals.rstrip('\n'))
-
-            # Check for unsupported types:
-            self.is_paw = (
-                str(section.attrib.get("is_paw")).lower() in ['t', 'true'])
-            if self.is_paw:
-                qp.log.error("  PAW datasets are not yet supported.")
-                raise ValueError('PAW dataset in '+filename+' unsupported')
-
-            # Valence properties:
-            self.Z = float(section.attrib["z_valence"])
-            self.l_max = int(section.attrib["l_max"])
-            n_grid = int(section.attrib["mesh_size"])
-            n_beta = int(section.attrib["number_of_proj"])
-            n_psi = int(section.attrib["number_of_wfc"])
-            qp.log.info(f"  {self.Z:g} valence electrons, {n_psi}"
-                        f" orbitals, {n_beta} projectors, {n_grid}"
-                        f" radial grid points, with l_max = {self.l_max}")
-
-        elif section.tag == 'PP_MESH':
-            # Radial grid and integration weight:
-            for entry in section:
-                if entry.tag == 'PP_R':
-                    self.r_grid = np.fromstring(entry.text, sep=' ')
-                    if not self.r_grid[0]:  # avoid divide by 0 below
-                        self.r_grid[0] = 1e-3 * self.r_grid[1]
-                elif entry.tag == 'PP_RAB':
-                    self.dr_grid = np.fromstring(entry.text, sep=' ')
-                else:
-                    qp.log.info(f"  NOTE: ignored section '{entry.tag}'")
+        if section.tag in ('PP_INFO', 'PP_HEADER', 'PP_MESH'):
+            pass  # not needed / already parsed above
 
         elif section.tag == 'PP_NLCC':
             # Nonlinear / partial core correction (optional):
-            self.n_core = np.fromstring(section.text, sep=' ')
+            self.n_core = qp.ions.RadialFunction(
+                self.r, self.dr, np.fromstring(section.text, sep=' '))
 
         elif section.tag == 'PP_LOCAL':
             # Local potential:
-            self.Vloc = np.fromstring(section.text, sep=' ')
-            self.Vloc *= 0.5  # Convert from Ry to Eh
-            self.Vloc += np.where(
-                self.r_grid >= 0, self.Z/self.r_grid, 0.)  # remove Z/r part
+            self.Vloc = qp.ions.RadialFunction(
+                self.r, self.dr, 0.5 * np.fromstring(section.text, sep=' '))
+            # Note: 0.5 above converts from Ry to Eh
 
         elif section.tag == 'PP_NONLOCAL':
-            self.beta = np.zeros((n_beta, len(self.r_grid)))  # projectors
-            self.l_beta = np.zeros(n_beta, dtype=int)  # angular momenta
-
+            beta = np.zeros((n_beta, len(r)))  # projectors
+            l_beta = np.zeros(n_beta, dtype=int)  # angular momenta
             for entry in section:
-
                 if entry.tag.startswith('PP_BETA.'):
                     # Check projector number:
                     i_beta = int(entry.tag[8:]) - 1
                     assert((i_beta >= 0) and (i_beta < n_beta))
                     # Get projector angular momentum:
-                    self.l_beta[i_beta] = entry.attrib['angular_momentum']
-                    assert(self.l_beta[i_beta] <= self.l_max)
-                    # Read projector (and remove 1/r factor stored in PS):
-                    self.beta[i_beta] = np.fromstring(entry.text, sep=' ')
-                    self.beta[i_beta] *= np.where(
-                        self.r_grid >= 0, 1./self.r_grid, 0.)
-
+                    l_beta[i_beta] = entry.attrib['angular_momentum']
+                    assert(l_beta[i_beta] <= self.l_max)
+                    # Read projector (contains factor of r removed below):
+                    beta[i_beta] = np.fromstring(entry.text, sep=' ')
                 elif entry.tag == 'PP_DIJ':
                     # Get descreened 'D' matrix of pseudopotential:
                     if n_beta:
-                        self.D = np.fromstring(entry.text, sep=' ')
-                        self.D = self.D.reshape(n_beta, n_beta) * 0.5
-                        # Note: 0.5 converts from Ry to Eh
+                        self.D = torch.tensor(
+                            np.fromstring(entry.text, sep=' ') * 0.5,
+                            device=rc.device).reshape(n_beta, n_beta)
+                        # Note: 0.5 above converts from Ry to Eh
                     else:
                         # np.fromstring misbehaves for an empty string
-                        self.D = np.zeros((0, 0))
-
+                        self.D = torch.zeros((0, 0), device=rc.device)
                 else:
                     qp.log.info(f"  NOTE: ignored section '{entry.tag}'")
+            # Create projector radial function:
+            self.beta = qp.ions.RadialFunction(
+                self.r, self.dr,
+                beta * (r[None, :] ** -(l_beta + 1)[:, None]),
+                l_beta)
 
         elif section.tag == 'PP_PSWFC':
-            self.psi = np.zeros((n_psi, len(self.r_grid)))  # orbitals
-            self.l_psi = np.zeros(n_psi, dtype=int)  # angular momenta
+            psi = np.zeros((n_psi, len(r)))  # orbitals
+            l_psi = np.zeros(n_psi, dtype=int)  # angular momenta
             self.eig_psi = np.zeros(n_psi)  # eigenvalue by orbital
             for entry in section:
                 if entry.tag.startswith('PP_CHI.'):
@@ -138,28 +147,31 @@ def _read_upf(self: 'Pseudopotential', filename: str, rc: 'RunConfig'):
                     i_psi = int(entry.tag[7:]) - 1
                     assert((i_psi >= 0) and (i_psi < n_psi))
                     # Get orbital angular momentum:
-                    self.l_psi[i_psi] = entry.attrib['l']
-                    assert(self.l_psi[i_psi] <= self.l_max)
+                    l_psi[i_psi] = entry.attrib['l']
+                    assert(l_psi[i_psi] <= self.l_max)
                     # Report orbital:
                     occ = float(entry.attrib["occupation"])
                     label = entry.attrib["label"]
                     self.eig_psi[i_psi] = float(entry.attrib.get(
                         "pseudo_energy", "NaN")) * 0.5  # convert from Ry to Eh
-                    qp.log.info(f"    {label}   l: {self.l_psi[i_psi]}'"
+                    qp.log.info(f"    {label}   l: {l_psi[i_psi]}'"
                                 f"   occupation: {occ:4.1f}"
                                 f"   eigenvalue: {self.eig_psi[i_psi]}")
-                    # Read orbital (and remove 1/r factor stored in PS):
-                    self.psi[i_psi] = np.fromstring(entry.text, sep=' ')
-                    self.psi[i_psi] *= np.where(
-                        self.r_grid >= 0, 1./self.r_grid, 0.)
+                    # Read orbital (contains factor of r removed below):
+                    psi[i_psi] = np.fromstring(entry.text, sep=' ')
                 else:
                     qp.log.info(f"  NOTE: ignored section '{entry.tag}'")
+            # Create orbitals radial function:
+            self.psi = qp.ions.RadialFunction(
+                self.r, self.dr,
+                psi * (r[None, :] ** -(l_psi + 1)[:, None]),
+                l_psi)
 
         elif section.tag == 'PP_RHOATOM':
             # Read atom electron density (removing 4 pi r^2 factor in PS file):
-            self.rho_atom = np.fromstring(section.text, sep=' ')
-            self.rho_atom *= np.where(
-                self.r_grid >= 0, 1./(4*np.pi*self.r_grid**2), 0.)
+            self.rho_atom = qp.ions.RadialFunction(
+                self.r, self.dr,
+                np.fromstring(section.text, sep=' ') / (4*np.pi*(r**2)))
 
         elif section.tag == 'PP_SPIN_ORB':
             self.j_beta = np.zeros(n_beta)   # j for each projector
@@ -181,7 +193,7 @@ def _read_upf(self: 'Pseudopotential', filename: str, rc: 'RunConfig'):
                     qp.log.info(f"  NOTE: ignored section '{entry.tag}'")
 
         else:
-            qp.log.info(f"  NOTE: ignored section '{entry.tag}'")
+            qp.log.info(f"  NOTE: ignored section '{section.tag}'")
     watch.stop()
 
 
@@ -203,12 +215,15 @@ if __name__ == '__main__':
         ps = qp.ions.Pseudopotential(psPath+'/'+psName, rc)
 
         # Plot local potential and densities:
+        r = ps.r.to(rc.cpu)
         plt.figure()
         plt.title(psName + ' density/potential')
-        plt.plot(ps.r_grid, ps.rho_atom, label=r'$\rho_{\mathrm{atom}}(r)$')
+        plt.plot(r, ps.rho_atom.f.to(rc.cpu)[0],
+                 label=r'$\rho_{\mathrm{atom}}(r)$')
         if hasattr(ps, 'nCore'):
-            plt.plot(ps.r_grid, ps.n_core, label=r'$n_{\mathrm{core}}(r)$')
-        plt.plot(ps.r_grid, ps.r_grid * ps.Vloc,
+            plt.plot(r, ps.n_core.f.to(rc.cpu)[0],
+                     label=r'$n_{\mathrm{core}}(r)$')
+        plt.plot(r, r * ps.Vloc.f.to(rc.cpu)[0],
                  label=r'$r V_{\mathrm{loc}}(r)$')
         plt.xlabel(r'$r$')
         plt.xlim(0, 10.)
@@ -217,9 +232,9 @@ if __name__ == '__main__':
         # Plot projectors:
         plt.figure()
         plt.title(psName + ' projectors')
-        for i_beta, beta in enumerate(ps.beta):
-            plt.plot(ps.r_grid, beta,
-                     label=r'$\beta_'+'spdf'[ps.l_beta[i_beta]]+'(r)$')
+        for i, beta_i in enumerate(ps.beta.f.to(rc.cpu)):
+            l_i = int(ps.beta.l[i].item())
+            plt.plot(r, beta_i, label=r'$\beta_'+'spdf'[l_i]+f'(r)/r^{l_i}$')
         plt.xlabel(r'$r$')
         plt.xlim(0, 10.)
         plt.legend()
@@ -227,9 +242,9 @@ if __name__ == '__main__':
         # Plot projectors:
         plt.figure()
         plt.title(psName + ' orbitals')
-        for i_psi, psi in enumerate(ps.psi):
-            plt.plot(ps.r_grid, psi,
-                     label=r'$\psi_'+'spdf'[ps.l_psi[i_psi]]+'(r)$')
+        for i, psi_i in enumerate(ps.psi.f.to(rc.cpu)):
+            l_i = int(ps.psi.l[i].item())
+            plt.plot(r, psi_i, label=r'$\psi_'+'spdf'[l_i]+f'(r)/r^{l_i}$')
         plt.xlabel(r'$r$')
         plt.xlim(0, 10.)
         plt.legend()
