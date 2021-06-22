@@ -1,18 +1,18 @@
-'''Calculate spherical Bessel functions.'''
+"""Calculate spherical Bessel functions."""
 # List exported symbols for doc generation
-__all__ = ['jl']
+__all__ = ['jl_by_xl']
 
 import torch
 
 
-def jl(l_max: int, x: torch.Tensor) -> torch.Tensor:
-    '''Compute spherical bessel functions j_l(x) for each l <= l_max.
+def jl_by_xl(l_max: int, x: torch.Tensor) -> torch.Tensor:
+    """Compute spherical bessel functions j_l(x)/x^l for each l <= l_max.
     This is optimized to calculate j_l up to l = 6 efficiently combining
     recursion relations and Taylor expansions to achieve both absolute
     and relative errors < 1e-15 for all x. (The errors will grow beyond
     l = 6 due to instability of the efficient recursion relation chosen,
-    so do not use for much higher l without testing.)
-    '''
+    so do not use this routine for higher l without testing.)
+    """
     result = torch.empty((l_max+1,) + x.shape, dtype=x.dtype, device=x.device)
     taylor_prefac = 1.
     for l in range(l_max+1):
@@ -23,7 +23,7 @@ def jl(l_max: int, x: torch.Tensor) -> torch.Tensor:
         sel = torch.where(x <= x_cut)
         x_sel = x[sel]
         taylor_prefac /= (2*l + 1)
-        term = taylor_prefac * (x_sel ** l)  # first non-zero term
+        term = torch.full_like(x_sel, taylor_prefac)  # first non-zero term
         series = term.clone().detach()
         x_sel_sq = x_sel * x_sel
         for i in range(1, 9 + 2*l):
@@ -38,10 +38,10 @@ def jl(l_max: int, x: torch.Tensor) -> torch.Tensor:
             result_l[sel] = torch.sin(x_sel) / x_sel  # j_0(x)
         elif l == 1:
             result_l[sel] = (result[0][sel]  # j_0(x) = sin(x)/x from before
-                             - torch.cos(x_sel)) / x_sel  # convert to j_1(x)
+                             - torch.cos(x_sel)) / (x_sel * x_sel)  # to j_1/x
         else:
-            result_l[sel] = ((2*l - 1) * result[l-1][sel] / x_sel
-                             - result[l-2][sel])  # j_{l>1} by recursion
+            result_l[sel] = (((2*l - 1) * result[l-1][sel] - result[l-2][sel])
+                             / (x_sel * x_sel))  # j_l/x^l by recursion for l>1
     return result
 
 
@@ -54,10 +54,10 @@ if __name__ == '__main__':
     rc = qp.utils.RunConfig()
     x = np.logspace(-3, 3, 6000)
     l_max = 6
-    jl_ref = [spherical_jn(l, x) for l in range(l_max+1)]
-    jl_test = jl(l_max, torch.tensor(x, device=rc.device)).to(rc.cpu).numpy()
+    jl_ref = [spherical_jn(l, x)/(x**l) for l in range(l_max+1)]
+    jl_test = jl_by_xl(l_max, torch.tensor(x, device=rc.device)).to(rc.cpu)
     for l in range(l_max+1):
-        err_scale = np.maximum(x**(-l), x)  # to match forms near 0 and infty
+        err_scale = np.maximum(x**(l+1), 1)  # to match forms near 0 and infty
         err = np.abs(jl_test[l] - jl_ref[l]) * err_scale
         plt.plot(x, err, label=f'l = {l}')
         print(f'l: {l}  ErrMean: {err.mean():.3e}  ErrMax: {err.max():.3e}')
