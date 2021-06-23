@@ -147,3 +147,13 @@ class Grid:
         """
         return torch.stack(
             torch.meshgrid(*self.mesh1D[space])).permute(1, 2, 3, 0)
+
+    def get_Gmax(self) -> float:
+        """Get maximum wave-vector magnitude of the FFT grid."""
+        iG_box = torch.tensor(np.array([
+                [+1, +1, +1],
+                [+1, +1, -1],
+                [+1, -1, +1],
+                [+1, -1, -1]]) * (np.array(self.shape) // 2)[None, :],
+            device=self.rc.device, dtype=torch.double)
+        return (iG_box @ self.lattice.Gbasis.T).norm(dim=1).max().item()

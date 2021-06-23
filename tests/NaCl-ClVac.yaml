@@ -8,7 +8,6 @@ lattice:
 
 ions:
   pseudopotentials:
-    - ../../../JDFTx/build_testing/pseudopotentials/SG15/Cl_ONCV_PBE-1.0.upf
     - ../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
   coordinates:
     - [Na, 0.25, 0.25, 0.25]

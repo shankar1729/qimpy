@@ -199,3 +199,5 @@ class Ions:
         """
         system.energy['Eewald'], _, _ = system.coulomb.ewald(self.positions,
                                                              self.Z)
+        for ps in self.pseudopotentials:
+            ps.update(system.grid.get_Gmax(), system.coulomb.ion_width)

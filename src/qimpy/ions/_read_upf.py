@@ -102,6 +102,7 @@ def _read_upf(self: 'Pseudopotential', filename: str, rc: 'RunConfig'):
 
         elif section.tag == 'PP_LOCAL':
             # Local potential:
+            self.ion_width = np.inf  # No range separation yet
             self.Vloc = qp.ions.RadialFunction(
                 self.r, self.dr, 0.5 * np.fromstring(section.text, sep=' '))
             # Note: 0.5 above converts from Ry to Eh
