@@ -6,7 +6,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from scipy.linalg import solve_banded
-from typing import Optional
+from typing import Optional, Tuple
 
 
 def get_coeff(samples: torch.Tensor) -> torch.Tensor:
@@ -60,7 +60,8 @@ class Interpolator:
         interp = Interpolator(x, dx)  # create interpolator for points x
         y = interp(y_coeff)  # interpolate y_samples at locations x
     """
-    __slots__ = ('_mat',)
+    __slots__ = ('_shape', '_mat')
+    _shape: Tuple[int, ...]  #: Dimensions of x to reproduced at output
     _mat: torch.Tensor  #: internal sparse matrix used for interpolation
     _BLIP_TO_POLY: Optional[torch.Tensor] = None  #: blip to poly transform
 
@@ -70,8 +71,8 @@ class Interpolator:
         Optionally, initialize to calculate derivative of order `deriv`
         (must be <= 4, since quintic splines are :math:`C^4` continuous).
         """
-        assert len(x.shape) == 1
-        t = x[:, None] / dx  # dimensionless coordinate
+        self._shape = x.shape  # remember shape before flattening below
+        t = x.view(-1, 1) / dx  # dimensionless coordinate (flattened)
         i = torch.floor(t).to(torch.int)  # interval index
         t -= i  # convert to fractional coordinate within interval
         # Initialize blip matrix if not done so:
@@ -97,7 +98,7 @@ class Interpolator:
         else:
             f = (t ** powers) @ Interpolator._BLIP_TO_POLY
         # Construct the sparse marix interpolator:
-        n_x = x.shape[0]
+        n_x = t.shape[0]
         indices = torch.empty((2, n_x, 6))
         indices[0] = torch.arange(n_x, device=x.device)[:, None]
         indices[1] = i + powers  # fetch 6 adjacent coefficients for each
@@ -109,10 +110,10 @@ class Interpolator:
         n_coeff_needed = self._mat.shape[1]
         assert n_coeff_needed <= coeff.shape[0]
         if len(coeff.shape) == 1:
-            return self._mat @ coeff[:n_coeff_needed]
+            return (self._mat @ coeff[:n_coeff_needed]).view(self._shape)
         else:
             result = (self._mat @ coeff[:n_coeff_needed].flatten(1)).T
-            return result.view(coeff.shape[1:] + result.shape[-1:])
+            return result.view(coeff.shape[1:] + self._shape)
 
 
 if __name__ == "__main__":

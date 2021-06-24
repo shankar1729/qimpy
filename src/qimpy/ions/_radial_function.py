@@ -22,15 +22,16 @@ class RadialFunction:
     f_t_coeff: torch.Tensor  #: quintic spline coefficients for `f_t`
 
     def __init__(self, r: torch.Tensor, dr: torch.Tensor,
-                 f: Union[np.ndarray, torch.Tensor],
+                 f: Optional[Union[np.ndarray, torch.Tensor]] = None,
                  l: Optional[Union[np.ndarray, torch.Tensor]] = None) -> None:
         """Initialize real-space portion of radial function.
         Note that f should have a factor of r^l removed for correct
         subsequent behavior with transforms and solid harmonics."""
         self.r = r
         self.dr = dr
-        f = (f if isinstance(f, torch.Tensor)
-             else torch.tensor(f, device=r.device))
+        f = (torch.zeros_like(r) if f is None
+             else ((f if isinstance(f, torch.Tensor)
+                    else torch.tensor(f, device=r.device))))
         self.f = (f if (len(f.shape) == 2) else f[None])
         self.l = (torch.zeros(1, dtype=torch.int, device=r.device)
                   if l is None

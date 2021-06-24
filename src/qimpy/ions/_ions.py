@@ -8,13 +8,14 @@ if TYPE_CHECKING:
     from ..utils import RunConfig
     from ._pseudopotential import Pseudopotential
     from .._system import System
+    from ..grid import FieldR, FieldH
 
 
 class Ions:
     """Ionic system: ionic geometry and pseudopotentials. """
     __slots__ = ('rc', 'n_ions', 'n_types', 'symbols', 'slices',
                  'pseudopotentials', 'positions', 'types', 'M_initial',
-                 'Z', 'Z_tot')
+                 'Z', 'Z_tot', 'rho', 'Vloc', 'n_core')
     rc: 'RunConfig'
     n_ions: int  #: number of ions
     n_types: int  #: number of distinct ion types
@@ -24,8 +25,11 @@ class Ions:
     positions: torch.Tensor  #: fractional positions of each ion (n_ions x 3)
     types: torch.Tensor  #: type of each ion (n_ions, int)
     M_initial: Optional[torch.Tensor]  #: initial magnetic moment for each ion
-    Z: torch.Tensor  #: charge of each ion (n_ions, float)
+    Z: torch.Tensor  #: charge of each ion type (n_types, float)
     Z_tot: float  #: total ionic charge
+    rho: 'FieldH'  #: ionic charge density profile (uses coulomb.ion_width)
+    Vloc: 'FieldH'  #: local potential due to ions (including from rho)
+    n_core: 'FieldH'  #: partial core electronic density (for inclusion in XC)
 
     def __init__(self, *, rc: 'RunConfig',
                  coordinates: Optional[List] = None,
@@ -156,10 +160,9 @@ class Ions:
                 raise ValueError(f'no pseudopotential found for {symbol}')
 
         # Calculate total ionic charge (needed for number of electrons):
-        self.Z = torch.zeros(self.n_ions, device=rc.device)
-        for i_type, slice_i in enumerate(self.slices):
-            self.Z[slice_i] = self.pseudopotentials[i_type].Z
-        self.Z_tot = self.Z.sum().item()
+        self.Z = torch.tensor([ps.Z for ps in self.pseudopotentials],
+                              device=rc.device)
+        self.Z_tot = self.Z[self.types].sum().item()
         qp.log.info(f'\nTotal ion charge, Z_tot: {self.Z_tot:g}')
 
         # Initialize / check replica process grid dimension:
@@ -197,7 +200,50 @@ class Ions:
         The grids used for the potentials are derived from system,
         and the energy components are stored within system.E.
         """
-        system.energy['Eewald'], _, _ = system.coulomb.ewald(self.positions,
-                                                             self.Z)
-        for ps in self.pseudopotentials:
-            ps.update(system.grid.get_Gmax(), system.coulomb.ion_width)
+        system.energy['Eewald'] = system.coulomb.ewald(self.positions,
+                                                       self.Z[self.types])[0]
+        # Update ionic densities and potentials:
+        from .quintic_spline import Interpolator
+        grid = system.grid
+        iG = grid.get_mesh('H').to(torch.double)  # half-space
+        Gsq = ((iG @ grid.lattice.Gbasis.T)**2).sum(dim=-1)
+        G = Gsq.sqrt()
+        Ginterp = Interpolator(G, qp.ions.RadialFunction.DG)
+        SF = torch.empty((self.n_types,) + G.shape, dtype=torch.cdouble,
+                         device=G.device)  # structure factor by species
+        inv_volume = 1. / grid.lattice.volume
+        # --- collect radial coefficients
+        Vloc_coeff = []
+        n_core_coeff = []
+        Gmax = system.grid.get_Gmax()
+        ion_width = system.coulomb.ion_width
+        for i_type, ps in enumerate(self.pseudopotentials):
+            ps.update(Gmax, ion_width)
+            SF[i_type] = self.translation_phase(iG, self.slices[i_type]
+                                                ).sum(dim=-1) * inv_volume
+            Vloc_coeff.append(ps.Vloc.f_t_coeff)
+            n_core_coeff.append(ps.n_core.f_t_coeff)
+        # --- interpolate to G and collect with structure factors
+        self.Vloc = qp.grid.FieldH(grid, data=(
+            (SF * Ginterp(torch.hstack(Vloc_coeff))).sum(dim=0)))
+        self.n_core = qp.grid.FieldH(grid, data=(
+            (SF * Ginterp(torch.hstack(n_core_coeff))).sum(dim=0)))
+        self.rho = qp.grid.FieldH(grid, data=(
+            (-self.Z.view(-1, 1, 1, 1) * SF).sum(dim=0)
+            * torch.exp((-0.5*(ion_width**2)) * Gsq)))
+        # --- include long-range electrostatic part of Vloc:
+        self.Vloc += system.coulomb(self.rho)
+        # TODO: G=0 correction for ion-width
+
+        # Output to check:
+        tmp = (~self.Vloc).to(system.electrons.basis.grid)
+        if self.rc.is_head:
+            tmp.data.to(self.rc.cpu).numpy().tofile('tmp.Vloc')
+
+    def translation_phase(self, iG: torch.Tensor,
+                          atom_slice: slice = slice(None)) -> torch.Tensor:
+        """Get translation phases at `iG` for a slice of atoms.
+        The result has atoms as the final dimension; summing over that
+        dimension yields the structure factor corresponding to these atoms.
+        """
+        return qp.utils.cis((-2*np.pi) * (iG @ self.positions[atom_slice].T))

@@ -37,6 +37,11 @@ def ceildiv(num: IntLike, den: IntLike) -> IntLike:
     return (num + den-1) // den
 
 
+def cis(x: torch.Tensor) -> torch.Tensor:
+    """Compute complex exponential exp(i x)."""
+    return torch.polar(torch.ones_like(x), x)
+
+
 def ortho_matrix(O: torch.Tensor, use_cholesky: bool = True) -> torch.Tensor:
     """Return orthonormalization matrix of a basis.
     The basis is specified by its overlap matrix or metric, `O`.

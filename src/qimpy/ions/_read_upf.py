@@ -195,6 +195,13 @@ def _read_upf(self: 'Pseudopotential', filename: str, rc: 'RunConfig'):
 
         else:
             qp.log.info(f"  NOTE: ignored section '{section.tag}'")
+
+    # Make sure some common entries are set:
+    assert hasattr(self, 'Vloc')
+    if not hasattr(self, 'rho_atom'):
+        self.rho_atom = qp.ions.RadialFunction(self.r, self.dr)
+    if not hasattr(self, 'n_core'):
+        self.n_core = qp.ions.RadialFunction(self.r, self.dr)
     watch.stop()
 
 

@@ -4,17 +4,19 @@ import torch
 from typing import Tuple, TYPE_CHECKING
 if TYPE_CHECKING:
     from ._grid import Grid
+    from ._field import FieldH
 
 
 class Coulomb:
     """Coulomb interactions between fields and point charges.
     TODO: support non-periodic geometries (truncation)."""
-    __slots__ = ('grid', 'ion_width', 'sigma', 'iR', 'iG')
+    __slots__ = ('grid', 'ion_width', 'sigma', 'iR', 'iG', '_kernel')
     grid: 'Grid'  #: Grid associated with fields for coulomb interaction
     ion_width: float  #: Ion-charge gaussian width for embedding and solvation
     sigma: float  #: Ewald range-separation parameter
     iR: torch.Tensor  #: Ewald real-space mesh points
     iG: torch.Tensor  #: Ewald reciprocal-space mesh points
+    _kernel: torch.Tensor  #: Cached coulomb kernel
 
     def __init__(self, grid: 'Grid', n_ions: int) -> None:
         """Initialize coulomb interactions.
@@ -76,6 +78,16 @@ class Coulomb:
                            include_margin=False, exclude_zero=True)
         qp.log.info(f'Ewald:  sigma: {self.sigma:f}'
                     f'  nR: {self.iR.shape[0]}  nG: {self.iG.shape[0]}')
+
+        # Set up kernel:
+        iG = grid.get_mesh('H').to(torch.double)  # half-space
+        Gsq = ((iG @ grid.lattice.Gbasis.T)**2).sum(dim=-1)
+        self._kernel = torch.where(Gsq == 0., 0., (4*np.pi)/Gsq)
+
+    def __call__(self, rho: 'FieldH') -> 'FieldH':
+        """Apply coulomb operator on charge density `rho`"""
+        assert self.grid is rho.grid
+        return qp.grid.FieldH(self.grid, data=(self._kernel * rho.data))
 
     def ewald(self, positions: torch.Tensor, Z: torch.Tensor,
               compute_stress: bool = False
