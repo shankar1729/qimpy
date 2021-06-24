@@ -10,7 +10,7 @@ class RadialFunction:
     and G^l in reciprocal space (f_t). This makes it convenient to work with
     solid harmonics that already contain these factors of r^l or G^l.
     """
-    __slots__ = ('r', 'dr', 'f', 'l', 'Gmax', 'G', 'f_t')
+    __slots__ = ('r', 'dr', 'f', 'l', 'Gmax', 'G', 'f_t', 'f_t_coeff')
     r: torch.Tensor  #: radial grid
     dr: torch.Tensor  #: radial grid integration weights (dr in 4 pi r^2 dr)
     f: torch.Tensor  #: real-space values corresponding to r (n x len(r))
@@ -19,6 +19,7 @@ class RadialFunction:
     Gmax: float  #: max G till which reciprocal space versions are current
     G: torch.Tensor  #: uniform reciprocal-space grid
     f_t: torch.Tensor  #: reciprocal-space version of each f on `G`
+    f_t_coeff: torch.Tensor  #: quintic spline coefficients for `f_t`
 
     def __init__(self, r: torch.Tensor, dr: torch.Tensor,
                  f: Union[np.ndarray, torch.Tensor],
@@ -79,12 +80,17 @@ class RadialFunction:
         comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(f_t),
                        op=qp.MPI.SUM)  # collect over r that was split above
 
+        # Compute spline coefficients:
+        f_t_coeff = qp.ions.quintic_spline.get_coeff(f_t)
+
         # Split results back over input radial functions:
         nf = [rf.f.shape[0] for rf in radial_functions]
         f_t_split = f_t.split(nf)
+        f_t_coeff_split = f_t_coeff.split(nf, dim=1)
         for i_rf, rf in enumerate(radial_functions):
             rf.G = G
             rf.f_t = f_t_split[i_rf]
+            rf.f_t_coeff = f_t_coeff_split[i_rf]
         if name:
             qp.log.info(f'Transformed {f.shape[0]} radial functions for {name}'
                         f' from n_r={r_div.n_tot} to nG={nG} points.')
