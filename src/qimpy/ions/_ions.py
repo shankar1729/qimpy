@@ -103,7 +103,7 @@ class Ions:
 
         # Convert to tensors before storing in class object:
         self.positions = torch.tensor(positions, device=rc.device)
-        self.types = torch.tensor(types, device=rc.device)
+        self.types = torch.tensor(types, device=rc.device, dtype=torch.long)
         # --- Fill in missing magnetizations (if any specified):
         M_lengths = set([(len(M) if isinstance(M, list) else 1)
                          for M in M_initial if M])
@@ -200,11 +200,16 @@ class Ions:
         The grids used for the potentials are derived from system,
         and the energy components are stored within system.E.
         """
+        grid = system.grid
+        self.rho = qp.grid.FieldH(grid)  # initialize zero ionic charge
+        self.Vloc = qp.grid.FieldH(grid)  # initizliae zero local potential
+        self.n_core = qp.grid.FieldH(grid)  # initialize zero core density
+        if not self.n_ions:
+            return  # no contributions below if no ions!
         system.energy['Eewald'] = system.coulomb.ewald(self.positions,
                                                        self.Z[self.types])[0]
         # Update ionic densities and potentials:
         from .quintic_spline import Interpolator
-        grid = system.grid
         iG = grid.get_mesh('H').to(torch.double)  # half-space
         Gsq = ((iG @ grid.lattice.Gbasis.T)**2).sum(dim=-1)
         G = Gsq.sqrt()
@@ -224,13 +229,11 @@ class Ions:
             Vloc_coeff.append(ps.Vloc.f_t_coeff)
             n_core_coeff.append(ps.n_core.f_t_coeff)
         # --- interpolate to G and collect with structure factors
-        self.Vloc = qp.grid.FieldH(grid, data=(
-            (SF * Ginterp(torch.hstack(Vloc_coeff))).sum(dim=0)))
-        self.n_core = qp.grid.FieldH(grid, data=(
-            (SF * Ginterp(torch.hstack(n_core_coeff))).sum(dim=0)))
-        self.rho = qp.grid.FieldH(grid, data=(
-            (-self.Z.view(-1, 1, 1, 1) * SF).sum(dim=0)
-            * torch.exp((-0.5*(ion_width**2)) * Gsq)))
+        self.Vloc.data = (SF * Ginterp(torch.hstack(Vloc_coeff))).sum(dim=0)
+        self.n_core.data = (SF * Ginterp(torch.hstack(n_core_coeff))
+                            ).sum(dim=0)
+        self.rho.data = ((-self.Z.view(-1, 1, 1, 1) * SF).sum(dim=0)
+                         * torch.exp((-0.5*(ion_width**2)) * Gsq))
         # --- include long-range electrostatic part of Vloc:
         self.Vloc += system.coulomb(self.rho, correct_G0_width=True)
 
