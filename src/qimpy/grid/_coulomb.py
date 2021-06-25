@@ -84,10 +84,17 @@ class Coulomb:
         Gsq = ((iG @ grid.lattice.Gbasis.T)**2).sum(dim=-1)
         self._kernel = torch.where(Gsq == 0., 0., (4*np.pi)/Gsq)
 
-    def __call__(self, rho: 'FieldH') -> 'FieldH':
-        """Apply coulomb operator on charge density `rho`"""
+    def __call__(self, rho: 'FieldH',
+                 correct_G0_width: bool = False) -> 'FieldH':
+        """Apply coulomb operator on charge density `rho`.
+        If correct_G0_width = True, rho is a point charge distribution
+        widened by `ion_width` and needs a corresponding G=0 correction.
+        """
         assert self.grid is rho.grid
-        return qp.grid.FieldH(self.grid, data=(self._kernel * rho.data))
+        result = qp.grid.FieldH(self.grid, data=(self._kernel * rho.data))
+        if correct_G0_width:
+            result.o += rho.o * (4*np.pi * (-0.5*(self.ion_width**2)))
+        return result
 
     def ewald(self, positions: torch.Tensor, Z: torch.Tensor,
               compute_stress: bool = False

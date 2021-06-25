@@ -232,13 +232,7 @@ class Ions:
             (-self.Z.view(-1, 1, 1, 1) * SF).sum(dim=0)
             * torch.exp((-0.5*(ion_width**2)) * Gsq)))
         # --- include long-range electrostatic part of Vloc:
-        self.Vloc += system.coulomb(self.rho)
-        # TODO: G=0 correction for ion-width
-
-        # Output to check:
-        tmp = (~self.Vloc).to(system.electrons.basis.grid)
-        if self.rc.is_head:
-            tmp.data.to(self.rc.cpu).numpy().tofile('tmp.Vloc')
+        self.Vloc += system.coulomb(self.rho, correct_G0_width=True)
 
     def translation_phase(self, iG: torch.Tensor,
                           atom_slice: slice = slice(None)) -> torch.Tensor:

@@ -104,6 +104,25 @@ class Field(metaclass=ABCMeta):
             norm_sq = self.grid.comm.allreduce(norm_sq, qp.MPI.SUM)
         return np.sqrt(norm_sq)
 
+    def get_origin_index(self):
+        """Return index into local data of the spatial index = 0 component(s),
+        which corresponds to r = 0 for real-space fields and to the G = 0
+        component for reciprocal-space fields. Returns an empty index
+        if the origin component is not local to this process.
+        The `o` property provides convenient access to data at this index.
+        """
+        return ((slice(None),) * (len(self.data.shape)-3)  # batch dimensions
+                + (((), (), ()) if self.grid.i_proc else (0, 0, 0)))
+
+    @property
+    def o(self) -> torch.Tensor:
+        """Slice of `data` corresponding to :meth:`get_origin_index`."""
+        return self.data[self.get_origin_index()]
+
+    @o.setter
+    def o(self, other: torch.Tensor) -> None:
+        self.data[self.get_origin_index()] = other
+
 
 class FieldR(Field):
     """Real fields in real space."""
