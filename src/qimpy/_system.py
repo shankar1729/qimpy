@@ -60,6 +60,7 @@ class System:
         # Initialize ionic potentials and energies at initial configuration:
         self.energy = qp.Energy()
         self.ions.update(self)
+        self.electrons.update(self)
 
         qp.log.info(f'\nInitialization completed at t[s]: {rc.clock():.2f}\n')
 

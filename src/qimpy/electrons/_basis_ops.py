@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ._basis import Basis
     from ._wavefunction import Wavefunction
+    from ..grid import FieldR
 
 
 def _apply_ke(self: 'Basis', C: 'Wavefunction') -> 'Wavefunction':
@@ -17,11 +18,11 @@ def _apply_ke(self: 'Basis', C: 'Wavefunction') -> 'Wavefunction':
                                      band_division=C.band_division)
 
 
-def _apply_potential(self: 'Basis', V: torch.Tensor,
+def _apply_potential(self: 'Basis', V: 'FieldR',
                      C: 'Wavefunction') -> 'Wavefunction':
     'Apply potential `V` to wavefunction `C`'
     shape = self.grid.shape
-    assert V.shape == shape
+    Vdata = V.to(self.grid).data  # change potential to basis grid if needed
 
     # Move wavefunctions to band-split, basis-together position:
     need_move = (self.rc.n_procs_b > 1) and (C.band_division is None)
@@ -53,7 +54,7 @@ def _apply_potential(self: 'Basis', V: torch.Tensor,
         # Expand -> ifft -> multiply V -> fft -> reduce back (on block)
         Cb[index] = coeff[:, :, b_start:b_stop].permute(1, 4, 0, 2, 3)
         VCb = self.grid.ifft(Cb.view((n_spins, nk, b_size, n_spinor) + shapeG))
-        VCb *= V
+        VCb *= Vdata
         VCb = self.grid.fft(VCb).flatten(-3)
         coeff[:, :, b_start:b_stop] = VCb[index].permute(2, 0, 3, 4, 1)
         # Advance to next block of data:

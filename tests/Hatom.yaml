@@ -1,0 +1,14 @@
+lattice:
+  system: cubic
+  modification: face-centered
+  a: 20.  # bohrs
+
+ions:
+  pseudopotentials:
+    - ../../../../Pseudopotentials/PSlib/H.pbe-n-nc.UPF
+  coordinates:
+    - [H, 0., 0., 0.]
+
+electrons:
+  n-bands: 1
+  n-bands-extra: 3

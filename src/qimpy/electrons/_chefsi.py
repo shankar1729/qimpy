@@ -83,7 +83,7 @@ class CheFSI(Davidson):
 
             # Filter parameters:
             b_up = (el.basis.ke_cutoff  # upper bound on KE
-                    + el.V_ks.max())  # upper bound on PE
+                    + el.V_ks.data.max())  # upper bound on PE
             b_lo = el.eig.max(dim=2)[0]  # Lower end of filter suppression
             a_lo = el.eig.min(dim=2)[0]  # Point that sets filter scaling
 
