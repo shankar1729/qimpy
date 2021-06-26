@@ -10,9 +10,9 @@ class Energy(dict):
         result = ''
         for name, value in self.items():
             if value:
-                result += f'{name:9s} = {value:25.16f}\n'
+                result += f'{name:>9s} = {value:25.16f}\n'
         result += ('-' * 37)
-        result += f'\n{self.name():9s} = {float(self):25.16f}'
+        result += f'\n{self.name():>9s} = {float(self):25.16f}'
         return result
 
     def name(self) -> str:

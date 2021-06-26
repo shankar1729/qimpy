@@ -10,5 +10,4 @@ ions:
     - [H, 0., 0., 0.]
 
 electrons:
-  n-bands: 1
   n-bands-extra: 3

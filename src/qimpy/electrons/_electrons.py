@@ -22,7 +22,8 @@ class Electrons:
     """Electronic subsystem"""
     __slots__ = ('rc', 'kpoints', 'spin_polarized', 'spinorial', 'n_spins',
                  'n_spinor', 'w_spin', 'fillings', 'n_bands', 'n_bands_extra',
-                 'basis', 'diagonalize', 'C', 'eig', 'deig_max', 'V_ks')
+                 'basis', 'diagonalize', 'C', 'mu', 'f', 'eig', 'deig_max',
+                 'V_ks')
     rc: 'RunConfig'  #: Current run configuration
     kpoints: 'Kpoints'  #: Set of kpoints (mesh or path)
     spin_polarized: bool  #: Whether calculation is spin-polarized
@@ -36,6 +37,8 @@ class Electrons:
     basis: 'Basis'  #: Plane-wave basis for wavefunctions
     diagonalize: 'Davidson'  #: Hamiltonian diagonalization method
     C: 'Wavefunction'  #: Electronic wavefunctions
+    mu: float  #: electron chemical potential
+    f: torch.Tensor  #: Electronic occupations
     eig: torch.Tensor  #: Electronic orbital eigenvalues
     deig_max: float  #: Estimate of accuracy of current `eig`
     V_ks: 'FieldR'  #: Kohn-Sham potential (local part)
@@ -218,8 +221,8 @@ class Electrons:
                 electrons=self)
         qp.log.info('diagonalization: ' + repr(self.diagonalize))
 
-    def update(self, system: 'System') -> None:
-        """Update electron density and potential"""
+    def update_potential(self, system: 'System') -> None:
+        """Update density-dependent energy terms and electron potential."""
         self.V_ks = ~system.ions.Vloc
 
     def output(self) -> None:

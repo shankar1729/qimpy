@@ -60,13 +60,15 @@ class System:
         # Initialize ionic potentials and energies at initial configuration:
         self.energy = qp.Energy()
         self.ions.update(self)
-        self.electrons.update(self)
 
         qp.log.info(f'\nInitialization completed at t[s]: {rc.clock():.2f}\n')
 
     def run(self):
         """Run any actions specified in the input."""
         # TODO: systematize selection of what actions to perform
+        self.electrons.fillings.update(self)
+        self.electrons.update_potential(self)
         self.electrons.diagonalize()
+        self.electrons.fillings.update(self)
         self.electrons.output()
         qp.log.info(f'\nEnergy components:\n{repr(self.energy)}')

@@ -22,7 +22,7 @@ def _apply_potential(self: 'Basis', V: 'FieldR',
                      C: 'Wavefunction') -> 'Wavefunction':
     'Apply potential `V` to wavefunction `C`'
     shape = self.grid.shape
-    Vdata = V.to(self.grid).data  # change potential to basis grid if needed
+    Vdata = (~((~V).to(self.grid))).data  # change V to basis grid if needed
 
     # Move wavefunctions to band-split, basis-together position:
     need_move = (self.rc.n_procs_b > 1) and (C.band_division is None)
