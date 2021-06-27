@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ._basis import Basis
     from ._wavefunction import Wavefunction
-    from ..grid import FieldR
+    from ..grid import FieldR, FieldH
 
 
 def _apply_ke(self: 'Basis', C: 'Wavefunction') -> 'Wavefunction':
@@ -18,11 +18,11 @@ def _apply_ke(self: 'Basis', C: 'Wavefunction') -> 'Wavefunction':
                                      band_division=C.band_division)
 
 
-def _apply_potential(self: 'Basis', V: 'FieldR',
+def _apply_potential(self: 'Basis', V: 'FieldH',
                      C: 'Wavefunction') -> 'Wavefunction':
     'Apply potential `V` to wavefunction `C`'
     shape = self.grid.shape
-    Vdata = (~((~V).to(self.grid))).data  # change V to basis grid if needed
+    Vdata = (~(V.to(self.grid))).data  # change to real space on basis grid
 
     # Move wavefunctions to band-split, basis-together position:
     need_move = (self.rc.n_procs_b > 1) and (C.band_division is None)

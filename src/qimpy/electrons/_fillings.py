@@ -126,6 +126,7 @@ class Fillings:
                 electrons.f[..., n_full] = (f_sum - n_full)  # left-over part
             electrons.mu = np.nan
             # TODO: support initial magnetization, reading from file etc.
+
         # Update fillings if necessary:
         if (self.sigma is not None) and (not np.isinf(electrons.deig_max)):
             def n_electrons_err(mu):
@@ -147,7 +148,7 @@ class Fillings:
                                              extra_outputs=True)
             system.energy['-TS'] = -self.sigma * self.rc.comm_k.allreduce(
                 (w_ks * S).sum().item(), qp.MPI.SUM)
-            qp.log.info(f'  fillings.update:  mu: {electrons.mu:.9f}'
+            qp.log.info(f'  FillingsUpdate:  mu: {electrons.mu:.9f}'
                         f'  n_electrons: {self.n_electrons:.6f}')
 
 

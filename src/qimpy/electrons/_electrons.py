@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from ..lattice import Lattice
     from ..ions import Ions
     from ..symmetries import Symmetries
-    from ..grid import FieldR
+    from ..grid import FieldR, FieldH
     from .. import System
     from ._kpoints import Kpoints, Kmesh, Kpath
     from ._fillings import Fillings
@@ -41,7 +41,7 @@ class Electrons:
     f: torch.Tensor  #: Electronic occupations
     eig: torch.Tensor  #: Electronic orbital eigenvalues
     deig_max: float  #: Estimate of accuracy of current `eig`
-    V_ks: 'FieldR'  #: Kohn-Sham potential (local part)
+    V_ks: 'FieldH'  #: Kohn-Sham potential (local part)
 
     hamiltonian = _hamiltonian
 
@@ -223,7 +223,7 @@ class Electrons:
 
     def update_potential(self, system: 'System') -> None:
         """Update density-dependent energy terms and electron potential."""
-        self.V_ks = ~system.ions.Vloc
+        self.V_ks = system.ions.Vloc
 
     def output(self) -> None:
         """Save any configured outputs (TODO: systematize this)"""
