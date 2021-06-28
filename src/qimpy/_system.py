@@ -68,7 +68,7 @@ class System:
         # TODO: systematize selection of what actions to perform
         self.electrons.fillings.update(self)
         n_prev = None
-        for i_scf in range(10):
+        for i_scf in range(20):
             self.electrons.update_density(self)
             if n_prev is not None:
                 self.electrons.n = 0.5 * (n_prev + self.electrons.n)

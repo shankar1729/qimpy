@@ -16,14 +16,15 @@ if TYPE_CHECKING:
     from ._davidson import Davidson
     from ._chefsi import CheFSI
     from ._wavefunction import Wavefunction
+    from ._xc import XC
 
 
 class Electrons:
     """Electronic subsystem"""
     __slots__ = ('rc', 'kpoints', 'spin_polarized', 'spinorial', 'n_spins',
                  'n_spinor', 'w_spin', 'fillings', 'n_bands', 'n_bands_extra',
-                 'basis', 'diagonalize', 'C', 'mu', 'f', 'eig', 'deig_max',
-                 'n', 'V_ks')
+                 'basis', 'xc', 'diagonalize', 'C', 'mu', 'f',
+                 'eig', 'deig_max', 'n', 'V_ks')
     rc: 'RunConfig'  #: Current run configuration
     kpoints: 'Kpoints'  #: Set of kpoints (mesh or path)
     spin_polarized: bool  #: Whether calculation is spin-polarized
@@ -35,6 +36,7 @@ class Electrons:
     n_bands: int  #: Number of bands to calculate
     n_bands_extra: int  #: Number of extra bands during diagonalization
     basis: 'Basis'  #: Plane-wave basis for wavefunctions
+    xc: 'XC'  #: Exchange-correlation functional
     diagonalize: 'Davidson'  #: Hamiltonian diagonalization method
     C: 'Wavefunction'  #: Electronic wavefunctions
     mu: float  #: electron chemical potential
@@ -53,6 +55,7 @@ class Electrons:
                  spin_polarized: bool = False, spinorial: bool = False,
                  fillings: Optional[Union[dict, 'Fillings']] = None,
                  basis: Optional[Union[dict, 'Basis']] = None,
+                 xc: Optional[Union[dict, 'XC']] = None,
                  n_bands: Optional[Union[int, str]] = None,
                  n_bands_extra: Optional[Union[int, str]] = None,
                  davidson: Optional[Union[dict, 'Davidson']] = None,
@@ -94,6 +97,9 @@ class Electrons:
         basis : qimpy.electrons.Basis or None, optional
             Wavefunction basis set (plane waves).
             Default: use default qimpy.electrons.Basis()
+        xc : qimpy.electrons.XC or None, optional
+            Exchange-correlation functional.
+            Default: use LDA. TODO: update when more options added.
         n_bands : {'x<scale>', 'atomic', int}, default: 'x1.'
             Number of bands, specified as a scale relative to the minimum
             number of bands to accommodate electrons i.e. 'x1.5' implies
@@ -205,6 +211,9 @@ class Electrons:
                                device=rc.device)
         self.deig_max = np.inf  # note that eigenvalues are completely wrong!
 
+        # Initialize exchange-correlation functional:
+        self.xc = qp.construct(qp.electrons.XC, xc, 'xc')
+
         # Initialize diagonalizer:
         n_options = np.count_nonzero([(d is not None)
                                       for d in (davidson, chefsi)])
@@ -241,8 +250,9 @@ class Electrons:
         self.V_ks = system.ions.Vloc + VH
         system.energy['EH'] = 0.5 * (rho ^ VH).item()
         system.energy['Eloc'] = (rho ^ system.ions.Vloc).item()
-        # TODO: corresponding energy terms
-        # TODO: XC contributions
+        # Exchange-correlation contributions:
+        system.energy['Exc'], Vxc = self.xc(self.n + system.ions.n_core)
+        self.V_ks = self.V_ks + Vxc
 
     def output(self) -> None:
         """Save any configured outputs (TODO: systematize this)"""

@@ -128,7 +128,7 @@ class Grid:
                                'ke-cutoff or shape must be specified')
             self.shape = tuple(symmetries.get_grid_shape(shape_min))
         qp.log.info(f'selected shape: {self.shape}')
-        self.dV = self.lattice.volume / np.prod(self.shape)
+        self.dV = self.lattice.volume / float(np.prod(self.shape))
         _init_grid_fft(self)
 
     def get_mesh(self, space: str) -> torch.Tensor:

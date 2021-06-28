@@ -6,7 +6,7 @@ from typing import Optional, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING:
     from ..utils import TaskDivision, RunConfig
     from ._grid import Grid
-    from ._field import FieldR, FieldC, FieldH, FieldG
+    from ._field import Field, FieldR, FieldC, FieldH, FieldG
 
 
 def scatter(v: torch.Tensor, split_out: 'TaskDivision',
