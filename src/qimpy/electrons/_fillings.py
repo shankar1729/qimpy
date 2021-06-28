@@ -132,12 +132,12 @@ class Fillings:
             def n_electrons_err(mu):
                 """Root function for finding chemical potential"""
                 n_electrons = self.rc.comm_k.allreduce(
-                    (w_ks * self.compute(electrons.eig, mu)).sum().item(),
+                    (w_sk * self.compute(electrons.eig, mu)).sum().item(),
                     qp.MPI.SUM)
                 # Broadcast across replica for machine-precision consistency:
                 return self.rc.comm_kb.bcast(n_electrons - self.n_electrons)
             # Bracket mu over range of eigenvalues (with margin):
-            w_ks = electrons.basis.wk.view(1, -1, 1) * electrons.w_spin
+            w_sk = electrons.basis.w_sk
             eig_min = self.rc.comm_kb.allreduce(electrons.eig.min().item(),
                                                 qp.MPI.MIN) - 30.*self.sigma
             eig_max = self.rc.comm_kb.allreduce(electrons.eig.max().item(),
@@ -147,7 +147,7 @@ class Fillings:
             electrons.f, _, S = self.compute(electrons.eig, electrons.mu,
                                              extra_outputs=True)
             system.energy['-TS'] = -self.sigma * self.rc.comm_k.allreduce(
-                (w_ks * S).sum().item(), qp.MPI.SUM)
+                (w_sk * S).sum().item(), qp.MPI.SUM)
             qp.log.info(f'  FillingsUpdate:  mu: {electrons.mu:.9f}'
                         f'  n_electrons: {self.n_electrons:.6f}')
 

@@ -42,6 +42,15 @@ def cis(x: torch.Tensor) -> torch.Tensor:
     return torch.polar(torch.ones_like(x), x)
 
 
+def abs_squared(x: torch.Tensor) -> torch.Tensor:
+    """Compute absolute value squared of complex or real tensor.
+    Avoids complex multiply and square root for efficiency."""
+    if x.is_complex():
+        return torch.view_as_real(x).square().sum(dim=-1)
+    else:
+        return x.square()
+
+
 def ortho_matrix(O: torch.Tensor, use_cholesky: bool = True) -> torch.Tensor:
     """Return orthonormalization matrix of a basis.
     The basis is specified by its overlap matrix or metric, `O`.

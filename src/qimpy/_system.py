@@ -67,6 +67,7 @@ class System:
         """Run any actions specified in the input."""
         # TODO: systematize selection of what actions to perform
         self.electrons.fillings.update(self)
+        self.electrons.update_density(self)
         self.electrons.update_potential(self)
         self.electrons.diagonalize()
         self.electrons.fillings.update(self)

@@ -23,7 +23,7 @@ class Electrons:
     __slots__ = ('rc', 'kpoints', 'spin_polarized', 'spinorial', 'n_spins',
                  'n_spinor', 'w_spin', 'fillings', 'n_bands', 'n_bands_extra',
                  'basis', 'diagonalize', 'C', 'mu', 'f', 'eig', 'deig_max',
-                 'V_ks')
+                 'n', 'V_ks')
     rc: 'RunConfig'  #: Current run configuration
     kpoints: 'Kpoints'  #: Set of kpoints (mesh or path)
     spin_polarized: bool  #: Whether calculation is spin-polarized
@@ -41,6 +41,7 @@ class Electrons:
     f: torch.Tensor  #: Electronic occupations
     eig: torch.Tensor  #: Electronic orbital eigenvalues
     deig_max: float  #: Estimate of accuracy of current `eig`
+    n: 'FieldH'  #: Electron (spin-)density
     V_ks: 'FieldH'  #: Kohn-Sham potential (local part)
 
     hamiltonian = _hamiltonian
@@ -220,6 +221,12 @@ class Electrons:
                 qp.electrons.CheFSI, chefsi, 'chefsi',
                 electrons=self)
         qp.log.info('diagonalization: ' + repr(self.diagonalize))
+
+    def update_density(self, system: 'System') -> None:
+        """Update electron density from wavefunctions and fillings.
+        Result is in system grid in reciprocal space."""
+        self.n = ~(self.basis.collect_density(self.C, self.f)).to(system.grid)
+        # TODO: ultrasoft augmentation and symmetrization
 
     def update_potential(self, system: 'System') -> None:
         """Update density-dependent energy terms and electron potential."""

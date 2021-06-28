@@ -102,7 +102,7 @@ class Davidson:
         """Compute the sum over band eigenvalues, averaged over k"""
         electrons = self.electrons
         return self.rc.comm_k.allreduce((
-            electrons.w_spin * electrons.basis.wk.view(1, -1, 1)
+            electrons.basis.w_sk
             * electrons.eig[..., :electrons.n_bands]).sum().item(), qp.MPI.SUM)
 
     def _check_deig(self, deig: torch.Tensor,
@@ -135,7 +135,7 @@ class Davidson:
         eig_threshold = eig_threshold if eig_threshold else self.eig_threshold
 
         # Initialize subspace:
-        if(2 * n_bands_max >= el.basis.n_min):
+        if 2 * n_bands_max >= el.basis.n_min:
             raise ValueError(
                 f'n_bands + n_bands_extra = {n_bands_max} exceeds'
                 f' min(n_basis)/2 = {el.basis.n_min//2} in Davidson')

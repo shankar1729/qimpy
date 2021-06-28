@@ -50,9 +50,6 @@ class CheFSI(Davidson):
         Also available as :meth:`__call__` to make `CheFSI` callable.
         """
         el = self.electrons
-        n_spins = el.n_spins
-        nk_mine = el.kpoints.n_mine
-        w_sk = el.w_spin * el.basis.wk.view(1, -1, 1)
         n_bands = el.n_bands
         helper = (type(self) != CheFSI)
         inner_loop = not (helper or ((n_iterations is None)

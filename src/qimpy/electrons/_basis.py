@@ -1,7 +1,7 @@
 import qimpy as qp
 import numpy as np
 import torch
-from ._basis_ops import _apply_ke, _apply_potential
+from ._basis_ops import _apply_ke, _apply_potential, _collect_density
 from typing import Optional, Tuple, Union, TYPE_CHECKING
 if TYPE_CHECKING:
     from ..utils import RunConfig
@@ -16,7 +16,7 @@ class Basis(qp.utils.TaskDivision):
     """Plane-wave basis for electronic wavefunctions. The underlying
      :class:`qimpy.utils.TaskDivision` splits plane waves over `rc.comm_b`"""
     __slots__ = ('rc', 'lattice', 'ions', 'kpoints', 'n_spins', 'n_spinor',
-                 'k', 'wk', 'real_wavefunctions', 'ke_cutoff', 'grid',
+                 'k', 'wk', 'w_sk', 'real_wavefunctions', 'ke_cutoff', 'grid',
                  'iG', 'n', 'n_min', 'n_max', 'n_avg', 'n_ideal', 'mine',
                  'fft_index', 'pad_index', 'pad_index_mine', 'fft_block_size',
                  'index_z0', 'index_z0_conj', 'Gweight_mine')
@@ -28,6 +28,7 @@ class Basis(qp.utils.TaskDivision):
     n_spinor: int  #: Default number of spinorial components
     k: torch.Tensor  #: Subset of k handled by this basis (due to MPI division)
     wk: torch.Tensor  #: Subset of weights corresponding to `k`
+    w_sk: torch.Tensor  #: Combined spin and k-point weights
     real_wavefunctions: bool  #: Whether wavefunctions are real
     ke_cutoff: float  #: Kinetic energy cutoff
     grid: 'Grid'  #: Wavefunction grid (always process-local)
@@ -50,6 +51,7 @@ class Basis(qp.utils.TaskDivision):
 
     apply_ke = _apply_ke
     apply_potential = _apply_potential
+    collect_density = _collect_density
 
     def __init__(self, *, rc: 'RunConfig',
                  lattice: 'Lattice', ions: 'Ions', symmetries: 'Symmetries',
@@ -103,6 +105,8 @@ class Basis(qp.utils.TaskDivision):
         k_mine = slice(kpoints.i_start, kpoints.i_stop)
         self.k = kpoints.k[k_mine]
         self.wk = kpoints.wk[k_mine]
+        w_spin = 2 // (self.n_spins * self.n_spinor)  # spin weight
+        self.w_sk = w_spin * self.wk.view(1, -1, 1)  # combined k and spin
 
         # Check real wavefunction support:
         self.real_wavefunctions = real_wavefunctions
