@@ -17,7 +17,7 @@ class Grid:
     """
     __slots__ = [
         'rc', 'lattice', 'comm', 'n_procs', 'i_proc', 'is_split', 'ke_cutoff',
-        'shape', 'shapeH', 'shapeR_mine', 'shapeG_mine', 'shapeH_mine',
+        'dV', 'shape', 'shapeH', 'shapeR_mine', 'shapeG_mine', 'shapeH_mine',
         'split0', 'split2', 'split2H', 'mesh1D',
         '_indices_fft', '_indices_ifft', '_indices_rfft', '_indices_irfft']
     rc: 'RunConfig'
@@ -27,6 +27,7 @@ class Grid:
     i_proc: int  #: Rank within comm
     is_split: bool  #: Whether the grid is split over MPI
     ke_cutoff: float  #: Kinetic energy of Nyquist-frequency plane-waves
+    dV: float  #: Volume per grid point (real-space integration weight)
     shape: Tuple[int, ...]  #: Global real-space grid dimensions
     shapeH: Tuple[int, ...]  #: Global half-reciprocal-space grid dimensions
     shapeR_mine: Tuple[int, ...]  #: Local real grid dimensions
@@ -127,6 +128,7 @@ class Grid:
                                'ke-cutoff or shape must be specified')
             self.shape = tuple(symmetries.get_grid_shape(shape_min))
         qp.log.info(f'selected shape: {self.shape}')
+        self.dV = self.lattice.volume / np.prod(self.shape)
         _init_grid_fft(self)
 
     def get_mesh(self, space: str) -> torch.Tensor:

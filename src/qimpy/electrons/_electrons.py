@@ -222,6 +222,11 @@ class Electrons:
                 electrons=self)
         qp.log.info('diagonalization: ' + repr(self.diagonalize))
 
+    @property
+    def rho(self) -> 'FieldH':
+        """Electronic charge density (sum over spin channels of `n`)."""
+        return qp.grid.FieldH(self.n.grid, data=self.n.data.sum(dim=0))
+
     def update_density(self, system: 'System') -> None:
         """Update electron density from wavefunctions and fillings.
         Result is in system grid in reciprocal space."""
@@ -231,8 +236,11 @@ class Electrons:
     def update_potential(self, system: 'System') -> None:
         """Update density-dependent energy terms and electron potential."""
         # Hartree and local contributions:
-        VH = system.coulomb(self.n)  # Hartree potential
+        rho = self.rho
+        VH = system.coulomb(rho)  # Hartree potential
         self.V_ks = system.ions.Vloc + VH
+        system.energy['EH'] = 0.5 * (rho ^ VH).item()
+        system.energy['Eloc'] = (rho ^ system.ions.Vloc).item()
         # TODO: corresponding energy terms
         # TODO: XC contributions
 

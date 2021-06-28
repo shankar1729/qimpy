@@ -119,6 +119,10 @@ class Field(metaclass=ABCMeta):
             result = result.sum(dim=-1).real  # z-axis summed here
         else:
             result = (data1 * data2).sum(dim=(-3, -2, -1))
+        # Volume factor:
+        result *= (self.grid.lattice.volume  # recip. space integration weight
+                   if isinstance(self, (FieldG, FieldH))
+                   else self.grid.dV)  # real space integration weight
         # Collect over MPI if needed:
         if self.grid.comm is not None:
             self.grid.comm.Allreduce(qp.MPI.IN_PLACE,
