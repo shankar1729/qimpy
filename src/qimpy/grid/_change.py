@@ -260,14 +260,17 @@ if __name__ == "__main__":
         grid_s = make_grid(shape, None)  # sequential
         return grid_p, grid_s
 
+    def norm_str(v: 'Field') -> str:
+        """Report norm of field averaged over batch dimensions"""
+        return f'{v.norm().mean().item():.3e}'
     qp.log.info('\n--- Tests with same shape ---')
     grid0p, grid0s = make_grids((96, 108, 112))
     for cls in (qp.grid.FieldR, qp.grid.FieldC,
                 qp.grid.FieldH, qp.grid.FieldG):
         name = cls.__qualname__
         v0p, v0s = (get_ref_field(cls, grid) for grid in (grid0p, grid0s))
-        qp.log.info(f'{name} scatter err: {(v0p - v0s.to(grid0p)).norm():e}')
-        qp.log.info(f'{name} gather err: {(v0s - v0p.to(grid0s)).norm():e}')
+        qp.log.info(f'{name} scatter err: {norm_str(v0p - v0s.to(grid0p))}')
+        qp.log.info(f'{name} gather err: {norm_str(v0s - v0p.to(grid0s))}')
     qp.utils.StopWatch.print_stats()
 
     qp.log.info('\n--- Tests with shape change ---')
@@ -292,12 +295,12 @@ if __name__ == "__main__":
         v12p = v12s.to(grid2p)
         v21p = v21s.to(grid1p)
         qp.log.info('')
-        qp.log.info(f'{name} 1s-2p err: {(v12p - v1s.to(grid2p)).norm():e}')
-        qp.log.info(f'{name} 1p-2s err: {(v12s - v1p.to(grid2s)).norm():e}')
-        qp.log.info(f'{name} 1p-2p err: {(v12p - v1p.to(grid2p)).norm():e}')
-        qp.log.info(f'{name} 2s-1p err: {(v21p - v2s.to(grid1p)).norm():e}')
-        qp.log.info(f'{name} 2p-1s err: {(v21s - v2p.to(grid1s)).norm():e}')
-        qp.log.info(f'{name} 2p-1p err: {(v21p - v2p.to(grid1p)).norm():e}')
+        qp.log.info(f'{name} 1s-2p err: {norm_str(v12p - v1s.to(grid2p))}')
+        qp.log.info(f'{name} 1p-2s err: {norm_str(v12s - v1p.to(grid2s))}')
+        qp.log.info(f'{name} 1p-2p err: {norm_str(v12p - v1p.to(grid2p))}')
+        qp.log.info(f'{name} 2s-1p err: {norm_str(v21p - v2s.to(grid1p))}')
+        qp.log.info(f'{name} 2p-1s err: {norm_str(v21s - v2p.to(grid1s))}')
+        qp.log.info(f'{name} 2p-1p err: {norm_str(v21p - v2p.to(grid1p))}')
 
     qp.log.info('\n--- Visual inspection of Fourier resampling ---')
     # Do this sequentially, as MPI equivalence tested above already

@@ -98,11 +98,41 @@ class Field(metaclass=ABCMeta):
         self.data *= other
         return self
 
-    def norm(self) -> float:
-        norm_sq = self.data.norm().item() ** 2
+    def overlap(self: FieldType, other: FieldType) -> torch.Tensor:
+        r"""Compute overlap :math:`\int a^\dagger b`.
+        This includes appropriate volume / mesh prefactors to convert it
+        to an integral. Batch dimensions must be broadcastable together.
+        Note that `a ^ b` is exactly equivalent to `a.overlap(b)` for `Field`s.
+        """
+        if not isinstance(other, type(self)):
+            return NotImplemented
+        assert self.grid is other.grid
+        data1 = self.data.conj() if self.data.is_complex() else self.data
+        data2 = other.data
+        if type(self) == FieldH:
+            result = (data1 * data2).sum(dim=(-3, -2))  # z-axis not summed yet
+            # Account for Hermitian symmetry weights:
+            split2H = self.grid.split2H
+            iz_start = max(1, split2H.i_start) - split2H.i_start
+            iz_stop = min(split2H.n_tot - 1, split2H.i_stop) - split2H.i_start
+            result[..., iz_start:iz_stop] *= 2
+            result = result.sum(dim=-1).real  # z-axis summed here
+        else:
+            result = (data1 * data2).sum(dim=(-3, -2, -1))
+        # Collect over MPI if needed:
         if self.grid.comm is not None:
-            norm_sq = self.grid.comm.allreduce(norm_sq, qp.MPI.SUM)
-        return np.sqrt(norm_sq)
+            self.grid.comm.Allreduce(qp.MPI.IN_PLACE,
+                                     qp.utils.BufferView(result), qp.MPI.SUM)
+        return result
+
+    __xor__ = overlap
+
+    def norm(self) -> torch.Tensor:
+        r"""Norm of a field, defined by :math:`\sqrt{\int |a|^2}`.
+        Returns a real tensor with shape equal to batch dimensions."""
+        norm_sq = self ^ self
+        return (norm_sq.real.sqrt() if norm_sq.is_complex()
+                else norm_sq.sqrt())
 
     def get_origin_index(self):
         """Return index into local data of the spatial index = 0 component(s),
