@@ -226,11 +226,16 @@ class Electrons:
         """Update electron density from wavefunctions and fillings.
         Result is in system grid in reciprocal space."""
         self.n = ~(self.basis.collect_density(self.C, self.f)).to(system.grid)
+        qp.log.info(f'nElectrons: {self.n.o * system.lattice.volume}')
         # TODO: ultrasoft augmentation and symmetrization
 
     def update_potential(self, system: 'System') -> None:
         """Update density-dependent energy terms and electron potential."""
-        self.V_ks = system.ions.Vloc
+        # Hartree and local contributions:
+        VH = system.coulomb(self.n)  # Hartree potential
+        self.V_ks = system.ions.Vloc + VH
+        # TODO: corresponding energy terms
+        # TODO: XC contributions
 
     def output(self) -> None:
         """Save any configured outputs (TODO: systematize this)"""

@@ -77,8 +77,12 @@ def _collect_density(self: 'Basis', C: 'Wavefunction',
     `f`. The result is in real-space on `basis.grid`.
     """
     assert(f.shape == C.coeff.shape[:3])
-    coeff = C.split_bands().coeff  # bring all G-vectors of each band together
-    f_weighted = (f * self.w_sk).view(f.shape + (1, 1, 1, 1))
+    C = C.split_bands()  # bring all G-vectors of each band together
+    coeff = C.coeff
+    if C.band_division is not None:
+        f = f[:, :, C.band_division.i_start:C.band_division.i_stop]
+    prefac = (f * (self.w_sk / self.lattice.volume)).view(f.shape
+                                                          + (1, 1, 1, 1))
 
     # Determine FFT type and dimensions:
     watch = qp.utils.StopWatch('Basis.collect_density', self.rc)
@@ -104,7 +108,7 @@ def _collect_density(self: 'Basis', C: 'Wavefunction',
         # Expand -> ifft -> collect | |^2
         Cb[index] = coeff[:, :, b_start:b_stop].permute(1, 4, 0, 2, 3)
         ICb = self.grid.ifft(Cb.view((n_spins, nk, b_size, n_spinor) + shapeG))
-        density.data += (f_weighted[:, :, b_start:b_stop]
+        density.data += (prefac[:, :, b_start:b_stop]
                          * qp.utils.abs_squared(ICb)).sum(dim=(1, 2, 3))
         # Advance to next block of data:
         b_start = b_stop
