@@ -226,7 +226,6 @@ class Electrons:
         """Update electron density from wavefunctions and fillings.
         Result is in system grid in reciprocal space."""
         self.n = ~(self.basis.collect_density(self.C, self.f)).to(system.grid)
-        qp.log.info(f'nElectrons: {self.n.o * system.lattice.volume}')
         # TODO: ultrasoft augmentation and symmetrization
 
     def update_potential(self, system: 'System') -> None:
