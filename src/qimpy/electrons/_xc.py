@@ -15,51 +15,47 @@ class XC:
     """Exchange-correlation functional. Only LDA so far.
     TODO: add other functionals and interface with LibXC."""
 
-    def __call__(self, n: 'FieldH') -> Tuple[float, 'FieldH']:
+    def __call__(self, n_t: 'FieldH') -> Tuple[float, 'FieldH']:
         """Compute exchange-correlation energy and potential."""
-        grid = n.grid
-        n_count = n.data.shape[0]
+        grid = n_t.grid
+        n_count = n_t.data.shape[0]
+        n_in = (~n_t).data.requires_grad_()  # to get V = delta E / delta n
+        n = torch.clamp(n_in, min=1e-16)
 
         # Slater exchange:
-        ns = torch.clamp((~n).data * n_count, min=1e-16)
-        Vx = -((3/np.pi) ** (1./3.)) * (ns ** (1./3))
-        Ex = (3./4) * (Vx * ns).sum().item() * grid.dV
+        Ex_prefac = -np.pi/4 * ((3*n_count/np.pi) ** (4./3.))
+        Ex_by_dV = Ex_prefac * (n ** (4./3)).sum()
 
         # PZ correlation:
-        def lda_pz_c(rs, para=True):
+        def lda_pz_c(rs: torch.Tensor, para: bool = True) -> torch.Tensor:
             """Compute LDA-PZ correlation for paramagnetic case
             if para=True and ferromagnetic if para=False.
-            Return energy density and potential for each rs point."""
+            Return energy density for each rs point."""
             a, b, c, d, gamma, beta1, beta2 = PZ_PARAMS[para]
             e = torch.empty_like(rs)  # energy density
-            e_rs = torch.empty_like(rs)  # it's derivative w.r.t rs
             # --- rs < 1 case:
             sel = torch.where(rs < 1.)
             if len(sel[0]):
                 rs_sel = rs[sel]
                 log_rs = torch.log(rs_sel)
-                e[sel] = (a + c*rs_sel) * log_rs + b + d*rs_sel
-                e_rs[sel] = a/rs_sel + c*(1 + log_rs) + d
+                e[sel] = (a + c*rs_sel) * torch.log(rs_sel) + b + d*rs_sel
             # --- rs >= 1 case:
             sel = torch.where(rs >= 1.)
             if len(sel[0]):
                 rs_sel = rs[sel]
                 rs_sqrt = torch.sqrt(rs_sel)
-                den_inv = 1./(1. + beta1*rs_sqrt + beta2*rs_sel)
-                den_rs = 0.5*beta1/rs_sqrt + beta2
-                e[sel] = gamma * den_inv
-                e_rs[sel] = -gamma * den_inv.square() * den_rs
-            return e, e_rs
-        n_tot = ns.mean(dim=0)
+                e[sel] = gamma / (1. + beta1*rs_sel.sqrt() + beta2*rs_sel)
+            return e
+        n_tot = n.sum(dim=0)
         rs = ((4.*np.pi/3.) * n_tot) ** (-1./3)
         assert n_count == 1  # TODO: support spin interpolation here
-        e, e_rs = lda_pz_c(rs, True)
-        Vc = e - (1./3) * e_rs * rs
-        Ec = (e * n_tot).sum().item() * grid.dV
+        Ec_by_dV = (lda_pz_c(rs, True) * n_tot).sum()
 
         # Collect results:
-        Vxc = ~qp.grid.FieldR(grid, data=(Vx + Vc))
-        Exc = Ex + Ec
+        Exc_by_dV = Ex_by_dV + Ec_by_dV
+        Exc_by_dV.backward()  # compute derivative w.r.t n
+        Vxc = ~qp.grid.FieldR(grid, data=n_in.grad)
+        Exc = grid.dV * Exc_by_dV.item()
         if grid.comm is not None:
             Exc = grid.comm.allreduce(Exc, qp.MPI.SUM)
         return Exc, Vxc
