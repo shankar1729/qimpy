@@ -54,9 +54,12 @@ class Davidson:
                 inner_loop: bool = False, converged: bool = False,
                 converge_failed: bool = False) -> None:
         """Report iteration progress / convergence in standardized form"""
+        if inner_loop and (not self._i_iter):
+            return  # skip zero'th iteration when Eband is not printed
         line_prefix = ('  ' if inner_loop else '') + self._line_prefix
-        line = f'{line_prefix}: {self._i_iter}' \
-               f'  Eband: {self._get_Eband():+.11f}'
+        line = f'{line_prefix}: {self._i_iter}'
+        if not inner_loop:
+            line += f'  Eband: {self._get_Eband():+.11f}'
         if self.electrons.deig_max != np.inf:
             line += f'  deig_max: {self.electrons.deig_max:.2e}'
         if n_eigs_done:
