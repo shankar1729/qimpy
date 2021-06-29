@@ -11,3 +11,5 @@ ions:
 
 electrons:
   n-bands-extra: 3
+  scf:
+    mix-density: no  # mix potential instead

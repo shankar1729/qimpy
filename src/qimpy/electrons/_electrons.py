@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from ._basis import Basis
     from ._davidson import Davidson
     from ._chefsi import CheFSI
+    from ._scf import SCF
     from ._wavefunction import Wavefunction
     from ._xc import XC
 
@@ -23,7 +24,7 @@ class Electrons:
     """Electronic subsystem"""
     __slots__ = ('rc', 'kpoints', 'spin_polarized', 'spinorial', 'n_spins',
                  'n_spinor', 'w_spin', 'fillings', 'n_bands', 'n_bands_extra',
-                 'basis', 'xc', 'diagonalize', 'C', 'mu', 'f',
+                 'basis', 'xc', 'diagonalize', 'scf', 'C', 'mu', 'f',
                  'eig', 'deig_max', 'n', 'V_ks')
     rc: 'RunConfig'  #: Current run configuration
     kpoints: 'Kpoints'  #: Set of kpoints (mesh or path)
@@ -38,6 +39,7 @@ class Electrons:
     basis: 'Basis'  #: Plane-wave basis for wavefunctions
     xc: 'XC'  #: Exchange-correlation functional
     diagonalize: 'Davidson'  #: Hamiltonian diagonalization method
+    scf: 'SCF'  #: Self-consistent field method
     C: 'Wavefunction'  #: Electronic wavefunctions
     mu: float  #: electron chemical potential
     f: torch.Tensor  #: Electronic occupations
@@ -59,7 +61,8 @@ class Electrons:
                  n_bands: Optional[Union[int, str]] = None,
                  n_bands_extra: Optional[Union[int, str]] = None,
                  davidson: Optional[Union[dict, 'Davidson']] = None,
-                 chefsi:  Optional[Union[dict, 'CheFSI']] = None) -> None:
+                 chefsi:  Optional[Union[dict, 'CheFSI']] = None,
+                 scf:  Optional[Union[dict, 'SCF']] = None) -> None:
         """Initialize from components and/or dictionary of options.
 
         Parameters
@@ -209,7 +212,7 @@ class Electrons:
         self.C = self.C.orthonormalize()
         self.eig = torch.zeros(self.C.coeff.shape[:3], dtype=torch.double,
                                device=rc.device)
-        self.deig_max = np.inf  # note that eigenvalues are completely wrong!
+        self.deig_max = np.nan  # note that eigenvalues are completely wrong!
 
         # Initialize exchange-correlation functional:
         self.xc = qp.construct(qp.electrons.XC, xc, 'xc')
@@ -230,6 +233,10 @@ class Electrons:
                 qp.electrons.CheFSI, chefsi, 'chefsi',
                 electrons=self)
         qp.log.info('diagonalization: ' + repr(self.diagonalize))
+
+        # Initialize SCF:
+        self.scf = qp.construct(qp.electrons.SCF, scf, 'scf',
+                                rc=rc, comm=rc.comm_kb)
 
     @property
     def rho(self) -> 'FieldH':
@@ -253,6 +260,16 @@ class Electrons:
         # Exchange-correlation contributions:
         system.energy['Exc'], Vxc = self.xc(self.n + system.ions.n_core)
         self.V_ks = self.V_ks + Vxc
+
+    def update(self, system: 'System') -> None:
+        """Update electronic system to current wavefunctions and eigenvalues.
+        This updates occupations, density, potential and electronic energy."""
+        self.fillings.update(system)
+        self.update_density(system)
+        self.update_potential(system)
+        system.energy['KE'] = self.rc.comm_k.allreduce(
+            (self.C.band_ke()[:, :, :self.f.shape[2]]
+             * self.basis.w_sk * self.f).sum().item(), qp.MPI.SUM)
 
     def output(self) -> None:
         """Save any configured outputs (TODO: systematize this)"""

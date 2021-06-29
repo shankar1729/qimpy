@@ -128,7 +128,7 @@ class Fillings:
             # TODO: support initial magnetization, reading from file etc.
 
         # Update fillings if necessary:
-        if (self.sigma is not None) and (not np.isinf(electrons.deig_max)):
+        if (self.sigma is not None) and (not np.isnan(electrons.deig_max)):
             def n_electrons_err(mu):
                 """Root function for finding chemical potential"""
                 n_electrons = self.rc.comm_k.allreduce(

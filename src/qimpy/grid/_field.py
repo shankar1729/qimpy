@@ -1,7 +1,7 @@
 import qimpy as qp
 import numpy as np
 import torch
-from abc import ABCMeta, abstractmethod
+from abc import abstractmethod
 from numbers import Number
 from ._change import _change_real, _change_recip
 from typing import TypeVar, Tuple, Optional, Sequence, TYPE_CHECKING
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 FieldType = TypeVar('FieldType', bound='Field')  #: Type for field ops.
 
 
-class Field(metaclass=ABCMeta):
+class Field(qp.utils.Optimizable):
     """Abstract base class for scalar/vector fields in real/reciprocal space.
     Provides common operators for fields in either space, but any fields
     used must specifically be in real (:class:`FieldR` and :class:`FieldC`),
@@ -98,8 +98,8 @@ class Field(metaclass=ABCMeta):
         self.data *= other
         return self
 
-    def overlap(self: FieldType, other: FieldType) -> torch.Tensor:
-        r"""Compute overlap :math:`\int a^\dagger b`.
+    def dot(self: FieldType, other: FieldType) -> torch.Tensor:
+        r"""Compute broadcasted inner product :math:`\int a^\dagger b`.
         This includes appropriate volume / mesh prefactors to convert it
         to an integral. Batch dimensions must be broadcastable together.
         Note that `a ^ b` is exactly equivalent to `a.overlap(b)` for `Field`s.
@@ -129,7 +129,17 @@ class Field(metaclass=ABCMeta):
                                      qp.utils.BufferView(result), qp.MPI.SUM)
         return result
 
-    __xor__ = overlap
+    __xor__ = dot
+
+    def overlap(self: FieldType, other: FieldType) -> float:
+        """Compute net inner product i.e. `dot` summed over batch dimensions.
+        The result is always real, which amounts to treating complex fields
+        as two-component real fields, and is therefore useful for optimizing
+        over `Field`s eg. with the `Pulay` or `Minimizer` algorithm templates.
+        """
+        result = self.dot(other).sum()
+        return float(result.real.item() if result.is_complex()
+                     else result.item())
 
     def norm(self) -> torch.Tensor:
         r"""Norm of a field, defined by :math:`\sqrt{\int |a|^2}`.

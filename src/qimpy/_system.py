@@ -66,21 +66,7 @@ class System:
     def run(self):
         """Run any actions specified in the input."""
         # TODO: systematize selection of what actions to perform
-        self.electrons.fillings.update(self)
-        n_prev = None
-        for i_scf in range(20):
-            self.electrons.update_density(self)
-            if n_prev is not None:
-                self.electrons.n = 0.5 * (n_prev + self.electrons.n)
-            n_prev = self.electrons.n
-            self.electrons.update_potential(self)
-            self.electrons.diagonalize(n_iterations=2)
-            self.energy['KE'] = self.rc.comm_k.allreduce(
-                (self.electrons.C.band_ke()[:, :, :self.electrons.f.shape[2]]
-                 * self.electrons.basis.w_sk
-                 * self.electrons.f).sum().item(), qp.MPI.SUM)
-            self.electrons.fillings.update(self)
-            qp.log.info(f'SCF:  Cycle: {i_scf}  {self.energy.name()}:'
-                        f' {float(self.energy):.12f}')
+        self.electrons.scf.update(self)
+        self.electrons.scf.optimize()
         self.electrons.output()
         qp.log.info(f'\nEnergy components:\n{repr(self.energy)}')

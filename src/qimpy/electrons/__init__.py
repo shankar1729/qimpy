@@ -4,7 +4,7 @@ __all__ = [
     'Electrons',
     'Kpoints', 'Kmesh', 'Kpath',
     'Fillings', 'Basis', 'Wavefunction', 'XC',
-    'Davidson', 'CheFSI']
+    'Davidson', 'CheFSI', 'SCF']
 
 from ._electrons import Electrons
 from ._kpoints import Kpoints, Kmesh, Kpath
@@ -14,3 +14,4 @@ from ._wavefunction import Wavefunction
 from ._xc import XC
 from ._davidson import Davidson
 from ._chefsi import CheFSI
+from ._scf import SCF
