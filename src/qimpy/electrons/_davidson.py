@@ -63,9 +63,9 @@ class Davidson:
             line += f'  n_eigs_done: {n_eigs_done}'
         line += f'  t[s]: {self.rc.clock():.2f}'
         qp.log.info(line)
-        if converged:
+        if converged and (not inner_loop):
             qp.log.info(f'{line_prefix}: Converged')
-        if converge_failed:
+        if converge_failed and (not inner_loop):
             qp.log.info(f'{line_prefix}: Failed to converge')
 
     def _precondition(self, Cerr: 'Wavefunction',
@@ -208,7 +208,7 @@ class Davidson:
             el.deig_max, n_eigs_done = self._check_deig(deig, eig_threshold)
             converged = (n_eigs_done == n_bands)
             converge_failed = ((self._i_iter == n_iterations)
-                               and (not (inner_loop or helper or converged)))
+                               and (not (helper or converged)))
             self._report(inner_loop=inner_loop, n_eigs_done=n_eigs_done,
                          converged=converged, converge_failed=converge_failed)
             if converged:
