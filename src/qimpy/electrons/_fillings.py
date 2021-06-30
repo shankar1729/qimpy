@@ -18,18 +18,21 @@ SmearingResults = collections.namedtuple('SmearingResults',
 class Fillings:
     """Electron occupation factors (smearing)"""
     __slots__ = ('rc', 'n_electrons', 'n_bands_min', 'smearing',
-                 'sigma', '_smearing_func')
+                 'sigma', 'M_initial', 'M_constrain', '_smearing_func')
     rc: 'RunConfig'  #: Current run configuration
     n_electrons: float  #: Number of electrons
     n_bands_min: int  #: Minimum number of bands to accomodate `n_electrons`
     smearing: Optional[str]  #: Smearing method name
     sigma: Optional[float]  #: Gaussian width (:math:`2k_BT` for Fermi)
+    M_initial: float  #: Initial total magnetization
+    M_constrain: float  #: Whether to constrain magnetization to `M_initial`
 
     def __init__(self, *,
                  rc: 'RunConfig', ions: 'Ions', electrons: 'Electrons',
                  charge: float = 0., smearing: str = 'gauss',
                  sigma: Optional[float] = None,
-                 kT: Optional[float] = None) -> None:
+                 kT: Optional[float] = None,
+                 M_initial: float = 0., M_constrain: bool = False) -> None:
         """Initialize occupation factor (smearing) scheme.
 
         Parameters
@@ -51,6 +54,13 @@ class Fillings:
             :math:`k_BT` for Fermi-Dirac occupations, amounting to
             :math:`\\sigma/2` for the other Gaussian-based smearing schemes.
             Specify only one of sigma or kT.
+        M_initial: float, default: 0.
+            Total magnetization (only for non-spinorial spin-polarized mode).
+            This magnetization is assigned to the initial occupations and it
+            may change when smearing is present depending on `M_constrain`.
+        M_constrain: bool, default: False
+            Whether to hold magnetization fixed to `M_initial` in occupation
+            updates: this only matters when `smearing` is not None.
         """
         self.rc = rc
 
@@ -59,7 +69,6 @@ class Fillings:
         self.n_bands_min = int(np.ceil(self.n_electrons / electrons.w_spin))
 
         # Smearing:
-        smear_options = _smearing_funcs.keys()
         self.smearing = smearing.lower() if smearing else None
         self.sigma = None
         if self.smearing:
@@ -78,6 +87,17 @@ class Fillings:
         qp.log.info(f'n_electrons: {self.n_electrons:g}'
                     f'  n_bands_min: {self.n_bands_min}')
         qp.log.info(f'smearing: {self.smearing}  sigma: {sigma_str}')
+
+        # Magnetization mode:
+        if M_initial and ((not electrons.spin_polarized)
+                          or electrons.spinorial):
+            raise ValueError('M_initial only allowed for spin-polarized'
+                             ' and non-spinorial calculations')
+        self.M_initial = M_initial
+        self.M_constrain = M_constrain
+        if M_initial:
+            qp.log.info(f'M: initial: {self.M_initial}'
+                        f'  constrained: {self.M_constrain}')
 
     def compute(self, eig: torch.Tensor, mu: float,
                 extra_outputs=False) -> Union[SmearingResults, torch.Tensor]:
@@ -119,7 +139,7 @@ class Fillings:
         electrons = system.electrons
         if not hasattr(electrons, "f"):
             electrons.f = torch.zeros_like(electrons.eig)
-            f_sum = self.n_electrons / electrons.w_spin
+            f_sum = self.n_electrons / (electrons.w_spin * electrons.n_spins)
             n_full = int(np.floor(f_sum))  # number of fully filled bands
             electrons.f[..., :n_full] = 1.  # full fillings
             if f_sum > n_full:

@@ -11,5 +11,8 @@ ions:
 
 electrons:
   n-bands-extra: 3
+  spin-polarized: yes
+  fillings:
+    M_initial: 0
   scf:
     mix-density: no  # mix potential instead

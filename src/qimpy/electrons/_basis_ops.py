@@ -21,8 +21,8 @@ def _apply_ke(self: 'Basis', C: 'Wavefunction') -> 'Wavefunction':
 def _apply_potential(self: 'Basis', V: 'FieldH',
                      C: 'Wavefunction') -> 'Wavefunction':
     'Apply potential `V` to wavefunction `C`'
-    shape = self.grid.shape
-    Vdata = (~(V.to(self.grid))).data  # change to real space on basis grid
+    Vdata = (~(V.to(self.grid))  # change to real space on basis grid
+             ).data[:, None, None, None]  # broadcast for spin
 
     # Move wavefunctions to band-split, basis-together position:
     need_move = (self.rc.n_procs_b > 1) and (C.band_division is None)
@@ -32,7 +32,7 @@ def _apply_potential(self: 'Basis', V: 'FieldH',
 
     # Determine FFT type and dimensions:
     watch = qp.utils.StopWatch('Basis.apply_potential', self.rc)
-    shapeG = (self.grid.shapeH if self.real_wavefunctions else shape)
+    shapeG = (self.grid.shapeH if self.real_wavefunctions else self.grid.shape)
     fft_nG = int(np.prod(shapeG))  # total reciprocal space points in FFT grid
     n_spins, nk, n_bands_mine, n_spinor = coeff.shape[:-1]
     ik = torch.arange(nk, device=coeff.device)[:, None]
@@ -54,7 +54,7 @@ def _apply_potential(self: 'Basis', V: 'FieldH',
         # Expand -> ifft -> multiply V -> fft -> reduce back (on block)
         Cb[index] = coeff[:, :, b_start:b_stop].permute(1, 4, 0, 2, 3)
         VCb = self.grid.ifft(Cb.view((n_spins, nk, b_size, n_spinor) + shapeG))
-        VCb *= Vdata  # TODO: handle spin correctly
+        VCb *= Vdata  # TODO: handle polarized-SOC correctly
         VCb = self.grid.fft(VCb).flatten(-3)
         coeff[:, :, b_start:b_stop] = VCb[index].permute(2, 0, 3, 4, 1)
         # Advance to next block of data:

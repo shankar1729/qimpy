@@ -23,7 +23,7 @@ class XC:
         n = torch.clamp(n_in, min=1e-16)
 
         # Slater exchange:
-        Ex_prefac = -np.pi/4 * ((3*n_count/np.pi) ** (4./3.))
+        Ex_prefac = -0.75 * ((3*n_count/np.pi) ** (1./3.))
         Ex_by_dV = Ex_prefac * (n ** (4./3)).sum()
 
         # PZ correlation:
@@ -48,8 +48,16 @@ class XC:
             return e
         n_tot = n.sum(dim=0)
         rs = ((4.*np.pi/3.) * n_tot) ** (-1./3)
-        assert n_count == 1  # TODO: support spin interpolation here
-        Ec_by_dV = (lda_pz_c(rs, True) * n_tot).sum()
+        if n_count == 1:
+            ec = lda_pz_c(rs, True)
+        else:
+            ec_para = lda_pz_c(rs, True)
+            ec_ferro = lda_pz_c(rs, False)
+            zeta = (n[0] - n[1]) / n_tot
+            spin_interp = (((1 + zeta)**(4./3) + (1 - zeta)**(4./3) - 2.)
+                           / (2.**(4./3) - 2.))
+            ec = ec_para + spin_interp * (ec_ferro - ec_para)
+        Ec_by_dV = (ec * n_tot).sum()
 
         # Collect results:
         Exc_by_dV = Ex_by_dV + Ec_by_dV
