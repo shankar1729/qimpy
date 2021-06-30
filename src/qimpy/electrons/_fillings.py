@@ -18,7 +18,8 @@ SmearingResults = collections.namedtuple('SmearingResults',
 class Fillings:
     """Electron occupation factors (smearing)"""
     __slots__ = ('rc', 'n_electrons', 'n_bands_min', 'smearing',
-                 'sigma', 'M_initial', 'M_constrain', '_smearing_func')
+                 'sigma', 'M_initial', 'M_constrain', '_smearing_func',
+                 'mu', 'M', 'f')
     rc: 'RunConfig'  #: Current run configuration
     n_electrons: float  #: Number of electrons
     n_bands_min: int  #: Minimum number of bands to accomodate `n_electrons`
@@ -26,6 +27,9 @@ class Fillings:
     sigma: Optional[float]  #: Gaussian width (:math:`2k_BT` for Fermi)
     M_initial: float  #: Initial total magnetization
     M_constrain: float  #: Whether to constrain magnetization to `M_initial`
+    mu: float  #: Electron chemical potential
+    M: torch.Tensor  #: Total magnetization (vector if spinorial)
+    f: torch.Tensor  #: Electronic occupations
 
     def __init__(self, *,
                  rc: 'RunConfig', ions: 'Ions', electrons: 'Electrons',
@@ -154,16 +158,14 @@ class Fillings:
                                      f' insufficient to support M_initial'
                                      f' = {self.M_initial:g}')
             # Initialize fillings based on sum in each channel:
-            electrons.mu = np.nan
-            electrons.M = torch.tensor(self.M_initial, device=self.rc.device)
-            electrons.f = torch.zeros_like(electrons.eig)
+            self.mu = np.nan
+            self.M = torch.tensor(self.M_initial, device=self.rc.device)
+            self.f = torch.zeros_like(electrons.eig)
             for i_spin, f_sum in enumerate(f_sums):
                 n_full = int(np.floor(f_sum))  # number of fully filled bands
-                electrons.f[i_spin, :, :n_full] = 1.  # full fillings
+                self.f[i_spin, :, :n_full] = 1.  # full fillings
                 if f_sum > n_full:
-                    electrons.f[i_spin, :, n_full] = (
-                        f_sum - n_full)  # left-over part
-            qp.log.info(electrons.f)
+                    self.f[i_spin, :, n_full] = (f_sum - n_full)  # left overs
 
         # Update fillings if necessary:
         if (self.sigma is not None) and (not np.isnan(electrons.deig_max)):
@@ -180,23 +182,23 @@ class Fillings:
                                                 qp.MPI.MIN) - 30.*self.sigma
             eig_max = self.rc.comm_kb.allreduce(electrons.eig.max().item(),
                                                 qp.MPI.MAX) + 30.*self.sigma
-            electrons.mu = brentq(n_electrons_err, eig_min, eig_max)
+            self.mu = brentq(n_electrons_err, eig_min, eig_max)
             # Update fillings and entropy accordingly:
-            electrons.f, _, S = self.compute(electrons.eig, electrons.mu,
-                                             extra_outputs=True)
+            self.f, _, S = self.compute(electrons.eig, self.mu,
+                                        extra_outputs=True)
             system.energy['-TS'] = -self.sigma * self.rc.comm_k.allreduce(
                 (w_sk * S).sum().item(), qp.MPI.SUM)
             # --- compute magnetization
             M_str = ''
             if electrons.spin_polarized:
-                assert electrons.f.shape[0] == 2  # TODO: support vector-spin
-                n_each = (w_sk * electrons.f).sum(dim=(1, 2))
-                electrons.M = n_each[1] - n_each[0]
+                assert self.f.shape[0] == 2  # TODO: support vector-spin
+                n_each = (w_sk * self.f).sum(dim=(1, 2))
+                self.M = n_each[1] - n_each[0]
                 self.rc.comm_k.Allreduce(qp.MPI.IN_PLACE,
-                                         qp.utils.BufferView(electrons.M),
+                                         qp.utils.BufferView(self.M),
                                          qp.MPI.SUM)
-                M_str = f'  M: {electrons.M.item():.5f}'
-            qp.log.info(f'  FillingsUpdate:  mu: {electrons.mu:.9f}'
+                M_str = f'  M: {self.M.item():.5f}'
+            qp.log.info(f'  FillingsUpdate:  mu: {self.mu:.9f}'
                         f'  n_electrons: {self.n_electrons:.6f}{M_str}')
 
 

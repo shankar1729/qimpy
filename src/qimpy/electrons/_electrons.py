@@ -24,7 +24,7 @@ class Electrons:
     """Electronic subsystem"""
     __slots__ = ('rc', 'kpoints', 'spin_polarized', 'spinorial', 'n_spins',
                  'n_spinor', 'w_spin', 'fillings', 'n_bands', 'n_bands_extra',
-                 'basis', 'xc', 'diagonalize', 'scf', 'C', 'mu', 'M', 'f',
+                 'basis', 'xc', 'diagonalize', 'scf', 'C',
                  'eig', 'deig_max', 'n', 'V_ks')
     rc: 'RunConfig'  #: Current run configuration
     kpoints: 'Kpoints'  #: Set of kpoints (mesh or path)
@@ -41,9 +41,6 @@ class Electrons:
     diagonalize: 'Davidson'  #: Hamiltonian diagonalization method
     scf: 'SCF'  #: Self-consistent field method
     C: 'Wavefunction'  #: Electronic wavefunctions
-    mu: float  #: Electron chemical potential
-    M: torch.Tensor  #: Total magnetization (vector if spinorial)
-    f: torch.Tensor  #: Electronic occupations
     eig: torch.Tensor  #: Electronic orbital eigenvalues
     deig_max: float  #: Estimate of accuracy of current `eig`
     n: 'FieldH'  #: Electron (spin-)density
@@ -247,7 +244,8 @@ class Electrons:
     def update_density(self, system: 'System') -> None:
         """Update electron density from wavefunctions and fillings.
         Result is in system grid in reciprocal space."""
-        self.n = ~(self.basis.collect_density(self.C, self.f)).to(system.grid)
+        f = self.fillings.f
+        self.n = ~(self.basis.collect_density(self.C, f)).to(system.grid)
         # TODO: ultrasoft augmentation and symmetrization
 
     def update_potential(self, system: 'System') -> None:
@@ -268,9 +266,10 @@ class Electrons:
         self.fillings.update(system)
         self.update_density(system)
         self.update_potential(system)
+        f = self.fillings.f
         system.energy['KE'] = self.rc.comm_k.allreduce(
-            (self.C.band_ke()[:, :, :self.f.shape[2]]
-             * self.basis.w_sk * self.f).sum().item(), qp.MPI.SUM)
+            (self.C.band_ke()[:, :, :f.shape[2]]
+             * self.basis.w_sk * f).sum().item(), qp.MPI.SUM)
 
     def output(self) -> None:
         """Save any configured outputs (TODO: systematize this)"""
