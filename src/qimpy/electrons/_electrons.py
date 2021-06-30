@@ -24,7 +24,7 @@ class Electrons:
     """Electronic subsystem"""
     __slots__ = ('rc', 'kpoints', 'spin_polarized', 'spinorial', 'n_spins',
                  'n_spinor', 'w_spin', 'fillings', 'n_bands', 'n_bands_extra',
-                 'basis', 'xc', 'diagonalize', 'scf', 'C', 'mu', 'f',
+                 'basis', 'xc', 'diagonalize', 'scf', 'C', 'mu', 'M', 'f',
                  'eig', 'deig_max', 'n', 'V_ks')
     rc: 'RunConfig'  #: Current run configuration
     kpoints: 'Kpoints'  #: Set of kpoints (mesh or path)
@@ -41,7 +41,8 @@ class Electrons:
     diagonalize: 'Davidson'  #: Hamiltonian diagonalization method
     scf: 'SCF'  #: Self-consistent field method
     C: 'Wavefunction'  #: Electronic wavefunctions
-    mu: float  #: electron chemical potential
+    mu: float  #: Electron chemical potential
+    M: torch.Tensor  #: Total magnetization (vector if spinorial)
     f: torch.Tensor  #: Electronic occupations
     eig: torch.Tensor  #: Electronic orbital eigenvalues
     deig_max: float  #: Estimate of accuracy of current `eig`

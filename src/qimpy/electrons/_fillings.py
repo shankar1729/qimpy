@@ -138,14 +138,32 @@ class Fillings:
         # Initialize fillings if necessary:
         electrons = system.electrons
         if not hasattr(electrons, "f"):
-            electrons.f = torch.zeros_like(electrons.eig)
-            f_sum = self.n_electrons / (electrons.w_spin * electrons.n_spins)
-            n_full = int(np.floor(f_sum))  # number of fully filled bands
-            electrons.f[..., :n_full] = 1.  # full fillings
-            if f_sum > n_full:
-                electrons.f[..., n_full] = (f_sum - n_full)  # left-over part
+            # Filings sum for each spin channel:
+            f_sums = (np.ones(electrons.n_spins) * self.n_electrons
+                      / (electrons.w_spin * electrons.n_spins))
+            if electrons.spin_polarized and self.M_initial:
+                assert electrons.n_spins == 2  # must be noncollinear
+                f_sums[0] += 0.5 * self.M_initial
+                f_sums[1] -= 0.5 * self.M_initial
+                if f_sums.min() < 0:
+                    raise ValueError(f'n_electrons = {self.n_electrons:g}'
+                                     f' insufficient to support M_initial'
+                                     f' = {self.M_initial:g}')
+                if f_sums.max() > electrons.n_bands:
+                    raise ValueError(f'n_bands = {electrons.n_bands:g}'
+                                     f' insufficient to support M_initial'
+                                     f' = {self.M_initial:g}')
+            # Initialize fillings based on sum in each channel:
             electrons.mu = np.nan
-            # TODO: support initial magnetization, reading from file etc.
+            electrons.M = torch.tensor(self.M_initial, device=self.rc.device)
+            electrons.f = torch.zeros_like(electrons.eig)
+            for i_spin, f_sum in enumerate(f_sums):
+                n_full = int(np.floor(f_sum))  # number of fully filled bands
+                electrons.f[i_spin, :, :n_full] = 1.  # full fillings
+                if f_sum > n_full:
+                    electrons.f[i_spin, :, n_full] = (
+                        f_sum - n_full)  # left-over part
+            qp.log.info(electrons.f)
 
         # Update fillings if necessary:
         if (self.sigma is not None) and (not np.isnan(electrons.deig_max)):
@@ -168,8 +186,18 @@ class Fillings:
                                              extra_outputs=True)
             system.energy['-TS'] = -self.sigma * self.rc.comm_k.allreduce(
                 (w_sk * S).sum().item(), qp.MPI.SUM)
+            # --- compute magnetization
+            M_str = ''
+            if electrons.spin_polarized:
+                assert electrons.f.shape[0] == 2  # TODO: support vector-spin
+                n_each = (w_sk * electrons.f).sum(dim=(1, 2))
+                electrons.M = n_each[1] - n_each[0]
+                self.rc.comm_k.Allreduce(qp.MPI.IN_PLACE,
+                                         qp.utils.BufferView(electrons.M),
+                                         qp.MPI.SUM)
+                M_str = f'  M: {electrons.M.item():.5f}'
             qp.log.info(f'  FillingsUpdate:  mu: {electrons.mu:.9f}'
-                        f'  n_electrons: {self.n_electrons:.6f}')
+                        f'  n_electrons: {self.n_electrons:.6f}{M_str}')
 
 
 def _smearing_fermi(eig: torch.Tensor, mu: float, sigma: float,
