@@ -2,8 +2,8 @@ import qimpy as qp
 import numpy as np
 import torch
 import collections
-from scipy.optimize import brentq
-from typing import Optional, Union, TYPE_CHECKING
+from scipy import optimize
+from typing import Optional, Dict, Union, Callable, TYPE_CHECKING
 if TYPE_CHECKING:
     from ..utils import RunConfig
     from ..ions import Ions
@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 SmearingResults = collections.namedtuple('SmearingResults',
                                          ['f', 'f_eig', 'S'])
+SmearingFunc = Callable[[torch.Tensor, float, float], SmearingResults]
 
 
 class Fillings:
@@ -30,6 +31,7 @@ class Fillings:
     mu: float  #: Electron chemical potential
     M: torch.Tensor  #: Total magnetization (vector if spinorial)
     f: torch.Tensor  #: Electronic occupations
+    _smearing_func: Optional[SmearingFunc]  #: Smearing function calculator
 
     def __init__(self, *,
                  rc: 'RunConfig', ions: 'Ions', electrons: 'Electrons',
@@ -79,7 +81,7 @@ class Fillings:
             self._smearing_func = _smearing_funcs.get(self.smearing, None)
             if self._smearing_func is None:
                 raise KeyError('smearing must be None/False or one of '
-                               + str(_smearing_funcs.keys()))
+                               f'{_smearing_funcs.keys()}')
             if sigma and kT:
                 raise ValueError('specify only one of sigma or kT')
             self.sigma = float(sigma if sigma  # get from sigma
@@ -102,36 +104,6 @@ class Fillings:
         if M_initial:
             qp.log.info(f'M: initial: {self.M_initial}'
                         f'  constrained: {self.M_constrain}')
-
-    def compute(self, eig: torch.Tensor, mu: float,
-                extra_outputs=False) -> Union[SmearingResults, torch.Tensor]:
-        """Compute occupations for energy eigenvalues `eig` and chemical
-        potential `mu`. Optionally also return the energy derivative of the
-        occupation factors and corresponding entropy contributions
-        if `extra_outputs` = True.
-
-        Parameters
-        ----------
-        eig
-            Orbital energies
-        mu
-            Electron chemical potential
-        extra_outputs : bool, default: False
-            Whether to also return energy derivative and entropy contribution
-            corresponding to each occupation factor (in a named tuple)
-
-        Returns
-        -------
-        f : Tensor
-            Occupations
-        f_eig : Tensor, only if extra_outputs=True
-            Energy derivative (df/deig)
-        S : Tensor, only if extra_outputs=True
-            Entropy contribution
-        """
-        assert(self.sigma is not None)
-        assert(self._smearing_func is not None)
-        return self._smearing_func(eig, mu, self.sigma, extra_outputs)
 
     def update(self, system: 'System') -> None:
         """Update fillings and chemical potential, if needed.
@@ -169,23 +141,45 @@ class Fillings:
 
         # Update fillings if necessary:
         if (self.sigma is not None) and (not np.isnan(electrons.deig_max)):
-            def n_electrons_err(mu):
-                """Root function for finding chemical potential"""
-                n_electrons = self.rc.comm_k.allreduce(
-                    (w_sk * self.compute(electrons.eig, mu)).sum().item(),
-                    qp.MPI.SUM)
-                # Broadcast across replica for machine-precision consistency:
-                return self.rc.comm_kb.bcast(n_electrons - self.n_electrons)
-            # Bracket mu over range of eigenvalues (with margin):
+            assert self._smearing_func is not None
             w_sk = electrons.basis.w_sk
-            eig_min = self.rc.comm_kb.allreduce(electrons.eig.min().item(),
-                                                qp.MPI.MIN) - 30.*self.sigma
-            eig_max = self.rc.comm_kb.allreduce(electrons.eig.max().item(),
-                                                qp.MPI.MAX) + 30.*self.sigma
-            self.mu = brentq(n_electrons_err, eig_min, eig_max)
+
+            def error_n_M(params):
+                """Root function for electron number and magnetization
+                constraints. Here, params is the set of Legendre multipliers
+                for these constraints, including chemical potential
+                and magnetization. Returns error and its gradient.
+                """
+                mu = params[0]
+                f, f_eig, _ = self._smearing_func(electrons.eig, mu, sigma_cur)
+                n = self.rc.comm_k.allreduce((w_sk * f).sum().item(),
+                                             qp.MPI.SUM)
+                n_mu = -self.rc.comm_k.allreduce((w_sk * f_eig).sum().item(),
+                                                 qp.MPI.SUM)
+                # Broadcast across replica for machine-precision consistency:
+                n_err = np.array([self.rc.comm_kb.bcast(n - self.n_electrons)])
+                n_err_mu = np.array([self.rc.comm_kb.bcast(n_mu)])
+                # qp.log.info(f'sigma_cur: {sigma_cur:f}  n_err: {n_err[0]}'
+                #            f'  n_mu: {n_err_mu[0]}')
+                return n_err, n_err_mu
+            # Bracket mu over range of eigenvalues (with margin):
+            params0 = np.array([self.mu if (not np.isnan(self.mu)) else 0.])
+            eig_diff_max = self.rc.comm_k.allreduce(
+                electrons.eig.diff(dim=-1).max(), qp.MPI.MAX)
+            sigma_cur = max(self.sigma, min(0.1, eig_diff_max))
+            final_step = False
+            while not final_step:
+                final_step = (sigma_cur == self.sigma)
+                xtol = 1e-8 if final_step else (0.1 * sigma_cur)
+                result = optimize.root(error_n_M, params0, jac=True,
+                                       method='lm',
+                                       options={'xtol': xtol, 'ftol': 1e-12})
+                params0 = result.x
+                sigma_cur = max(self.sigma, 0.5 * sigma_cur)
+            self.mu = params0[0]
             # Update fillings and entropy accordingly:
-            self.f, _, S = self.compute(electrons.eig, self.mu,
-                                        extra_outputs=True)
+            self.f, _, S = self._smearing_func(electrons.eig, self.mu,
+                                               self.sigma)
             system.energy['-TS'] = -self.sigma * self.rc.comm_k.allreduce(
                 (w_sk * S).sum().item(), qp.MPI.SUM)
             # --- compute magnetization
@@ -202,65 +196,51 @@ class Fillings:
                         f'  n_electrons: {self.n_electrons:.6f}{M_str}')
 
 
-def _smearing_fermi(eig: torch.Tensor, mu: float, sigma: float,
-                    extra_outputs=False) -> Union[SmearingResults,
-                                                  torch.Tensor]:
-    """Compute Fermi-Dirac occupations, and optionally also its
-    derivative and entropy in a named tuple if extra_outputs=True.
+def _smearing_fermi(eig: torch.Tensor, mu: float,
+                    sigma: float) -> SmearingResults:
+    """Compute Fermi-Dirac occupations, its energy derivative and entropy.
     Note that sigma is taken as 2 kT to keep width consistent."""
     f = torch.sigmoid((mu - eig)/(0.5*sigma))
-    if extra_outputs:
-        f_eig = f * (1 - f) / (-0.5*sigma)
-        S = -f.xlogy(f) - (1-f).xlogy(1-f)
-        return SmearingResults(f, f_eig, S)
-    return f
+    f_eig = f * (1 - f) / (-0.5*sigma)
+    S = -f.xlogy(f) - (1-f).xlogy(1-f)
+    return SmearingResults(f, f_eig, S)
 
 
-def _smearing_gauss(eig: torch.Tensor, mu: float, sigma: float,
-                    extra_outputs=False) -> Union[SmearingResults,
-                                                  torch.Tensor]:
-    """Compute Gaussian (erfc) occupations, and optionally also its
-    derivative and entropy in a named tuple if extra_outputs=True"""
+def _smearing_gauss(eig: torch.Tensor, mu: float,
+                    sigma: float) -> SmearingResults:
+    """Compute Gaussian (erfc) occupations, energy derivative and entropy."""
     x = (eig - mu) / sigma
     f = 0.5*torch.erfc(x)
-    if extra_outputs:
-        S = torch.exp(-x*x) / np.sqrt(np.pi)
-        f_eig = (-1./sigma) * S
-        return SmearingResults(f, f_eig, S)
-    return f
+    S = torch.exp(-x*x) / np.sqrt(np.pi)
+    f_eig = (-1./sigma) * S
+    return SmearingResults(f, f_eig, S)
 
 
-def _smearing_mp1(eig: torch.Tensor, mu: float, sigma: float,
-                  extra_outputs=False) -> Union[SmearingResults, torch.Tensor]:
-    """Compute first-order Methfessel-Paxton occupations, and optionally also
-    its derivative and entropy in a named tuple if extra_outputs=True"""
+def _smearing_mp1(eig: torch.Tensor, mu: float,
+                  sigma: float) -> SmearingResults:
+    """Compute first-order Methfessel-Paxton occupations, energy derivative
+    and entropy."""
     x = (eig - mu) / sigma
     gaussian = torch.exp(-x*x) / np.sqrt(np.pi)
     f = 0.5*(torch.erfc(x) - x * gaussian)
-    if extra_outputs:
-        f_eig = (x*x - 1.5) * gaussian / sigma
-        S = (0.5 - x*x) * gaussian
-        return SmearingResults(f, f_eig, S)
-    return f
+    f_eig = (x*x - 1.5) * gaussian / sigma
+    S = (0.5 - x*x) * gaussian
+    return SmearingResults(f, f_eig, S)
 
 
-def _smearing_cold(eig: torch.Tensor, mu: float, sigma: float,
-                   extra_outputs=False) -> Union[SmearingResults,
-                                                 torch.Tensor]:
-    """Compute Cold smearing occupations, and optionally also
-    its derivative and entropy in a named tuple if extra_outputs=True"""
+def _smearing_cold(eig: torch.Tensor, mu: float,
+                   sigma: float) -> SmearingResults:
+    """Compute Cold smearing occupations, energy derivative and entropy."""
     x = (eig - mu) / sigma + np.sqrt(0.5)  # note: not centered at mu
     sqrt2 = np.sqrt(2.)
     gaussian = torch.exp(-x*x) / np.sqrt(np.pi)
     f = 0.5*(torch.erfc(x) + sqrt2*gaussian)
-    if extra_outputs:
-        f_eig = -gaussian * (1 + x*sqrt2) / sigma
-        S = gaussian * x * sqrt2
-        return SmearingResults(f, f_eig, S)
-    return f
+    f_eig = -gaussian * (1 + x*sqrt2) / sigma
+    S = gaussian * x * sqrt2
+    return SmearingResults(f, f_eig, S)
 
 
-_smearing_funcs = {
+_smearing_funcs: Dict[str, SmearingFunc] = {
     'fermi': _smearing_fermi,
     'gauss': _smearing_gauss,
     'mp1': _smearing_mp1,
@@ -277,7 +257,7 @@ if __name__ == '__main__':
         eig = torch.linspace(mu-20*kT, mu+20*kT, 4001)
         deig = eig[1] - eig[0]
         for name, func in _smearing_funcs.items():
-            f, f_eig, S = func(eig, mu, 2*kT, extra_outputs=True)
+            f, f_eig, S = func(eig, mu, 2*kT)
             f_eig_num = (f[2:] - f[:-2])/(2*deig)
             f_eig_err = (f_eig[1:-1] - f_eig_num).norm() / f_eig_num.norm()
             print(f'{name:>5s}:  Err(f_eig): {f_eig_err:.2e}'
