@@ -13,6 +13,7 @@ electrons:
   n-bands-extra: 3
   spin-polarized: yes
   fillings:
-    M-initial: +1
+    M: +1.
+    M-constrain: yes
   scf:
     mix-density: no  # mix potential instead
