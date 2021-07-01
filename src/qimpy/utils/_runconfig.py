@@ -235,11 +235,14 @@ class RunConfig:
         duration = datetime.timedelta(seconds=(t_stop - self.t_start))
         qp.log.info(f'\nEnd time: {time.ctime(t_stop)} (Duration: {duration})')
 
-    def fmt(self, tensor: torch.Tensor) -> str:
-        """Standardized conversion of torch tensors for logging."""
-        return np.array2string(
-            tensor.to(self.cpu).numpy(),
-            precision=8, suppress_small=True, separator=', ')
+    def fmt(self, tensor: torch.Tensor, **kwargs) -> str:
+        """Standardized conversion of torch tensors for logging.
+        Keyword arguments are forwarded to numpy.array2string."""
+        # Set some defaults in formatter:
+        kwargs.setdefault('precision', 8)
+        kwargs.setdefault('suppress_small', True)
+        kwargs.setdefault('separator', ', ')
+        return np.array2string(tensor.to(self.cpu).numpy(), **kwargs)
 
 
 def comm_split_grid(comm: qp.MPI.Comm, n_procs_o: int,

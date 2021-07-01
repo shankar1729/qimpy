@@ -268,7 +268,8 @@ class Fillings:
                 M = results['NM'][1:]
                 if not self.M_constrain:
                     self.M = M
-                M_str = f'  M: {self.rc.fmt(M)}'
+                M_str = '  M: ' \
+                        f'{self.rc.fmt(M, floatmode="fixed", precision=5)}'
             else:
                 M_str = ''
             qp.log.info(f'  FillingsUpdate:  mu: {self.mu:.9f}'
