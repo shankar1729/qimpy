@@ -18,7 +18,7 @@ def _band_norms(self: 'Wavefunction', mode: str) -> torch.Tensor:
     assert(mode in ('norm', 'ke'))
     assert(not self.band_division)
     basis = self.basis
-    coeff_sq = torch.abs(self.coeff)**2
+    coeff_sq = qp.utils.abs_squared(self.coeff)
     if mode == 'ke':
         coeff_sq *= basis.get_ke(basis.mine)[None, :, None, None, :]
     result = ((coeff_sq @ basis.Gweight_mine).sum(dim=-1)
@@ -38,6 +38,29 @@ def _band_norm(self: 'Wavefunction') -> torch.Tensor:
 def _band_ke(self: 'Wavefunction') -> torch.Tensor:
     """Return per-band norm of wavefunctions"""
     return _band_norms(self, 'ke')
+
+
+def _band_spin(self: 'Wavefunction') -> torch.Tensor:
+    """Return per-band spin of wavefunctions (must be spinorial).
+    Result dimensions are 3 x 1 x nk x n_bands."""
+    assert(not self.band_division)
+    basis = self.basis
+    coeff = self.coeff
+    assert(coeff.shape[-2] == 2)  # must be spinorial
+    # Compute spin density matrix per band:
+    rho_s = (torch.einsum('skbxg, g, skbyg -> skbxy',
+                          coeff.conj(), basis.Gweight_mine, coeff)
+             if basis.real_wavefunctions
+             else torch.einsum('skbxg, skbyg -> skbxy', coeff.conj(), coeff))
+    if basis.n_procs > 1:
+        basis.rc.comm_b.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(rho_s),
+                                  op=qp.MPI.SUM)
+    # Convert to spin vector:
+    result = torch.zeros((3,) + coeff.shape[:3], device=coeff.device)
+    result[0] = 2. * rho_s[..., 0, 1].real  # Sx
+    result[1] = 2. * rho_s[..., 1, 0].imag  # Sy
+    result[2] = rho_s[..., 0, 0].real - rho_s[..., 1, 1].real  # Sz
+    return result
 
 
 def _dot(self: 'Wavefunction', other: 'Wavefunction') -> torch.Tensor:

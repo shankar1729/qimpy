@@ -4,7 +4,7 @@ import torch
 from ._wavefunction_init import _randomize, \
     _randomize_selected, _RandomizeSelected
 from ._wavefunction_split import _split_bands, _split_basis
-from ._wavefunction_ops import _norm, _band_norm, _band_ke, \
+from ._wavefunction_ops import _norm, _band_norm, _band_ke, _band_spin, \
     _dot, _dot_O, _overlap, _matmul, _orthonormalize, \
     _mul, _imul, _add, _iadd, _sub, _isub, _getitem, _cat
 from typing import Callable, Optional, Union, TYPE_CHECKING
@@ -124,6 +124,7 @@ class Wavefunction:
     norm: UnaryOpS = _norm
     band_norm: UnaryOpT = _band_norm
     band_ke: UnaryOpT = _band_ke
+    band_spin: UnaryOpT = _band_spin
     dot_O: BinaryOpT = _dot_O  # dot product through overlap operator
     dot: BinaryOpT = _dot  # bare dot product
     __xor__: BinaryOpT = _dot  # convenient shorthand C1 ^ C2 for dot product

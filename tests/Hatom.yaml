@@ -12,8 +12,9 @@ ions:
 electrons:
   n-bands-extra: 3
   spin-polarized: yes
+  spinorial: yes
   fillings:
-    M: +1.
-    M-constrain: yes
+    M: [1, 0, 0]
+    M-constrain: no
   scf:
     mix-density: no  # mix potential instead

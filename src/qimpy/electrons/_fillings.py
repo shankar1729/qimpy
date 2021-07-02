@@ -248,11 +248,15 @@ class Fillings:
                 final_step = False
                 while not final_step:
                     final_step = (sigma_cur == self.sigma)
-                    xtol = 1e-8 if final_step else (0.1 * sigma_cur)
-                    optimize.root(compute_NM, mu_B[i_free], args=(True,),
-                                  jac=True, method='lm',
-                                  options={'xtol': xtol, 'ftol': 1e-12})
+                    xtol = 1e-12 if final_step else (0.1 * sigma_cur)
+                    res = optimize.root(compute_NM, mu_B[i_free], args=(True,),
+                                        jac=True, method='lm',
+                                        options={'xtol': xtol, 'ftol': 1e-12})
                     sigma_cur = max(self.sigma, 0.5 * sigma_cur)
+                if np.max(np.abs(res.fun)) > 1e-10 * self.n_electrons:
+                    raise ValueError('Density/magnetization constraint failed:'
+                                     ' check if n_bands is sufficient or if'
+                                     ' mu/B guesses are reasonable.')
             else:
                 compute_NM(np.array([]))  # both mu and B are fixed
 
