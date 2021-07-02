@@ -11,9 +11,10 @@ if TYPE_CHECKING:
 
 class SCF(qp.utils.Pulay['FieldH']):
     """Electronic self-consistent field iteration."""
-    __slots__ = ('q_kerker', 'q_metric', 'q_kappa',
+    __slots__ = ('mix_fraction_mag', 'q_kerker', 'q_metric', 'q_kappa',
                  'n_eig_steps', 'eig_threshold', 'mix_density',
                  'system', 'K_kerker', 'K_metric')
+    mix_fraction_mag: float  #: Mix-fraction for magnetization
     q_kerker: float  #: Kerker-mixing wavevector
     q_metric: float  #: Wavevector controlling reciprocal-space metric
     q_kappa: Optional[float]  #: Debye wavevector (automatic if None)
@@ -27,10 +28,11 @@ class SCF(qp.utils.Pulay['FieldH']):
     def __init__(self, *, rc: 'RunConfig', comm: qp.MPI.Comm,
                  n_iterations: int = 50, energy_threshold: float = 1e-8,
                  residual_threshold: float = 1e-7, n_history: int = 10,
-                 mix_fraction: float = 0.5, q_kerker: float = 0.8,
-                 q_metric: float = 0.8, q_kappa: Optional[float] = None,
-                 n_eig_steps: int = 2, eig_threshold: float = 1e-8,
-                 mix_density: bool = True):
+                 mix_fraction: float = 0.5, mix_fraction_mag: float = 1.5,
+                 q_kerker: float = 0.8, q_metric: float = 0.8,
+                 q_kappa: Optional[float] = None, n_eig_steps: int = 2,
+                 eig_threshold: float = 1e-8, mix_density: bool = True):
+        self.mix_fraction_mag = mix_fraction_mag
         self.q_kerker = q_kerker
         self.q_metric = q_metric
         self.q_kappa = q_kappa
@@ -97,7 +99,10 @@ class SCF(qp.utils.Pulay['FieldH']):
             electrons.V_ks = v
 
     def precondition(self, v: 'FieldH') -> 'FieldH':
-        return qp.grid.FieldH(v.grid, data=(v.data * self.K_kerker))
+        result = qp.grid.FieldH(v.grid, data=(v.data * self.K_kerker))
+        if result.data.shape[0] > 1:  # Different fraction for magnetization
+            result.data[1:] *= (self.mix_fraction_mag / self.mix_fraction)
+        return result
 
     def metric(self, v: 'FieldH') -> 'FieldH':
         return qp.grid.FieldH(v.grid, data=(v.data * self.K_metric))
