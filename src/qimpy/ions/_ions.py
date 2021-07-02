@@ -201,11 +201,11 @@ class Ions:
         and the energy components are stored within system.E.
         """
         grid = system.grid
-        n_spins = system.electrons.n_spins
+        n_densities = system.electrons.n_densities
         self.rho = qp.grid.FieldH(grid)  # initialize zero ionic charge
         self.Vloc = qp.grid.FieldH(grid)  # initizliae zero local potential
         self.n_core = qp.grid.FieldH(grid,  # initialize zero core density
-                                     shape_batch=(n_spins,))
+                                     shape_batch=(n_densities,))
         if not self.n_ions:
             return  # no contributions below if no ions!
         system.energy['Eewald'] = system.coulomb.ewald(self.positions,
@@ -232,8 +232,8 @@ class Ions:
             n_core_coeff.append(ps.n_core.f_t_coeff)
         # --- interpolate to G and collect with structure factors
         self.Vloc.data = (SF * Ginterp(torch.hstack(Vloc_coeff))).sum(dim=0)
-        self.n_core.data += (SF * Ginterp(torch.hstack(n_core_coeff))
-                             ).sum(dim=0)[None, ...] * (1./n_spins)
+        self.n_core.data[0] = (SF * Ginterp(torch.hstack(n_core_coeff))
+                               ).sum(dim=0)
         self.rho.data = ((-self.Z.view(-1, 1, 1, 1) * SF).sum(dim=0)
                          * torch.exp((-0.5*(ion_width**2)) * Gsq))
         # --- include long-range electrostatic part of Vloc:

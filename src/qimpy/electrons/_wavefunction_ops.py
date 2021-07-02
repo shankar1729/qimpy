@@ -57,7 +57,7 @@ def _band_spin(self: 'Wavefunction') -> torch.Tensor:
                                   op=qp.MPI.SUM)
     # Convert to spin vector:
     result = torch.zeros((3,) + coeff.shape[:3], device=coeff.device)
-    result[0] = 2. * rho_s[..., 0, 1].real  # Sx
+    result[0] = 2. * rho_s[..., 1, 0].real  # Sx
     result[1] = 2. * rho_s[..., 1, 0].imag  # Sy
     result[2] = rho_s[..., 0, 0].real - rho_s[..., 1, 1].real  # Sz
     return result

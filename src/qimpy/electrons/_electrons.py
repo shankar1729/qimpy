@@ -43,7 +43,7 @@ class Electrons:
     C: 'Wavefunction'  #: Electronic wavefunctions
     eig: torch.Tensor  #: Electronic orbital eigenvalues
     deig_max: float  #: Estimate of accuracy of current `eig`
-    n: 'FieldH'  #: Electron (spin-)density
+    n: 'FieldH'  #: Electron density (and magnetization, if `spin_polarized`)
     V_ks: 'FieldH'  #: Kohn-Sham potential (local part)
 
     hamiltonian = _hamiltonian
@@ -237,28 +237,29 @@ class Electrons:
                                 rc=rc, comm=rc.comm_kb)
 
     @property
-    def rho(self) -> 'FieldH':
-        """Electronic charge density (sum over spin channels of `n`)."""
-        return qp.grid.FieldH(self.n.grid, data=self.n.data.sum(dim=0))
+    def n_densities(self) -> int:
+        """Number of electron density / magnetization components in `n`."""
+        return ((4 if self.spinorial else 2) if self.spin_polarized else 1)
 
     def update_density(self, system: 'System') -> None:
         """Update electron density from wavefunctions and fillings.
         Result is in system grid in reciprocal space."""
         f = self.fillings.f
-        self.n = ~(self.basis.collect_density(self.C, f)).to(system.grid)
+        need_Mvec = (self.spinorial and self.spin_polarized)
+        self.n = ~(self.basis.collect_density(self.C, f,
+                                              need_Mvec)).to(system.grid)
         # TODO: ultrasoft augmentation and symmetrization
 
     def update_potential(self, system: 'System') -> None:
         """Update density-dependent energy terms and electron potential."""
+        # Exchange-correlation contributions:
+        system.energy['Exc'], self.V_ks = self.xc(self.n + system.ions.n_core)
         # Hartree and local contributions:
-        rho = self.rho
+        rho = self.n[0]  # total charge density
         VH = system.coulomb(rho)  # Hartree potential
-        self.V_ks = system.ions.Vloc + VH
+        self.V_ks[0] += system.ions.Vloc + VH
         system.energy['EH'] = 0.5 * (rho ^ VH).item()
         system.energy['Eloc'] = (rho ^ system.ions.Vloc).item()
-        # Exchange-correlation contributions:
-        system.energy['Exc'], Vxc = self.xc(self.n + system.ions.n_core)
-        self.V_ks = self.V_ks + Vxc
 
     def update(self, system: 'System') -> None:
         """Update electronic system to current wavefunctions and eigenvalues.

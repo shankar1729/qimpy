@@ -4,7 +4,7 @@ import torch
 from abc import abstractmethod
 from numbers import Number
 from ._change import _change_real, _change_recip
-from typing import TypeVar, Tuple, Optional, Sequence, TYPE_CHECKING
+from typing import TypeVar, Any, Tuple, Optional, Sequence, TYPE_CHECKING
 if TYPE_CHECKING:
     from ._grid import Grid
 
@@ -166,6 +166,14 @@ class Field(qp.utils.Optimizable):
     @o.setter
     def o(self, other: torch.Tensor) -> None:
         self.data[self.get_origin_index()] = other
+
+    def __getitem__(self: FieldType, index: Any) -> FieldType:
+        """Slice on batch dimensions."""
+        return self.__class__(self.grid, data=self.data[index])
+
+    def __setitem__(self: FieldType, index: Any, value: FieldType) -> None:
+        """Assign to slice on batch dimensions"""
+        self.data[index] = value.data
 
 
 class FieldR(Field):
