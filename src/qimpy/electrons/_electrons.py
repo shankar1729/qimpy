@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from ._chefsi import CheFSI
     from ._scf import SCF
     from ._wavefunction import Wavefunction
-    from ._xc import XC
+    from .xc import XC
 
 
 class Electrons:
@@ -213,7 +213,7 @@ class Electrons:
         self.deig_max = np.nan  # note that eigenvalues are completely wrong!
 
         # Initialize exchange-correlation functional:
-        self.xc = qp.construct(qp.electrons.XC, xc, 'xc')
+        self.xc = qp.construct(qp.electrons.xc.XC, xc, 'xc')
 
         # Initialize diagonalizer:
         n_options = np.count_nonzero([(d is not None)
