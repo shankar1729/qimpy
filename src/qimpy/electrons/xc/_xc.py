@@ -14,11 +14,17 @@ class XC:
     __slots__ = ('_functionals',)
     _functionals: List["Functional"]  #: list of functionals that add up to XC
 
-    def __init__(self):
+    def __init__(self, *, name: str = 'lda-pz'):
         """TODO: add selection of functionals here"""
         self._functionals = []
-        self._functionals.append(lda.X_Slater())
-        self._functionals.append(lda.C_PZ())
+        if name == 'lda-pz':
+            self._functionals.append(lda.X_Slater())
+            self._functionals.append(lda.C_PZ())
+        elif name == 'lda-vwn':
+            self._functionals.append(lda.X_Slater())
+            self._functionals.append(lda.C_VWN())
+        else:
+            raise KeyError(f'Unknown XC functional {name}')
 
     def __call__(self, n_t: 'FieldH') -> Tuple[float, 'FieldH']:
         """Compute exchange-correlation energy and potential."""

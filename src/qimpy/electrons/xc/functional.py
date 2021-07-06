@@ -1,8 +1,8 @@
-from abc import abstractmethod
+from abc import abstractmethod, ABC
 import torch
 
 
-class Functional:
+class Functional(ABC):
     """Abstract base class for exchange-correlation functionals."""
     __slots__ = ('needs_sigma', 'needs_lap', 'needs_tau',
                  'has_exchange', 'has_correlation', 'has_kinetic',
