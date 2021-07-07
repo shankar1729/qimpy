@@ -20,6 +20,12 @@ class XC:
         if name == 'lda-pz':
             self._functionals.append(lda.X_Slater())
             self._functionals.append(lda.C_PZ())
+        elif name == 'lda-pw':
+            self._functionals.append(lda.X_Slater())
+            self._functionals.append(lda.C_PW(high_precision=False))
+        elif name == 'lda-pw-prec':
+            self._functionals.append(lda.X_Slater())
+            self._functionals.append(lda.C_PW(high_precision=True))
         elif name == 'lda-vwn':
             self._functionals.append(lda.X_Slater())
             self._functionals.append(lda.C_VWN())

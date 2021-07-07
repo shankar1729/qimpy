@@ -119,6 +119,40 @@ class C_PZ(SpinInterpolated):
         return e
 
 
+class C_PW(SpinInterpolated):
+    """Perdew-Wang LDA correlation functional."""
+    __slots__ = ('_params',)
+    _params: torch.Tensor  # PZ functional parameters
+
+    def __init__(self, high_precision: bool, scale_factor: float = 1.) -> None:
+        """Initialize PW correlation functional.
+        Here, `high_precision` controls whether parameters are at the
+        full precision (if True) as used within the PBE GGA, or at the
+        original precision (if False) as in the original PW-LDA paper."""
+        super().__init__(has_correlation=True, scale_factor=scale_factor)
+        if not high_precision:
+            self.stiffness_scale = 1./1.709921  # limit to single precision
+        self._params = torch.tensor([
+            ([0.0310907, 0.01554535, 0.0168869]  # A at full precision
+             if high_precision else
+             [0.031091, 0.015545, 0.016887]),  # A at original precision
+            [0.21370, 0.20548, 0.11125],  # alpha
+            [7.5957, 14.1189, 10.357],  # beta1
+            [3.5876, 6.1977, 3.6231],  # beta2
+            [1.6382, 3.3662, 0.88026],  # beta3
+            [0.49294, 0.62517, 0.49671],  # beta4
+        ])
+        self._params[0] *= 2.  # Convert A to 2A used below
+
+    def compute(self, rs: torch.Tensor, spin_polarized: bool) -> torch.Tensor:
+        n_channels = (3 if spin_polarized else 1)
+        A2, alpha, beta1, beta2, beta3, beta4 \
+            = self._params[:, :n_channels].to(rs.device).unbind()
+        x = rs.sqrt()[..., None]  # add dim for spin interpolation
+        den = A2 * x*(beta1 + x*(beta2 + x*(beta3 + x*beta4)))
+        return -A2 * (1 + alpha*rs[..., None]) * (1. + 1./den).log()
+
+
 class C_VWN(SpinInterpolated):
     """Vosko-Wilk-Nusair LDA correlation functional."""
     __slots__ = ('_params',)
