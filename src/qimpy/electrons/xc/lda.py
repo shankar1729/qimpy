@@ -103,8 +103,8 @@ class C_PZ(SpinInterpolated):
 
     def compute(self, rs: torch.Tensor, spin_polarized: bool) -> torch.Tensor:
         n_channels = (2 if spin_polarized else 1)
-        _params = self._params[:, :n_channels].to(rs.device)
-        a, b, c, d, gamma, beta1, beta2 = _params.unbind()
+        a, b, c, d, gamma, beta1, beta2 \
+            = self._params[:, :n_channels].to(rs.device).unbind()
         e = torch.empty(rs.shape + (n_channels,))  # energy density
         # --- rs < 1 case:
         sel = torch.where(rs < 1.)
@@ -135,8 +135,7 @@ class C_VWN(SpinInterpolated):
 
     def compute(self, rs: torch.Tensor, spin_polarized: bool) -> torch.Tensor:
         n_channels = (3 if spin_polarized else 1)
-        _params = self._params[:, :n_channels].to(rs.device)
-        A, b, c, x0 = _params.unbind()
+        A, b, c, x0 = self._params[:, :n_channels].to(rs.device).unbind()
         # Commonly used combinations of rs:
         X0 = c + x0*(b + x0)
         Q = (4.*c - b*b).sqrt()
@@ -150,3 +149,46 @@ class C_VWN(SpinInterpolated):
         # Final combination to correlation energy:
         return A*(log_term1 + b*(atan_term - (x0/X0)*(log_term2
                                                       + (b+2*x0)*atan_term)))
+
+
+class XC_Teter(Functional):
+    """Teter LSDA functional."""
+    __slots__ = ('_params',)
+    _params: torch.Tensor  # Teter functional parameters
+
+    def __init__(self, scale_factor: float = 1.) -> None:
+        super().__init__(has_exchange=True, has_correlation=True,
+                         scale_factor=scale_factor)
+        self._params = torch.tensor([
+            [0.4581652932831429, 0.119086804055547],  # a0  (para, ferro-para)
+            [2.217058676663745, 0.6157402568883345],  # a1
+            [0.7405551735357053, 0.1574201515892867],  # a2
+            [0.01968227878617998, 0.003532336663397157],  # a3
+            [4.504130959426697, 0.2673612973836267],  # b2
+            [1.110667363742916, 0.2052004607777787],  # b3
+            [0.02359291751427506, 0.004200005045691381]  # b4
+        ])
+
+    def __call__(self, n: torch.Tensor, sigma: torch.Tensor,
+                 lap: torch.Tensor, tau: torch.Tensor) -> float:
+        n_spins = n.shape[0]
+        n.requires_grad_()
+        n_tot = n.sum(dim=0)
+        rs = ((4.*np.pi/3.) * n_tot) ** (-1./3)
+        # Spin interpolate the parameters (if needed):
+        if n_spins == 1:
+            params = self._params[:, 0].to(n.device)
+        else:
+            zeta = (n[0] - n[1]) / n_tot
+            spin_interp = (((1 + zeta)**(4./3) + (1 - zeta)**(4./3) - 2.)
+                           / (2.**(4./3) - 2.))
+            params_para, params_dferro = self._params.to(n.device
+                                                         ).unbind(dim=-1)
+            params = params_para + spin_interp[..., None] * params_dferro
+        # Pade approximant with spin-interpolated parameters:
+        a0, a1, a2, a3, b2, b3, b4 = params.unbind(dim=-1)
+        minus_exc = ((a0 + rs*(a1 + rs*(a2 + rs*a3)))
+                     / (rs*(1. + rs*(b2 + rs*(b3 + rs*b4)))))
+        E = (minus_exc * n_tot).sum() * (-self.scale_factor)
+        E.backward()  # updates n.grad
+        return E.item()

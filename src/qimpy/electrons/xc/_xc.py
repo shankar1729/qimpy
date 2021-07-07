@@ -23,6 +23,8 @@ class XC:
         elif name == 'lda-vwn':
             self._functionals.append(lda.X_Slater())
             self._functionals.append(lda.C_VWN())
+        elif name == 'lda-teter':
+            self._functionals.append(lda.XC_Teter())
         else:
             raise KeyError(f'Unknown XC functional {name}')
 

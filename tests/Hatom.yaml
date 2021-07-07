@@ -12,7 +12,7 @@ ions:
 electrons:
   n-bands-extra: 3
   xc: 
-    name: lda-vwn
+    name: lda-teter
   spin-polarized: yes
   #spinorial: yes
   fillings:
