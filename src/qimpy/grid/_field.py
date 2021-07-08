@@ -175,6 +175,25 @@ class Field(qp.utils.Optimizable):
         """Assign to slice on batch dimensions"""
         self.data[index] = value.data
 
+    def gradient(self: FieldType, dim: int = 0) -> FieldType:
+        """Gradient of field. A new batch dimension of length 3 is inserted
+        at the location specified by `dim`, by default at the beginning."""
+        field_type = type(self)
+        if field_type in {FieldR, FieldC}:  # apply in reciprocal space
+            return ~((~self).gradient(dim=dim))  # type: ignore
+        op = self.grid.get_gradient_operator('H' if (field_type == FieldH)
+                                             else 'G')
+        shape_in = self.data.shape
+        n_batch_dims = len(shape_in) - 3
+        shape_data = shape_in[:dim] + (1,) + shape_in[dim:]
+        shape_op = (1,)*dim + (3,) + (1,)*(n_batch_dims-dim) + op.shape[1:]
+        return self.__class__(self.grid, data=(op.view(shape_op)
+                                               * self.data.view(shape_data)))
+
+    def zeros_like(self: FieldType) -> FieldType:
+        """Create zero Field with same grid and batch dimensions."""
+        return self.__class__(self.grid, shape_batch=self.data.shape[:-3])
+
 
 class FieldR(Field):
     """Real fields in real space."""

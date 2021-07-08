@@ -150,6 +150,24 @@ class Grid:
         return torch.stack(
             torch.meshgrid(*self.mesh1D[space])).permute(1, 2, 3, 0)
 
+    def get_gradient_operator(self, space: str) -> torch.Tensor:
+        """Get gradient operator in reciprocal space.
+
+        Parameters
+        ----------
+        space : {'G', 'H'}
+            Which space to compute mesh coordinates for: 'G' = full reciprocal
+            space and 'H' = half or Hermitian-symmetric recipocal space.
+
+        Returns
+        -------
+        Tensor
+            Tensor with dimensions (3,) + shape_mine, where
+            shape_mine is the relevant local dimensions of requested space
+        """
+        iG = torch.stack(torch.meshgrid(*self.mesh1D[space])).to(torch.double)
+        return 1j * torch.tensordot(self.lattice.Gbasis, iG, dims=1)
+
     def get_Gmax(self) -> float:
         """Get maximum wave-vector magnitude of the FFT grid."""
         iG_box = torch.tensor(np.array([

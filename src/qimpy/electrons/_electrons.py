@@ -25,7 +25,7 @@ class Electrons:
     __slots__ = ('rc', 'kpoints', 'spin_polarized', 'spinorial', 'n_spins',
                  'n_spinor', 'w_spin', 'fillings', 'n_bands', 'n_bands_extra',
                  'basis', 'xc', 'diagonalize', 'scf', 'C',
-                 'eig', 'deig_max', 'n', 'V_ks')
+                 'eig', 'deig_max', 'n', 'tau', 'V_ks', 'V_tau')
     rc: 'RunConfig'  #: Current run configuration
     kpoints: 'Kpoints'  #: Set of kpoints (mesh or path)
     spin_polarized: bool  #: Whether calculation is spin-polarized
@@ -44,7 +44,9 @@ class Electrons:
     eig: torch.Tensor  #: Electronic orbital eigenvalues
     deig_max: float  #: Estimate of accuracy of current `eig`
     n: 'FieldH'  #: Electron density (and magnetization, if `spin_polarized`)
+    tau: 'FieldH'  #: KE density (only for meta-GGAs)
     V_ks: 'FieldH'  #: Kohn-Sham potential (local part)
+    V_tau: 'FieldH'  #: KE potential
 
     hamiltonian = _hamiltonian
 
@@ -249,11 +251,14 @@ class Electrons:
         self.n = ~(self.basis.collect_density(self.C, f,
                                               need_Mvec)).to(system.grid)
         # TODO: ultrasoft augmentation and symmetrization
+        self.tau = qp.grid.FieldH(system.grid, shape_batch=(0,))
+        # TODO: actually compute KE density if required
 
     def update_potential(self, system: 'System') -> None:
         """Update density-dependent energy terms and electron potential."""
         # Exchange-correlation contributions:
-        system.energy['Exc'], self.V_ks = self.xc(self.n + system.ions.n_core)
+        system.energy['Exc'], self.V_ks, self.V_tau = \
+            self.xc(self.n + system.ions.n_core, self.tau)
         # Hartree and local contributions:
         rho = self.n[0]  # total charge density
         VH = system.coulomb(rho)  # Hartree potential

@@ -14,7 +14,7 @@ electrons:
   xc: 
     name: lda-pw-prec
   spin-polarized: yes
-  #spinorial: yes
+  spinorial: yes
   fillings:
     #M: [-1, 0, 0]
     #M-constrain: no
