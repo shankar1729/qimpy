@@ -85,6 +85,9 @@ class Field(qp.utils.Optimizable):
         self.data -= other.data
         return self
 
+    def __neg__(self: FieldType) -> FieldType:
+        return self.__class__(self.grid, data=(-self.data))
+
     def __mul__(self: FieldType, other: float) -> FieldType:
         if not isinstance(other, Number):
             return NotImplemented
@@ -189,6 +192,28 @@ class Field(qp.utils.Optimizable):
         shape_op = (1,)*dim + (3,) + (1,)*(n_batch_dims-dim) + op.shape[1:]
         return self.__class__(self.grid, data=(op.view(shape_op)
                                                * self.data.view(shape_data)))
+
+    def divergence(self: FieldType, dim: int = 0) -> FieldType:
+        """Divergence of field. A dimension of length 3 at `dim`, by default
+        at the beginning, is contracted against the gradient operator."""
+        field_type = type(self)
+        if field_type in {FieldR, FieldC}:  # apply in reciprocal space
+            return ~((~self).divergence(dim=dim))  # type: ignore
+        op = self.grid.get_gradient_operator('H' if (field_type == FieldH)
+                                             else 'G')
+        n_batch_dims = len(self.data.shape) - 4  # other than contracted one
+        shape_op = (1,)*dim + (3,) + (1,)*(n_batch_dims-dim) + op.shape[1:]
+        return self.__class__(self.grid, data=(op.view(shape_op)
+                                               * self.data).sum(dim=dim))
+
+    def laplacian(self: FieldType) -> FieldType:
+        """Laplacian of field."""
+        field_type = type(self)
+        if field_type in {FieldR, FieldC}:  # apply in reciprocal space
+            return ~((~self).laplacian())  # type: ignore
+        iG = self.grid.get_mesh('H' if (field_type == FieldH) else 'G')
+        op = -((iG.to(torch.double) @ self.grid.lattice.Gbasis)**2).sum(dim=-1)
+        return self.__class__(self.grid, data=(op * self.data))
 
     def zeros_like(self: FieldType) -> FieldType:
         """Create zero Field with same grid and batch dimensions."""
