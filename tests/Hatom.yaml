@@ -12,9 +12,9 @@ ions:
 electrons:
   n-bands-extra: 3
   xc: 
-    name: lda-pw-prec
+    name: gga-pbe
   spin-polarized: yes
-  spinorial: yes
+  #spinorial: yes
   fillings:
     #M: [-1, 0, 0]
     #M-constrain: no

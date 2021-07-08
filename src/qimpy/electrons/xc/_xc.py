@@ -1,7 +1,7 @@
 import qimpy as qp
 import numpy as np
 import torch
-from . import lda
+from . import lda, gga
 from typing import TYPE_CHECKING, Tuple, List, Optional
 if TYPE_CHECKING:
     from ...grid import FieldH
@@ -37,6 +37,9 @@ class XC:
             self._functionals.append(lda.C_VWN())
         elif name == 'lda-teter':
             self._functionals.append(lda.XC_Teter())
+        elif name == 'gga-pbe':
+            self._functionals.append(gga.X_PBE(sol=False))
+            self._functionals.append(lda.C_PW(high_precision=True))  # TODO
         else:
             raise KeyError(f'Unknown XC functional {name}')
 
@@ -83,7 +86,7 @@ class XC:
         if self.need_sigma:
             Dn_in = (~(n_t.gradient(dim=1))).data
             Dn = from_magnetization(Dn_in)
-            sigma = torch.empty((2*n_spins+1,) + n.shape[1:], dtype=n.dtype,
+            sigma = torch.empty((2*n_spins-1,) + n.shape[1:], dtype=n.dtype,
                                 device=n.device)
             for s1 in range(n_spins):
                 for s2 in range(s1, n_spins):
