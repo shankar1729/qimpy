@@ -73,7 +73,11 @@ class XC:
             x = torch.empty((2,) + x_in.shape[1:], dtype=x_in.dtype,
                             device=x_in.device)
             if n_densities == 4:
-                xM = (x_in[1:] * Mhat).sum(dim=0)
+                # Broadcast Mhat with any batch dimensions of x_in:
+                n_batch = len(x_in.shape) - 4
+                Mhat_view = Mhat.view((3,) + (1,)*n_batch + Mhat.shape[1:])
+                # Project vector component of x against Mhat:
+                xM = (x_in[1:] * Mhat_view).sum(dim=0)
                 x[0] = 0.5 * (x_in[0] + xM)
                 x[1] = 0.5 * (x_in[0] - xM)
             else:  # n_densities == 2:
@@ -135,11 +139,20 @@ class XC:
             E_x_in[0] = 0.5 * (E_x[0] + E_x[1])
             E_x_diff = 0.5 * (E_x[0] - E_x[1])
             if n_densities == 4:
-                E_x_in[1:] = E_x_diff * Mhat
+                # Broadcast Mhat with any batch dimensions of x_in:
+                n_batch = len(E_x.shape) - 4
+                Mhat_view = Mhat.view((3,) + (1,)*n_batch + Mhat.shape[1:])
+                # Propagate E_Mhat = E_x_diff to E_x_in:
+                E_x_in[1:] = E_x_diff * Mhat_view
+                # Additional propagation of E_Mhat to E_n_in:
                 if x_in is not None:
                     x_vec = x_in[1:]
-                    E_n_in[1:] += E_x_diff * MmagInv * (
-                        x_vec - Mhat * (Mhat * x_vec).sum(dim=0))
+                    E_M = E_x_diff * MmagInv * (
+                        x_vec - Mhat_view * (Mhat_view * x_vec).sum(dim=0))
+                    if n_batch:
+                        batch_dims = tuple(range(1, 1+n_batch))
+                        E_M = E_M.sum(dim=batch_dims)
+                    E_n_in[1:] += E_M
             else:  # n_densities == 2:
                 E_x_in[1] = E_x_diff
             return E_x_in
