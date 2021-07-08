@@ -1,3 +1,8 @@
+"""Internal LDA implementations."""
+# List exported symbols for doc generation
+__all__ = ['KE_TF', 'X_Slater', 'SpinInterpolated',
+           'C_PZ', 'C_PW', 'C_VWN', 'XC_Teter']
+
 from .functional import Functional
 import numpy as np
 import torch
@@ -47,32 +52,37 @@ class SpinInterpolated(Functional):
 
     def __call__(self, n: torch.Tensor, sigma: torch.Tensor,
                  lap: torch.Tensor, tau: torch.Tensor) -> float:
+        """Main interface function including gradient evaluation."""
         n_spins = n.shape[0]
         n.requires_grad_()
         n_tot = n.sum(dim=0)
         rs = ((4.*np.pi/3.) * n_tot) ** (-1./3)
-        ec_spins = self.compute(rs, (n_spins == 2))
+        zeta = (((n[0] - n[1]) / n_tot) if (n_spins == 2)
+                else torch.zeros(1, dtype=n.dtype, device=n.device))
+        E = (n_tot * self.get_ec(rs, zeta)).sum() * self.scale_factor
+        E.backward()  # updates n.grad
+        return E.item()
+
+    def get_ec(self, rs: torch.Tensor, zeta: torch.Tensor) -> torch.Tensor:
+        """Internal spin interpolator, starting with `rs` and `zeta`."""
+        spin_polarized = ((len(zeta) != 1) or (zeta.item() != 0.))
+        ec_spins = self.compute(rs, spin_polarized)
         # Interpolate between spin channels:
         n_channels = ec_spins.shape[-1]
         if n_channels == 1:  # un-polarized: no spin interpolation needed
-            ec = ec_spins[..., 0]
+            return ec_spins[..., 0]
         else:
-            zeta = (n[0] - n[1]) / n_tot
             spin_interp = (((1 + zeta)**(4./3) + (1 - zeta)**(4./3) - 2.)
                            / (2.**(4./3) - 2.))
             if n_channels == 2:  # interpolate between para and ferro
                 ec_para, ec_ferro = ec_spins.unbind(dim=-1)
-                ec = ec_para + spin_interp * (ec_ferro - ec_para)
+                return ec_para + spin_interp * (ec_ferro - ec_para)
             else:  # n_channels == 3: additionally include spin stiffness
                 ec_para, ec_ferro, ec_stiff = ec_spins.unbind(dim=-1)
                 zeta4 = zeta ** 4
                 w1 = zeta4 * spin_interp
                 w2 = (zeta4 - 1.) * spin_interp * self.stiffness_scale
-                ec = ec_para + w1 * (ec_ferro - ec_para) + w2 * ec_stiff
-        # Compute energy density:
-        E = (n_tot * ec).sum() * self.scale_factor
-        E.backward()  # updates n.grad
-        return E.item()
+                return ec_para + w1 * (ec_ferro - ec_para) + w2 * ec_stiff
 
     @abstractmethod
     def compute(self, rs: torch.Tensor, spin_polarized: bool) -> torch.Tensor:

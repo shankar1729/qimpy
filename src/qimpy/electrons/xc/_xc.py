@@ -20,7 +20,7 @@ class XC:
     need_lap: bool  #: whether overall functional needs laplacian
     need_tau: bool  #: whether overall functional needs KE density
 
-    def __init__(self, *, name: str = 'lda-pz'):
+    def __init__(self, *, name: str = 'gga-pbe'):
         """TODO: add selection of functionals here"""
         self._functionals = []
         if name == 'lda-pz':
@@ -39,7 +39,10 @@ class XC:
             self._functionals.append(lda.XC_Teter())
         elif name == 'gga-pbe':
             self._functionals.append(gga.X_PBE(sol=False))
-            self._functionals.append(lda.C_PW(high_precision=True))  # TODO
+            self._functionals.append(gga.C_PBE(sol=False))
+        elif name == 'gga-pbesol':
+            self._functionals.append(gga.X_PBE(sol=True))
+            self._functionals.append(gga.C_PBE(sol=True))
         else:
             raise KeyError(f'Unknown XC functional {name}')
 

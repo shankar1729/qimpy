@@ -4,7 +4,7 @@ __all__ = [
     'Electrons',
     'Kpoints', 'Kmesh', 'Kpath',
     'Fillings', 'Basis', 'Wavefunction',
-    'Davidson', 'CheFSI', 'SCF']
+    'Davidson', 'CheFSI', 'SCF', 'xc']
 
 from ._electrons import Electrons
 from ._kpoints import Kpoints, Kmesh, Kpath

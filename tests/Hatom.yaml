@@ -11,8 +11,8 @@ ions:
 
 electrons:
   n-bands-extra: 3
-  xc: 
-    name: gga-pbe
+  #xc: 
+    #name: gga-pbe
   spin-polarized: yes
   #spinorial: yes
   fillings:

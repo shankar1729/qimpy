@@ -1,3 +1,7 @@
+"""Internal interface for XC functionals."""
+# List exported symbols for doc generation
+__all__ = ['Functional']
+
 from abc import abstractmethod, ABC
 import torch
 
