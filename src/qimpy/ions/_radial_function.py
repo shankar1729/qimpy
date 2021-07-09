@@ -70,7 +70,7 @@ class RadialFunction:
 
         # Set up radial G grid:
         nG = int(np.ceil(Gmax / cls.DG)) + 5  # with sufficient margin
-        G = torch.arange(nG) * cls.DG
+        G = torch.arange(nG, device=r.device) * cls.DG
 
         # Perform transform for each l:
         f_t = torch.empty((f.shape[0], nG), device=f.device)
