@@ -72,8 +72,8 @@ def _symmetrize_lattice(self: 'Symmetries',
     metric_sym = (self.rot.transpose(-2, -1)
                   @ (metric @ self.rot)).mean(dim=0)
     # From transformation from matrix square-roots of metrics:
-    E, V = metric.symeig(eigenvectors=True)
-    E_sym, V_sym = metric_sym.symeig(eigenvectors=True)
+    E, V = torch.linalg.eigh(metric)
+    E_sym, V_sym = torch.linalg.eigh(metric_sym)
     return (
         Rbasis
         @ (V @ ((1./E.sqrt()).diag_embed() @ V.T))  # metric^(-1/2)
