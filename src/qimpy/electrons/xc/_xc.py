@@ -2,7 +2,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from . import lda, gga
-from typing import TYPE_CHECKING, Tuple, List, Optional
+from typing import TYPE_CHECKING, Tuple, List, Optional, Union
 if TYPE_CHECKING:
     from ...grid import FieldH
     from .functional import Functional
@@ -20,31 +20,13 @@ class XC:
     need_lap: bool  #: whether overall functional needs laplacian
     need_tau: bool  #: whether overall functional needs KE density
 
-    def __init__(self, *, name: str = 'gga-pbe'):
+    def __init__(self, *, functional: Union[str, List[str]] = 'gga-pbe'):
         """TODO: add selection of functionals here"""
         self._functionals = []
-        if name == 'lda-pz':
-            self._functionals.append(lda.X_Slater())
-            self._functionals.append(lda.C_PZ())
-        elif name == 'lda-pw':
-            self._functionals.append(lda.X_Slater())
-            self._functionals.append(lda.C_PW(high_precision=False))
-        elif name == 'lda-pw-prec':
-            self._functionals.append(lda.X_Slater())
-            self._functionals.append(lda.C_PW(high_precision=True))
-        elif name == 'lda-vwn':
-            self._functionals.append(lda.X_Slater())
-            self._functionals.append(lda.C_VWN())
-        elif name == 'lda-teter':
-            self._functionals.append(lda.XC_Teter())
-        elif name == 'gga-pbe':
-            self._functionals.append(gga.X_PBE(sol=False))
-            self._functionals.append(gga.C_PBE(sol=False))
-        elif name == 'gga-pbesol':
-            self._functionals.append(gga.X_PBE(sol=True))
-            self._functionals.append(gga.C_PBE(sol=True))
-        else:
-            raise KeyError(f'Unknown XC functional {name}')
+        if isinstance(functional, str):
+            functional = [functional]
+        for func_name in functional:
+            self._functionals.extend(_get_functionals(func_name))
 
         # Collect overall needs:
         self.need_sigma = any(func.needs_sigma for func in self._functionals)
@@ -192,3 +174,23 @@ class XC:
             E = grid.comm.allreduce(E, qp.MPI.SUM)
         watch.stop()
         return E, E_n_t, E_tau_t
+
+
+def _get_functionals(name: str) -> List['Functional']:
+    """Get list of Functional objects associated with a functional name."""
+    if name == 'lda-pz':
+        return [lda.X_Slater(), lda.C_PZ()]
+    elif name == 'lda-pw':
+        return [lda.X_Slater(), lda.C_PW(high_precision=False)]
+    elif name == 'lda-pw-prec':
+        return [lda.X_Slater(), lda.C_PW(high_precision=True)]
+    elif name == 'lda-vwn':
+        return [lda.X_Slater(), lda.C_VWN()]
+    elif name == 'lda-teter':
+        return [lda.XC_Teter()]
+    elif name == 'gga-pbe':
+        return [gga.X_PBE(sol=False), gga.C_PBE(sol=False)]
+    elif name == 'gga-pbesol':
+        return [gga.X_PBE(sol=True), gga.C_PBE(sol=True)]
+    else:
+        raise KeyError(f'Unknown XC functional {name}')
