@@ -150,7 +150,7 @@ class Basis(qp.utils.TaskDivision):
                               dim=1)[:, :self.n_tot]  # same count all k
         self.iG = self.iG[self.fft_index]  # basis plane waves for each k
         pad_index = torch.where(fft_range[None, :self.n_tot]
-                                > self.n[:, None])  # padded entries
+                                >= self.n[:, None])  # padded entries
         self.pad_index = (slice(None), pad_index[0], slice(None), slice(None),
                           pad_index[1])  # add spin, band and spinor dims
 
@@ -159,7 +159,7 @@ class Basis(qp.utils.TaskDivision):
         self.mine = slice(self.i_start, self.i_stop)
         # --- initialize local pad index separately (not trivially sliceable):
         pad_index = torch.where(fft_range[None, self.i_start:self.i_stop]
-                                > self.n[:, None])  # local padded entries
+                                >= self.n[:, None])  # local padded entries
         self.pad_index_mine = (slice(None), pad_index[0], slice(None),
                                slice(None), pad_index[1])  # add other dims
 
