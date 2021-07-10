@@ -2,6 +2,7 @@
 #include <iostream>
 #include <vector>
 #include <cstdio>
+#include <stdexcept>
 
 namespace py = pybind11;
 
@@ -22,7 +23,9 @@ struct BufferView
 	
 	//Bind a view to a specified tensor:
 	BufferView(torch::Tensor t)
-	{	data_ptr = t.data_ptr();
+	{	if(not t.is_contiguous())
+			throw std::invalid_argument("Tensor must be contiguous for BufferView");
+		data_ptr = t.data_ptr();
 		AT_DISPATCH_ALL_TYPES_AND_COMPLEX(t.scalar_type(), "BufferView",
 		([&]{
 				itemsize = sizeof(scalar_t);
