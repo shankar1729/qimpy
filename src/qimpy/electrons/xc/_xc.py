@@ -104,9 +104,9 @@ class XC:
         sigma.grad = torch.zeros_like(sigma)
         lap.grad = torch.zeros_like(lap)
         tau.grad = torch.zeros_like(tau)
-        E_by_dV = 0.
+        E = 0.
         for functional in self._functionals:
-            E_by_dV += functional(n, sigma, lap, tau)
+            E += functional(n, sigma, lap, tau) * grid.dV
 
         # Gradient propagation for potential:
         def from_magnetization_grad(E_x: torch.Tensor,
@@ -169,7 +169,6 @@ class XC:
         E_n_t += ~qp.grid.FieldR(grid, data=E_n_in)
 
         # Collect energy
-        E = grid.dV * E_by_dV
         if grid.comm is not None:
             E = grid.comm.allreduce(E, qp.MPI.SUM)
         watch.stop()

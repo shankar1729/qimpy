@@ -20,3 +20,4 @@ electrons:
     #M-constrain: no
   scf:
     mix-density: no  # mix potential instead
+

@@ -128,6 +128,7 @@ class Field(qp.utils.Optimizable):
                    else self.grid.dV)  # real space integration weight
         # Collect over MPI if needed:
         if self.grid.comm is not None:
+            result = result.contiguous()
             self.grid.comm.Allreduce(qp.MPI.IN_PLACE,
                                      qp.utils.BufferView(result), qp.MPI.SUM)
         return result

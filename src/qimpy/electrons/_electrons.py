@@ -248,8 +248,8 @@ class Electrons:
         Result is in system grid in reciprocal space."""
         f = self.fillings.f
         need_Mvec = (self.spinorial and self.spin_polarized)
-        self.n = ~(self.basis.collect_density(self.C, f,
-                                              need_Mvec)).to(system.grid)
+        self.n = (~(self.basis.collect_density(self.C, f,
+                                               need_Mvec))).to(system.grid)
         # TODO: ultrasoft augmentation and symmetrization
         self.tau = qp.grid.FieldH(system.grid, shape_batch=(0,))
         # TODO: actually compute KE density if required
