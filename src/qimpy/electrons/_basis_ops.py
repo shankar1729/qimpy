@@ -84,6 +84,7 @@ def _apply_potential(self: 'Basis', V: 'FieldH',
     if self.real_wavefunctions:
         coeff[..., self.index_z0] += coeff[..., self.index_z0_conj].conj()
         coeff[..., self.index_z0] *= 0.5
+    coeff[self.pad_index] = 0.
     watch.stop()
 
     # Restore V*C to the same configuration (basis or band-split) as C:
