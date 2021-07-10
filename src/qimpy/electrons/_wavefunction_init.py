@@ -56,7 +56,7 @@ def _randomize(self: 'Wavefunction', seed: int = 0, b_start: int = 0,
                         else self.band_division.n_mine)
         n_bands_prev = self.band_division.i_start + b_start_local
         basis_start = 0
-        basis_stop = basis.n_tot
+        basis_stop = basis.n_max
         pad_index = basis.pad_index
     if b_start_local >= b_stop_local:
         return  # no bands to randomize on this process
@@ -70,7 +70,7 @@ def _randomize(self: 'Wavefunction', seed: int = 0, b_start: int = 0,
                            device=self.coeff.device).view(1, -1, 1, 1)
         i_spin = torch.arange(basis.n_spins,
                               device=self.coeff.device).view(-1, 1, 1, 1)
-        return (1 + seed) + basis_index.view(1, 1, 1, -1) + basis.n_tot * (
+        return (1 + seed) + basis_index.view(1, 1, 1, -1) + basis.n_max * (
             i_spinor + basis.n_spinor * (i_k + basis.kpoints.n_tot * i_spin))
 
     # Create random complex numbers for each band with index-based seed:
@@ -126,7 +126,7 @@ def _randomize_selected(self: 'Wavefunction', i_spin: torch.Tensor,
         i_spinor = torch.arange(basis.n_spinor,
                                 device=self.coeff.device).view(1, -1, 1)
         i_k_global = (basis.kpoints.i_start + i_k).view(-1, 1, 1)
-        return (1 + seed) + basis_index.view(1, 1, -1) + basis.n_tot * (
+        return (1 + seed) + basis_index.view(1, 1, -1) + basis.n_max * (
             i_spinor + basis.n_spinor * (
                 i_band.view(-1, 1, 1) + n_bands * (
                     i_k_global + basis.kpoints.n_tot * i_spin.view(-1, 1, 1))))
