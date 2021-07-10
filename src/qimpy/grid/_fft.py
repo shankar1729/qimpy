@@ -146,7 +146,7 @@ def parallel_transform(
     index_n_batch
         relevant unscramble index (coefficient of n_batch) from _init_grid_fft
     """
-    assert(v.shape[-3:] == shape_in)
+    assert v.shape[-3:] == shape_in
     n_batch = int(np.prod(v.shape[:-3]))
     v_tilde = fft_before(v)  # Transform 2 or 1 dims here
     v_tilde = v_tilde.flatten(0, -2).T.contiguous()  # bring last dim to front
@@ -206,10 +206,10 @@ def _fft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
             *self._indices_fft).swapaxes(-1, -3)
     else:
         # Real to complex forward transform:
-        assert (v.dtype.is_floating_point)
+        assert v.dtype.is_floating_point
         if self.n_procs == 1:
             return torch.fft.rfftn(v, s=self.shape, norm='forward')
-        assert (v.dtype.is_floating_point)
+        assert v.dtype.is_floating_point
         return parallel_transform(
             self.rc, self.comm, v,
             self.shapeR_mine, self.shapeH_mine[::-1],
@@ -240,7 +240,7 @@ def _ifft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
         three dimensions of `v` match `shapeG_mine` or `shapeH_mine`.
     """
     # Get total size of last dimension to dispatch complex vs real:
-    assert(v.dtype.is_complex)
+    assert v.dtype.is_complex
     shape2 = v.shape[-1]
     if self.n_procs > 1:
         assert self.comm is not None
@@ -260,7 +260,7 @@ def _ifft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
         assert shape2 == self.shapeH[2]
         if self.n_procs == 1:
             return torch.fft.irfftn(v, s=self.shape, norm='forward')
-        assert (v.dtype.is_complex)
+        assert v.dtype.is_complex
         shapeR_mine_complex = (self.split0.n_mine,
                                self.shape[1], self.shapeH[2])
         return parallel_transform(
