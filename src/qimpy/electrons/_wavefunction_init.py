@@ -56,7 +56,7 @@ def _randomize(self: 'Wavefunction', seed: int = 0, b_start: int = 0,
                         else self.band_division.n_mine)
         n_bands_prev = self.band_division.i_start + b_start_local
         basis_start = 0
-        basis_stop = basis.n_max
+        basis_stop = basis.n_tot
         pad_index = basis.pad_index
     if b_start_local >= b_stop_local:
         return  # no bands to randomize on this process

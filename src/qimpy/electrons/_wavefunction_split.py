@@ -90,10 +90,13 @@ if __name__ == '__main__':
     # Create a system to test with:
     qp.utils.log_config()
     rc = qp.utils.RunConfig(process_grid=(1, 1, -1))  # ensure basis-split
+    if rc.n_procs == 1:
+        raise ValueError("Wavefunction split test requires > 1 processes.")
     system = qp.System(
         rc=rc, lattice={'system': 'hexagonal', 'a': 9., 'c': 12.},
         electrons={'k-mesh': {'size': [4, 4, 3]},
-                   'basis': {'real-wavefunctions': False}})
+                   'basis': {'real-wavefunctions': False}},
+        chk=qp.utils.HDF5_io('../../../tests/chk.h5', rc))
 
     qp.log.info('\n--- Checking Wavefunction.split* ---')
     n_bands = 37  # deliberately prime!
