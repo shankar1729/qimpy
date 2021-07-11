@@ -35,6 +35,7 @@ class XC:
         Therefore, 'gga-pbe' (default) will use the internal PBE GGA,
         while 'gga-xc-pbe' will use 'gga_x_pbe' + 'gga_c_pbe' from Libxc.
         """
+        qp.log.info('\nInitializing XC:')
         if isinstance(functional, str):
             functional = functional.split(' ')
 

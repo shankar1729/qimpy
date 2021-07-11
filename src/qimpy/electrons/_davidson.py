@@ -48,7 +48,7 @@ class Davidson:
 
     def __repr__(self) -> str:
         return (f'Davidson(n_iterations: {self.n_iterations},'
-                f' eig_threshold: {self.eig_threshold:g}')
+                f' eig_threshold: {self.eig_threshold:g})')
 
     def _report(self, n_eigs_done: int = 0,
                 inner_loop: bool = False, converged: bool = False,

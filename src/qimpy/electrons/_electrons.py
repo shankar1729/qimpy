@@ -232,7 +232,7 @@ class Electrons:
             self.diagonalize = qp.construct(
                 qp.electrons.CheFSI, chefsi, 'chefsi',
                 electrons=self)
-        qp.log.info('diagonalization: ' + repr(self.diagonalize))
+        qp.log.info('\nDiagonalization: ' + repr(self.diagonalize))
 
         # Initialize SCF:
         self.scf = qp.construct(qp.electrons.SCF, scf, 'scf',

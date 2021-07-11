@@ -3,6 +3,7 @@
 __all__ = ['Functional', 'LIBXC_AVAILABLE', 'get_libxc_functional_names']
 
 from abc import abstractmethod, ABC
+import qimpy as qp
 import torch
 
 try:
@@ -31,7 +32,8 @@ class Functional(ABC):
     def __init__(self, *, needs_sigma: bool = False, needs_lap: bool = False,
                  needs_tau: bool = False, has_exchange: bool = False,
                  has_correlation: bool = False, has_kinetic: bool = False,
-                 has_energy: bool = True, scale_factor: float = 1.) -> None:
+                 has_energy: bool = True, scale_factor: float = 1.,
+                 name: str = '') -> None:
         self.needs_sigma = needs_sigma
         self.needs_lap = needs_lap
         self.needs_tau = needs_tau
@@ -40,6 +42,10 @@ class Functional(ABC):
         self.has_kinetic = has_kinetic
         self.has_energy = has_energy
         self.scale_factor = scale_factor
+        if name:
+            scale_str = ('' if (scale_factor == 1.)
+                         else f' (scaled by {scale_factor})')
+            qp.log.info(f'  {name} functional{scale_str}.')
 
     @abstractmethod
     def __call__(self, n: torch.Tensor, sigma: torch.Tensor,

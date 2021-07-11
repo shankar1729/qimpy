@@ -12,7 +12,8 @@ from abc import abstractmethod
 class KE_TF(Functional):
     """Thomas-Fermi kinetic energy functional."""
     def __init__(self, scale_factor: float = 1.) -> None:
-        super().__init__(has_kinetic=True, scale_factor=scale_factor)
+        super().__init__(has_kinetic=True, scale_factor=scale_factor,
+                         name='Thomas-Fermi LDA KE')
 
     def __call__(self, n: torch.Tensor, sigma: torch.Tensor,
                  lap: torch.Tensor, tau: torch.Tensor) -> float:
@@ -28,7 +29,8 @@ class KE_TF(Functional):
 class X_Slater(Functional):
     """Slater exchange functional."""
     def __init__(self, scale_factor: float = 1.) -> None:
-        super().__init__(has_exchange=True, scale_factor=scale_factor)
+        super().__init__(has_exchange=True, scale_factor=scale_factor,
+                         name='Slater LDA exchange')
 
     def __call__(self, n: torch.Tensor, sigma: torch.Tensor,
                  lap: torch.Tensor, tau: torch.Tensor) -> float:
@@ -100,7 +102,8 @@ class C_PZ(SpinInterpolated):
     _params: torch.Tensor  # PZ functional parameters
 
     def __init__(self, scale_factor: float = 1.) -> None:
-        super().__init__(has_correlation=True, scale_factor=scale_factor)
+        super().__init__(has_correlation=True, scale_factor=scale_factor,
+                         name='Perdew-Zunger LDA correlation')
         self._params = torch.tensor([
             [0.0311, 0.01555],  # a
             [-0.0480, -0.0269],  # b
@@ -134,12 +137,15 @@ class C_PW(SpinInterpolated):
     __slots__ = ('_params',)
     _params: torch.Tensor  # PZ functional parameters
 
-    def __init__(self, high_precision: bool, scale_factor: float = 1.) -> None:
+    def __init__(self, high_precision: bool, scale_factor: float = 1.,
+                 helper: bool = False) -> None:
         """Initialize PW correlation functional.
         Here, `high_precision` controls whether parameters are at the
         full precision (if True) as used within the PBE GGA, or at the
         original precision (if False) as in the original PW-LDA paper."""
-        super().__init__(has_correlation=True, scale_factor=scale_factor)
+        super().__init__(has_correlation=True, scale_factor=scale_factor,
+                         name=('' if helper  # skip printing name
+                               else 'Perdew-Zunger LDA correlation'))
         if not high_precision:
             self.stiffness_scale = 1./1.709921  # limit to single precision
         self._params = torch.tensor([
@@ -169,7 +175,8 @@ class C_VWN(SpinInterpolated):
     _params: torch.Tensor  # VWN functional parameters
 
     def __init__(self, scale_factor: float = 1.) -> None:
-        super().__init__(has_correlation=True, scale_factor=scale_factor)
+        super().__init__(has_correlation=True, scale_factor=scale_factor,
+                         name='Vosko-Wilk-Nusair LDA correlation')
         self._params = torch.tensor([
             [0.0310907, 0.01554535,  1./(6.*(np.pi**2))],  # A
             [3.72744, 7.06042, 1.13107],  # b
@@ -202,7 +209,8 @@ class XC_Teter(Functional):
 
     def __init__(self, scale_factor: float = 1.) -> None:
         super().__init__(has_exchange=True, has_correlation=True,
-                         scale_factor=scale_factor)
+                         scale_factor=scale_factor,
+                         name='Teter93 LSD exchange+correlation')
         self._params = torch.tensor([
             [0.4581652932831429, 0.119086804055547],  # a0  (para, ferro-para)
             [2.217058676663745, 0.6157402568883345],  # a1

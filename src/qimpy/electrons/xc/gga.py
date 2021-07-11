@@ -37,7 +37,8 @@ class X_PBE(SpinScaled):
     sol: bool  # PBEsol if True; PBE otherwise
 
     def __init__(self, sol: bool, scale_factor: float = 1.) -> None:
-        super().__init__(has_exchange=True, scale_factor=scale_factor)
+        super().__init__(has_exchange=True, scale_factor=scale_factor,
+                         name=f'PBE{"sol" if sol else ""} GGA exchange')
         self.sol = sol
 
     def compute(self, rs: torch.Tensor, s2: torch.Tensor) -> torch.Tensor:
@@ -102,9 +103,10 @@ class C_PBE(SpinInterpolated):
     _pw: C_PW  #: PW LDA correlation evaluator
 
     def __init__(self, sol: bool, scale_factor: float = 1.) -> None:
-        super().__init__(has_correlation=True, scale_factor=scale_factor)
+        super().__init__(has_correlation=True, scale_factor=scale_factor,
+                         name=f'PBE{"sol" if sol else ""} GGA correlation')
         self.sol = sol
-        self._pw = C_PW(high_precision=True)
+        self._pw = C_PW(high_precision=True, helper=True)
 
     def compute(self, rs: torch.Tensor, zeta: torch.Tensor, g: torch.Tensor,
                 t2: torch.Tensor) -> torch.Tensor:
