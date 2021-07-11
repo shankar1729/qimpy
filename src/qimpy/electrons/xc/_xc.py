@@ -2,10 +2,12 @@ import qimpy as qp
 import numpy as np
 import torch
 from . import lda, gga
-from .functional import Functional, get_libxc_functional_names
+from .functional import Functional,\
+    get_libxc_functional_names, FunctionalsLibxc
 from typing import TYPE_CHECKING, Tuple, List, Dict, Optional, Union
 if TYPE_CHECKING:
     from ...grid import FieldH
+    from ...utils import RunConfig
 
 
 N_CUT = 1e-16  # Regularization threshold for densities
@@ -19,7 +21,8 @@ class XC:
     need_lap: bool  #: whether overall functional needs laplacian
     need_tau: bool  #: whether overall functional needs KE density
 
-    def __init__(self, *, functional: Union[str, List[str]] = 'gga-pbe'):
+    def __init__(self, *, rc: 'RunConfig', spin_polarized: bool,
+                 functional: Union[str, List[str]] = 'gga-pbe'):
         """Initialize functional from name or list of names.
         Each entry in the list must be one of the internal functionals:
 
@@ -62,8 +65,8 @@ class XC:
                     libxc_names.setdefault(func, 0.)
                     libxc_names[func] += 1.
         if libxc_names:
-            raise NotImplementedError('Initialize Libxc functionals:'
-                                      f' {libxc_names}')
+            self._functionals.append(FunctionalsLibxc(rc, spin_polarized,
+                                                      libxc_names))
 
         # Collect overall needs:
         self.need_sigma = any(func.needs_sigma for func in self._functionals)

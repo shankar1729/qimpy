@@ -215,7 +215,8 @@ class Electrons:
         self.deig_max = np.nan  # note that eigenvalues are completely wrong!
 
         # Initialize exchange-correlation functional:
-        self.xc = qp.construct(qp.electrons.xc.XC, xc, 'xc')
+        self.xc = qp.construct(qp.electrons.xc.XC, xc, 'xc',
+                               rc=rc, spin_polarized=spin_polarized)
 
         # Initialize diagonalizer:
         n_options = np.count_nonzero([(d is not None)

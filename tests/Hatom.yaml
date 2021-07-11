@@ -12,7 +12,7 @@ ions:
 electrons:
   n-bands-extra: 3
   xc: 
-    functional: gga-pbe
+    functional: gga-xc-pbe
   spin-polarized: yes
   #spinorial: yes
   fillings:
