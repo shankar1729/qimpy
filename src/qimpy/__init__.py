@@ -7,7 +7,7 @@ __all__ = [
 
 # Module import definition
 from mpi4py import MPI
-from ._input import Constructable, ConstructOptions
+from ._construct import Constructable, ConstructOptions
 from ._energy import Energy
 from . import utils
 from . import ions
