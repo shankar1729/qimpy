@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from ..ions import Ions
 
 
-class Symmetries:
+class Symmetries(qp.Constructable):
     """Space group symmetries.
     Detects space group from lattice and ions, and provides methods to
     symmetrize properties such as positions, forces and densities."""
@@ -36,6 +36,7 @@ class Symmetries:
     def __init__(self, *, rc: 'RunConfig', lattice: 'Lattice', ions: 'Ions',
                  tolerance: float = 1e-6) -> None:
         """Determine space group from `lattice` and `ions`."""
+        super().__init__()
         self.rc = rc
         self.lattice = lattice
         self.ions = ions

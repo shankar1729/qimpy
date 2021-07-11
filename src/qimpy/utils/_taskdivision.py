@@ -20,6 +20,7 @@ class TaskDivision:
     def __init__(self, n_tot: int, n_procs: int, i_proc: int,
                  name: Optional[str] = None) -> None:
         """Divide `n_tot` tasks among `n_procs` processes"""
+        super().__init__()  # needed when used as a mix-in base class
         # Store inputs:
         self.n_tot = n_tot
         self.n_procs = n_procs

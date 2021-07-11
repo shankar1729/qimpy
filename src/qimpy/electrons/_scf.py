@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from .._system import System
 
 
-class SCF(qp.utils.Pulay['FieldH']):
+class SCF(qp.utils.Pulay['FieldH'], qp.Constructable):
     """Electronic self-consistent field iteration."""
     __slots__ = ('mix_fraction_mag', 'q_kerker', 'q_metric', 'q_kappa',
                  'n_eig_steps', 'eig_threshold', 'mix_density',

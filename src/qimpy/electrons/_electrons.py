@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .xc import XC
 
 
-class Electrons:
+class Electrons(qp.Constructable):
     """Electronic subsystem"""
     __slots__ = ('rc', 'kpoints', 'spin_polarized', 'spinorial', 'n_spins',
                  'n_spinor', 'w_spin', 'fillings', 'n_bands', 'n_bands_extra',
@@ -124,6 +124,7 @@ class Electrons:
             Specify only one of davidson or chefsi.
             Default: None
         """
+        super().__init__()
         self.rc = rc
         qp.log.info('\n--- Initializing Electrons ---')
 
@@ -135,12 +136,12 @@ class Electrons:
         if n_options > 1:
             raise ValueError('Cannot use both k-mesh and k-path')
         if k_mesh is not None:
-            self.kpoints = qp.construct(
-                qp.electrons.Kmesh, k_mesh, 'k_mesh',
+            qp.electrons.Kmesh.construct(
+                self, 'kpoints', k_mesh, attr_version_name='k-mesh',
                 rc=rc, symmetries=symmetries, lattice=lattice)
         if k_path is not None:
-            self.kpoints = qp.construct(
-                qp.electrons.Kpath, k_path, 'k_path',
+            qp.electrons.Kpath.construct(
+                self, 'kpoints', k_path, attr_version_name='k-path',
                 rc=rc, lattice=lattice)
 
         # Initialize spin:
@@ -154,9 +155,8 @@ class Electrons:
                     f'  w_spin: {self.w_spin}')
 
         # Initialize fillings:
-        self.fillings = qp.construct(
-            qp.electrons.Fillings, fillings, 'fillings',
-            rc=rc, ions=ions, electrons=self)
+        qp.electrons.Fillings.construct(self, 'fillings', fillings,
+                                        rc=rc, ions=ions, electrons=self)
 
         # Determine number of bands:
         if n_bands is None:
@@ -199,8 +199,8 @@ class Electrons:
             f'  n_bands_extra: {self.n_bands_extra} ({n_bands_extra_method})')
 
         # Initialize wave-function basis:
-        self.basis = qp.construct(
-            qp.electrons.Basis, basis, 'basis',
+        qp.electrons.Basis.construct(
+            self, 'basis', basis,
             rc=rc, lattice=lattice, ions=ions, symmetries=symmetries,
             kpoints=self.kpoints, n_spins=self.n_spins, n_spinor=self.n_spinor)
 
@@ -215,8 +215,8 @@ class Electrons:
         self.deig_max = np.nan  # note that eigenvalues are completely wrong!
 
         # Initialize exchange-correlation functional:
-        self.xc = qp.construct(qp.electrons.xc.XC, xc, 'xc',
-                               rc=rc, spin_polarized=spin_polarized)
+        qp.electrons.xc.XC.construct(self, 'xc', xc,
+                                     rc=rc, spin_polarized=spin_polarized)
 
         # Initialize diagonalizer:
         n_options = np.count_nonzero([(d is not None)
@@ -226,18 +226,17 @@ class Electrons:
         if n_options > 1:
             raise ValueError('Cannot use both davidson and chefsi')
         if davidson is not None:
-            self.diagonalize = qp.construct(
-                qp.electrons.Davidson, davidson, 'davidson',
+            qp.electrons.Davidson.construct(
+                self, 'diagonalize', davidson, attr_version_name='davidson',
                 electrons=self)
         if chefsi is not None:
-            self.diagonalize = qp.construct(
-                qp.electrons.CheFSI, chefsi, 'chefsi',
+            qp.electrons.CheFSI.construct(
+                self, 'diagonalize', chefsi, attr_version_name='chefsi',
                 electrons=self)
         qp.log.info('\nDiagonalization: ' + repr(self.diagonalize))
 
         # Initialize SCF:
-        self.scf = qp.construct(qp.electrons.SCF, scf, 'scf',
-                                rc=rc, comm=rc.comm_kb)
+        qp.electrons.SCF.construct(self, 'scf', scf, rc=rc, comm=rc.comm_kb)
 
     @property
     def n_densities(self) -> int:

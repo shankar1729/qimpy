@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 N_CUT = 1e-16  # Regularization threshold for densities
 
 
-class XC:
+class XC(qp.Constructable):
     """Exchange-correlation functional."""
     __slots__ = ('_functionals', 'need_sigma', 'need_lap', 'need_tau')
     _functionals: List[Functional]  #: list of functionals that add up to XC
@@ -44,6 +44,7 @@ class XC:
         a 50-50 mix of two functionals. Warning: there is no normalization or
         check to make the fractions of exchange or correlation to add up to 1.
         """
+        super().__init__()
         qp.log.info('\nInitializing XC:')
         if isinstance(functional, str):
             functional = functional.split(' ')

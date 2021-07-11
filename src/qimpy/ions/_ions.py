@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from ..grid import FieldR, FieldH
 
 
-class Ions:
+class Ions(qp.Constructable):
     """Ionic system: ionic geometry and pseudopotentials. """
     __slots__ = ('rc', 'n_ions', 'n_types', 'symbols', 'slices',
                  'pseudopotentials', 'positions', 'types', 'M_initial',
@@ -55,6 +55,7 @@ class Ions:
             templates is processed in order, and the first match for
             each element takes precedence.
         """
+        super().__init__()
         self.rc = rc
         qp.log.info('\n--- Initializing Ions ---')
 

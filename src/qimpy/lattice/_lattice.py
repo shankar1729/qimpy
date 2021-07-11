@@ -7,7 +7,7 @@ if TYPE_CHECKING:
     from ..utils import RunConfig
 
 
-class Lattice:
+class Lattice(qp.Constructable):
     """Real and reciprocal space lattice vectors"""
 
     __slots__ = ('rc', 'Rbasis', 'Gbasis', 'volume')
@@ -80,6 +80,7 @@ class Lattice:
             Single scale factor for all lattice vectors, or separate factor
             :math:`[s_1, s_2, s_3]` for each lattice vector
         """
+        super().__init__()
         self.rc = rc
         qp.log.info('\n--- Initializing Lattice ---')
 

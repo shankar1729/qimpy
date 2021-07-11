@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from .utils import HDF5_io
 
 
-class System:
+class System(qp.Constructable):
     """Overall system to calculate within QimPy"""
     __slots__ = ('rc', 'chk', 'lattice', 'ions', 'symmetries', 'electrons',
                  'grid', 'coulomb', 'energy')
@@ -36,24 +36,22 @@ class System:
         """Compose a System to calculate from its pieces. Each piece
         could be provided as an object or a dictionary of parameters
         suitable for initializing that object"""
+        super().__init__()
         self.rc = rc
         self.chk = chk
-        self.lattice = qp.construct(qp.lattice.Lattice, lattice, 'lattice',
-                                    rc=rc)
-        self.ions = qp.construct(qp.ions.Ions, ions, 'ions', rc=rc)
-        self.symmetries = qp.construct(
-            qp.symmetries.Symmetries, symmetries, 'symmetries',
+        qp.lattice.Lattice.construct(self, 'lattice', lattice, rc=rc)
+        qp.ions.Ions.construct(self, 'ions', ions, rc=rc)
+        qp.symmetries.Symmetries.construct(
+            self, 'symmetries', symmetries,
             rc=rc, lattice=self.lattice, ions=self.ions)
-        self.electrons = qp.construct(
-            qp.electrons.Electrons, electrons, 'electrons',
-            rc=rc, lattice=self.lattice, ions=self.ions,
-            symmetries=self.symmetries)
+        qp.electrons.Electrons.construct(
+            self, 'electrons', electrons, rc=rc, lattice=self.lattice,
+            ions=self.ions, symmetries=self.symmetries)
 
         qp.log.info('\n--- Initializing Charge-Density Grid ---')
-        self.grid = qp.construct(
-            qp.grid.Grid, grid, 'grid',
-            rc=rc, lattice=self.lattice, symmetries=self.symmetries,
-            comm=rc.comm_kb,  # parallelized on intra-replica comm
+        qp.grid.Grid.construct(
+            self, 'grid', grid, rc=rc, lattice=self.lattice,
+            symmetries=self.symmetries, comm=rc.comm_kb,
             ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff)
         self.coulomb = qp.grid.Coulomb(self.grid, self.ions.n_ions)
 

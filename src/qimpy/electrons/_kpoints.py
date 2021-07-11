@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from ..lattice import Lattice
 
 
-class Kpoints(qp.utils.TaskDivision):
+class Kpoints(qp.utils.TaskDivision, qp.Constructable):
     """Set of k-points in Brillouin zone.
     The underlying :class:`TaskDivision` splits k-points over `rc.comm_k`."""
     __slots__ = ('rc', 'k', 'wk')

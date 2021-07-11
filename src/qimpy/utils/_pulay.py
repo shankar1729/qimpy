@@ -98,6 +98,7 @@ class Pulay(Generic[Variable], ABC):
         self._variables = deque(maxlen=n_history)
         self._residuals = deque(maxlen=n_history)
         self._overlaps = np.zeros((0, 0), dtype=float)
+        super().__init__()  # needed when used as a mix-in base class
 
     @abstractmethod
     def cycle(self, dEprev: float) -> Sequence[float]:

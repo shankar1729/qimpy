@@ -16,7 +16,7 @@ SmearingResults = collections.namedtuple('SmearingResults',
 SmearingFunc = Callable[[torch.Tensor, float, float], SmearingResults]
 
 
-class Fillings:
+class Fillings(qp.Constructable):
     """Electron occupation factors (smearing)"""
     __slots__ = ('rc', 'n_electrons', 'n_bands_min', 'smearing',
                  'sigma', 'mu_constrain', 'M_constrain', '_smearing_func',
@@ -86,6 +86,7 @@ class Fillings:
             Whether to hold magnetization fixed to `M` in occupation updates:
             this only matters when `smearing` is not None.
         """
+        super().__init__()
         self.rc = rc
 
         # Number of electrons and bands:

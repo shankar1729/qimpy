@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from ._wavefunction import Wavefunction
 
 
-class Davidson:
+class Davidson(qp.Constructable):
     """Davidson diagonalization of Hamiltonian in `electrons`."""
     __slots__ = ('rc', 'electrons', 'n_iterations', 'eig_threshold',
                  '_line_prefix', '_norm_cut', '_i_iter', '_HC')
@@ -37,6 +37,7 @@ class Davidson:
             the self-consistent field method overrides this when
             diagonalizing in an inner loop
         """
+        super().__init__()
         self.rc = electrons.rc
         self.electrons = electrons
         self.n_iterations = n_iterations

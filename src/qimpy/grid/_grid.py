@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from ..symmetries import Symmetries
 
 
-class Grid:
+class Grid(qp.Constructable):
     """Real and reciprocal space grids for a unit cell.
     The grid could either be local or distributed over an MPI communicator,
     and this class provides FFT routines to switch fields on these grids,
@@ -75,6 +75,7 @@ class Grid:
             Explicit grid dimensions. Highest precedence, and if specified,
             will supercede ke_cutoff
         """
+        super().__init__()
         self.rc = rc
         self.lattice = lattice
 

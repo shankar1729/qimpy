@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from ._kpoints import Kpoints
 
 
-class Basis(qp.utils.TaskDivision):
+class Basis(qp.utils.TaskDivision, qp.Constructable):
     """Plane-wave basis for electronic wavefunctions. The underlying
      :class:`qimpy.utils.TaskDivision` splits plane waves over `rc.comm_b`"""
     __slots__ = ('rc', 'lattice', 'ions', 'kpoints', 'n_spins', 'n_spinor',
@@ -121,11 +121,9 @@ class Basis(qp.utils.TaskDivision):
         # Initialize grid to match cutoff:
         self.ke_cutoff = float(ke_cutoff)
         qp.log.info('\nInitializing wavefunction grid:')
-        self.grid = qp.grid.Grid(
-            rc=rc, lattice=lattice, symmetries=symmetries,
-            comm=None,  # always process-local
-            ke_cutoff_wavefunction=self.ke_cutoff,
-            **(qp.dict_input_cleanup(grid) if grid else {}))
+        qp.grid.Grid.construct(
+            self, 'grid', grid, rc=rc, lattice=lattice, symmetries=symmetries,
+            comm=None, ke_cutoff_wavefunction=self.ke_cutoff)
 
         # Initialize basis:
         self.iG = self.grid.get_mesh('H' if self.real_wavefunctions
