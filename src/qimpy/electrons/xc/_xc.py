@@ -34,6 +34,12 @@ class XC:
         to separate x and c names for convenience, where appropriate.
         Therefore, 'gga-pbe' (default) will use the internal PBE GGA,
         while 'gga-xc-pbe' will use 'gga_x_pbe' + 'gga_c_pbe' from Libxc.
+
+        Finally, each functional name in the list can have an optional "*num"
+        suffix (no spaces) to scale the functional by num. For example,
+        the specification 'gga-pbe*0.5 lda-pz*0.5' may be used to compute
+        a 50-50 mix of two functionals. Warning: there is no normalization or
+        check to make the fractions of exchange or correlation to add up to 1.
         """
         qp.log.info('\nInitializing XC:')
         if isinstance(functional, str):
@@ -43,7 +49,12 @@ class XC:
         self._functionals = []
         libxc_names: Dict[str, float] = {}  # Libxc names with scale factors
         for func_name in functional:
-            scale_factor = 1.
+            if '*' in func_name:
+                tokens = func_name.split('*')
+                func_name = tokens[0]
+                scale_factor = float(tokens[1])
+            else:
+                scale_factor = 1.
             for func in _get_functionals(func_name, scale_factor):
                 if isinstance(func, Functional):
                     self._functionals.append(func)
@@ -206,8 +217,9 @@ INTERNAL_FUNCTIONAL_NAMES = {'lda_pz', 'lda_pw', 'lda_pw_prec', 'lda_vwn',
 
 
 # Substitute internal functional names in XC docstring:
-XC.__init__.__doc__ = XC.__init__.__doc__.replace(
-    '{INTERNAL_FUNCTIONAL_NAMES}', str(sorted(INTERNAL_FUNCTIONAL_NAMES)))
+if XC.__init__.__doc__:
+    XC.__init__.__doc__ = XC.__init__.__doc__.replace(
+        '{INTERNAL_FUNCTIONAL_NAMES}', str(sorted(INTERNAL_FUNCTIONAL_NAMES)))
 
 
 def _get_functionals(name: str,
