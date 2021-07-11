@@ -32,11 +32,12 @@ class System(qp.Constructable):
                  ions: Union['Ions', dict, None] = None,
                  symmetries: Union['Symmetries', dict, None] = None,
                  electrons: Union['Electrons', dict, None] = None,
-                 grid: Union['Grid', dict, None] = None):
+                 grid: Union['Grid', dict, None] = None,
+                 co: qp.ConstructOptions = qp.ConstructOptions()):
         """Compose a System to calculate from its pieces. Each piece
         could be provided as an object or a dictionary of parameters
         suitable for initializing that object"""
-        super().__init__()
+        super().__init__(co=co)
         self.rc = rc
         self.chk = chk
         qp.lattice.Lattice.construct(self, 'lattice', lattice, rc=rc)

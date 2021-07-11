@@ -16,7 +16,7 @@ class Lattice(qp.Constructable):
     Gbasis: torch.Tensor  #: Reciprocal-space lattice vectors (in columns)
     volume: float  #: Unit cell volume
 
-    def __init__(self, *, rc: 'RunConfig',
+    def __init__(self, *, rc: 'RunConfig', co: qp.ConstructOptions,
                  system: Optional[str] = None,
                  modification: Optional[str] = None,
                  a: Optional[float] = None,
@@ -80,7 +80,7 @@ class Lattice(qp.Constructable):
             Single scale factor for all lattice vectors, or separate factor
             :math:`[s_1, s_2, s_3]` for each lattice vector
         """
-        super().__init__()
+        super().__init__(co=co)
         self.rc = rc
         qp.log.info('\n--- Initializing Lattice ---')
 

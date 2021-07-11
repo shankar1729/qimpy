@@ -31,7 +31,7 @@ class Ions(qp.Constructable):
     Vloc: 'FieldH'  #: local potential due to ions (including from rho)
     n_core: 'FieldH'  #: partial core electronic density (for inclusion in XC)
 
-    def __init__(self, *, rc: 'RunConfig',
+    def __init__(self, *, rc: 'RunConfig', co: qp.ConstructOptions,
                  coordinates: Optional[List] = None,
                  pseudopotentials: Optional[Union[str, List[str]]] = None
                  ) -> None:
@@ -55,7 +55,7 @@ class Ions(qp.Constructable):
             templates is processed in order, and the first match for
             each element takes precedence.
         """
-        super().__init__()
+        super().__init__(co=co)
         self.rc = rc
         qp.log.info('\n--- Initializing Ions ---')
 

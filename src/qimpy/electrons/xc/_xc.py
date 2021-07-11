@@ -21,7 +21,8 @@ class XC(qp.Constructable):
     need_lap: bool  #: whether overall functional needs laplacian
     need_tau: bool  #: whether overall functional needs KE density
 
-    def __init__(self, *, rc: 'RunConfig', spin_polarized: bool,
+    def __init__(self, *, rc: 'RunConfig', co: qp.ConstructOptions,
+                 spin_polarized: bool,
                  functional: Union[str, List[str]] = 'gga-pbe'):
         """Initialize functional from name or list of names.
         Each entry in the list must be one of the internal functionals:
@@ -44,7 +45,7 @@ class XC(qp.Constructable):
         a 50-50 mix of two functionals. Warning: there is no normalization or
         check to make the fractions of exchange or correlation to add up to 1.
         """
-        super().__init__()
+        super().__init__(co=co)
         qp.log.info('\nInitializing XC:')
         if isinstance(functional, str):
             functional = functional.split(' ')

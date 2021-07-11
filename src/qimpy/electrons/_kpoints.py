@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from ..lattice import Lattice
 
 
-class Kpoints(qp.utils.TaskDivision, qp.Constructable):
+class Kpoints(qp.utils.TaskDivision):
     """Set of k-points in Brillouin zone.
     The underlying :class:`TaskDivision` splits k-points over `rc.comm_k`."""
     __slots__ = ('rc', 'k', 'wk')
@@ -16,8 +16,8 @@ class Kpoints(qp.utils.TaskDivision, qp.Constructable):
     k: torch.Tensor  #: Array of k-points (N x 3)
     wk: torch.Tensor  #: Integration weights for each k (adds to 1)
 
-    def __init__(self, rc: 'RunConfig',
-                 k: torch.Tensor, wk: torch.Tensor) -> None:
+    def __init__(self, rc: 'RunConfig', k: torch.Tensor, wk: torch.Tensor,
+                 co: qp.ConstructOptions) -> None:
         """Initialize from list of k-points and weights. Typically, this should
          be used only by derived classes :class:`Kmesh` or :class:`Kpath`.
         """
@@ -28,7 +28,8 @@ class Kpoints(qp.utils.TaskDivision, qp.Constructable):
 
         # Initialize process grid dimension (if -1) and split k-points:
         rc.provide_n_tasks(1, k.shape[0])
-        super().__init__(k.shape[0], rc.n_procs_k, rc.i_proc_k, 'k-point')
+        super().__init__(n_tot=k.shape[0], n_procs=rc.n_procs_k,
+                         i_proc=rc.i_proc_k, name='k-point', co=co)
 
 
 class Kmesh(Kpoints):
@@ -39,7 +40,7 @@ class Kmesh(Kpoints):
     i_sym: torch.Tensor  #: Symmetry index that maps mesh points to reduced set
     invert: torch.Tensor  #: Inversion factor (1, -1) in reduction of each k
 
-    def __init__(self, *, rc: 'RunConfig',
+    def __init__(self, *, rc: 'RunConfig', co: qp.ConstructOptions,
                  symmetries: 'Symmetries', lattice: 'Lattice',
                  offset: Union[Sequence[float], np.ndarray] = (0., 0., 0.),
                  size: Union[float, Sequence[int], np.ndarray] = (1, 1, 1),
@@ -151,15 +152,15 @@ class Kmesh(Kpoints):
             qp.log.info('Note: used k-inversion (conjugation) symmetry')
 
         # Initialize base class:
-        super().__init__(rc, k, wk)
+        super().__init__(rc, k, wk, co=co)
 
 
 class Kpath(Kpoints):
     """Path of k-points traversing Brillouin zone.
     Typically used only for band structure calculations."""
 
-    def __init__(self, *, rc: 'RunConfig', lattice: 'Lattice',
-                 dk: float, points: list) -> None:
+    def __init__(self, *, rc: 'RunConfig', co: qp.ConstructOptions,
+                 lattice: 'Lattice', dk: float, points: list) -> None:
         """Initialize k-path with spacing `dk` connecting `points`.
 
         Parameters
@@ -208,7 +209,7 @@ class Kpath(Kpoints):
                     f' length {distance_tot:g}')
 
         # Initialize base class:
-        super().__init__(rc, k, wk)
+        super().__init__(rc, k, wk, co=co)
 
     def plot(self, E, filename):
         """Save band structure plot to filename given energies E"""

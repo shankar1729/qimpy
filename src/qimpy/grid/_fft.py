@@ -19,9 +19,12 @@ def _init_grid_fft(self: 'Grid') -> None:
     self.shapeH = (self.shape[0], self.shape[1], 1+self.shape[2]//2)
     qp.log.info(f'real-fft shape: {self.shapeH}')
     # MPI division:
-    self.split0 = TaskDivision(self.shape[0], self.n_procs, self.i_proc)
-    self.split2 = TaskDivision(self.shape[2], self.n_procs, self.i_proc)
-    self.split2H = TaskDivision(self.shapeH[2], self.n_procs, self.i_proc)
+    self.split0 = TaskDivision(n_tot=self.shape[0],
+                               n_procs=self.n_procs, i_proc=self.i_proc)
+    self.split2 = TaskDivision(n_tot=self.shape[2],
+                               n_procs=self.n_procs, i_proc=self.i_proc)
+    self.split2H = TaskDivision(n_tot=self.shapeH[2],
+                                n_procs=self.n_procs, i_proc=self.i_proc)
     # Overall local grid dimensions:
     self.shapeR_mine = (self.split0.n_mine, self.shape[1], self.shape[2])
     self.shapeG_mine = (self.shape[0], self.shape[1], self.split2.n_mine)
@@ -328,16 +331,20 @@ if __name__ == "__main__":
     n_batch = tuple(int(arg) for arg in sys.argv[1:-3])
 
     # Prerequisites for creating grid:
+    co = qp.ConstructOptions()
     lattice = qp.lattice.Lattice(
-        rc=rc, system='triclinic', a=2.1, b=2.2, c=2.3,
+        rc=rc, co=co, system='triclinic', a=2.1, b=2.2, c=2.3,
         alpha=75, beta=80, gamma=85)  # pick one with no symmetries
-    ions = qp.ions.Ions(rc=rc, pseudopotentials=[], coordinates=[])
-    symmetries = qp.symmetries.Symmetries(rc=rc, lattice=lattice, ions=ions)
+    ions = qp.ions.Ions(rc=rc, co=co, pseudopotentials=[], coordinates=[])
+    symmetries = qp.symmetries.Symmetries(rc=rc, co=co,
+                                          lattice=lattice, ions=ions)
 
     # Create grids with and without parallelization:
-    grid_par = qp.grid.Grid(rc=rc, lattice=lattice, symmetries=symmetries,
+    grid_par = qp.grid.Grid(rc=rc, co=co,
+                            lattice=lattice, symmetries=symmetries,
                             shape=shape, comm=rc.comm)  # parallel version
-    grid_seq = qp.grid.Grid(rc=rc, lattice=lattice, symmetries=symmetries,
+    grid_seq = qp.grid.Grid(rc=rc, co=co,
+                            lattice=lattice, symmetries=symmetries,
                             shape=shape, comm=None)  # sequential version
 
     def test(name, dtype_in, seq_func, par_func,

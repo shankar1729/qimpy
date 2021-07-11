@@ -45,7 +45,8 @@ class Grid(qp.Constructable):
     fft: MethodFFT = _fft
     ifft: MethodFFT = _ifft
 
-    def __init__(self, *, rc: 'RunConfig', lattice: 'Lattice',
+    def __init__(self, *,
+                 rc: 'RunConfig', co: qp.ConstructOptions, lattice: 'Lattice',
                  symmetries: 'Symmetries', comm: Optional[qp.MPI.Comm],
                  ke_cutoff_wavefunction: Optional[float] = None,
                  ke_cutoff: Optional[float] = None,
@@ -75,7 +76,7 @@ class Grid(qp.Constructable):
             Explicit grid dimensions. Highest precedence, and if specified,
             will supercede ke_cutoff
         """
-        super().__init__()
+        super().__init__(co=co)
         self.rc = rc
         self.lattice = lattice
 

@@ -14,7 +14,8 @@ class CheFSI(Davidson):
     filter_order: int  #: Order of Chebyshev filter
     init_threshold: float  #: Threshold for Davidson initialization
 
-    def __init__(self, *, electrons: 'Electrons', n_iterations: int = 100,
+    def __init__(self, *, co: qp.ConstructOptions,
+                 electrons: 'Electrons', n_iterations: int = 100,
                  eig_threshold: float = 1E-8, filter_order: int = 10,
                  init_threshold: float = 1E-1) -> None:
         """Initialize with stopping criteria and filter order.
@@ -32,7 +33,7 @@ class CheFSI(Davidson):
             Eigenvalue threshold for the initial Davidson steps used to ensure
             a reasonable starting point for CheFSI (needed for stability)
         """
-        super().__init__(electrons=electrons, n_iterations=n_iterations,
+        super().__init__(co=co, electrons=electrons, n_iterations=n_iterations,
                          eig_threshold=eig_threshold)
         self.filter_order = filter_order
         self.init_threshold = init_threshold

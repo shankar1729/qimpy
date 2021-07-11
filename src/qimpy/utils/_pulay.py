@@ -54,7 +54,7 @@ class Optimizable(ABC):
 Variable = TypeVar('Variable', bound=Optimizable)
 
 
-class Pulay(Generic[Variable], ABC):
+class Pulay(Generic[Variable], ABC, qp.Constructable):
     """Abstract base class implementing the Pulay mixing algorithm.
     The mixed `Variable` must be a class supporting vector-space operators
     +, +=, -, -=, * for scalar multiply and method overlap() for inner product.
@@ -81,11 +81,13 @@ class Pulay(Generic[Variable], ABC):
     #: to the extra values output by :meth:`cycle`.
     extra_thresholds: Dict[str, float]
 
-    def __init__(self, *, rc: 'RunConfig', comm: qp.MPI.Comm, name: str,
+    def __init__(self, *, rc: 'RunConfig', co: qp.ConstructOptions,
+                 comm: qp.MPI.Comm, name: str,
                  n_iterations: int, energy_threshold: float,
                  residual_threshold: float, extra_thresholds: Dict[str, float],
                  n_history: int, mix_fraction: float) -> None:
         """Initialize Pulay algorithm parameters."""
+        super().__init__(co=co)
         self.rc = rc
         self.comm = comm
         self.name = name
@@ -98,7 +100,6 @@ class Pulay(Generic[Variable], ABC):
         self._variables = deque(maxlen=n_history)
         self._residuals = deque(maxlen=n_history)
         self._overlaps = np.zeros((0, 0), dtype=float)
-        super().__init__()  # needed when used as a mix-in base class
 
     @abstractmethod
     def cycle(self, dEprev: float) -> Sequence[float]:

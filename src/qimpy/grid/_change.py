@@ -206,11 +206,12 @@ def _change_recip(v: FieldTypeRecip, grid_out: 'Grid') -> FieldTypeRecip:
                 data_out[..., i_pos] *= 0.5
 
         # Revised split_in to match updated data (for MPI rearrangement below):
-        split_in = qp.utils.TaskDivisionCustom(n_mine_new, grid_in.comm)
+        split_in = qp.utils.TaskDivisionCustom(n_mine=n_mine_new,
+                                               comm=grid_in.comm)
     else:
         data_out = data
 
-        # Rearrange data as needed:
+    # Rearrange data as needed:
     data_out = fix_split(data_out, split_in, grid_in.comm,
                          split_out, grid_out.comm, grid_in.rc, -1)
     return v.__class__(grid_out, data=data_out)
@@ -221,11 +222,13 @@ if __name__ == "__main__":
     qp.log.info('*'*15 + ' QimPy ' + qp.__version__ + ' ' + '*'*15)
     rc = qp.utils.RunConfig()
     # Prepare a grid for testing:
+    co = qp.ConstructOptions()
     lattice = qp.lattice.Lattice(
-        rc=rc, system='triclinic', a=2.1, b=2.2, c=2.3,
+        rc=rc, co=co, system='triclinic', a=2.1, b=2.2, c=2.3,
         alpha=75, beta=80, gamma=85)  # pick one with no symmetries
-    ions = qp.ions.Ions(rc=rc, pseudopotentials=[], coordinates=[])
-    symmetries = qp.symmetries.Symmetries(rc=rc, lattice=lattice, ions=ions)
+    ions = qp.ions.Ions(rc=rc, co=co, pseudopotentials=[], coordinates=[])
+    symmetries = qp.symmetries.Symmetries(rc=rc, co=co,
+                                          lattice=lattice, ions=ions)
 
     # MPI-reproducible grid for testing:
     def get_ref_field(cls, grid):
@@ -252,7 +255,8 @@ if __name__ == "__main__":
 
     # Make parallel and sequential grids of given shape:
     def make_grid(shape, comm):
-        return qp.grid.Grid(rc=rc, lattice=lattice, symmetries=symmetries,
+        return qp.grid.Grid(rc=rc, co=co,
+                            lattice=lattice, symmetries=symmetries,
                             shape=shape, comm=comm)
 
     def make_grids(shape):

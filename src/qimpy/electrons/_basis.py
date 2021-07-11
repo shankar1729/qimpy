@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from ._kpoints import Kpoints
 
 
-class Basis(qp.utils.TaskDivision, qp.Constructable):
+class Basis(qp.utils.TaskDivision):
     """Plane-wave basis for electronic wavefunctions. The underlying
      :class:`qimpy.utils.TaskDivision` splits plane waves over `rc.comm_b`"""
     __slots__ = ('rc', 'lattice', 'ions', 'kpoints', 'n_spins', 'n_spinor',
@@ -53,7 +53,7 @@ class Basis(qp.utils.TaskDivision, qp.Constructable):
     apply_potential = _apply_potential
     collect_density = _collect_density
 
-    def __init__(self, *, rc: 'RunConfig',
+    def __init__(self, *, rc: 'RunConfig', co: qp.ConstructOptions,
                  lattice: 'Lattice', ions: 'Ions', symmetries: 'Symmetries',
                  kpoints: 'Kpoints', n_spins: int, n_spinor: int,
                  ke_cutoff: float = 20., real_wavefunctions: bool = False,
@@ -93,6 +93,7 @@ class Basis(qp.utils.TaskDivision, qp.Constructable):
             Higher numbers require more memory, but can achieve
             better occupancy of GPUs or high-core-count CPUs.
         """
+        super().__init__(co=co)
         self.rc = rc
         self.lattice = lattice
         self.ions = ions
@@ -153,7 +154,8 @@ class Basis(qp.utils.TaskDivision, qp.Constructable):
                           pad_index[1])  # add spin, band and spinor dims
 
         # Divide basis on comm_b:
-        super().__init__(self.n_tot, rc.n_procs_b, rc.i_proc_b, 'padded basis')
+        self.update_division(self.n_tot, rc.n_procs_b, rc.i_proc_b,
+                             'padded basis')
         self.mine = slice(self.i_start, self.i_stop)
         # --- initialize local pad index separately (not trivially sliceable):
         pad_index = torch.where(fft_range[None, self.i_start:self.i_stop]

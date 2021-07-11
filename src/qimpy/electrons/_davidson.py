@@ -21,7 +21,8 @@ class Davidson(qp.Constructable):
     _i_iter: int
     _HC: 'Wavefunction'  # Used only for coordination with sub-classes
 
-    def __init__(self, *, electrons: 'Electrons', n_iterations: int = 100,
+    def __init__(self, *, co: qp.ConstructOptions,
+                 electrons: 'Electrons', n_iterations: int = 100,
                  eig_threshold: float = 1E-8) -> None:
         """Initialize diagonalizer with stopping criteria.
 
@@ -37,7 +38,7 @@ class Davidson(qp.Constructable):
             the self-consistent field method overrides this when
             diagonalizing in an inner loop
         """
-        super().__init__()
+        super().__init__(co=co)
         self.rc = electrons.rc
         self.electrons = electrons
         self.n_iterations = n_iterations

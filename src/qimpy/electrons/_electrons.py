@@ -50,8 +50,8 @@ class Electrons(qp.Constructable):
 
     hamiltonian = _hamiltonian
 
-    def __init__(self, *, rc: 'RunConfig', lattice: 'Lattice', ions: 'Ions',
-                 symmetries: 'Symmetries',
+    def __init__(self, *, rc: 'RunConfig', co: qp.ConstructOptions,
+                 lattice: 'Lattice', ions: 'Ions', symmetries: 'Symmetries',
                  k_mesh: Optional[Union[dict, 'Kmesh']] = None,
                  k_path: Optional[Union[dict, 'Kpath']] = None,
                  spin_polarized: bool = False, spinorial: bool = False,
@@ -124,7 +124,7 @@ class Electrons(qp.Constructable):
             Specify only one of davidson or chefsi.
             Default: None
         """
-        super().__init__()
+        super().__init__(co=co)
         self.rc = rc
         qp.log.info('\n--- Initializing Electrons ---')
 

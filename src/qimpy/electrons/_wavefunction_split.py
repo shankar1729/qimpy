@@ -22,8 +22,9 @@ def _split_bands(self: 'Wavefunction') -> 'Wavefunction':
     n_per_band = np.prod(send_coeff.shape[1:])
 
     # All-to-all MPI rearrangement:
-    band_division = qp.utils.TaskDivision(self.coeff.shape[2],
-                                          basis.n_procs, basis.i_proc)
+    band_division = qp.utils.TaskDivision(n_tot=self.coeff.shape[2],
+                                          n_procs=basis.n_procs,
+                                          i_proc=basis.i_proc)
     send_counts = np.diff(band_division.n_prev) * n_per_band
     send_offset = band_division.n_prev[:-1] * n_per_band
     recv_counts = band_division.n_mine * n_per_band

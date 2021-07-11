@@ -53,8 +53,9 @@ class RadialFunction:
         # Collect all radial functions together, dividing r over comm:
         if not radial_functions:
             return  # Nothing to do
-        r_div = qp.utils.TaskDivision(radial_functions[0].r.shape[0],
-                                      comm.Get_size(), comm.Get_rank())
+        r_div = qp.utils.TaskDivision(n_tot=radial_functions[0].r.shape[0],
+                                      n_procs=comm.Get_size(),
+                                      i_proc=comm.Get_rank())
         r_slice = slice(r_div.i_start, r_div.i_stop)
         r = radial_functions[0].r[r_slice]
         dr = radial_functions[0].dr[r_slice]

@@ -33,10 +33,11 @@ class Symmetries(qp.Constructable):
     check_grid_shape = _check_grid_shape
     get_grid_shape = _get_grid_shape
 
-    def __init__(self, *, rc: 'RunConfig', lattice: 'Lattice', ions: 'Ions',
+    def __init__(self, *, rc: 'RunConfig', co: qp.ConstructOptions,
+                 lattice: 'Lattice', ions: 'Ions',
                  tolerance: float = 1e-6) -> None:
         """Determine space group from `lattice` and `ions`."""
-        super().__init__()
+        super().__init__(co=co)
         self.rc = rc
         self.lattice = lattice
         self.ions = ions
