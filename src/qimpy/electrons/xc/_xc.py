@@ -2,31 +2,56 @@ import qimpy as qp
 import numpy as np
 import torch
 from . import lda, gga
-from typing import TYPE_CHECKING, Tuple, List, Optional, Union
+from .functional import Functional, get_libxc_functional_names
+from typing import TYPE_CHECKING, Tuple, List, Dict, Optional, Union
 if TYPE_CHECKING:
     from ...grid import FieldH
-    from .functional import Functional
 
 
 N_CUT = 1e-16  # Regularization threshold for densities
 
 
 class XC:
-    """Exchange-correlation functional. Only LDA so far.
-    TODO: add other functionals and interface with LibXC."""
+    """Exchange-correlation functional."""
     __slots__ = ('_functionals', 'need_sigma', 'need_lap', 'need_tau')
-    _functionals: List["Functional"]  #: list of functionals that add up to XC
+    _functionals: List[Functional]  #: list of functionals that add up to XC
     need_sigma: bool  #: whether overall functional needs gradient
     need_lap: bool  #: whether overall functional needs laplacian
     need_tau: bool  #: whether overall functional needs KE density
 
     def __init__(self, *, functional: Union[str, List[str]] = 'gga-pbe'):
-        """TODO: add selection of functionals here"""
-        self._functionals = []
+        """Initialize functional from name or list of names.
+        Each entry in the list must be one of the internal functionals:
+
+        {INTERNAL_FUNCTIONAL_NAMES}
+
+        or a Libxc functional name (if available).
+        Run the code with functional: 'list' to print the names of available
+        functionals including those from Libxc (and exit immediately).
+        The names are case insensitive, and may use hyphens or underscores.
+
+        Additionally, for Libxc functionals, a combined xc name will expand
+        to separate x and c names for convenience, where appropriate.
+        Therefore, 'gga-pbe' (default) will use the internal PBE GGA,
+        while 'gga-xc-pbe' will use 'gga_x_pbe' + 'gga_c_pbe' from Libxc.
+        """
         if isinstance(functional, str):
-            functional = [functional]
+            functional = functional.split(' ')
+
+        # Initialize internal and LibXC functional objects:
+        self._functionals = []
+        libxc_names: Dict[str, float] = {}  # Libxc names with scale factors
         for func_name in functional:
-            self._functionals.extend(_get_functionals(func_name))
+            scale_factor = 1.
+            for func in _get_functionals(func_name, scale_factor):
+                if isinstance(func, Functional):
+                    self._functionals.append(func)
+                else:
+                    libxc_names.setdefault(func, 0.)
+                    libxc_names[func] += 1.
+        if libxc_names:
+            raise NotImplementedError('Initialize Libxc functionals:'
+                                      f' {libxc_names}')
 
         # Collect overall needs:
         self.need_sigma = any(func.needs_sigma for func in self._functionals)
@@ -175,21 +200,65 @@ class XC:
         return E, E_n_t, E_tau_t
 
 
-def _get_functionals(name: str) -> List['Functional']:
-    """Get list of Functional objects associated with a functional name."""
-    if name == 'lda-pz':
-        return [lda.X_Slater(), lda.C_PZ()]
-    elif name == 'lda-pw':
-        return [lda.X_Slater(), lda.C_PW(high_precision=False)]
-    elif name == 'lda-pw-prec':
-        return [lda.X_Slater(), lda.C_PW(high_precision=True)]
-    elif name == 'lda-vwn':
-        return [lda.X_Slater(), lda.C_VWN()]
-    elif name == 'lda-teter':
-        return [lda.XC_Teter()]
-    elif name == 'gga-pbe':
-        return [gga.X_PBE(sol=False), gga.C_PBE(sol=False)]
-    elif name == 'gga-pbesol':
-        return [gga.X_PBE(sol=True), gga.C_PBE(sol=True)]
+INTERNAL_FUNCTIONAL_NAMES = {'lda_pz', 'lda_pw', 'lda_pw_prec', 'lda_vwn',
+                             'lda_teter', 'gga_pbe', 'gga_pbesol'}
+
+
+# Substitute internal functional names in XC docstring:
+XC.__init__.__doc__ = XC.__init__.__doc__.replace(
+    '{INTERNAL_FUNCTIONAL_NAMES}', str(sorted(INTERNAL_FUNCTIONAL_NAMES)))
+
+
+def _get_functionals(name: str,
+                     scale_factor: float) -> List[Union[Functional, str]]:
+    """Get list of Functional objects associated with a functional `name`.
+    For Libxc functionals, a validated list of strings is returned so that
+    all the Libxc evaluations can be consolidated in a single wrapper.
+    The Functional objects will be initialized with specified scale factor,
+    while the scale factors of the Libxc names must be handled separately."""
+    key = name.lower().replace('-', '_')
+    if key in INTERNAL_FUNCTIONAL_NAMES:
+        # Initialize appropriate combination of internal functionals:
+        if key == 'lda_pz':
+            return [lda.X_Slater(scale_factor=scale_factor),
+                    lda.C_PZ(scale_factor=scale_factor)]
+        elif key == 'lda_pw':
+            return [lda.X_Slater(scale_factor=scale_factor),
+                    lda.C_PW(scale_factor=scale_factor, high_precision=False)]
+        elif key == 'lda_pw_prec':
+            return [lda.X_Slater(scale_factor=scale_factor),
+                    lda.C_PW(scale_factor=scale_factor, high_precision=True)]
+        elif key == 'lda_vwn':
+            return [lda.X_Slater(scale_factor=scale_factor),
+                    lda.C_VWN(scale_factor=scale_factor)]
+        elif key == 'lda_teter':
+            return [lda.XC_Teter(scale_factor=scale_factor)]
+        elif key == 'gga_pbe':
+            return [gga.X_PBE(scale_factor=scale_factor, sol=False),
+                    gga.C_PBE(scale_factor=scale_factor, sol=False)]
+        else:   # key == 'gga_pbesol'
+            return [gga.X_PBE(scale_factor=scale_factor, sol=True),
+                    gga.C_PBE(scale_factor=scale_factor, sol=True)]
     else:
+        # Check LibXC functionals:
+        libxc_names = get_libxc_functional_names()
+        # --- List available functionals if requested:
+        if key == 'list':
+            qp.log.info('\nAvailable internal XC functionals:\n'
+                        f'\n{sorted(INTERNAL_FUNCTIONAL_NAMES)}\n')
+            if libxc_names:
+                qp.log.info('\nAvailable Libxc functionals:\n'
+                            f'\n{np.array(sorted(libxc_names))}\n')
+            else:
+                qp.log.info('\nLibxc not available.')
+            exit()
+        # --- Try the specified name directly first:
+        if key in libxc_names:
+            return [key]
+        # --- If not, try spitting xc to x and c functionals:
+        if '_xc_' in key:
+            key_x = key.replace('_xc_', '_x_')
+            key_c = key.replace('_xc_', '_c_')
+            if (key_x in libxc_names) and (key_c in libxc_names):
+                return [key_x, key_c]
         raise KeyError(f'Unknown XC functional {name}')

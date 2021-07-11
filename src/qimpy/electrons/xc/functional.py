@@ -1,9 +1,18 @@
 """Internal interface for XC functionals."""
 # List exported symbols for doc generation
-__all__ = ['Functional']
+__all__ = ['Functional', 'LIBXC_AVAILABLE', 'get_libxc_functional_names']
 
 from abc import abstractmethod, ABC
 import torch
+
+try:
+    import pylibxc
+    LIBXC_AVAILABLE: bool = True  #: Whether Libxc is available.
+except ImportError:
+    LIBXC_AVAILABLE = False
+
+from typing import Set
+from functools import lru_cache
 
 
 class Functional(ABC):
@@ -57,3 +66,13 @@ class Functional(ABC):
         -------
         Total energy density, summed over all input grid points.
         """
+
+
+@lru_cache
+def get_libxc_functional_names() -> Set[str]:
+    """Get set of available Libxc functionals.
+    (Empty if Libxc is not available.)"""
+    if LIBXC_AVAILABLE:
+        return set(pylibxc.util.xc_available_functional_names())
+    else:
+        return set()

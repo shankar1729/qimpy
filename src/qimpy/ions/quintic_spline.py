@@ -55,7 +55,9 @@ class Interpolator:
     Create Interpolator object for a set of points to calculate for,
     and then use it with any blip coefficients generated with same spacing.
     Typical usage:
+
     .. code-block:: python
+
         y_coeff = get_coeff(y_samples)  # convert samples to blip coefficients
         interp = Interpolator(x, dx)  # create interpolator for points x
         y = interp(y_coeff)  # interpolate y_samples at locations x
