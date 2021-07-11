@@ -145,15 +145,12 @@ if __name__ == "__main__":
     # Set up run configuration
     rc = qp.utils.RunConfig(cores=args.cores, process_grid=args.process_grid)
 
-    # initialize checkpoint file handler
-    chk = qp.utils.HDF5_io('chk.h5', rc)
-
     # Load input parameters from YAML file:
     with open(args.input_file) as f:
         inputDict = yaml.safe_load(f)
 
     # Initialize system with input parameters:
-    system = qp.System(rc=rc, chk=chk, **inputDict)
+    system = qp.System(rc=rc, **inputDict)
 
     # Dry-run bypass:
     if args.dry_run:

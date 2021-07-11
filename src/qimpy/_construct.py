@@ -1,4 +1,8 @@
-from typing import Optional, List, Union, TypeVar, Type, NamedTuple
+import qimpy as qp
+from typing import Optional, List, Union, TypeVar, Type, NamedTuple, \
+    TYPE_CHECKING
+if TYPE_CHECKING:
+    from .utils import Checkpoint
 
 
 ClassType = TypeVar('ClassType')
@@ -25,6 +29,13 @@ class Constructable:
         self.children = []
         self.path = ([] if (co.parent is None)
                      else (co.parent.path + [co.attr_name]))
+
+    def save_checkpoint(self, checkpoint: 'Checkpoint'):
+        # TODO: actually implement saving in overrides in all Constructable's
+        path_str = '/' + '/'.join(self.path)
+        qp.log.info(f'Saved {path_str} to {checkpoint.filename}')
+        for child in self.children:
+            child.save_checkpoint(checkpoint)
 
     @classmethod
     def construct(cls: Type[ConstructableType],

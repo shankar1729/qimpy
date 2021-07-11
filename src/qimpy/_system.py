@@ -9,15 +9,14 @@ if TYPE_CHECKING:
     from .symmetries import Symmetries
     from .electrons import Electrons
     from .grid import Grid, Coulomb
-    from .utils import HDF5_io
+    from .utils import Checkpoint
 
 
 class System(qp.Constructable):
     """Overall system to calculate within QimPy"""
-    __slots__ = ('rc', 'chk', 'lattice', 'ions', 'symmetries', 'electrons',
+    __slots__ = ('rc', 'lattice', 'ions', 'symmetries', 'electrons',
                  'grid', 'coulomb', 'energy')
     rc: 'RunConfig'  #: Current run configuration
-    chk: 'HDF5_io'  #: Checkpoint file handler
     lattice: 'Lattice'  #: Lattice vectors / unit cell definition
     ions: 'Ions'  #: Ionic positions and pseudopotentials
     symmetries: 'Symmetries'  #: Point and space group symmetries
@@ -27,7 +26,6 @@ class System(qp.Constructable):
     energy: 'Energy'  #: Energy components
 
     def __init__(self, *, rc: 'RunConfig',
-                 chk: 'HDF5_io',
                  lattice: Union['Lattice', dict],
                  ions: Union['Ions', dict, None] = None,
                  symmetries: Union['Symmetries', dict, None] = None,
@@ -39,7 +37,6 @@ class System(qp.Constructable):
         suitable for initializing that object"""
         super().__init__(co=co)
         self.rc = rc
-        self.chk = chk
         qp.lattice.Lattice.construct(self, 'lattice', lattice, rc=rc)
         qp.ions.Ions.construct(self, 'ions', ions, rc=rc)
         qp.symmetries.Symmetries.construct(
@@ -62,10 +59,13 @@ class System(qp.Constructable):
 
         qp.log.info(f'\nInitialization completed at t[s]: {rc.clock():.2f}\n')
 
-    def run(self):
+    def run(self) -> None:
         """Run any actions specified in the input."""
         # TODO: systematize selection of what actions to perform
         self.electrons.scf.update(self)
         self.electrons.scf.optimize()
         self.electrons.output()
         qp.log.info(f'\nEnergy components:\n{repr(self.energy)}')
+
+        qp.log.info('')
+        self.save_checkpoint(qp.utils.Checkpoint('chk.h5', self.rc))

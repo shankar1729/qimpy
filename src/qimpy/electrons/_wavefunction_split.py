@@ -96,8 +96,7 @@ if __name__ == '__main__':
     system = qp.System(
         rc=rc, lattice={'system': 'hexagonal', 'a': 9., 'c': 12.},
         electrons={'k-mesh': {'size': [4, 4, 3]},
-                   'basis': {'real-wavefunctions': False}},
-        chk=qp.utils.HDF5_io('../../../tests/chk.h5', rc))
+                   'basis': {'real-wavefunctions': False}})
 
     qp.log.info('\n--- Checking Wavefunction.split* ---')
     n_bands = 37  # deliberately prime!

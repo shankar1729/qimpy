@@ -8,11 +8,8 @@ if TYPE_CHECKING:
     from ._runconfig import RunConfig
 
 
-class HDF5_io:
-
-    """
-    Handles HDF5 file i/o for checkpoint file.
-    """
+class Checkpoint:
+    """ Helper for checkpoint load/save from HDF5 files."""
 
     def __init__(self, filename: str, rc: 'RunConfig'):
 

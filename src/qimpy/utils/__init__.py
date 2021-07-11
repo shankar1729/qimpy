@@ -5,7 +5,7 @@ __all__ = [
     'ortho_matrix', 'eighg',
     'log_config', 'RunConfig', 'StopWatch',
     'Pulay', 'ConvergenceCheck', 'Optimizable',
-    'TaskDivision', 'TaskDivisionCustom', 'BufferView', 'HDF5_io']
+    'TaskDivision', 'TaskDivisionCustom', 'BufferView', 'Checkpoint']
 
 from ._math import prime_factorization, fft_suitable, ceildiv, \
     cis, abs_squared, ortho_matrix, eighg
@@ -15,4 +15,4 @@ from ._stopwatch import StopWatch
 from ._taskdivision import TaskDivision, TaskDivisionCustom
 from ._bufferview import BufferView
 from ._pulay import Pulay, ConvergenceCheck, Optimizable
-from ._HDF5_io import HDF5_io
+from ._checkpoint import Checkpoint
