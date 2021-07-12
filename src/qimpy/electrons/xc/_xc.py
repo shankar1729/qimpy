@@ -21,8 +21,7 @@ class XC(qp.Constructable):
     need_lap: bool  #: whether overall functional needs laplacian
     need_tau: bool  #: whether overall functional needs KE density
 
-    def __init__(self, *, rc: 'RunConfig', co: qp.ConstructOptions,
-                 spin_polarized: bool,
+    def __init__(self, *, co: qp.ConstructOptions, spin_polarized: bool,
                  functional: Union[str, List[str]] = 'gga-pbe'):
         """Initialize functional from name or list of names.
         Each entry in the list must be one of the internal functionals:
@@ -67,7 +66,7 @@ class XC(qp.Constructable):
                     libxc_names.setdefault(func, 0.)
                     libxc_names[func] += 1.
         if libxc_names:
-            self._functionals.append(FunctionalsLibxc(rc, spin_polarized,
+            self._functionals.append(FunctionalsLibxc(self.rc, spin_polarized,
                                                       libxc_names))
 
         # Collect overall needs:

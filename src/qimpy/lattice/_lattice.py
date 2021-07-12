@@ -10,13 +10,12 @@ if TYPE_CHECKING:
 class Lattice(qp.Constructable):
     """Real and reciprocal space lattice vectors"""
 
-    __slots__ = ('rc', 'Rbasis', 'Gbasis', 'volume')
-    rc: 'RunConfig'  #: Current run configuration
+    __slots__ = ('Rbasis', 'Gbasis', 'volume')
     Rbasis: torch.Tensor  #: Real-space lattice vectors (in columns)
     Gbasis: torch.Tensor  #: Reciprocal-space lattice vectors (in columns)
     volume: float  #: Unit cell volume
 
-    def __init__(self, *, rc: 'RunConfig', co: qp.ConstructOptions,
+    def __init__(self, *, co: qp.ConstructOptions,
                  system: Optional[str] = None,
                  modification: Optional[str] = None,
                  a: Optional[float] = None,
@@ -81,7 +80,6 @@ class Lattice(qp.Constructable):
             :math:`[s_1, s_2, s_3]` for each lattice vector
         """
         super().__init__(co=co)
-        self.rc = rc
         qp.log.info('\n--- Initializing Lattice ---')
 
         # Get unscaled lattice vectors:
@@ -107,13 +105,13 @@ class Lattice(qp.Constructable):
             assert(len(scale_vector) in (1, 3))
             self.Rbasis = scale_vector[None, :] * self.Rbasis
         qp.log.info('Rbasis (real-space basis in columns):\n'
-                    + rc.fmt(self.Rbasis))
-        self.Rbasis = self.Rbasis.to(rc.device)
+                    + self.rc.fmt(self.Rbasis))
+        self.Rbasis = self.Rbasis.to(self.rc.device)
 
         # Compute reciprocal lattice vectors:
         self.Gbasis = (2*np.pi) * torch.linalg.inv(self.Rbasis.T)
         qp.log.info('Gbasis (reciprocal-space basis in columns):\n'
-                    + rc.fmt(self.Gbasis))
+                    + self.rc.fmt(self.Gbasis))
 
         # Compute unit cell volume:
         self.volume = abs(torch.linalg.det(self.Rbasis).item())

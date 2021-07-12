@@ -59,10 +59,9 @@ class Pulay(Generic[Variable], ABC, qp.Constructable):
     The mixed `Variable` must be a class supporting vector-space operators
     +, +=, -, -=, * for scalar multiply and method overlap() for inner product.
     """
-    __slots__ = ('rc', 'comm', 'name', 'n_iterations', 'energy_threshold',
+    __slots__ = ('comm', 'name', 'n_iterations', 'energy_threshold',
                  'residual_threshold', 'extra_thresholds', 'n_history',
                  'mix_fraction', '_variables', '_residuals', '_overlaps')
-    rc: 'RunConfig'  #: Current run configuration
     comm: qp.MPI.Comm  #: Communicator over which algorithm operates in unison
     name: str  #: Name of algorithm instance used in reporting eg. 'SCF'.
     n_iterations: int  #: Maximum number of iterations
@@ -81,14 +80,13 @@ class Pulay(Generic[Variable], ABC, qp.Constructable):
     #: to the extra values output by :meth:`cycle`.
     extra_thresholds: Dict[str, float]
 
-    def __init__(self, *, rc: 'RunConfig', co: qp.ConstructOptions,
+    def __init__(self, *, co: qp.ConstructOptions,
                  comm: qp.MPI.Comm, name: str,
                  n_iterations: int, energy_threshold: float,
                  residual_threshold: float, extra_thresholds: Dict[str, float],
                  n_history: int, mix_fraction: float) -> None:
         """Initialize Pulay algorithm parameters."""
         super().__init__(co=co)
-        self.rc = rc
         self.comm = comm
         self.name = name
         self.n_iterations = n_iterations

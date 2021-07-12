@@ -331,20 +331,17 @@ if __name__ == "__main__":
     n_batch = tuple(int(arg) for arg in sys.argv[1:-3])
 
     # Prerequisites for creating grid:
-    co = qp.ConstructOptions()
+    co = qp.ConstructOptions(rc=rc)
     lattice = qp.lattice.Lattice(
-        rc=rc, co=co, system='triclinic', a=2.1, b=2.2, c=2.3,
+        co=co, system='triclinic', a=2.1, b=2.2, c=2.3,
         alpha=75, beta=80, gamma=85)  # pick one with no symmetries
-    ions = qp.ions.Ions(rc=rc, co=co, pseudopotentials=[], coordinates=[])
-    symmetries = qp.symmetries.Symmetries(rc=rc, co=co,
-                                          lattice=lattice, ions=ions)
+    ions = qp.ions.Ions(co=co, pseudopotentials=[], coordinates=[])
+    symmetries = qp.symmetries.Symmetries(co=co, lattice=lattice, ions=ions)
 
     # Create grids with and without parallelization:
-    grid_par = qp.grid.Grid(rc=rc, co=co,
-                            lattice=lattice, symmetries=symmetries,
+    grid_par = qp.grid.Grid(co=co, lattice=lattice, symmetries=symmetries,
                             shape=shape, comm=rc.comm)  # parallel version
-    grid_seq = qp.grid.Grid(rc=rc, co=co,
-                            lattice=lattice, symmetries=symmetries,
+    grid_seq = qp.grid.Grid(co=co, lattice=lattice, symmetries=symmetries,
                             shape=shape, comm=None)  # sequential version
 
     def test(name, dtype_in, seq_func, par_func,

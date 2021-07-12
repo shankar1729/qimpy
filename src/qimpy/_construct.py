@@ -2,7 +2,7 @@ import qimpy as qp
 from typing import Optional, List, Union, TypeVar, Type, NamedTuple, \
     TYPE_CHECKING
 if TYPE_CHECKING:
-    from .utils import Checkpoint
+    from .utils import Checkpoint, RunConfig
 
 
 ClassType = TypeVar('ClassType')
@@ -14,21 +14,25 @@ class ConstructOptions(NamedTuple):
     """Options passed through `__init__` of all Constructable objects."""
     parent: Optional['Constructable'] = None  #: Parent in heirarchy
     attr_name: str = ''  #: Attribute name of object within parent
+    rc: Optional['RunConfig'] = None  #: Current run configuration
 
 
 class Constructable:
     """Base class of dict-constructable and serializable objects
     in QimPy heirarchy."""
-    __slots__ = ('parent', 'children', 'path')
+    __slots__ = ('parent', 'children', 'path', 'rc')
     parent: Optional['Constructable']  #: Parent object in heirarchy (if any)
     children: List['Constructable']  #: Child objects in heirarchy
     path: List[str]  #: Elements of object's absolute path in heirarchy
+    rc: 'RunConfig'  #: Current run configuration
 
     def __init__(self, co: ConstructOptions, **kwargs):
         self.parent = co.parent
         self.children = []
         self.path = ([] if (co.parent is None)
                      else (co.parent.path + [co.attr_name]))
+        if co.rc is not None:
+            self.rc = co.rc
 
     def save_checkpoint(self, checkpoint: 'Checkpoint'):
         # TODO: actually implement saving in overrides in all Constructable's
@@ -57,7 +61,8 @@ class Constructable:
         """
 
         # Try all the valid possibilities:
-        co = ConstructOptions(parent=parent, attr_name=attr_name)
+        assert parent.rc is not None
+        co = ConstructOptions(parent=parent, attr_name=attr_name, rc=parent.rc)
         if isinstance(params, dict):
             result = cls(**kwargs, **dict_input_cleanup(params), co=co)
         elif params is None:

@@ -13,10 +13,9 @@ if TYPE_CHECKING:
 
 class Ions(qp.Constructable):
     """Ionic system: ionic geometry and pseudopotentials. """
-    __slots__ = ('rc', 'n_ions', 'n_types', 'symbols', 'slices',
+    __slots__ = ('n_ions', 'n_types', 'symbols', 'slices',
                  'pseudopotentials', 'positions', 'types', 'M_initial',
                  'Z', 'Z_tot', 'rho', 'Vloc', 'n_core')
-    rc: 'RunConfig'
     n_ions: int  #: number of ions
     n_types: int  #: number of distinct ion types
     symbols: List[str]  #: symbol for each ion type
@@ -31,7 +30,7 @@ class Ions(qp.Constructable):
     Vloc: 'FieldH'  #: local potential due to ions (including from rho)
     n_core: 'FieldH'  #: partial core electronic density (for inclusion in XC)
 
-    def __init__(self, *, rc: 'RunConfig', co: qp.ConstructOptions,
+    def __init__(self, *, co: qp.ConstructOptions,
                  coordinates: Optional[List] = None,
                  pseudopotentials: Optional[Union[str, List[str]]] = None
                  ) -> None:
@@ -56,7 +55,7 @@ class Ions(qp.Constructable):
             each element takes precedence.
         """
         super().__init__(co=co)
-        self.rc = rc
+        rc = self.rc
         qp.log.info('\n--- Initializing Ions ---')
 
         # Read ionic coordinates:

@@ -15,9 +15,8 @@ class Symmetries(qp.Constructable):
     Detects space group from lattice and ions, and provides methods to
     symmetrize properties such as positions, forces and densities."""
 
-    __slots__ = ('rc', 'lattice', 'ions', 'tolerance', 'n_sym',
+    __slots__ = ('lattice', 'ions', 'tolerance', 'n_sym',
                  'rot', 'trans', 'ion_map', 'i_id', 'i_inv')
-    rc: 'RunConfig'  #: Current run configuration
     lattice: 'Lattice'  #: Corresponding lattice vectors
     ions: 'Ions'  #: Corresponding ionic geometry
     tolerance: float  #: Relative error threshold in detecting symmetries
@@ -33,12 +32,12 @@ class Symmetries(qp.Constructable):
     check_grid_shape = _check_grid_shape
     get_grid_shape = _get_grid_shape
 
-    def __init__(self, *, rc: 'RunConfig', co: qp.ConstructOptions,
+    def __init__(self, *, co: qp.ConstructOptions,
                  lattice: 'Lattice', ions: 'Ions',
                  tolerance: float = 1e-6) -> None:
         """Determine space group from `lattice` and `ions`."""
         super().__init__(co=co)
-        self.rc = rc
+        rc = self.rc
         self.lattice = lattice
         self.ions = ions
         self.tolerance = tolerance

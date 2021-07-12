@@ -16,11 +16,10 @@ class Grid(qp.Constructable):
     and routines to convert fields between grids.
     """
     __slots__ = [
-        'rc', 'lattice', 'comm', 'n_procs', 'i_proc', 'is_split', 'ke_cutoff',
+        'lattice', 'comm', 'n_procs', 'i_proc', 'is_split', 'ke_cutoff',
         'dV', 'shape', 'shapeH', 'shapeR_mine', 'shapeG_mine', 'shapeH_mine',
         'split0', 'split2', 'split2H', 'mesh1D',
         '_indices_fft', '_indices_ifft', '_indices_rfft', '_indices_irfft']
-    rc: 'RunConfig'
     lattice: 'Lattice'
     comm: Optional[qp.MPI.Comm]  #: Communicator to split grid and FFTs over
     n_procs: int  #: Size of comm
@@ -45,8 +44,7 @@ class Grid(qp.Constructable):
     fft: MethodFFT = _fft
     ifft: MethodFFT = _ifft
 
-    def __init__(self, *,
-                 rc: 'RunConfig', co: qp.ConstructOptions, lattice: 'Lattice',
+    def __init__(self, *, co: qp.ConstructOptions, lattice: 'Lattice',
                  symmetries: 'Symmetries', comm: Optional[qp.MPI.Comm],
                  ke_cutoff_wavefunction: Optional[float] = None,
                  ke_cutoff: Optional[float] = None,
@@ -77,7 +75,6 @@ class Grid(qp.Constructable):
             will supercede ke_cutoff
         """
         super().__init__(co=co)
-        self.rc = rc
         self.lattice = lattice
 
         # MPI settings (identify local or split):

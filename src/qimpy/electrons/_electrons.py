@@ -22,11 +22,10 @@ if TYPE_CHECKING:
 
 class Electrons(qp.Constructable):
     """Electronic subsystem"""
-    __slots__ = ('rc', 'kpoints', 'spin_polarized', 'spinorial', 'n_spins',
+    __slots__ = ('kpoints', 'spin_polarized', 'spinorial', 'n_spins',
                  'n_spinor', 'w_spin', 'fillings', 'n_bands', 'n_bands_extra',
                  'basis', 'xc', 'diagonalize', 'scf', 'C',
                  'eig', 'deig_max', 'n', 'tau', 'V_ks', 'V_tau')
-    rc: 'RunConfig'  #: Current run configuration
     kpoints: 'Kpoints'  #: Set of kpoints (mesh or path)
     spin_polarized: bool  #: Whether calculation is spin-polarized
     spinorial: bool  #: Whether calculation is relativistic / spinorial
@@ -50,7 +49,7 @@ class Electrons(qp.Constructable):
 
     hamiltonian = _hamiltonian
 
-    def __init__(self, *, rc: 'RunConfig', co: qp.ConstructOptions,
+    def __init__(self, *, co: qp.ConstructOptions,
                  lattice: 'Lattice', ions: 'Ions', symmetries: 'Symmetries',
                  k_mesh: Optional[Union[dict, 'Kmesh']] = None,
                  k_path: Optional[Union[dict, 'Kpath']] = None,
@@ -67,8 +66,6 @@ class Electrons(qp.Constructable):
 
         Parameters
         ----------
-        rc : qimpy.utils.RunConfig
-            Current run configuration
         lattice : qimpy.lattice.Lattice
             Lattice (unit cell) to associate with electronic wave functions
         ions : qimpy.ions.Ions
@@ -125,7 +122,7 @@ class Electrons(qp.Constructable):
             Default: None
         """
         super().__init__(co=co)
-        self.rc = rc
+        rc = self.rc
         qp.log.info('\n--- Initializing Electrons ---')
 
         # Initialize k-points:
@@ -138,11 +135,11 @@ class Electrons(qp.Constructable):
         if k_mesh is not None:
             qp.electrons.Kmesh.construct(
                 self, 'kpoints', k_mesh, attr_version_name='k-mesh',
-                rc=rc, symmetries=symmetries, lattice=lattice)
+                symmetries=symmetries, lattice=lattice)
         if k_path is not None:
             qp.electrons.Kpath.construct(
                 self, 'kpoints', k_path, attr_version_name='k-path',
-                rc=rc, lattice=lattice)
+                lattice=lattice)
 
         # Initialize spin:
         self.spin_polarized = spin_polarized
@@ -156,7 +153,7 @@ class Electrons(qp.Constructable):
 
         # Initialize fillings:
         qp.electrons.Fillings.construct(self, 'fillings', fillings,
-                                        rc=rc, ions=ions, electrons=self)
+                                        ions=ions, electrons=self)
 
         # Determine number of bands:
         if n_bands is None:
@@ -201,7 +198,7 @@ class Electrons(qp.Constructable):
         # Initialize wave-function basis:
         qp.electrons.Basis.construct(
             self, 'basis', basis,
-            rc=rc, lattice=lattice, ions=ions, symmetries=symmetries,
+            lattice=lattice, ions=ions, symmetries=symmetries,
             kpoints=self.kpoints, n_spins=self.n_spins, n_spinor=self.n_spinor)
 
         # Initial wavefunctions:
@@ -216,7 +213,7 @@ class Electrons(qp.Constructable):
 
         # Initialize exchange-correlation functional:
         qp.electrons.xc.XC.construct(self, 'xc', xc,
-                                     rc=rc, spin_polarized=spin_polarized)
+                                     spin_polarized=spin_polarized)
 
         # Initialize diagonalizer:
         n_options = np.count_nonzero([(d is not None)
@@ -236,7 +233,7 @@ class Electrons(qp.Constructable):
         qp.log.info('\nDiagonalization: ' + repr(self.diagonalize))
 
         # Initialize SCF:
-        qp.electrons.SCF.construct(self, 'scf', scf, rc=rc, comm=rc.comm_kb)
+        qp.electrons.SCF.construct(self, 'scf', scf, comm=rc.comm_kb)
 
     @property
     def n_densities(self) -> int:

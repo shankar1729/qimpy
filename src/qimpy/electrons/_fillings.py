@@ -18,10 +18,9 @@ SmearingFunc = Callable[[torch.Tensor, float, float], SmearingResults]
 
 class Fillings(qp.Constructable):
     """Electron occupation factors (smearing)"""
-    __slots__ = ('rc', 'n_electrons', 'n_bands_min', 'smearing',
+    __slots__ = ('n_electrons', 'n_bands_min', 'smearing',
                  'sigma', 'mu_constrain', 'M_constrain', '_smearing_func',
                  'mu', 'B', 'M', 'f')
-    rc: 'RunConfig'  #: Current run configuration
     n_electrons: float  #: Number of electrons
     n_bands_min: int  #: Minimum number of bands to accomodate `n_electrons`
     smearing: Optional[str]  #: Smearing method name
@@ -34,7 +33,7 @@ class Fillings(qp.Constructable):
     f: torch.Tensor  #: Electronic occupations
     _smearing_func: Optional[SmearingFunc]  #: Smearing function calculator
 
-    def __init__(self, *, rc: 'RunConfig', co: qp.ConstructOptions,
+    def __init__(self, *, co: qp.ConstructOptions,
                  ions: 'Ions', electrons: 'Electrons',
                  charge: float = 0., smearing: str = 'gauss',
                  sigma: Optional[float] = None,
@@ -87,7 +86,6 @@ class Fillings(qp.Constructable):
             this only matters when `smearing` is not None.
         """
         super().__init__(co=co)
-        self.rc = rc
 
         # Number of electrons and bands:
         self.n_electrons = ions.Z_tot - charge

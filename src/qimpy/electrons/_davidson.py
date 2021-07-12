@@ -10,9 +10,8 @@ if TYPE_CHECKING:
 
 class Davidson(qp.Constructable):
     """Davidson diagonalization of Hamiltonian in `electrons`."""
-    __slots__ = ('rc', 'electrons', 'n_iterations', 'eig_threshold',
+    __slots__ = ('electrons', 'n_iterations', 'eig_threshold',
                  '_line_prefix', '_norm_cut', '_i_iter', '_HC')
-    rc: 'RunConfig'  #: Current run configuration
     electrons: 'Electrons'  #: Electronic system to diagonalize
     n_iterations: int  #: Number of diagonalization iterations
     eig_threshold: float  #: Eigenvalue convergence threshold (in :math:`E_h`)
@@ -39,7 +38,6 @@ class Davidson(qp.Constructable):
             diagonalizing in an inner loop
         """
         super().__init__(co=co)
-        self.rc = electrons.rc
         self.electrons = electrons
         self.n_iterations = n_iterations
         self.eig_threshold = eig_threshold

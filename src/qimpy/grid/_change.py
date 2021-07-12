@@ -222,13 +222,12 @@ if __name__ == "__main__":
     qp.log.info('*'*15 + ' QimPy ' + qp.__version__ + ' ' + '*'*15)
     rc = qp.utils.RunConfig()
     # Prepare a grid for testing:
-    co = qp.ConstructOptions()
+    co = qp.ConstructOptions(rc=rc)
     lattice = qp.lattice.Lattice(
-        rc=rc, co=co, system='triclinic', a=2.1, b=2.2, c=2.3,
+        co=co, system='triclinic', a=2.1, b=2.2, c=2.3,
         alpha=75, beta=80, gamma=85)  # pick one with no symmetries
-    ions = qp.ions.Ions(rc=rc, co=co, pseudopotentials=[], coordinates=[])
-    symmetries = qp.symmetries.Symmetries(rc=rc, co=co,
-                                          lattice=lattice, ions=ions)
+    ions = qp.ions.Ions(co=co, pseudopotentials=[], coordinates=[])
+    symmetries = qp.symmetries.Symmetries(co=co, lattice=lattice, ions=ions)
 
     # MPI-reproducible grid for testing:
     def get_ref_field(cls, grid):
@@ -255,8 +254,7 @@ if __name__ == "__main__":
 
     # Make parallel and sequential grids of given shape:
     def make_grid(shape, comm):
-        return qp.grid.Grid(rc=rc, co=co,
-                            lattice=lattice, symmetries=symmetries,
+        return qp.grid.Grid(co=co, lattice=lattice, symmetries=symmetries,
                             shape=shape, comm=comm)
 
     def make_grids(shape):

@@ -15,12 +15,11 @@ if TYPE_CHECKING:
 class Basis(qp.utils.TaskDivision):
     """Plane-wave basis for electronic wavefunctions. The underlying
      :class:`qimpy.utils.TaskDivision` splits plane waves over `rc.comm_b`"""
-    __slots__ = ('rc', 'lattice', 'ions', 'kpoints', 'n_spins', 'n_spinor',
+    __slots__ = ('lattice', 'ions', 'kpoints', 'n_spins', 'n_spinor',
                  'k', 'wk', 'w_sk', 'real_wavefunctions', 'ke_cutoff', 'grid',
                  'iG', 'n', 'n_min', 'n_max', 'n_avg', 'n_ideal', 'mine',
                  'fft_index', 'pad_index', 'pad_index_mine', 'fft_block_size',
                  'index_z0', 'index_z0_conj', 'Gweight_mine')
-    rc: 'RunConfig'  #: Current run configuration
     lattice: 'Lattice'  #: Lattice vectors of unit cell
     ions: 'Ions'  #: Ionic system: implicit part of basis for ultrasoft / PAW
     kpoints: 'Kpoints'  #: k-point set for which basis is initialized
@@ -53,7 +52,7 @@ class Basis(qp.utils.TaskDivision):
     apply_potential = _apply_potential
     collect_density = _collect_density
 
-    def __init__(self, *, rc: 'RunConfig', co: qp.ConstructOptions,
+    def __init__(self, *, co: qp.ConstructOptions,
                  lattice: 'Lattice', ions: 'Ions', symmetries: 'Symmetries',
                  kpoints: 'Kpoints', n_spins: int, n_spinor: int,
                  ke_cutoff: float = 20., real_wavefunctions: bool = False,
@@ -94,7 +93,7 @@ class Basis(qp.utils.TaskDivision):
             better occupancy of GPUs or high-core-count CPUs.
         """
         super().__init__(co=co)
-        self.rc = rc
+        rc = self.rc
         self.lattice = lattice
         self.ions = ions
         self.kpoints = kpoints
@@ -123,7 +122,7 @@ class Basis(qp.utils.TaskDivision):
         self.ke_cutoff = float(ke_cutoff)
         qp.log.info('\nInitializing wavefunction grid:')
         qp.grid.Grid.construct(
-            self, 'grid', grid, rc=rc, lattice=lattice, symmetries=symmetries,
+            self, 'grid', grid, lattice=lattice, symmetries=symmetries,
             comm=None, ke_cutoff_wavefunction=self.ke_cutoff)
 
         # Initialize basis:

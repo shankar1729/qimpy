@@ -14,9 +14,8 @@ if TYPE_CHECKING:
 
 class System(qp.Constructable):
     """Overall system to calculate within QimPy"""
-    __slots__ = ('rc', 'lattice', 'ions', 'symmetries', 'electrons',
+    __slots__ = ('lattice', 'ions', 'symmetries', 'electrons',
                  'grid', 'coulomb', 'energy')
-    rc: 'RunConfig'  #: Current run configuration
     lattice: 'Lattice'  #: Lattice vectors / unit cell definition
     ions: 'Ions'  #: Ionic positions and pseudopotentials
     symmetries: 'Symmetries'  #: Point and space group symmetries
@@ -30,25 +29,23 @@ class System(qp.Constructable):
                  ions: Union['Ions', dict, None] = None,
                  symmetries: Union['Symmetries', dict, None] = None,
                  electrons: Union['Electrons', dict, None] = None,
-                 grid: Union['Grid', dict, None] = None,
-                 co: qp.ConstructOptions = qp.ConstructOptions()):
+                 grid: Union['Grid', dict, None] = None):
         """Compose a System to calculate from its pieces. Each piece
         could be provided as an object or a dictionary of parameters
         suitable for initializing that object"""
-        super().__init__(co=co)
-        self.rc = rc
-        qp.lattice.Lattice.construct(self, 'lattice', lattice, rc=rc)
-        qp.ions.Ions.construct(self, 'ions', ions, rc=rc)
+        super().__init__(qp.ConstructOptions(rc=rc))
+        qp.lattice.Lattice.construct(self, 'lattice', lattice)
+        qp.ions.Ions.construct(self, 'ions', ions)
         qp.symmetries.Symmetries.construct(
             self, 'symmetries', symmetries,
-            rc=rc, lattice=self.lattice, ions=self.ions)
+            lattice=self.lattice, ions=self.ions)
         qp.electrons.Electrons.construct(
-            self, 'electrons', electrons, rc=rc, lattice=self.lattice,
+            self, 'electrons', electrons, lattice=self.lattice,
             ions=self.ions, symmetries=self.symmetries)
 
         qp.log.info('\n--- Initializing Charge-Density Grid ---')
         qp.grid.Grid.construct(
-            self, 'grid', grid, rc=rc, lattice=self.lattice,
+            self, 'grid', grid, lattice=self.lattice,
             symmetries=self.symmetries, comm=rc.comm_kb,
             ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff)
         self.coulomb = qp.grid.Coulomb(self.grid, self.ions.n_ions)
