@@ -1,6 +1,6 @@
 import qimpy as qp
 import numpy as np
-from typing import Union, TYPE_CHECKING
+from typing import Union, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from ._energy import Energy
     from .utils import RunConfig
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 class System(qp.Constructable):
     """Overall system to calculate within QimPy"""
     __slots__ = ('lattice', 'ions', 'symmetries', 'electrons',
-                 'grid', 'coulomb', 'energy')
+                 'grid', 'coulomb', 'energy', 'checkpoint_out')
     lattice: 'Lattice'  #: Lattice vectors / unit cell definition
     ions: 'Ions'  #: Ionic positions and pseudopotentials
     symmetries: 'Symmetries'  #: Point and space group symmetries
@@ -23,17 +23,33 @@ class System(qp.Constructable):
     grid: 'Grid'  #: Charge-density grid
     coulomb: 'Coulomb'  #: Coulomb interactions on charge-density grid
     energy: 'Energy'  #: Energy components
+    checkpoint_out: Optional[str]  #: Filename for output checkpoint
 
     def __init__(self, *, rc: 'RunConfig',
                  lattice: Union['Lattice', dict],
                  ions: Union['Ions', dict, None] = None,
                  symmetries: Union['Symmetries', dict, None] = None,
                  electrons: Union['Electrons', dict, None] = None,
-                 grid: Union['Grid', dict, None] = None):
+                 grid: Union['Grid', dict, None] = None,
+                 checkpoint: Optional[str] = None,
+                 checkpoint_out: Optional[str] = None):
         """Compose a System to calculate from its pieces. Each piece
         could be provided as an object or a dictionary of parameters
         suitable for initializing that object"""
-        super().__init__(qp.ConstructOptions(rc=rc))
+
+        # Set in and out checkpoints:
+        try:
+            checkpoint_in = (None if (checkpoint is None)
+                             else qp.utils.Checkpoint(checkpoint,
+                                                      rc=rc, mode='r'))
+        except OSError:  # Raised by h5py when file not readable
+            qp.log.info(f"Cannot load checkpoint file '{checkpoint}'")
+            checkpoint_in = None
+        self.checkpoint_out = (checkpoint if checkpoint_out is None
+                               else checkpoint_out)
+
+        super().__init__(qp.ConstructOptions(rc=rc,
+                                             checkpoint_in=checkpoint_in))
         qp.lattice.Lattice.construct(self, 'lattice', lattice)
         qp.ions.Ions.construct(self, 'ions', ions)
         qp.symmetries.Symmetries.construct(
@@ -65,4 +81,6 @@ class System(qp.Constructable):
         qp.log.info(f'\nEnergy components:\n{repr(self.energy)}')
 
         qp.log.info('')
-        self.save_checkpoint(qp.utils.Checkpoint('chk.h5', self.rc))
+        if self.checkpoint_out:
+            self.save_checkpoint(qp.utils.Checkpoint(self.checkpoint_out,
+                                                     rc=self.rc, mode='w'))

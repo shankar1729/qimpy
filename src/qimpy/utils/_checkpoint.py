@@ -1,8 +1,8 @@
 import h5py
 from mpi4py import MPI
+import qimpy as qp
 import numpy as np
 import torch
-import qimpy as qp
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ._runconfig import RunConfig
@@ -11,15 +11,16 @@ if TYPE_CHECKING:
 class Checkpoint:
     """ Helper for checkpoint load/save from HDF5 files."""
 
-    def __init__(self, filename: str, rc: 'RunConfig'):
-
+    def __init__(self, filename: str, *, rc: 'RunConfig',
+                 mode: str = 'r') -> None:
         self.filename = filename
-        self.f = h5py.File(self.filename, 'a', driver='mpio',
-                           comm=MPI.COMM_WORLD)
-        # Will read/write if file exists, or create otherwise
+        self.rc = rc
+        self.mode = mode
+        self.f = h5py.File(self.filename, mode, driver='mpio', comm=rc.comm)
+        mode_name = 'reading' if mode.startswith('r') else 'writing'
+        qp.log.info(f"Opened checkpoint file '{filename}' for {mode_name}")
 
     def create_dataset(self, header: str, shape: tuple):
-
         """
         Creates a datasdet inside the hdf5 file.
 

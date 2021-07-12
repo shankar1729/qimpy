@@ -15,16 +15,20 @@ class ConstructOptions(NamedTuple):
     parent: Optional['Constructable'] = None  #: Parent in heirarchy
     attr_name: str = ''  #: Attribute name of object within parent
     rc: Optional['RunConfig'] = None  #: Current run configuration
+    checkpoint_in: Optional['Checkpoint'] = None \
+        #: If present, load data from this checkpoint file during construction
 
 
 class Constructable:
     """Base class of dict-constructable and serializable objects
     in QimPy heirarchy."""
-    __slots__ = ('parent', 'children', 'path', 'rc')
+    __slots__ = ('parent', 'children', 'path', 'rc', 'checkpoint_in')
     parent: Optional['Constructable']  #: Parent object in heirarchy (if any)
     children: List['Constructable']  #: Child objects in heirarchy
     path: List[str]  #: Elements of object's absolute path in heirarchy
     rc: 'RunConfig'  #: Current run configuration
+    checkpoint_in: Optional['Checkpoint'] \
+        #: If present, load data from this checkpoint file during construction
 
     def __init__(self, co: ConstructOptions, **kwargs):
         self.parent = co.parent
@@ -33,6 +37,7 @@ class Constructable:
                      else (co.parent.path + [co.attr_name]))
         if co.rc is not None:
             self.rc = co.rc
+        self.checkpoint_in = co.checkpoint_in
 
     def save_checkpoint(self, checkpoint: 'Checkpoint'):
         # TODO: actually implement saving in overrides in all Constructable's
@@ -62,7 +67,8 @@ class Constructable:
 
         # Try all the valid possibilities:
         assert parent.rc is not None
-        co = ConstructOptions(parent=parent, attr_name=attr_name, rc=parent.rc)
+        co = ConstructOptions(parent=parent, attr_name=attr_name, rc=parent.rc,
+                              checkpoint_in=parent.checkpoint_in)
         if isinstance(params, dict):
             result = cls(**kwargs, **dict_input_cleanup(params), co=co)
         elif params is None:

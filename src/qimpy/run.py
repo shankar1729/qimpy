@@ -147,10 +147,14 @@ if __name__ == "__main__":
 
     # Load input parameters from YAML file:
     with open(args.input_file) as f:
-        inputDict = yaml.safe_load(f)
+        input_dict: dict = yaml.safe_load(f)
+
+    # Set default checkpoint file (if not specified in input):
+    input_dict.setdefault('checkpoint',
+                          os.path.splitext(args.input_file)[0] + '.h5')
 
     # Initialize system with input parameters:
-    system = qp.System(rc=rc, **inputDict)
+    system = qp.System(rc=rc, **input_dict)
 
     # Dry-run bypass:
     if args.dry_run:
