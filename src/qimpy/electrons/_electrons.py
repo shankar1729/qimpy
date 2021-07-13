@@ -2,9 +2,9 @@ import qimpy as qp
 import numpy as np
 import torch
 from ._hamiltonian import _hamiltonian
-from typing import Union, Optional, TYPE_CHECKING
+from typing import Union, Optional, List, TYPE_CHECKING
 if TYPE_CHECKING:
-    from ..utils import RunConfig
+    from ..utils import Checkpoint, RunConfig
     from ..lattice import Lattice
     from ..ions import Ions
     from ..symmetries import Symmetries
@@ -274,3 +274,7 @@ class Electrons(qp.Constructable):
         """Save any configured outputs (TODO: systematize this)"""
         if isinstance(self.kpoints, qp.electrons.Kpath):
             self.kpoints.plot(self.eig[..., :self.n_bands], 'bandstruct.pdf')
+
+    def _save_checkpoint(self, checkpoint: 'Checkpoint',
+                         path: str) -> List[str]:
+        return ['n', 'C']   # TODO: actually write these

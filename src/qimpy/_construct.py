@@ -1,5 +1,5 @@
 import qimpy as qp
-from typing import Optional, List, Union, TypeVar, Type, NamedTuple, \
+from typing import Optional, List, Union, TypeVar, Type, NamedTuple, final, \
     TYPE_CHECKING
 if TYPE_CHECKING:
     from .utils import Checkpoint, RunConfig
@@ -39,12 +39,24 @@ class Constructable:
             self.rc = co.rc
         self.checkpoint_in = co.checkpoint_in
 
-    def save_checkpoint(self, checkpoint: 'Checkpoint'):
-        # TODO: actually implement saving in overrides in all Constructable's
+    @final
+    def save_checkpoint(self, checkpoint: 'Checkpoint') -> None:
+        """Save `self` and all children in heirarchy to `checkpoint`.
+        Override `_save_checkpoint` to implement the save functionality."""
+        # Save quantities in self:
         path_str = '/' + '/'.join(self.path)
-        qp.log.info(f'Saved {path_str} to {checkpoint.filename}')
+        saved = self._save_checkpoint(checkpoint, path_str)
+        if saved:
+            qp.log.info(f'  {path_str}: {", ".join(saved)}')
+        # Recur down the heirarchy:
         for child in self.children:
             child.save_checkpoint(checkpoint)
+
+    def _save_checkpoint(self, checkpoint: 'Checkpoint',
+                         path: str) -> List[str]:
+        """Override to save required quantities to `path` wiithin `checkpoint`.
+        Return names of objects saved that should be reported."""
+        return []
 
     def construct(self, attr_name: str, cls: Type[ConstructableType],
                   params: Union[ConstructableType, dict, None],

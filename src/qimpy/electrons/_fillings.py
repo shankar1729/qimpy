@@ -3,9 +3,10 @@ import numpy as np
 import torch
 import collections
 from scipy import optimize
-from typing import Optional, Dict, Union, Callable, Sequence, TYPE_CHECKING
+from typing import Optional, Dict, Union, Callable, List, Sequence, \
+    TYPE_CHECKING
 if TYPE_CHECKING:
-    from ..utils import RunConfig
+    from ..utils import Checkpoint, RunConfig
     from ..ions import Ions
     from ._electrons import Electrons
     from .._system import System
@@ -277,6 +278,10 @@ class Fillings(qp.Constructable):
                 M_str = ''
             qp.log.info(f'  FillingsUpdate:  mu: {self.mu:.9f}'
                         f'  n_electrons: {n_electrons:.6f}{M_str}')
+
+    def _save_checkpoint(self, checkpoint: 'Checkpoint',
+                         path: str) -> List[str]:
+        return ['f', 'mu', 'sigma']   # TODO: actually write these
 
 
 def _smearing_fermi(eig: torch.Tensor, mu: float,

@@ -17,7 +17,7 @@ class Checkpoint:
         self.rc = rc
         self.mode = mode
         self.f = h5py.File(self.filename, mode, driver='mpio', comm=rc.comm)
-        mode_name = 'reading' if mode.startswith('r') else 'writing'
+        mode_name = 'reading' if mode.startswith('r') else 'writing:'
         qp.log.info(f"Opened checkpoint file '{filename}' for {mode_name}")
 
     def create_dataset(self, header: str, shape: tuple):
