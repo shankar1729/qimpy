@@ -38,13 +38,12 @@ class Checkpoint(h5py.File):
                       for i, s_i in enumerate(data.shape))
         dset[index] = data.to(self.rc.cpu).numpy()
 
-    def read_slice(self, dset_name: str, offset: Sequence[int],
+    def read_slice(self, dset: Any, offset: Sequence[int],
                    size: Sequence[int]) -> torch.Tensor:
-        """Read a slice of data from data set named `dset_name` in file,
+        """Read a slice of data from data set `dset` in file,
         starting at `offset` and of length `size` in each dimension.
         Returns data on CPU or GPU as specified by `rc.device`.
         """
-        dset = self.f[dset_name]
         assert len(offset) == len(dset.shape)
         assert len(offset) == len(size)
         index = tuple(slice(offset[i], offset[i] + size[i])

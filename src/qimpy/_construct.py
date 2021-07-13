@@ -25,7 +25,7 @@ class Constructable:
     __slots__ = ('parent', 'children', 'path', 'rc', 'checkpoint_in')
     parent: Optional['Constructable']  #: Parent object in heirarchy (if any)
     children: List['Constructable']  #: Child objects in heirarchy
-    path: List[str]  #: Elements of object's absolute path in heirarchy
+    path: str  #: Object's absolute path in heirarchy (includes trailing /)
     rc: 'RunConfig'  #: Current run configuration
     checkpoint_in: Optional['Checkpoint'] \
         #: If present, load data from this checkpoint file during construction
@@ -34,8 +34,8 @@ class Constructable:
         self.rc = co.rc
         self.parent = co.parent
         self.children = []
-        self.path = ([] if (co.parent is None)
-                     else (co.parent.path + [co.attr_name]))
+        self.path = ('/' if (co.parent is None)
+                     else (co.parent.path + co.attr_name + '/'))
         self.checkpoint_in = co.checkpoint_in
 
     @final
@@ -43,19 +43,23 @@ class Constructable:
         """Save `self` and all children in heirarchy to `checkpoint`.
         Override `_save_checkpoint` to implement the save functionality."""
         # Save quantities in self:
-        path_str = '/' + '/'.join(self.path)
-        saved = self._save_checkpoint(checkpoint, path_str)
+        saved = self._save_checkpoint(checkpoint)
         if saved:
-            qp.log.info(f'  {path_str}: {", ".join(saved)}')
+            qp.log.info(f'  {self.path} <- {", ".join(saved)}')
         # Recur down the heirarchy:
         for child in self.children:
             child.save_checkpoint(checkpoint)
 
-    def _save_checkpoint(self, checkpoint: 'Checkpoint',
-                         path: str) -> List[str]:
-        """Override to save required quantities to `path` wiithin `checkpoint`.
-        Return names of objects saved that should be reported."""
+    def _save_checkpoint(self, checkpoint: 'Checkpoint') -> List[str]:
+        """Override to save required quantities to `self.path`
+        within `checkpoint`. Return names of objects saved (for logging)."""
         return []
+
+    def _checkpoint_has(self, object_name: str) -> bool:
+        """Return whether input checkpoint exists and contains `object_name`
+        at `self.path`"""
+        return ((self.checkpoint_in is not None)
+                and ((self.path + object_name) in self.checkpoint_in))
 
     def construct(self, attr_name: str, cls: Type[ConstructableType],
                   params: Union[ConstructableType, dict, None],

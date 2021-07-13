@@ -222,6 +222,5 @@ class Electrons(qp.Constructable):
             self.kpoints.plot(self.eig[..., :self.fillings.n_bands],
                               'bandstruct.pdf')
 
-    def _save_checkpoint(self, checkpoint: 'Checkpoint',
-                         path: str) -> List[str]:
+    def _save_checkpoint(self, checkpoint: 'Checkpoint') -> List[str]:
         return ['n', 'C']   # TODO: actually write these

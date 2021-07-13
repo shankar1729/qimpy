@@ -161,6 +161,13 @@ class Fillings(qp.Constructable):
                         f'  constrained: {self.M_constrain}'
                         f'  B: {self.rc.fmt(self.B)}')
 
+        self._initialize_n_bands(n_bands, n_bands_extra)
+        self._initialize_f()
+
+    def _initialize_n_bands(self,
+                            n_bands: Optional[Union[int, str]] = None,
+                            n_bands_extra: Optional[Union[int, str]] = None
+                            ) -> None:
         # Determine number of bands:
         if n_bands is None:
             n_bands = 'x1'
@@ -201,149 +208,170 @@ class Fillings(qp.Constructable):
             f'n_bands: {self.n_bands} ({n_bands_method})'
             f'  n_bands_extra: {self.n_bands_extra} ({n_bands_extra_method})')
 
-        # Initialize fillings:
-        # --- Fillings sum for each spin channel:
-        f_sums = (np.ones(electrons.n_spins) * self.n_electrons
-                  / (electrons.w_spin * electrons.n_spins))
-        if electrons.spin_polarized and (not electrons.spinorial):
-            half_M = 0.5 * self.M.item()
-            f_sums[0] += half_M
-            f_sums[1] -= half_M
-            if f_sums.min() < 0:
-                raise ValueError(f'M = {(2 * half_M):g} too large for'
-                                 f' n_electrons = {self.n_electrons:g}')
-            if f_sums.max() > self.n_bands:
-                raise ValueError(f'M = {(2 * half_M):g} too large for'
-                                 f' n_bands = {self.n_bands:g}')
-        # --- Initialize fillings based on sum in each channel:
-        nk_mine = electrons.kpoints.division.n_mine
-        self.f = torch.zeros((electrons.n_spins, nk_mine, self.n_bands),
+    def _initialize_f(self) -> None:
+        """Create or load initial fillings."""
+        el = self.electrons
+        k_division = el.kpoints.division
+        self.f = torch.zeros((el.n_spins, k_division.n_mine, self.n_bands),
                              device=self.rc.device)
-        for i_spin, f_sum in enumerate(f_sums):
-            n_full = int(np.floor(f_sum))  # number of fully filled bands
-            self.f[i_spin, :, :n_full] = 1.  # full fillings
-            if f_sum > n_full:
-                self.f[i_spin, :, n_full] = (f_sum - n_full)  # left overs
+        if self._checkpoint_has('f'):
+            qp.log.info("Loading fillings from checkpoint")
+            assert self.checkpoint_in is not None
+            dset_f = self.checkpoint_in[self.path + 'f']
+            n_bands_in = min(dset_f.shape[-1], self.n_bands)
+            offset_f = (0, k_division.i_start, 0)
+            size_f = (el.n_spins, k_division.n_mine, n_bands_in)
+            self.f[..., :n_bands_in] = self.checkpoint_in.read_slice(
+                dset_f, offset_f, size_f)
+            qp.log.info(f'Read: {self.rc.fmt(self.f)}')
+        else:
+            # Compute fillings
+            qp.log.info("Constructing fillings to occupy lowest bands")
+            # --- Fillings sum for each spin channel:
+            f_sums = (np.ones(el.n_spins) * self.n_electrons
+                      / (el.w_spin * el.n_spins))
+            if el.spin_polarized and (not el.spinorial):
+                half_M = 0.5 * self.M.item()
+                f_sums[0] += half_M
+                f_sums[1] -= half_M
+                if f_sums.min() < 0:
+                    raise ValueError(f'M = {(2 * half_M):g} too large for'
+                                     f' n_electrons = {self.n_electrons:g}')
+                if f_sums.max() > self.n_bands:
+                    raise ValueError(f'M = {(2 * half_M):g} too large for'
+                                     f' n_bands = {self.n_bands:g}')
+            # --- Initialize fillings based on sum in each channel:
+            for i_spin, f_sum in enumerate(f_sums):
+                n_full = int(np.floor(f_sum))  # number of fully filled bands
+                self.f[i_spin, :, :n_full] = 1.  # full fillings
+                if f_sum > n_full:
+                    self.f[i_spin, :, n_full] = (f_sum - n_full)  # left overs
 
     def update(self, energy: 'Energy') -> None:
         """Update fillings `f` and chemical potential `mu`, if needed.
         Set corresponding energy components in `energy`.
         """
+        if (self.sigma is None) or np.isnan(self.electrons.deig_max):
+            return  # Fixed fillings, or eigenvalues not yet available
+
+        assert self._smearing_func is not None
         el = self.electrons
+        w_sk = el.basis.w_sk
 
-        # Update fillings if necessary:
-        if (self.sigma is not None) and (not np.isnan(el.deig_max)):
-            assert self._smearing_func is not None
-            w_sk = el.basis.w_sk
+        # Guess chemical potential from eigenvalues if needed:
+        if np.isnan(self.mu):
+            n_full = int(np.floor(self.n_electrons /
+                                  (el.w_spin * el.n_spins)))
+            self.mu = self.rc.comm_kb.allreduce(
+                el.eig[:, :, n_full].min().item(), qp.MPI.MIN)
 
-            # Guess chemical potential from eigenvalues if needed:
-            if np.isnan(self.mu):
-                n_full = int(np.floor(self.n_electrons /
-                                      (el.w_spin * el.n_spins)))
-                self.mu = self.rc.comm_kb.allreduce(
-                    el.eig[:, :, n_full].min().item(), qp.MPI.MIN)
-
-            # Weights that generate number / magnetization and their targets:
-            if el.spin_polarized:
-                if el.spinorial:
-                    w_NM = torch.cat((
-                        torch.ones_like(el.eig)[None, ...],
-                        el.C.band_spin()), dim=0)
-                    M_len = 3
-                else:
-                    w_NM = torch.tensor([[1, 1], [1, -1]],
-                                        device=self.rc.device).view(2, 2, 1, 1)
-                    M_len = 1
-                NM_target = np.concatenate(([self.n_electrons],
-                                            self.M.to(self.rc.cpu)))
-                mu_B = np.concatenate(([self.mu], self.B.to(self.rc.cpu)))
-                i_free = np.where([not self.mu_constrain]
-                                  + [self.M_constrain] * M_len)[0]
+        # Weights that generate number / magnetization and their targets:
+        if el.spin_polarized:
+            if el.spinorial:
+                w_NM = torch.cat((
+                    torch.ones_like(el.eig)[None, ...],
+                    el.C.band_spin()), dim=0)
+                M_len = 3
             else:
-                w_NM = torch.ones((1, 1, 1, 1), device=self.rc.device)
-                NM_target = np.array([self.n_electrons])
-                mu_B = np.array([self.mu])
-                i_free = np.where([not self.mu_constrain])[0]
-            results = {}  # populated with NM, f and S by compute_NM
+                w_NM = torch.tensor([[1, 1], [1, -1]],
+                                    device=self.rc.device).view(2, 2, 1, 1)
+                M_len = 1
+            NM_target = np.concatenate(([self.n_electrons],
+                                        self.M.to(self.rc.cpu)))
+            mu_B = np.concatenate(([self.mu], self.B.to(self.rc.cpu)))
+            i_free = np.where([not self.mu_constrain]
+                              + [self.M_constrain] * M_len)[0]
+        else:
+            w_NM = torch.ones((1, 1, 1, 1), device=self.rc.device)
+            NM_target = np.array([self.n_electrons])
+            mu_B = np.array([self.mu])
+            i_free = np.where([not self.mu_constrain])[0]
+        results = {}  # populated with NM, f and S by compute_NM
 
-            def compute_NM(params, get_error=True):
-                """Compute electron number and magnetization from eigenvalues.
-                Here params are the entries in mu_B that are being optimized.
-                Return error in corresponding NM entries, and its gradient
-                with respect to the mu_B being optimized.
-                Also store NM, f and entropy in `results` of outer scope.
-                """
-                mu_B[i_free] = params
-                mu_B_t = torch.tensor(mu_B).to(self.rc.device)
-                mu_eff = (mu_B_t.view(-1, 1, 1, 1) * w_NM).sum(dim=0)
-                f, f_eig, S = self._smearing_func(el.eig, mu_eff,
-                                                  sigma_cur)
+        def compute_NM(params):
+            """Compute electron number and magnetization from eigenvalues.
+            Here params are the entries in mu_B that are being optimized.
+            Return error in corresponding NM entries, and its gradient
+            with respect to the mu_B being optimized.
+            Also store NM, f and entropy in `results` of outer scope.
+            """
+            mu_B[i_free] = params
+            mu_B_t = torch.tensor(mu_B).to(self.rc.device)
+            mu_eff = (mu_B_t.view(-1, 1, 1, 1) * w_NM).sum(dim=0)
+            f, f_eig, S = self._smearing_func(el.eig, mu_eff,
+                                              sigma_cur)
 
-                qp.log.debug(f'    sigma: {sigma_cur:f} mu,B: {mu_B}')
+            qp.log.debug(f'    sigma: {sigma_cur:f} mu,B: {mu_B}')
 
-                NM = (w_NM * (w_sk * f)).sum(dim=(1, 2, 3))
-                NM_mu_B = -((w_NM[None, ...] * w_NM[:, None, ...])
-                            * (w_sk * f_eig)).sum(dim=(2, 3, 4))
-                # Collect across MPI and make consistent to machine precision:
-                for tensor in (NM, NM_mu_B):
-                    self.rc.comm_k.Allreduce(qp.MPI.IN_PLACE,
-                                             qp.utils.BufferView(tensor),
-                                             qp.MPI.SUM)
-                    self.rc.comm_kb.Bcast(qp.utils.BufferView(tensor))
-                results['NM'] = NM
-                results['f'] = f
-                results['S'] = S
-                # Compute errors:
-                NM_err = NM.to(self.rc.cpu).numpy() - NM_target
-                NM_err_mu_B = NM_mu_B.to(self.rc.cpu).numpy()
-                return NM_err[i_free], NM_err_mu_B[i_free][:, i_free]
+            NM = (w_NM * (w_sk * f)).sum(dim=(1, 2, 3))
+            NM_mu_B = -((w_NM[None, ...] * w_NM[:, None, ...])
+                        * (w_sk * f_eig)).sum(dim=(2, 3, 4))
+            # Collect across MPI and make consistent to machine precision:
+            for tensor in (NM, NM_mu_B):
+                self.rc.comm_k.Allreduce(qp.MPI.IN_PLACE,
+                                         qp.utils.BufferView(tensor),
+                                         qp.MPI.SUM)
+                self.rc.comm_kb.Bcast(qp.utils.BufferView(tensor))
+            results['NM'] = NM
+            results['f'] = f
+            results['S'] = S
+            # Compute errors:
+            NM_err = NM.to(self.rc.cpu).numpy() - NM_target
+            NM_err_mu_B = NM_mu_B.to(self.rc.cpu).numpy()
+            return NM_err[i_free], NM_err_mu_B[i_free][:, i_free]
 
-            if len(i_free):
-                # Find mu and/or B to match N and/or M as appropriate:
-                # --- start with a larger sigma and reduce down for stability:
-                eig_diff_max = self.rc.comm_k.allreduce(
-                    el.eig.diff(dim=-1).max(), qp.MPI.MAX)
-                sigma_cur = max(self.sigma, min(0.1, eig_diff_max))
-                final_step = False
-                while not final_step:
-                    final_step = (sigma_cur == self.sigma)
-                    xtol = 1e-12 if final_step else (0.1 * sigma_cur)
-                    res = optimize.root(compute_NM, mu_B[i_free], args=(True,),
-                                        jac=True, method='lm',
-                                        options={'xtol': xtol, 'ftol': 1e-12})
-                    sigma_cur = max(self.sigma, 0.5 * sigma_cur)
-                if np.max(np.abs(res.fun)) > 1e-10 * self.n_electrons:
-                    raise ValueError('Density/magnetization constraint failed:'
-                                     ' check if n_bands is sufficient or if'
-                                     ' mu/B guesses are reasonable.')
-            else:
-                compute_NM(np.array([]))  # both mu and B are fixed
+        if len(i_free):
+            # Find mu and/or B to match N and/or M as appropriate:
+            # --- start with a larger sigma and reduce down for stability:
+            eig_diff_max = self.rc.comm_k.allreduce(
+                el.eig.diff(dim=-1).max(), qp.MPI.MAX)
+            sigma_cur = max(self.sigma, min(0.1, eig_diff_max))
+            final_step = False
+            while not final_step:
+                final_step = (sigma_cur == self.sigma)
+                xtol = 1e-12 if final_step else (0.1 * sigma_cur)
+                res = optimize.root(compute_NM, mu_B[i_free],
+                                    jac=True, method='lm',
+                                    options={'xtol': xtol, 'ftol': 1e-12})
+                sigma_cur = max(self.sigma, 0.5 * sigma_cur)
+            if np.max(np.abs(res.fun)) > 1e-10 * self.n_electrons:
+                raise ValueError('Density/magnetization constraint failed:'
+                                 ' check if n_bands is sufficient or if'
+                                 ' mu/B guesses are reasonable.')
+        else:
+            compute_NM(np.array([]))  # both mu and B are fixed
 
-            # Update fillings and entropy accordingly:
-            self.f = results['f']
-            energy['-TS'] = -self.sigma * self.rc.comm_k.allreduce(
-                (w_sk * results['S']).sum().item(), qp.MPI.SUM)
-            n_electrons = results['NM'][0].item()
-            if self.mu_constrain:
-                self.n_electrons = n_electrons
-            # --- compute magnetization
-            if el.spin_polarized:
-                M = results['NM'][1:]
-                if not self.M_constrain:
-                    self.M = M
-                M_str = '  M: ' \
-                        f'{self.rc.fmt(M, floatmode="fixed", precision=5)}'
-            else:
-                M_str = ''
-            qp.log.info(f'  FillingsUpdate:  mu: {self.mu:.9f}'
-                        f'  n_electrons: {n_electrons:.6f}{M_str}')
+        # Update fillings and entropy accordingly:
+        self.f = results['f']
+        energy['-TS'] = -self.sigma * self.rc.comm_k.allreduce(
+            (w_sk * results['S']).sum().item(), qp.MPI.SUM)
+        n_electrons = results['NM'][0].item()
+        if self.mu_constrain:
+            self.n_electrons = n_electrons
+        # --- compute magnetization
+        if el.spin_polarized:
+            M = results['NM'][1:]
+            if not self.M_constrain:
+                self.M = M
+            M_str = '  M: ' \
+                    f'{self.rc.fmt(M, floatmode="fixed", precision=5)}'
+        else:
+            M_str = ''
+        qp.log.info(f'  FillingsUpdate:  mu: {self.mu:.9f}'
+                    f'  n_electrons: {n_electrons:.6f}{M_str}')
 
-    def _save_checkpoint(self, checkpoint: 'Checkpoint',
-                         path: str) -> List[str]:
+    def _save_checkpoint(self, checkpoint: 'Checkpoint') -> List[str]:
         written: List[str] = []
         # Write fillings:
-        # dset_f = checkpoint.create_dataset(path + '/f')  # TODO
-
+        el = self.electrons
+        k_division = el.kpoints.division
+        shape_f = (el.n_spins, k_division.n_tot, self.n_bands)
+        offset_f = (0, k_division.i_start, 0)
+        dset_f = checkpoint.create_dataset(self.path + 'f', shape=shape_f)
+        if self.rc.i_proc_b == 0:
+            checkpoint.write_slice(dset_f, offset_f,
+                                   self.f[:, :, :self.n_bands])
+        written.append('f')
         return written
 
 
