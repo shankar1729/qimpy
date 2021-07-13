@@ -281,7 +281,11 @@ class Fillings(qp.Constructable):
 
     def _save_checkpoint(self, checkpoint: 'Checkpoint',
                          path: str) -> List[str]:
-        return ['f', 'mu', 'sigma']   # TODO: actually write these
+        written: List[str] = []
+        # Write fillings:
+        # dset_f = checkpoint.create_dataset(path + '/f')  # TODO
+
+        return written
 
 
 def _smearing_fermi(eig: torch.Tensor, mu: float,
