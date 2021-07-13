@@ -1,0 +1,14 @@
+# Required
+version: 2
+
+build:
+  image: latest
+
+# Python version and build requirements
+python:
+  version: 3.8
+  system_packages: true
+  install:
+    - method: setup.py
+      requirements: docs/requirements.txt
+      path: .
