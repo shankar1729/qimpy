@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 class Electrons(qp.Constructable):
     """Electronic subsystem"""
     __slots__ = ('kpoints', 'spin_polarized', 'spinorial', 'n_spins',
-                 'n_spinor', 'w_spin', 'fillings', 'n_bands', 'n_bands_extra',
+                 'n_spinor', 'w_spin', 'fillings',
                  'basis', 'xc', 'diagonalize', 'scf', 'C',
                  'eig', 'deig_max', 'n', 'tau', 'V_ks', 'V_tau')
     kpoints: 'Kpoints'  #: Set of kpoints (mesh or path)
@@ -223,4 +223,8 @@ class Electrons(qp.Constructable):
                               'bandstruct.pdf')
 
     def _save_checkpoint(self, checkpoint: 'Checkpoint') -> List[str]:
-        return ['n', 'C']   # TODO: actually write these
+        written: List[str] = []
+        # Write wavefunctions:
+        self.C[:, :, :self.fillings.n_bands].write(checkpoint, self.path + 'C')
+        written.append('C')
+        return written

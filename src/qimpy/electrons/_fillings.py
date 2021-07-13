@@ -367,7 +367,8 @@ class Fillings(qp.Constructable):
         k_division = el.kpoints.division
         shape_f = (el.n_spins, k_division.n_tot, self.n_bands)
         offset_f = (0, k_division.i_start, 0)
-        dset_f = checkpoint.create_dataset(self.path + 'f', shape=shape_f)
+        dset_f = checkpoint.create_dataset(self.path + 'f', shape=shape_f,
+                                           dtype=self.rc.np_type[self.f.dtype])
         if self.rc.i_proc_b == 0:
             checkpoint.write_slice(dset_f, offset_f,
                                    self.f[:, :, :self.n_bands])

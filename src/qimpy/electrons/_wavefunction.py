@@ -9,7 +9,7 @@ from ._wavefunction_ops import _norm, _band_norm, _band_ke, _band_spin, \
     _mul, _imul, _add, _iadd, _sub, _isub, _getitem, _cat
 from typing import Callable, Optional, Union, TYPE_CHECKING
 if TYPE_CHECKING:
-    from ..utils import TaskDivision
+    from ..utils import TaskDivision, Checkpoint
     from ._basis import Basis
 
 
@@ -102,7 +102,45 @@ class Wavefunction:
 
     def n_bands(self) -> int:
         """Get number of bands in wavefunction"""
-        return 0 if (self.coeff is None) else self.coeff.shape[2]
+        return self.coeff.shape[2]
+
+    def read(self, checkpoint: 'Checkpoint', path: str) -> int:
+        """Read wavefunctions from `path` in `checkpoint`.
+        Return number of bands read."""
+        dset = checkpoint[path]
+        n_bands_in = min(dset.shape[2], self.n_bands())
+        basis = self.basis
+        # Slice to be read on this process:
+        if basis.n_max <= basis.division.i_start:
+            return n_bands_in  # Only padded elements here; nothing to read
+        basis_n_mine = (min(basis.n_max, basis.division.i_stop)
+                        - basis.division.i_start)  # size without padding
+        # Read:
+        k_division = basis.kpoints.division
+        n_spins, nk_mine, _, n_spinor, _ = self.coeff.shape
+        offset = (0, k_division.i_start, 0, 0, basis.division.i_start)
+        size = (n_spins, nk_mine, n_bands_in, n_spinor, basis_n_mine)
+        self.coeff[:, :, :n_bands_in] = \
+            checkpoint.read_slice_complex(dset, offset, size)
+        return n_bands_in
+
+    def write(self, checkpoint: 'Checkpoint', path: str) -> None:
+        """Write wavefunctions to `path` in `checkpoint`."""
+        basis = self.basis
+        k_division = basis.kpoints.division
+        # Create datashep with overall shape:
+        n_spins, _, n_bands, n_spinor, _ = self.coeff.shape
+        shape = (n_spins, k_division.n_tot, n_bands, n_spinor, basis.n_max)
+        dset = checkpoint.create_dataset_complex(path, shape=shape,
+                                                 dtype=self.coeff.dtype)
+        # Slice to be written from this process:
+        if basis.n_max <= basis.division.i_start:
+            return  # Only padded elements on this process (not written)
+        basis_n_mine = (min(basis.n_max, basis.division.i_stop)
+                        - basis.division.i_start)  # size without padding
+        offset = (0, k_division.i_start, 0, 0, basis.division.i_start)
+        checkpoint.write_slice_complex(dset, offset,
+                                       self.coeff[..., :basis_n_mine])
 
     def randomize(self: 'Wavefunction', seed: int = 0, b_start: int = 0,
                   b_stop: Optional[int] = None) -> None:

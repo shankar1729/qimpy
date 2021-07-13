@@ -86,6 +86,19 @@ class RunConfig:
             torch.complex64: qp.MPI.COMPLEX,
             torch.complex128: qp.MPI.DOUBLE_COMPLEX
         }  #: Mapping from torch dtypes to MPI datatypes
+        self.np_type: dict = {
+            torch.bool: np.bool,
+            torch.uint8: np.uint8,
+            torch.int8: np.int8,
+            torch.int16: np.int16,
+            torch.int32: np.int32,
+            torch.int64: np.int64,
+            torch.float16: np.float16,
+            torch.float32: np.float32,
+            torch.float64: np.float64,
+            torch.complex64: np.complex64,
+            torch.complex128: np.complex128
+        }  #: Mapping from torch dtypes to numpy datatypes
 
         # Select GPU before initializing torch:
         self.comm_node: qp.MPI.Comm = self.comm.Split_type(
