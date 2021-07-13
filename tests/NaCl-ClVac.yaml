@@ -27,7 +27,8 @@ ions:
     - [Cl, 0.50, 0.50, 0.50]
 
 electrons:
-  n-bands-extra: 20
+  fillings:
+    n-bands-extra: 20
   basis:
     real-wavefunctions: yes
 #  chefsi: {filter-order: 10}

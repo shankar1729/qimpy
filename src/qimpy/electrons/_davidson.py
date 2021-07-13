@@ -104,15 +104,16 @@ class Davidson(qp.Constructable):
     def _get_Eband(self) -> float:
         """Compute the sum over band eigenvalues, averaged over k"""
         electrons = self.electrons
-        return self.rc.comm_k.allreduce((
-            electrons.basis.w_sk
-            * electrons.eig[..., :electrons.n_bands]).sum().item(), qp.MPI.SUM)
+        n_bands = electrons.fillings.n_bands
+        return self.rc.comm_k.allreduce((electrons.basis.w_sk
+                                         * electrons.eig[..., :n_bands]
+                                         ).sum().item(), qp.MPI.SUM)
 
     def _check_deig(self, deig: torch.Tensor,
                     eig_threshold: float) -> Tuple[float, int]:
         """Return maximum change in eigenvalues and how many
         eigenvalues are converged at all spin and k"""
-        n_bands = self.electrons.n_bands
+        n_bands = self.electrons.fillings.n_bands
         deig_max = self.rc.comm_kb.allreduce(deig[..., :n_bands].max().item(),
                                              qp.MPI.MAX)
         pending = torch.where((deig[..., :n_bands]
@@ -129,8 +130,8 @@ class Davidson(qp.Constructable):
         el = self.electrons
         n_spins = el.n_spins
         nk_mine = el.kpoints.division.n_mine
-        n_bands = el.n_bands
-        n_bands_max = el.n_bands + el.n_bands_extra
+        n_bands = el.fillings.n_bands
+        n_bands_max = n_bands + el.fillings.n_bands_extra
         helper = (type(self) != Davidson)
         inner_loop = not (helper or ((n_iterations is None)
                                      and (eig_threshold is None)))

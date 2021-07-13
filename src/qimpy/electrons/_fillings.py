@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from ..ions import Ions
     from ._electrons import Electrons
     from .._system import System
+    from .. import Energy
 
 
 SmearingResults = collections.namedtuple('SmearingResults',
@@ -19,11 +20,15 @@ SmearingFunc = Callable[[torch.Tensor, float, float], SmearingResults]
 
 class Fillings(qp.Constructable):
     """Electron occupation factors (smearing)"""
-    __slots__ = ('n_electrons', 'n_bands_min', 'smearing',
-                 'sigma', 'mu_constrain', 'M_constrain', '_smearing_func',
-                 'mu', 'B', 'M', 'f')
+    __slots__ = ('electrons', 'n_electrons',
+                 'n_bands_min', 'n_bands', 'n_bands_extra',
+                 'smearing', 'sigma', 'mu_constrain', 'M_constrain',
+                 'mu', 'B', 'M', 'f', '_smearing_func')
+    electrons: 'Electrons'
     n_electrons: float  #: Number of electrons
     n_bands_min: int  #: Minimum number of bands to accomodate `n_electrons`
+    n_bands: int  #: Number of bands to calculate
+    n_bands_extra: int  #: Number of extra bands during diagonalization
     smearing: Optional[str]  #: Smearing method name
     sigma: Optional[float]  #: Gaussian width (:math:`2k_BT` for Fermi)
     mu: float  #: Electron chemical potential
@@ -43,7 +48,9 @@ class Fillings(qp.Constructable):
                  mu_constrain: bool = False,
                  B: Union[float, Sequence[float]] = 0.,
                  M: Union[float, Sequence[float]] = 0.,
-                 M_constrain: bool = False) -> None:
+                 M_constrain: bool = False,
+                 n_bands: Optional[Union[int, str]] = None,
+                 n_bands_extra: Optional[Union[int, str]] = None) -> None:
         r"""Initialize occupation factor (smearing) scheme.
 
         Parameters
@@ -85,8 +92,20 @@ class Fillings(qp.Constructable):
         M_constrain
             Whether to hold magnetization fixed to `M` in occupation updates:
             this only matters when `smearing` is not None.
+        n_bands : {'x<scale>', 'atomic', int}, default: 'x1.'
+            Number of bands, specified as a scale relative to the minimum
+            number of bands to accommodate electrons i.e. 'x1.5' implies
+            use 1.5 times the minimum number. Alternately, 'atomic' sets
+            the number of bands to the number of atomic orbitals. Finally,
+            an integer explicitly sets the number of bands.
+        n_bands_extra : {'x<scale>', int}, default: 'x0.1'
+            Number of extra bands retained by diagonalizers, necessary to
+            converge any degenerate subspaces straddling n_bands. This could
+            be specified as a multiple of n_bands e.g. 'x0.1' = 0.1 x n_bands,
+            or could be specified as an explicit number of extra bands
         """
         super().__init__(co=co)
+        self.electrons = electrons
 
         # Number of electrons and bands:
         self.n_electrons = ions.Z_tot - charge
@@ -142,54 +161,94 @@ class Fillings(qp.Constructable):
                         f'  constrained: {self.M_constrain}'
                         f'  B: {self.rc.fmt(self.B)}')
 
-    def update(self, system: 'System') -> None:
-        """Update fillings and chemical potential, if needed.
-        Set updated fillings in `system.electrons` and corresponding
-        energy comonents in `system.energy`, initializing fillings
-        if not already done so.
+        # Determine number of bands:
+        if n_bands is None:
+            n_bands = 'x1'
+        if isinstance(n_bands, int):
+            self.n_bands = n_bands
+            assert(self.n_bands >= 1)
+            n_bands_method = 'explicit'
+        else:
+            assert isinstance(n_bands, str)
+            if n_bands == 'atomic':
+                n_bands_method = 'atomic'
+                raise NotImplementedError('n_bands from atomic orbitals')
+            else:
+                assert n_bands.startswith('x')
+                n_bands_scale = float(n_bands[1:])
+                if n_bands_scale < 1.:
+                    raise ValueError('<scale> must be >=1 in n_bands')
+                self.n_bands = max(1, int(np.ceil(self.n_bands_min
+                                                  * n_bands_scale)))
+                n_bands_method = n_bands[1:] + '*n_bands_min'
+        # --- similarly for extra bands:
+        if n_bands_extra is None:
+            n_bands_extra = 'x0.1'
+        if isinstance(n_bands_extra, int):
+            self.n_bands_extra = n_bands_extra
+            assert(self.n_bands_extra >= 1)
+            n_bands_extra_method = 'explicit'
+        else:
+            assert(isinstance(n_bands_extra, str)
+                   and n_bands_extra.startswith('x'))
+            n_bands_extra_scale = float(n_bands_extra[1:])
+            if n_bands_extra_scale <= 0.:
+                raise ValueError('<scale> must be >0 in n_bands_extra')
+            self.n_bands_extra = max(1, int(np.ceil(self.n_bands
+                                                    * n_bands_extra_scale)))
+            n_bands_extra_method = n_bands_extra[1:] + '*n_bands'
+        qp.log.info(
+            f'n_bands: {self.n_bands} ({n_bands_method})'
+            f'  n_bands_extra: {self.n_bands_extra} ({n_bands_extra_method})')
+
+        # Initialize fillings:
+        # --- Fillings sum for each spin channel:
+        f_sums = (np.ones(electrons.n_spins) * self.n_electrons
+                  / (electrons.w_spin * electrons.n_spins))
+        if electrons.spin_polarized and (not electrons.spinorial):
+            half_M = 0.5 * self.M.item()
+            f_sums[0] += half_M
+            f_sums[1] -= half_M
+            if f_sums.min() < 0:
+                raise ValueError(f'M = {(2 * half_M):g} too large for'
+                                 f' n_electrons = {self.n_electrons:g}')
+            if f_sums.max() > self.n_bands:
+                raise ValueError(f'M = {(2 * half_M):g} too large for'
+                                 f' n_bands = {self.n_bands:g}')
+        # --- Initialize fillings based on sum in each channel:
+        nk_mine = electrons.kpoints.division.n_mine
+        self.f = torch.zeros((electrons.n_spins, nk_mine, self.n_bands),
+                             device=self.rc.device)
+        for i_spin, f_sum in enumerate(f_sums):
+            n_full = int(np.floor(f_sum))  # number of fully filled bands
+            self.f[i_spin, :, :n_full] = 1.  # full fillings
+            if f_sum > n_full:
+                self.f[i_spin, :, n_full] = (f_sum - n_full)  # left overs
+
+    def update(self, energy: 'Energy') -> None:
+        """Update fillings `f` and chemical potential `mu`, if needed.
+        Set corresponding energy components in `energy`.
         """
-        # Initialize fillings if necessary:
-        electrons = system.electrons
-        if not hasattr(electrons, "f"):
-            # Filings sum for each spin channel:
-            f_sums = (np.ones(electrons.n_spins) * self.n_electrons
-                      / (electrons.w_spin * electrons.n_spins))
-            if electrons.spin_polarized and (not electrons.spinorial):
-                half_M = 0.5 * self.M.item()
-                f_sums[0] += half_M
-                f_sums[1] -= half_M
-                if f_sums.min() < 0:
-                    raise ValueError(f'M = {(2*half_M):g} too large for'
-                                     f' n_electrons = {self.n_electrons:g}')
-                if f_sums.max() > electrons.n_bands:
-                    raise ValueError(f'M = {(2*half_M):g} too large for'
-                                     f' n_bands = {electrons.n_bands:g}')
-            # Initialize fillings based on sum in each channel:
-            self.f = torch.zeros_like(electrons.eig)
-            for i_spin, f_sum in enumerate(f_sums):
-                n_full = int(np.floor(f_sum))  # number of fully filled bands
-                self.f[i_spin, :, :n_full] = 1.  # full fillings
-                if f_sum > n_full:
-                    self.f[i_spin, :, n_full] = (f_sum - n_full)  # left overs
+        el = self.electrons
 
         # Update fillings if necessary:
-        if (self.sigma is not None) and (not np.isnan(electrons.deig_max)):
+        if (self.sigma is not None) and (not np.isnan(el.deig_max)):
             assert self._smearing_func is not None
-            w_sk = electrons.basis.w_sk
+            w_sk = el.basis.w_sk
 
             # Guess chemical potential from eigenvalues if needed:
             if np.isnan(self.mu):
                 n_full = int(np.floor(self.n_electrons /
-                                      (electrons.w_spin * electrons.n_spins)))
+                                      (el.w_spin * el.n_spins)))
                 self.mu = self.rc.comm_kb.allreduce(
-                    electrons.eig[:, :, n_full].min().item(), qp.MPI.MIN)
+                    el.eig[:, :, n_full].min().item(), qp.MPI.MIN)
 
             # Weights that generate number / magnetization and their targets:
-            if electrons.spin_polarized:
-                if electrons.spinorial:
+            if el.spin_polarized:
+                if el.spinorial:
                     w_NM = torch.cat((
-                        torch.ones_like(electrons.eig)[None, ...],
-                        electrons.C.band_spin()), dim=0)
+                        torch.ones_like(el.eig)[None, ...],
+                        el.C.band_spin()), dim=0)
                     M_len = 3
                 else:
                     w_NM = torch.tensor([[1, 1], [1, -1]],
@@ -217,7 +276,7 @@ class Fillings(qp.Constructable):
                 mu_B[i_free] = params
                 mu_B_t = torch.tensor(mu_B).to(self.rc.device)
                 mu_eff = (mu_B_t.view(-1, 1, 1, 1) * w_NM).sum(dim=0)
-                f, f_eig, S = self._smearing_func(electrons.eig, mu_eff,
+                f, f_eig, S = self._smearing_func(el.eig, mu_eff,
                                                   sigma_cur)
 
                 qp.log.debug(f'    sigma: {sigma_cur:f} mu,B: {mu_B}')
@@ -243,7 +302,7 @@ class Fillings(qp.Constructable):
                 # Find mu and/or B to match N and/or M as appropriate:
                 # --- start with a larger sigma and reduce down for stability:
                 eig_diff_max = self.rc.comm_k.allreduce(
-                    electrons.eig.diff(dim=-1).max(), qp.MPI.MAX)
+                    el.eig.diff(dim=-1).max(), qp.MPI.MAX)
                 sigma_cur = max(self.sigma, min(0.1, eig_diff_max))
                 final_step = False
                 while not final_step:
@@ -262,13 +321,13 @@ class Fillings(qp.Constructable):
 
             # Update fillings and entropy accordingly:
             self.f = results['f']
-            system.energy['-TS'] = -self.sigma * self.rc.comm_k.allreduce(
+            energy['-TS'] = -self.sigma * self.rc.comm_k.allreduce(
                 (w_sk * results['S']).sum().item(), qp.MPI.SUM)
             n_electrons = results['NM'][0].item()
             if self.mu_constrain:
                 self.n_electrons = n_electrons
             # --- compute magnetization
-            if electrons.spin_polarized:
+            if el.spin_polarized:
                 M = results['NM'][1:]
                 if not self.M_constrain:
                     self.M = M

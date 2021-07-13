@@ -68,13 +68,14 @@ class SCF(qp.utils.Pulay['FieldH']):
 
     def cycle(self, dEprev: float) -> Sequence[float]:
         electrons = self.system.electrons
-        eig_prev = electrons.eig[..., :electrons.n_bands]
+        eig_prev = electrons.eig[..., :electrons.fillings.n_bands]
         eig_threshold_inner = min(1e-6, 0.1*abs(dEprev))
         electrons.diagonalize(n_iterations=self.n_eig_steps,
                               eig_threshold=eig_threshold_inner)
         electrons.update(self.system)  # update total energy
         # Compute eigenvalue difference for extra convergence threshold:
-        deig = (electrons.eig[..., :electrons.n_bands] - eig_prev).abs()
+        eig_cur = electrons.eig[..., :electrons.fillings.n_bands]
+        deig = (eig_cur - eig_prev).abs()
         deig_max = self.rc.comm_kb.allreduce(deig.max().item(), qp.MPI.MAX)
         return [deig_max]
 

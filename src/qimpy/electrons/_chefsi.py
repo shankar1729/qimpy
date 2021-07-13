@@ -51,7 +51,7 @@ class CheFSI(Davidson):
         Also available as :meth:`__call__` to make `CheFSI` callable.
         """
         el = self.electrons
-        n_bands = el.n_bands
+        n_bands = el.fillings.n_bands
         helper = (type(self) != CheFSI)
         inner_loop = not (helper or ((n_iterations is None)
                                      and (eig_threshold is None)))

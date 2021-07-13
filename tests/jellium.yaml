@@ -6,8 +6,9 @@ lattice:
   c: 7  # bohrs
 
 electrons:
-  n-bands: 10
-  n-bands-extra: 'x0.5'
+  fillings:
+    n-bands: 10
+    n-bands-extra: 'x0.5'
   k-path:
     dk: 0.01
     points:

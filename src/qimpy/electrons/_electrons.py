@@ -33,8 +33,6 @@ class Electrons(qp.Constructable):
     n_spinor: int  #: Number of spinor components
     w_spin: float  #: Spin weight (degeneracy factor)
     fillings: 'Fillings'  #: Occupation factor / smearing scheme
-    n_bands: int  #: Number of bands to calculate
-    n_bands_extra: int  #: Number of extra bands during diagonalization
     basis: 'Basis'  #: Plane-wave basis for wavefunctions
     xc: 'XC'  #: Exchange-correlation functional
     diagonalize: 'Davidson'  #: Hamiltonian diagonalization method
@@ -57,8 +55,6 @@ class Electrons(qp.Constructable):
                  fillings: Optional[Union[dict, 'Fillings']] = None,
                  basis: Optional[Union[dict, 'Basis']] = None,
                  xc: Optional[Union[dict, 'XC']] = None,
-                 n_bands: Optional[Union[int, str]] = None,
-                 n_bands_extra: Optional[Union[int, str]] = None,
                  davidson: Optional[Union[dict, 'Davidson']] = None,
                  chefsi:  Optional[Union[dict, 'CheFSI']] = None,
                  scf:  Optional[Union[dict, 'SCF']] = None) -> None:
@@ -100,17 +96,6 @@ class Electrons(qp.Constructable):
         xc : qimpy.electrons.XC or None, optional
             Exchange-correlation functional.
             Default: use LDA. TODO: update when more options added.
-        n_bands : {'x<scale>', 'atomic', int}, default: 'x1.'
-            Number of bands, specified as a scale relative to the minimum
-            number of bands to accommodate electrons i.e. 'x1.5' implies
-            use 1.5 times the minimum number. Alternately, 'atomic' sets
-            the number of bands to the number of atomic orbitals. Finally,
-            an integer explicitly sets the number of bands.
-        n_bands_extra : {'x<scale>', int}, default: 'x0.1'
-            Number of extra bands retained by diagonalizers, necessary to
-            converge any degenerate subspaces straddling n_bands. This could
-            be specified as a multiple of n_bands e.g. 'x0.1' = 0.1 x n_bands,
-            or could be specified as an explicit number of extra bands
         davidson : qimpy.electrons.Davidson or dict, optional
             Diagonalize Kohm-Sham Hamiltonian using the Davidson method.
             Specify only one of davidson or chefsi.
@@ -154,46 +139,6 @@ class Electrons(qp.Constructable):
         self.construct('fillings', qp.electrons.Fillings, fillings,
                        ions=ions, electrons=self)
 
-        # Determine number of bands:
-        if n_bands is None:
-            n_bands = 'x1'
-        if isinstance(n_bands, int):
-            self.n_bands = n_bands
-            assert(self.n_bands >= 1)
-            n_bands_method = 'explicit'
-        else:
-            assert isinstance(n_bands, str)
-            if n_bands == 'atomic':
-                raise NotImplementedError('n_bands from atomic orbitals')
-                n_bands_method = 'atomic'
-            else:
-                assert n_bands.startswith('x')
-                n_bands_scale = float(n_bands[1:])
-                if n_bands_scale < 1.:
-                    raise ValueError('<scale> must be >=1 in n_bands')
-                self.n_bands = max(1, int(np.ceil(self.fillings.n_bands_min
-                                                  * n_bands_scale)))
-                n_bands_method = n_bands[1:] + '*n_bands_min'
-        # --- similarly for extra bands:
-        if n_bands_extra is None:
-            n_bands_extra = 'x0.1'
-        if isinstance(n_bands_extra, int):
-            self.n_bands_extra = n_bands_extra
-            assert(self.n_bands_extra >= 1)
-            n_bands_extra_method = 'explicit'
-        else:
-            assert(isinstance(n_bands_extra, str)
-                   and n_bands_extra.startswith('x'))
-            n_bands_extra_scale = float(n_bands_extra[1:])
-            if n_bands_extra_scale <= 0.:
-                raise ValueError('<scale> must be >0 in n_bands_extra')
-            self.n_bands_extra = max(1, int(np.ceil(self.n_bands
-                                                    * n_bands_extra_scale)))
-            n_bands_extra_method = n_bands_extra[1:] + '*n_bands'
-        qp.log.info(
-            f'n_bands: {self.n_bands} ({n_bands_method})'
-            f'  n_bands_extra: {self.n_bands_extra} ({n_bands_extra_method})')
-
         # Initialize wave-function basis:
         self.construct('basis', qp.electrons.Basis, basis, lattice=lattice,
                        ions=ions, symmetries=symmetries, kpoints=self.kpoints,
@@ -202,7 +147,8 @@ class Electrons(qp.Constructable):
         # Initial wavefunctions:
         qp.log.info('Initializing wavefunctions:'
                     ' bandwidth-limited random numbers')
-        self.C = qp.electrons.Wavefunction(self.basis, n_bands=self.n_bands)
+        self.C = qp.electrons.Wavefunction(self.basis,
+                                           n_bands=self.fillings.n_bands)
         self.C.randomize()
         self.C = self.C.orthonormalize()
         self.eig = torch.zeros(self.C.coeff.shape[:3], dtype=torch.double,
@@ -262,7 +208,7 @@ class Electrons(qp.Constructable):
     def update(self, system: 'System') -> None:
         """Update electronic system to current wavefunctions and eigenvalues.
         This updates occupations, density, potential and electronic energy."""
-        self.fillings.update(system)
+        self.fillings.update(system.energy)
         self.update_density(system)
         self.update_potential(system)
         f = self.fillings.f
@@ -273,7 +219,8 @@ class Electrons(qp.Constructable):
     def output(self) -> None:
         """Save any configured outputs (TODO: systematize this)"""
         if isinstance(self.kpoints, qp.electrons.Kpath):
-            self.kpoints.plot(self.eig[..., :self.n_bands], 'bandstruct.pdf')
+            self.kpoints.plot(self.eig[..., :self.fillings.n_bands],
+                              'bandstruct.pdf')
 
     def _save_checkpoint(self, checkpoint: 'Checkpoint',
                          path: str) -> List[str]:

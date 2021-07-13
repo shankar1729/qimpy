@@ -10,12 +10,12 @@ ions:
     - [H, 0., 0., 0.]
 
 electrons:
-  n-bands-extra: 3
   xc: 
     functional: gga-xc-pbe
   spin-polarized: yes
   #spinorial: yes
   fillings:
+    n-bands-extra: 3
     #M: [-1, 0, 0]
     #M-constrain: no
   scf:
