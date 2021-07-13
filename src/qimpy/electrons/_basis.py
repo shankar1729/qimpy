@@ -4,7 +4,7 @@ import torch
 from ._basis_ops import _apply_ke, _apply_potential, _collect_density
 from typing import Optional, Tuple, Union, TYPE_CHECKING
 if TYPE_CHECKING:
-    from ..utils import RunConfig
+    from ..utils import RunConfig, TaskDivision
     from ..lattice import Lattice
     from ..ions import Ions
     from ..symmetries import Symmetries
@@ -12,14 +12,15 @@ if TYPE_CHECKING:
     from ._kpoints import Kpoints
 
 
-class Basis(qp.utils.TaskDivision):
+class Basis(qp.Constructable):
     """Plane-wave basis for electronic wavefunctions. The underlying
      :class:`qimpy.utils.TaskDivision` splits plane waves over `rc.comm_b`"""
     __slots__ = ('lattice', 'ions', 'kpoints', 'n_spins', 'n_spinor',
                  'k', 'wk', 'w_sk', 'real_wavefunctions', 'ke_cutoff', 'grid',
-                 'iG', 'n', 'n_min', 'n_max', 'n_avg', 'n_ideal', 'mine',
-                 'fft_index', 'pad_index', 'pad_index_mine', 'fft_block_size',
-                 'index_z0', 'index_z0_conj', 'Gweight_mine')
+                 'iG', 'n', 'n_min', 'n_max', 'n_avg', 'n_tot', 'n_ideal',
+                 'fft_index', 'fft_block_size', 'pad_index', 'pad_index_mine',
+                 'division', 'mine', 'index_z0', 'index_z0_conj',
+                 'Gweight_mine')
     lattice: 'Lattice'  #: Lattice vectors of unit cell
     ions: 'Ions'  #: Ionic system: implicit part of basis for ultrasoft / PAW
     kpoints: 'Kpoints'  #: k-point set for which basis is initialized
@@ -36,14 +37,16 @@ class Basis(qp.utils.TaskDivision):
     n_min: int  #: Minimum of `n` across all `k` (including on other processes)
     n_max: int  #: Maximum of `n` across all `k` (including on other processes)
     n_avg: float  #: Average `n` across all `k` (weighted by `wk`)
+    n_tot: int  #: Actual common `n` stored for each `k` including padding
     n_ideal: float  #: Ideal `n_avg` based on `ke_cutoff` G-sphere volume
     fft_index: torch.Tensor  #: Index of each plane wave in reciprocal grid
     fft_block_size: int  #: Number of bands to FFT together
-    mine: slice  #: Slice of basis entries local to this process
     PadIndex = Tuple[slice, torch.Tensor, slice, slice, torch.Tensor] \
         #: Indexing datatype for `pad_index` and `pad_index_mine`
     pad_index: PadIndex  #: Which basis entries are padding (beyond `n`)
     pad_index_mine: PadIndex  #: Subset of `pad_index` on this process
+    division: 'TaskDivision'  #: Division of basis across `rc.comm_b`
+    mine: slice  #: Slice of basis entries local to this process
     index_z0: torch.Tensor  #: Index of Gz = 0 points (only for real case)
     index_z0_conj: torch.Tensor  #: Hermitian conjugate points of `index_z0`
     Gweight_mine: torch.Tensor  #: Weight of local plane waves (real case only)
@@ -102,7 +105,7 @@ class Basis(qp.utils.TaskDivision):
         self.fft_block_size = int(fft_block_size)
 
         # Select subset of k-points relevant on this process:
-        k_mine = slice(kpoints.i_start, kpoints.i_stop)
+        k_mine = slice(kpoints.division.i_start, kpoints.division.i_stop)
         self.k = kpoints.k[k_mine]
         self.wk = kpoints.wk[k_mine]
         w_spin = 2 // (self.n_spins * self.n_spinor)  # spin weight
@@ -153,17 +156,18 @@ class Basis(qp.utils.TaskDivision):
                           pad_index[1])  # add spin, band and spinor dims
 
         # Divide basis on comm_b:
-        self.update_division(self.n_tot, rc.n_procs_b, rc.i_proc_b,
-                             'padded basis')
-        self.mine = slice(self.i_start, self.i_stop)
+        div = qp.utils.TaskDivision(n_tot=self.n_tot, n_procs=rc.n_procs_b,
+                                    i_proc=rc.i_proc_b, name='padded basis')
+        self.division = div
+        self.mine = slice(div.i_start, div.i_stop)
         # --- initialize local pad index separately (not trivially sliceable):
-        pad_index = torch.where(fft_range[None, self.i_start:self.i_stop]
+        pad_index = torch.where(fft_range[None, div.i_start:div.i_stop]
                                 >= self.n[:, None])  # local padded entries
         self.pad_index_mine = (slice(None), pad_index[0], slice(None),
                                slice(None), pad_index[1])  # add other dims
 
         # Extra book-keeping for real-wavefunction basis:
-        if self.real_wavefunctions and kpoints.n_mine:
+        if self.real_wavefunctions and kpoints.division.n_mine:
             # Find conjugate pairs with iG_z = 0:
             self.index_z0 = torch.where(self.iG[0, :, 2] == 0)[0]
             # --- compute index of each point and conjugate in iG_z = 0 plane:
@@ -179,9 +183,9 @@ class Basis(qp.utils.TaskDivision):
             plane[plane_index] = self.index_z0
             self.index_z0_conj = plane[plane_index_conj].clone().detach()
             # Weight by element for overlaps (only for this process portion):
-            self.Gweight_mine = torch.zeros(self.n_each, device=self.rc.device)
-            self.Gweight_mine[:self.n_mine] = torch.where(
-                self.iG[0, self.i_start:self.i_stop, 2] == 0, 1., 2.)
+            self.Gweight_mine = torch.zeros(div.n_each, device=self.rc.device)
+            self.Gweight_mine[:div.n_mine] = torch.where(
+                self.iG[0, div.i_start:div.i_stop, 2] == 0, 1., 2.)
             Gweight_sum = rc.comm_b.allreduce(self.Gweight_mine.sum().item(),
                                               qp.MPI.SUM)
             qp.log.info(f'basis weight sum: {Gweight_sum:g}')

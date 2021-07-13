@@ -3,7 +3,7 @@ import qimpy as qp
 from typing import Optional
 
 
-class TaskDivision(qp.Constructable):
+class TaskDivision:
     """Division of a number of tasks over MPI."""
     __slots__ = ('n_tot', 'n_procs', 'i_proc', 'n_each', 'n_prev',
                  'i_start', 'i_stop', 'n_mine')
@@ -17,19 +17,9 @@ class TaskDivision(qp.Constructable):
     i_stop: int  #: Task stop index on current process
     n_mine: int  #: Number of tasks on current process
 
-    def __init__(self, *, n_tot: int = 0, n_procs: int = 1, i_proc: int = 0,
-                 name: Optional[str] = None,
-                 co: qp.ConstructOptions = qp.ConstructOptions()) -> None:
+    def __init__(self, *, n_tot: int, n_procs: int, i_proc: int,
+                 name: Optional[str] = None) -> None:
         """Divide `n_tot` tasks among `n_procs` processes.
-        Default corresponds to no tasks, divided on a single process.
-        Use :meth:`update_division` to change this later if `n_tot`
-        not known initially. """
-        super().__init__(co=co)
-        self.update_division(n_tot, n_procs, i_proc, name)
-
-    def update_division(self, n_tot: int, n_procs: int, i_proc: int,
-                        name: Optional[str] = None) -> None:
-        """Update division to `n_tot` tasks among `n_procs` processes.
         Report division and load balance if `name` is not None."""
         # Store inputs:
         self.n_tot = n_tot
@@ -61,21 +51,19 @@ class TaskDivisionCustom(TaskDivision):
     __slots__ = ('n_each_custom',)
     n_each_custom: np.ndarray  #: Custom number of tasks on each process
 
-    def __init__(self, *, n_mine: int, comm: Optional[qp.MPI.Comm],
-                 co: qp.ConstructOptions = qp.ConstructOptions()) -> None:
+    def __init__(self, *, n_mine: int, comm: Optional[qp.MPI.Comm]) -> None:
         """Initialize given local number of tasks on each processes."""
-        super().__init__(co=co)
-        # Collect n_mine on each process and store inputs:
+        # Collect n_mine on each process and initialize process parameters:
         if comm is None:
             self.n_each_custom = np.full(1, n_mine)
-            self.n_procs = 1
-            self.i_proc = 0
+            super().__init__(n_tot=0, n_procs=1, i_proc=0)
         else:
             self.n_each_custom = np.array(comm.allgather(n_mine))
-            self.n_procs = comm.Get_size()
-            self.i_proc = comm.Get_rank()
+            super().__init__(n_tot=0, n_procs=comm.Get_size(),
+                             i_proc=comm.Get_rank())
+        # Override base-class settings:
         self.n_mine = n_mine
-        self.n_each = 0
+        self.n_each = 0  # not applicable for custom division
         # Compute remaining attributes:
         self.n_prev = np.concatenate(([0], self.n_each_custom.cumsum()))
         self.n_tot = self.n_prev[-1]

@@ -128,7 +128,7 @@ class Davidson(qp.Constructable):
         """
         el = self.electrons
         n_spins = el.n_spins
-        nk_mine = el.kpoints.n_mine
+        nk_mine = el.kpoints.division.n_mine
         n_bands = el.n_bands
         n_bands_max = el.n_bands + el.n_bands_extra
         helper = (type(self) != Davidson)

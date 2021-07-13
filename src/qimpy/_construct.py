@@ -12,9 +12,9 @@ ConstructableType2 = TypeVar('ConstructableType2', bound="Constructable")
 
 class ConstructOptions(NamedTuple):
     """Options passed through `__init__` of all Constructable objects."""
+    rc: 'RunConfig'  #: Current run configuration
     parent: Optional['Constructable'] = None  #: Parent in heirarchy
     attr_name: str = ''  #: Attribute name of object within parent
-    rc: Optional['RunConfig'] = None  #: Current run configuration
     checkpoint_in: Optional['Checkpoint'] = None \
         #: If present, load data from this checkpoint file during construction
 
@@ -31,12 +31,11 @@ class Constructable:
         #: If present, load data from this checkpoint file during construction
 
     def __init__(self, co: ConstructOptions, **kwargs):
+        self.rc = co.rc
         self.parent = co.parent
         self.children = []
         self.path = ([] if (co.parent is None)
                      else (co.parent.path + [co.attr_name]))
-        if co.rc is not None:
-            self.rc = co.rc
         self.checkpoint_in = co.checkpoint_in
 
     @final
@@ -75,7 +74,6 @@ class Constructable:
         """
 
         # Try all the valid possibilities:
-        assert self.rc is not None
         co = ConstructOptions(parent=self, attr_name=attr_name, rc=self.rc,
                               checkpoint_in=self.checkpoint_in)
         if isinstance(params, dict):

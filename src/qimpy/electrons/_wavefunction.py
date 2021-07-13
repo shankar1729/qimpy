@@ -71,12 +71,12 @@ class Wavefunction:
             # Initialize zero coefficients:
             assert(n_bands or band_division)
             basis = self.basis
-            nk_mine = basis.kpoints.n_mine
+            nk_mine = basis.kpoints.division.n_mine
             n_bands = (n_bands if (band_division is None)
                        else band_division.n_mine)
             n_spins = (n_spins if n_spins else basis.n_spins)
             n_spinor = (n_spinor if n_spinor else basis.n_spinor)
-            n_basis = (basis.n_tot if band_division else basis.n_mine)
+            n_basis = (basis.n_tot if band_division else basis.division.n_each)
             self.coeff = torch.zeros(
                 (n_spins, nk_mine, n_bands, n_spinor, n_basis),
                 dtype=torch.cdouble, device=basis.rc.device)

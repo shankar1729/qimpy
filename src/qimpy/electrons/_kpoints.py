@@ -3,33 +3,35 @@ import numpy as np
 import torch
 from typing import Union, Sequence, Tuple, TYPE_CHECKING
 if TYPE_CHECKING:
-    from ..utils import RunConfig
+    from ..utils import RunConfig, TaskDivision
     from ..symmetries import Symmetries
     from ..lattice import Lattice
 
 
-class Kpoints(qp.utils.TaskDivision):
+class Kpoints(qp.Constructable):
     """Set of k-points in Brillouin zone.
     The underlying :class:`TaskDivision` splits k-points over `rc.comm_k`."""
-    __slots__ = ('k', 'wk')
+    __slots__ = ('k', 'wk', 'division')
     k: torch.Tensor  #: Array of k-points (N x 3)
     wk: torch.Tensor  #: Integration weights for each k (adds to 1)
+    division: 'TaskDivision'  #: Division of k-points across `rc.comm_k`
 
-    def __init__(self, k: torch.Tensor, wk: torch.Tensor,
-                 co: qp.ConstructOptions) -> None:
+    def __init__(self, *, co: qp.ConstructOptions,
+                 k: torch.Tensor, wk: torch.Tensor) -> None:
         """Initialize from list of k-points and weights. Typically, this should
          be used only by derived classes :class:`Kmesh` or :class:`Kpath`.
         """
+        super().__init__(co=co)
         self.k = k
         self.wk = wk
         assert(abs(wk.sum() - 1.) < 1e-14)
 
         # Initialize process grid dimension (if -1) and split k-points:
-        rc = co.rc
-        assert rc is not None
-        rc.provide_n_tasks(1, k.shape[0])
-        super().__init__(n_tot=k.shape[0], n_procs=rc.n_procs_k,
-                         i_proc=rc.i_proc_k, name='k-point', co=co)
+        self.rc.provide_n_tasks(1, k.shape[0])
+        self.division = qp.utils.TaskDivision(n_tot=k.shape[0],
+                                              n_procs=self.rc.n_procs_k,
+                                              i_proc=self.rc.i_proc_k,
+                                              name='k-point')
 
 
 class Kmesh(Kpoints):
@@ -155,7 +157,7 @@ class Kmesh(Kpoints):
             qp.log.info('Note: used k-inversion (conjugation) symmetry')
 
         # Initialize base class:
-        super().__init__(k, wk, co=co)
+        super().__init__(k=k, wk=wk, co=co)
 
 
 class Kpath(Kpoints):
@@ -214,7 +216,7 @@ class Kpath(Kpoints):
                     f' length {distance_tot:g}')
 
         # Initialize base class:
-        super().__init__(k, wk, co=co)
+        super().__init__(k=k, wk=wk, co=co)
 
     def plot(self, E, filename):
         """Save band structure plot to filename given energies E"""

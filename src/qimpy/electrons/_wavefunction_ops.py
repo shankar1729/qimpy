@@ -24,7 +24,7 @@ def _band_norms(self: 'Wavefunction', mode: str) -> torch.Tensor:
     result = ((coeff_sq @ basis.Gweight_mine).sum(dim=-1)
               if basis.real_wavefunctions
               else coeff_sq.sum(dim=(-2, -1)))
-    if basis.n_procs > 1:
+    if basis.division.n_procs > 1:
         basis.rc.comm_b.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(result),
                                   op=qp.MPI.SUM)
     return result if (mode == 'ke') else result.sqrt()
@@ -52,7 +52,7 @@ def _band_spin(self: 'Wavefunction') -> torch.Tensor:
                           coeff.conj(), basis.Gweight_mine, coeff)
              if basis.real_wavefunctions
              else torch.einsum('skbxg, skbyg -> skbxy', coeff.conj(), coeff))
-    if basis.n_procs > 1:
+    if basis.division.n_procs > 1:
         basis.rc.comm_b.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(rho_s),
                                   op=qp.MPI.SUM)
     # Convert to spin vector:
@@ -101,7 +101,7 @@ def _dot(self: 'Wavefunction', other: 'Wavefunction') -> torch.Tensor:
     result = (C1 @ C2)
     if basis.real_wavefunctions:
         result.imag *= 0.  # due to implicit +h.c. terms in C1 and C2
-    if basis.n_procs > 1:
+    if basis.division.n_procs > 1:
         basis.rc.comm_b.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(result),
                                   op=qp.MPI.SUM)
     watch.stop()

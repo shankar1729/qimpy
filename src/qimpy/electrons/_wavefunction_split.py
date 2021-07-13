@@ -11,7 +11,7 @@ def _split_bands(self: 'Wavefunction') -> 'Wavefunction':
     each band together on some process. Note that the result may be a view if
     there is only one process, or if the wavefunction is already split by bands
     """
-    if (self.basis.n_procs == 1) or self.band_division:
+    if (self.basis.division.n_procs == 1) or self.band_division:
         return self  # already in required configuration
     watch = qp.utils.StopWatch('Wavefunction.split_bands', self.basis.rc)
     basis = self.basis
@@ -23,15 +23,15 @@ def _split_bands(self: 'Wavefunction') -> 'Wavefunction':
 
     # All-to-all MPI rearrangement:
     band_division = qp.utils.TaskDivision(n_tot=self.coeff.shape[2],
-                                          n_procs=basis.n_procs,
-                                          i_proc=basis.i_proc)
+                                          n_procs=basis.division.n_procs,
+                                          i_proc=basis.division.i_proc)
     send_counts = np.diff(band_division.n_prev) * n_per_band
     send_offset = band_division.n_prev[:-1] * n_per_band
     recv_counts = band_division.n_mine * n_per_band
-    recv_offset = np.arange(basis.n_procs) * recv_counts
+    recv_offset = np.arange(band_division.n_procs) * recv_counts
     mpi_type = basis.rc.mpi_type[send_coeff.dtype]
     recv_coeff = torch.zeros(
-        (basis.n_procs, band_division.n_mine) + send_coeff.shape[1:],
+        (band_division.n_procs, band_division.n_mine) + send_coeff.shape[1:],
         dtype=send_coeff.dtype, device=send_coeff.device)
     basis.rc.comm_b.Alltoallv(
         (qp.utils.BufferView(send_coeff), send_counts, send_offset, mpi_type),
@@ -51,7 +51,7 @@ def _split_basis(self: 'Wavefunction') -> 'Wavefunction':
     coefficient together on some process. Note that the result may be a view if
     there is only one process, or if the wavefunction is already split by basis
     """
-    if (self.basis.n_procs == 1) or (self.band_division is None):
+    if (self.basis.division.n_procs == 1) or (self.band_division is None):
         return self  # already in required configuration
     watch = qp.utils.StopWatch('Wavefunction.split_basis', self.basis.rc)
     basis = self.basis
@@ -60,14 +60,15 @@ def _split_basis(self: 'Wavefunction') -> 'Wavefunction':
     # outermost for contiguous send chunks and band dim right after
     # --- after this, dim order is (proc, band, spin, k, spinor, basis-each)
     send_coeff = self.coeff.view(self.coeff.shape[:-1]
-                                 + (basis.n_procs, basis.n_each)).permute(
-                                     4, 2, 0, 1, 3, 5).contiguous()
+                                 + (basis.division.n_procs,
+                                    basis.division.n_each)
+                                 ).permute(4, 2, 0, 1, 3, 5).contiguous()
     n_per_band = np.prod(send_coeff.shape[2:])
 
     # All-to-all MPI rearrangement:
     band_division = self.band_division
     send_counts = band_division.n_mine * n_per_band
-    send_offset = np.arange(basis.n_procs) * send_counts
+    send_offset = np.arange(band_division.n_procs) * send_counts
     recv_counts = np.diff(band_division.n_prev) * n_per_band
     recv_offset = band_division.n_prev[:-1] * n_per_band
     mpi_type = basis.rc.mpi_type[send_coeff.dtype]
