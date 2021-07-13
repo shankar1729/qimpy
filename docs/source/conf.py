@@ -52,7 +52,7 @@ autodoc_typehints = "description"
 autodoc_member_order = 'groupwise'
 
 # Options needed for building on readthedocs:
-autodoc_mock_imports = ["mpi4py", "h5py"]
+autodoc_mock_imports = ["mpi4py", "h5py", "pylibxc"]
 
 # -- Options for HTML output -------------------------------------------------
 

@@ -50,20 +50,18 @@ class System(qp.Constructable):
 
         super().__init__(qp.ConstructOptions(rc=rc,
                                              checkpoint_in=checkpoint_in))
-        qp.lattice.Lattice.construct(self, 'lattice', lattice)
-        qp.ions.Ions.construct(self, 'ions', ions)
-        qp.symmetries.Symmetries.construct(
-            self, 'symmetries', symmetries,
-            lattice=self.lattice, ions=self.ions)
-        qp.electrons.Electrons.construct(
-            self, 'electrons', electrons, lattice=self.lattice,
-            ions=self.ions, symmetries=self.symmetries)
+        self.construct('lattice', qp.lattice.Lattice, lattice)
+        self.construct('ions', qp.ions.Ions, ions)
+        self.construct('symmetries', qp.symmetries.Symmetries, symmetries,
+                       lattice=self.lattice, ions=self.ions)
+        self.construct('electrons', qp.electrons.Electrons, electrons,
+                       lattice=self.lattice, ions=self.ions,
+                       symmetries=self.symmetries)
 
         qp.log.info('\n--- Initializing Charge-Density Grid ---')
-        qp.grid.Grid.construct(
-            self, 'grid', grid, lattice=self.lattice,
-            symmetries=self.symmetries, comm=rc.comm_kb,
-            ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff)
+        self.construct('grid', qp.grid.Grid, grid, lattice=self.lattice,
+                       symmetries=self.symmetries, comm=rc.comm_kb,  # Parallel
+                       ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff)
         self.coulomb = qp.grid.Coulomb(self.grid, self.ions.n_ions)
 
         # Initialize ionic potentials and energies at initial configuration:

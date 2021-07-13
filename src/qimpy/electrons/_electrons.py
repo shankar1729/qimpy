@@ -133,13 +133,12 @@ class Electrons(qp.Constructable):
         if n_options > 1:
             raise ValueError('Cannot use both k-mesh and k-path')
         if k_mesh is not None:
-            qp.electrons.Kmesh.construct(
-                self, 'kpoints', k_mesh, attr_version_name='k-mesh',
-                symmetries=symmetries, lattice=lattice)
+            self.construct('kpoints', qp.electrons.Kmesh, k_mesh,
+                           attr_version_name='k-mesh',
+                           symmetries=symmetries, lattice=lattice)
         if k_path is not None:
-            qp.electrons.Kpath.construct(
-                self, 'kpoints', k_path, attr_version_name='k-path',
-                lattice=lattice)
+            self.construct('kpoints', qp.electrons.Kpath, k_path,
+                           attr_version_name='k-path', lattice=lattice)
 
         # Initialize spin:
         self.spin_polarized = spin_polarized
@@ -152,8 +151,8 @@ class Electrons(qp.Constructable):
                     f'  w_spin: {self.w_spin}')
 
         # Initialize fillings:
-        qp.electrons.Fillings.construct(self, 'fillings', fillings,
-                                        ions=ions, electrons=self)
+        self.construct('fillings', qp.electrons.Fillings, fillings,
+                       ions=ions, electrons=self)
 
         # Determine number of bands:
         if n_bands is None:
@@ -196,10 +195,9 @@ class Electrons(qp.Constructable):
             f'  n_bands_extra: {self.n_bands_extra} ({n_bands_extra_method})')
 
         # Initialize wave-function basis:
-        qp.electrons.Basis.construct(
-            self, 'basis', basis,
-            lattice=lattice, ions=ions, symmetries=symmetries,
-            kpoints=self.kpoints, n_spins=self.n_spins, n_spinor=self.n_spinor)
+        self.construct('basis', qp.electrons.Basis, basis, lattice=lattice,
+                       ions=ions, symmetries=symmetries, kpoints=self.kpoints,
+                       n_spins=self.n_spins, n_spinor=self.n_spinor)
 
         # Initial wavefunctions:
         qp.log.info('Initializing wavefunctions:'
@@ -212,8 +210,8 @@ class Electrons(qp.Constructable):
         self.deig_max = np.nan  # note that eigenvalues are completely wrong!
 
         # Initialize exchange-correlation functional:
-        qp.electrons.xc.XC.construct(self, 'xc', xc,
-                                     spin_polarized=spin_polarized)
+        self.construct('xc', qp.electrons.xc.XC, xc,
+                       spin_polarized=spin_polarized)
 
         # Initialize diagonalizer:
         n_options = np.count_nonzero([(d is not None)
@@ -223,22 +221,20 @@ class Electrons(qp.Constructable):
         if n_options > 1:
             raise ValueError('Cannot use both davidson and chefsi')
         if davidson is not None:
-            qp.electrons.Davidson.construct(
-                self, 'diagonalize', davidson, attr_version_name='davidson',
-                electrons=self)
+            self.construct('diagonalize', qp.electrons.Davidson, davidson,
+                           attr_version_name='davidson', electrons=self)
         if chefsi is not None:
-            qp.electrons.CheFSI.construct(
-                self, 'diagonalize', chefsi, attr_version_name='chefsi',
-                electrons=self)
+            self.construct('diagonalize', qp.electrons.CheFSI, chefsi,
+                           attr_version_name='chefsi', electrons=self)
         qp.log.info('\nDiagonalization: ' + repr(self.diagonalize))
 
         # Initialize SCF:
-        qp.electrons.SCF.construct(self, 'scf', scf, comm=rc.comm_kb)
+        self.construct('scf', qp.electrons.SCF, scf, comm=rc.comm_kb)
 
     @property
     def n_densities(self) -> int:
         """Number of electron density / magnetization components in `n`."""
-        return ((4 if self.spinorial else 2) if self.spin_polarized else 1)
+        return (4 if self.spinorial else 2) if self.spin_polarized else 1
 
     def update_density(self, system: 'System') -> None:
         """Update electron density from wavefunctions and fillings.

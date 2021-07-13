@@ -46,13 +46,10 @@ class Constructable:
         for child in self.children:
             child.save_checkpoint(checkpoint)
 
-    @classmethod
-    def construct(cls: Type[ConstructableType],
-                  parent: ConstructableType2, attr_name: str,
+    def construct(self, attr_name: str, cls: Type[ConstructableType],
                   params: Union[ConstructableType, dict, None],
                   attr_version_name: str = '', **kwargs) -> None:
-        """Construct object of type `cls` in QimPy heirarchy.
-        Set the result as attribute named `attr_name` of `parent`.
+        """Construct child object `self`.`attr_name` of type `cls`.
         Specifically, construct object from `params` and `kwargs`
         if `params` is a dict, and just from `kwargs` if `params` is None.
         Any '-' in the keys of `params` are replaced with '_' for convenience.
@@ -66,9 +63,9 @@ class Constructable:
         """
 
         # Try all the valid possibilities:
-        assert parent.rc is not None
-        co = ConstructOptions(parent=parent, attr_name=attr_name, rc=parent.rc,
-                              checkpoint_in=parent.checkpoint_in)
+        assert self.rc is not None
+        co = ConstructOptions(parent=self, attr_name=attr_name, rc=self.rc,
+                              checkpoint_in=self.checkpoint_in)
         if isinstance(params, dict):
             result = cls(**kwargs, **dict_input_cleanup(params), co=co)
         elif params is None:
@@ -87,9 +84,9 @@ class Constructable:
             a_name = (attr_version_name if attr_version_name else attr_name)
             raise TypeError(f'{a_name} must be dict or {class_name}')
 
-        # Add to parent and set up links:
-        setattr(parent, attr_name, result)
-        parent.children.append(result)
+        # Add as an attribute and child in heirarchy:
+        setattr(self, attr_name, result)
+        self.children.append(result)
 
 
 def dict_input_cleanup(params: dict) -> dict:

@@ -121,9 +121,9 @@ class Basis(qp.utils.TaskDivision):
         # Initialize grid to match cutoff:
         self.ke_cutoff = float(ke_cutoff)
         qp.log.info('\nInitializing wavefunction grid:')
-        qp.grid.Grid.construct(
-            self, 'grid', grid, lattice=lattice, symmetries=symmetries,
-            comm=None, ke_cutoff_wavefunction=self.ke_cutoff)
+        self.construct('grid', qp.grid.Grid, grid, lattice=lattice,
+                       symmetries=symmetries, comm=None,  # Never parallel
+                       ke_cutoff_wavefunction=self.ke_cutoff)
 
         # Initialize basis:
         self.iG = self.grid.get_mesh('H' if self.real_wavefunctions
