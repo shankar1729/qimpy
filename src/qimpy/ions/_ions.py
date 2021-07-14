@@ -9,13 +9,14 @@ if TYPE_CHECKING:
     from ._pseudopotential import Pseudopotential
     from .._system import System
     from ..grid import FieldR, FieldH
+    from ..electrons import Wavefunction, Basis
 
 
 class Ions(qp.Constructable):
     """Ionic system: ionic geometry and pseudopotentials. """
     __slots__ = ('n_ions', 'n_types', 'symbols', 'slices',
                  'pseudopotentials', 'positions', 'types', 'M_initial',
-                 'Z', 'Z_tot', 'rho', 'Vloc', 'n_core')
+                 'Z', 'Z_tot', 'rho', 'Vloc', 'n_core', 'beta')
     n_ions: int  #: number of ions
     n_types: int  #: number of distinct ion types
     symbols: List[str]  #: symbol for each ion type
@@ -29,6 +30,7 @@ class Ions(qp.Constructable):
     rho: 'FieldH'  #: ionic charge density profile (uses coulomb.ion_width)
     Vloc: 'FieldH'  #: local potential due to ions (including from rho)
     n_core: 'FieldH'  #: partial core electronic density (for inclusion in XC)
+    beta: 'Wavefunction'  #: pseudopotential projectors
 
     def __init__(self, *, co: qp.ConstructOptions,
                  coordinates: Optional[List] = None,
@@ -196,7 +198,7 @@ class Ions(qp.Constructable):
                 f' {position[1]:11.8f}, {position[2]:11.8f}{attrib_str}]')
 
     def update(self, system: 'System') -> None:
-        """Update ionic potentials and energy components.
+        """Update ionic potentials, projectors and energy components.
         The grids used for the potentials are derived from system,
         and the energy components are stored within system.E.
         """
@@ -239,6 +241,12 @@ class Ions(qp.Constructable):
         # --- include long-range electrostatic part of Vloc:
         self.Vloc += system.coulomb(self.rho, correct_G0_width=True)
 
+        # Update pseudopotential projectors:
+        self.beta = self._get_projectors(system.electrons.basis)
+
+        qp.log.info('Testing')
+        exit()
+
     def translation_phase(self, iG: torch.Tensor,
                           atom_slice: slice = slice(None)) -> torch.Tensor:
         """Get translation phases at `iG` for a slice of atoms.
@@ -246,3 +254,12 @@ class Ions(qp.Constructable):
         dimension yields the structure factor corresponding to these atoms.
         """
         return qp.utils.cis((-2*np.pi) * (iG @ self.positions[atom_slice].T))
+
+    def _get_projectors(self, basis: 'Basis') -> 'Wavefunction':
+        """Get projectors corresponding to specified `basis`."""
+        from .quintic_spline import Interpolator
+        Gk = ((basis.iG[:, basis.mine] + basis.k[:, None])
+              @ basis.lattice.Gbasis.T)  # Cartesian (G + k) of this process
+        Gk_mag = (Gk ** 2).sum(dim=-1).sqrt()
+        Ginterp = Interpolator(Gk_mag, qp.ions.RadialFunction.DG)
+        return qp.electrons.Wavefunction(basis)

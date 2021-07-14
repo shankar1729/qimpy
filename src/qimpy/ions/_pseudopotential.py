@@ -5,6 +5,7 @@ from ._read_upf import _read_upf
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ._radial_function import RadialFunction
+    from ._pseudo_quantum_numbers import PseudoQuantumNumbers
     from ..utils import RunConfig
 
 
@@ -14,7 +15,8 @@ class Pseudopotential:
     Currently supports norm-conserving pseudopotentials."""
     __slots__ = ('rc', 'element', 'atomic_number', 'is_paw', 'Z', 'l_max',
                  'r', 'dr', 'rho_atom', 'n_core', 'Vloc', 'ion_width',
-                 'beta', 'psi', 'j_beta', 'j_psi', 'eig_psi', 'D', 'Gmax')
+                 'beta', 'psi', 'j_beta', 'j_psi', 'eig_psi', 'D',
+                 'Gmax', 'pqn_beta', 'pqn_psi')
     rc: 'RunConfig'
     element: str  #: Chemical symbol of element
     atomic_number: int  #: Atomic number of element
@@ -33,7 +35,10 @@ class Pseudopotential:
     j_psi: np.ndarray  #: l+s of each atomic orbital (if relativistic)
     eig_psi: np.ndarray  #: Energy eigenvalue of each atomic orbital
     D: torch.Tensor  #: Descreened nonlocal pseudopotential matrix
+
     Gmax: float  #: Current reciprocal space extent of radial functions
+    pqn_beta: 'PseudoQuantumNumbers'  #: quantum numbers for projectors
+    pqn_psi: 'PseudoQuantumNumbers'  #: quantum numbers for orbitals
 
     # Methods defined out of class:
     read_upf = _read_upf
@@ -50,7 +55,9 @@ class Pseudopotential:
         self.rc = rc
         assert(filename[-4:].lower() == '.upf')
         self.read_upf(filename, rc)
-        self.Gmax = 0.  # reciprocal space versiosn not yet initialized
+        self.Gmax = 0.  # reciprocal space versions not yet initialized
+        self.pqn_beta = qp.ions.PseudoQuantumNumbers(self.beta.l)
+        self.pqn_psi = qp.ions.PseudoQuantumNumbers(self.psi.l)
 
     def update(self, Gmax: float, ion_width: float) -> None:
         """Update to support calculation of G upto `Gmax`.
