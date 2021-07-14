@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import collections
 from scipy import optimize
-from typing import Optional, Dict, Union, Callable, List, Sequence, \
+from typing import Optional, Dict, Union, Callable, List, Sequence, cast, \
     TYPE_CHECKING
 if TYPE_CHECKING:
     from ..utils import Checkpoint, RunConfig
@@ -215,18 +215,17 @@ class Fillings(qp.Constructable):
         self.f = torch.zeros((el.n_spins, k_division.n_mine, self.n_bands),
                              device=self.rc.device)
         if self._checkpoint_has('f'):
-            qp.log.info("Loading fillings from checkpoint")
-            assert self.checkpoint_in is not None
-            dset_f = self.checkpoint_in[self.path + 'f']
+            qp.log.info("Loading fillings f")
+            chk_in = cast('Checkpoint', self.checkpoint_in)
+            dset_f = chk_in[self.path + 'f']
             n_bands_in = min(dset_f.shape[-1], self.n_bands)
             offset_f = (0, k_division.i_start, 0)
             size_f = (el.n_spins, k_division.n_mine, n_bands_in)
-            self.f[..., :n_bands_in] = self.checkpoint_in.read_slice(
-                dset_f, offset_f, size_f)
-            qp.log.info(f'Read: {self.rc.fmt(self.f)}')
+            self.f[..., :n_bands_in] = chk_in.read_slice(dset_f, offset_f,
+                                                         size_f)
         else:
             # Compute fillings
-            qp.log.info("Constructing fillings to occupy lowest bands")
+            qp.log.info("Constructing fillings f to occupy lowest bands")
             # --- Fillings sum for each spin channel:
             f_sums = (np.ones(el.n_spins) * self.n_electrons
                       / (el.w_spin * el.n_spins))

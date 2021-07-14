@@ -87,7 +87,7 @@ class RunConfig:
             torch.complex128: qp.MPI.DOUBLE_COMPLEX
         }  #: Mapping from torch dtypes to MPI datatypes
         self.np_type: dict = {
-            torch.bool: np.bool,
+            torch.bool: np.bool8,
             torch.uint8: np.uint8,
             torch.int8: np.int8,
             torch.int16: np.int16,

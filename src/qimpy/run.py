@@ -147,7 +147,7 @@ if __name__ == "__main__":
 
     # Load input parameters from YAML file:
     with open(args.input_file) as f:
-        input_dict: dict = yaml.safe_load(f)
+        input_dict: dict = qp.dict_input_cleanup(yaml.safe_load(f))
 
     # Set default checkpoint file (if not specified in input):
     input_dict.setdefault('checkpoint',

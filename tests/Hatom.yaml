@@ -21,3 +21,5 @@ electrons:
   scf:
     mix-density: no  # mix potential instead
 
+# checkpoint: null  # disable reading checkpoint
+# checkpoint-out: Hatom.h5  # but still create it

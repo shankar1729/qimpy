@@ -2,7 +2,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from ._hamiltonian import _hamiltonian
-from typing import Union, Optional, List, TYPE_CHECKING
+from typing import Union, Optional, List, cast, TYPE_CHECKING
 if TYPE_CHECKING:
     from ..utils import Checkpoint, RunConfig
     from ..lattice import Lattice
@@ -145,11 +145,19 @@ class Electrons(qp.Constructable):
                        n_spins=self.n_spins, n_spinor=self.n_spinor)
 
         # Initial wavefunctions:
-        qp.log.info('Initializing wavefunctions:'
-                    ' bandwidth-limited random numbers')
         self.C = qp.electrons.Wavefunction(self.basis,
                                            n_bands=self.fillings.n_bands)
-        self.C.randomize()
+        if self._checkpoint_has('C'):
+            qp.log.info('Loading wavefunctions C')
+            n_bands_done = self.C.read(cast('Checkpoint', self.checkpoint_in),
+                                       self.path + 'C')
+        else:
+            n_bands_done = 0
+        if n_bands_done < self.fillings.n_bands:
+            qp.log.info('Randomizing {} bands of wavefunctions C '.format(
+                f'{self.fillings.n_bands - n_bands_done}'
+                if n_bands_done else 'all'))
+            self.C.randomize(b_start=n_bands_done)
         self.C = self.C.orthonormalize()
         self.eig = torch.zeros(self.C.coeff.shape[:3], dtype=torch.double,
                                device=rc.device)

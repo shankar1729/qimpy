@@ -1,13 +1,13 @@
 """QimPy: Quantum-Integrated Multi-PhYsics"""
 # List exported symbols for doc generation
 __all__ = [
-    'MPI', 'System', 'Constructable', 'ConstructOptions', 'Energy',
-    'utils', 'ions', 'lattice', 'symmetries', 'grid', 'electrons',
+    'MPI', 'System', 'Constructable', 'ConstructOptions', 'dict_input_cleanup',
+    'Energy', 'utils', 'ions', 'lattice', 'symmetries', 'grid', 'electrons',
     'log']
 
 # Module import definition
 from mpi4py import MPI
-from ._construct import Constructable, ConstructOptions
+from ._construct import Constructable, ConstructOptions, dict_input_cleanup
 from ._energy import Energy
 from . import utils
 from . import ions

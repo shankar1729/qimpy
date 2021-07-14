@@ -120,7 +120,7 @@ class Wavefunction:
         n_spins, nk_mine, _, n_spinor, _ = self.coeff.shape
         offset = (0, k_division.i_start, 0, 0, basis.division.i_start)
         size = (n_spins, nk_mine, n_bands_in, n_spinor, basis_n_mine)
-        self.coeff[:, :, :n_bands_in] = \
+        self.coeff[:, :, :n_bands_in, :, :basis_n_mine] = \
             checkpoint.read_slice_complex(dset, offset, size)
         return n_bands_in
 
