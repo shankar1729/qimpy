@@ -216,13 +216,8 @@ class Fillings(qp.Constructable):
                              device=self.rc.device)
         if self._checkpoint_has('f'):
             qp.log.info("Loading fillings f")
-            chk_in = cast('Checkpoint', self.checkpoint_in)
-            dset_f = chk_in[self.path + 'f']
-            n_bands_in = min(dset_f.shape[-1], self.n_bands)
-            offset_f = (0, k_division.i_start, 0)
-            size_f = (el.n_spins, k_division.n_mine, n_bands_in)
-            self.f[..., :n_bands_in] = chk_in.read_slice(dset_f, offset_f,
-                                                         size_f)
+            self.read_band_scalars(cast('Checkpoint', self.checkpoint_in),
+                                   self.path + 'f', self.f)
         else:
             # Compute fillings
             qp.log.info("Constructing fillings f to occupy lowest bands")
@@ -360,19 +355,35 @@ class Fillings(qp.Constructable):
                     f'  n_electrons: {n_electrons:.6f}{M_str}')
 
     def _save_checkpoint(self, checkpoint: 'Checkpoint') -> List[str]:
-        written: List[str] = []
-        # Write fillings:
+        self.write_band_scalars(checkpoint, self.path + 'f', self.f)
+        return ['f']
+
+    def write_band_scalars(self, checkpoint: 'Checkpoint', path: str,
+                           v: torch.Tensor) -> None:
+        """Write `v` containing one scalar per band to `path` in `checkpoint`.
+        This is useful for writing fillings, eigenvalues etc."""
         el = self.electrons
         k_division = el.kpoints.division
-        shape_f = (el.n_spins, k_division.n_tot, self.n_bands)
-        offset_f = (0, k_division.i_start, 0)
-        dset_f = checkpoint.create_dataset(self.path + 'f', shape=shape_f,
-                                           dtype=self.rc.np_type[self.f.dtype])
+        shape = (el.n_spins, k_division.n_tot, self.n_bands)
+        offset = (0, k_division.i_start, 0)
+        dset = checkpoint.create_dataset(path, shape=shape,
+                                         dtype=self.rc.np_type[v.dtype])
         if self.rc.i_proc_b == 0:
-            checkpoint.write_slice(dset_f, offset_f,
-                                   self.f[:, :, :self.n_bands])
-        written.append('f')
-        return written
+            checkpoint.write_slice(dset, offset, v[:, :, :self.n_bands])
+
+    def read_band_scalars(self, checkpoint: 'Checkpoint', path: str,
+                          v: torch.Tensor) -> int:
+        """Read one scalar per band from `path` in `checkpoint` into `v`.
+        Returns number of bands read, which may be <= `self.n_bands`.
+        This is useful for reading fillings, eigenvalues etc."""
+        el = self.electrons
+        k_division = el.kpoints.division
+        dset = checkpoint[path]
+        n_bands_in = min(dset.shape[-1], self.n_bands)
+        offset = (0, k_division.i_start, 0)
+        size = (el.n_spins, k_division.n_mine, n_bands_in)
+        v[..., :n_bands_in] = checkpoint.read_slice(dset, offset, size)
+        return n_bands_in
 
 
 def _smearing_fermi(eig: torch.Tensor, mu: float,

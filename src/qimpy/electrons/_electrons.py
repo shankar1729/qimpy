@@ -161,7 +161,16 @@ class Electrons(qp.Constructable):
         self.C = self.C.orthonormalize()
         self.eig = torch.zeros(self.C.coeff.shape[:3], dtype=torch.double,
                                device=rc.device)
-        self.deig_max = np.nan  # note that eigenvalues are completely wrong!
+        if self._checkpoint_has('eig'):
+            qp.log.info('Loading band eigenvalues eig')
+            n_bands_done = self.fillings.read_band_scalars(
+                cast('Checkpoint', self.checkpoint_in),
+                self.path + 'eig', self.eig)
+        else:
+            n_bands_done = 0  # number for which eigenvalues are ready
+        self.deig_max = (np.nan  # (some) eigenvalues completely wrong
+                         if (n_bands_done < self.fillings.n_bands)
+                         else np.inf)  # not fully wrong, but accuracy unknown
 
         # Initialize exchange-correlation functional:
         self.construct('xc', qp.electrons.xc.XC, xc,
@@ -231,8 +240,8 @@ class Electrons(qp.Constructable):
                               'bandstruct.pdf')
 
     def _save_checkpoint(self, checkpoint: 'Checkpoint') -> List[str]:
-        written: List[str] = []
-        # Write wavefunctions:
-        self.C[:, :, :self.fillings.n_bands].write(checkpoint, self.path + 'C')
-        written.append('C')
-        return written
+        n_bands = self.fillings.n_bands
+        self.C[:, :, :n_bands].write(checkpoint, self.path + 'C')
+        self.fillings.write_band_scalars(checkpoint, self.path + 'eig',
+                                         self.eig)
+        return ['C', 'eig']
