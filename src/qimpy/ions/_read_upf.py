@@ -155,9 +155,9 @@ def _read_upf(self: 'Pseudopotential', filename: str, rc: 'RunConfig'):
                     label = entry.attrib["label"]
                     self.eig_psi[i_psi] = float(entry.attrib.get(
                         "pseudo_energy", "NaN")) * 0.5  # convert from Ry to Eh
-                    qp.log.info(f"    {label}   l: {l_psi[i_psi]}'"
-                                f"   occupation: {occ:4.1f}"
-                                f"   eigenvalue: {self.eig_psi[i_psi]}")
+                    qp.log.info(f'    {label}   l: {l_psi[i_psi]}'
+                                f'  occupation: {occ:4.1f}'
+                                f'  eigenvalue: {self.eig_psi[i_psi]}')
                     # Read orbital (contains factor of r removed below):
                     psi[i_psi] = np.fromstring(entry.text, sep=' ')
                 else:

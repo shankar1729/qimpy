@@ -306,7 +306,7 @@ class Ions(qp.Constructable):
                                  dtype=torch.complex128)
         i_proj_start = 0
         for i_ps, ps in enumerate(self.pseudopotentials):
-            D = ps.D[ps.pqn_beta.i_rf][:, ps.pqn_beta.i_rf].contiguous()
+            D = ps.pqn_beta.expand_matrix(ps.D)
             n_proj_atom = D.shape[0]
             # TODO: Handle spin-angle transformations for relativistic case
             # Set diagonal block for each atom:

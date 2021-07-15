@@ -38,3 +38,9 @@ class PseudoQuantumNumbers:
             # To next shell:
             i_start = i_stop
         self.i_lm = self.l*(self.l + 1) + self.m
+
+    def expand_matrix(self, D: torch.Tensor) -> torch.Tensor:
+        """Expand matrix `D` from (n, l) basis to include m."""
+        D_out = D[self.i_rf][:, self.i_rf].contiguous()
+        D_out[self.i_lm[None] != self.i_lm[:, None]] = 0.  # spherical symmetry
+        return D_out
