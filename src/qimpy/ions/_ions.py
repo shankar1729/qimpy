@@ -283,11 +283,12 @@ class Ions(qp.Constructable):
             i_proj_stop = i_proj_start + n_proj_cur
             # Compute atomic template:
             proj_atom = (Ginterp(ps.beta.f_t_coeff)[ps.pqn_beta.i_rf]  # radial
-                         * Ylm[ps.pqn_beta.i_lm])[:, None]  # angular
+                         * Ylm[ps.pqn_beta.i_lm]  # angular
+                         ).transpose(0, 1)[:, None]  # k,1,i_proj,G
             # Repeat by translation to each atom:
-            trans_cur = translations[:, self.slices[i_ps], None]
-            proj[0, :, i_proj_start:i_proj_stop, 0] = \
-                (proj_atom * trans_cur).flatten(0, 1).transpose(0, 1)
+            trans_cur = translations[:, self.slices[i_ps], None]  # k,atom,1,G
+            proj[0, :, i_proj_start:i_proj_stop, 0] = (proj_atom * trans_cur
+                                                       ).flatten(1, 2)
             # Prepare for next species:
             i_proj_start = i_proj_stop
         return qp.electrons.Wavefunction(basis, coeff=proj)
