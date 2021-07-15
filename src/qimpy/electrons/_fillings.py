@@ -183,6 +183,11 @@ class Fillings(qp.Constructable):
             if n_bands == 'atomic':
                 n_bands_method = 'atomic'
                 self.n_bands = ions.n_atomic_orbitals
+                if self.n_bands < self.n_bands_min:
+                    qp.log.warning(f'Note: {self.n_bands} atomic orbitals'
+                                   f' < n_bands_min = {self.n_bands_min}')
+                    self.n_bands = self.n_bands_min
+                    n_bands_method = '1*n_bands_min'
             else:
                 assert n_bands.startswith('x')
                 n_bands_scale = float(n_bands[1:])
@@ -254,20 +259,20 @@ class Fillings(qp.Constructable):
         assert self._smearing_func is not None
         el = self.electrons
         w_sk = el.basis.w_sk
+        eig = el.eig[..., :self.n_bands]  # don't include extra bands in f
 
         # Guess chemical potential from eigenvalues if needed:
         if np.isnan(self.mu):
             n_full = int(np.floor(self.n_electrons /
                                   (el.w_spin * el.n_spins)))
-            self.mu = self.rc.comm_kb.allreduce(
-                el.eig[:, :, n_full].min().item(), qp.MPI.MIN)
+            self.mu = self.rc.comm_kb.allreduce(eig[:, :, n_full].min().item(),
+                                                qp.MPI.MIN)
 
         # Weights that generate number / magnetization and their targets:
         if el.spin_polarized:
             if el.spinorial:
-                w_NM = torch.cat((
-                    torch.ones_like(el.eig)[None, ...],
-                    el.C.band_spin()), dim=0)
+                w_NM = torch.cat((torch.ones_like(eig)[None, ...],
+                                  el.C.band_spin()), dim=0)
                 M_len = 3
             else:
                 w_NM = torch.tensor([[1, 1], [1, -1]],
@@ -295,11 +300,7 @@ class Fillings(qp.Constructable):
             mu_B[i_free] = params
             mu_B_t = torch.tensor(mu_B).to(self.rc.device)
             mu_eff = (mu_B_t.view(-1, 1, 1, 1) * w_NM).sum(dim=0)
-            f, f_eig, S = self._smearing_func(el.eig, mu_eff,
-                                              sigma_cur)
-
-            qp.log.debug(f'    sigma: {sigma_cur:f} mu,B: {mu_B}')
-
+            f, f_eig, S = self._smearing_func(eig, mu_eff, sigma_cur)
             NM = (w_NM * (w_sk * f)).sum(dim=(1, 2, 3))
             NM_mu_B = -((w_NM[None, ...] * w_NM[:, None, ...])
                         * (w_sk * f_eig)).sum(dim=(2, 3, 4))
@@ -340,8 +341,8 @@ class Fillings(qp.Constructable):
         else:  # B is free: use a quasi-Newton method
             # Find mu and/or B to match N and/or M as appropriate:
             # --- start with a larger sigma and reduce down for stability:
-            eig_diff_max = self.rc.comm_k.allreduce(
-                el.eig.diff(dim=-1).max(), qp.MPI.MAX)
+            eig_diff_max = self.rc.comm_k.allreduce(eig.diff(dim=-1).max(),
+                                                    qp.MPI.MAX)
             sigma_cur = max(self.sigma, min(0.1, eig_diff_max))
             final_step = False
             while not final_step:
@@ -373,8 +374,7 @@ class Fillings(qp.Constructable):
                 self.B = torch.from_numpy(mu_B[1:]).to(self.rc.device)
             else:
                 self.M = M
-            M_str = '  M: ' \
-                    f'{self.rc.fmt(M, floatmode="fixed", precision=5)}'
+            M_str = f'  M: {self.rc.fmt(M, floatmode="fixed", precision=5)}'
         else:
             M_str = ''
         qp.log.info(f'  FillingsUpdate:  mu: {self.mu:.9f}'

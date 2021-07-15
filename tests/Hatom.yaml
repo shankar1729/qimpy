@@ -16,9 +16,8 @@ electrons:
   spin-polarized: yes
   #spinorial: yes
   fillings:
-    n-bands-extra: 3
-    #M: [-1, 0, 0]
-    #M-constrain: no
+    M: 1
+    smearing: null
   scf:
     mix-density: no  # mix potential instead
 

@@ -203,9 +203,10 @@ class Electrons(qp.Constructable):
         """Update electron density from wavefunctions and fillings.
         Result is in system grid in reciprocal space."""
         f = self.fillings.f
+        C = self.C[:, :, :self.fillings.n_bands]  # ignore extra bands in n
         need_Mvec = (self.spinorial and self.spin_polarized)
-        self.n = (~(self.basis.collect_density(self.C, f,
-                                               need_Mvec))).to(system.grid)
+        self.n = (~(self.basis.collect_density(C, f, need_Mvec
+                                               ))).to(system.grid)
         # TODO: ultrasoft augmentation and symmetrization
         self.tau = qp.grid.FieldH(system.grid, shape_batch=(0,))
         # TODO: actually compute KE density if required
@@ -233,7 +234,7 @@ class Electrons(qp.Constructable):
             (self.C.band_ke()[:, :, :f.shape[2]]
              * self.basis.w_sk * f).sum().item(), qp.MPI.SUM)
         # Nonlocal projector:
-        beta_C = system.ions.beta ^ self.C
+        beta_C = system.ions.beta ^ self.C[:, :, :self.fillings.n_bands]
         system.energy['Enl'] = self.rc.comm_k.allreduce(
             ((beta_C.conj() * (system.ions.D_all @ beta_C)).sum(dim=-2)
              * self.basis.w_sk * f).real.sum().item(), qp.MPI.SUM)
