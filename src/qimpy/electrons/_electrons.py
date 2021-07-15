@@ -232,6 +232,11 @@ class Electrons(qp.Constructable):
         system.energy['KE'] = self.rc.comm_k.allreduce(
             (self.C.band_ke()[:, :, :f.shape[2]]
              * self.basis.w_sk * f).sum().item(), qp.MPI.SUM)
+        # Nonlocal projector:
+        beta_C = system.ions.beta ^ self.C
+        system.energy['Enl'] = self.rc.comm_k.allreduce(
+            ((beta_C.conj() * (system.ions.D_all @ beta_C)).sum(dim=-2)
+             * self.basis.w_sk * f).real.sum().item(), qp.MPI.SUM)
 
     def output(self) -> None:
         """Save any configured outputs (TODO: systematize this)"""

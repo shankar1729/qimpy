@@ -10,6 +10,8 @@ if TYPE_CHECKING:
 def _hamiltonian(self: 'Electrons', C: 'Wavefunction') -> 'Wavefunction':
     """Apply electronic Hamiltonian on wavefunction `C`"""
     basis = C.basis
+    ions = basis.ions
     HC = basis.apply_ke(C)
     HC += basis.apply_potential(self.V_ks, C)
+    HC += ions.beta @ (ions.D_all @ (ions.beta ^ C))  # nonlocal ps
     return HC

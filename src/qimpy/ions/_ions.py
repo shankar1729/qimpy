@@ -14,11 +14,12 @@ if TYPE_CHECKING:
 
 class Ions(qp.Constructable):
     """Ionic system: ionic geometry and pseudopotentials. """
-    __slots__ = ('n_ions', 'n_types', 'symbols', 'slices',
+    __slots__ = ('n_ions', 'n_types', 'symbols', 'n_ions_type', 'slices',
                  'pseudopotentials', 'positions', 'types', 'M_initial',
-                 'Z', 'Z_tot', 'rho', 'Vloc', 'n_core', 'beta')
+                 'Z', 'Z_tot', 'rho', 'Vloc', 'n_core', 'beta', 'D_all')
     n_ions: int  #: number of ions
     n_types: int  #: number of distinct ion types
+    n_ions_type: List[int]  #: number of ions of each type
     symbols: List[str]  #: symbol for each ion type
     slices: List[slice]  #: slice to get each ion type
     pseudopotentials: List['Pseudopotential']  #: pseudopotential for each type
@@ -31,6 +32,7 @@ class Ions(qp.Constructable):
     Vloc: 'FieldH'  #: local potential due to ions (including from rho)
     n_core: 'FieldH'  #: partial core electronic density (for inclusion in XC)
     beta: 'Wavefunction'  #: pseudopotential projectors
+    D_all: torch.Tensor  #: nonlocal pseudopotential matrix (all atoms)
 
     def __init__(self, *, co: qp.ConstructOptions,
                  coordinates: Optional[List] = None,
@@ -67,6 +69,7 @@ class Ions(qp.Constructable):
         self.n_ions = 0  # number of ions
         self.n_types = 0  # number of distinct ion types
         self.symbols = []  # symbol for each ion type
+        self.n_ions_type = []  # numebr of ions of each type
         self.slices = []  # slice to get each ion type
         positions = []  # position of each ion
         types = []      # type of each ion (index into symbols)
@@ -89,6 +92,7 @@ class Ions(qp.Constructable):
                 self.n_types += 1
                 if type_start != self.n_ions:
                     self.slices.append(slice(type_start, self.n_ions))
+                    self.n_ions_type.append(self.n_ions - type_start)
                     type_start = self.n_ions
             # Add type and position of current ion:
             types.append(self.n_types-1)
@@ -97,6 +101,7 @@ class Ions(qp.Constructable):
             self.n_ions += 1
         if type_start != self.n_ions:
             self.slices.append(slice(type_start, self.n_ions))  # for last type
+            self.n_ions_type.append(self.n_ions - type_start)
 
         # Check order:
         if len(set(self.symbols)) < self.n_types:
@@ -160,6 +165,7 @@ class Ions(qp.Constructable):
                     qp.ions.Pseudopotential(fname, rc))
             else:
                 raise ValueError(f'no pseudopotential found for {symbol}')
+        self._collect_ps_matrix()  # collect pseudopotential across all atoms
 
         # Calculate total ionic charge (needed for number of electrons):
         self.Z = torch.tensor([ps.Z for ps in self.pseudopotentials],
@@ -244,9 +250,6 @@ class Ions(qp.Constructable):
         # Update pseudopotential projectors:
         self.beta = self._get_projectors(system.electrons.basis)
 
-        qp.log.info('Testing')
-        exit()
-
     def translation_phase(self, iG: torch.Tensor,
                           atom_slice: slice = slice(None)) -> torch.Tensor:
         """Get translation phases at `iG` for a slice of atoms.
@@ -258,8 +261,56 @@ class Ions(qp.Constructable):
     def _get_projectors(self, basis: 'Basis') -> 'Wavefunction':
         """Get projectors corresponding to specified `basis`."""
         from .quintic_spline import Interpolator
-        Gk = ((basis.iG[:, basis.mine] + basis.k[:, None])
-              @ basis.lattice.Gbasis.T)  # Cartesian (G + k) of this process
+        iGk = basis.iG[:, basis.mine] + basis.k[:, None]  # fractional G + k
+        Gk = iGk @ basis.lattice.Gbasis.T  # Cartesian G + k (of this process)
+        # Get harmonics (per l,m):
+        l_max = max(ps.l_max for ps in self.pseudopotentials)
+        Ylm = qp.ions.spherical_harmonics.get_harmonics(l_max, Gk)
+        # Get per-atom translations:
+        translations = (self.translation_phase(iGk).transpose(1, 2)  # k,atom,G
+                        / np.sqrt(basis.lattice.volume))  # due to factor in C
+        # Prepare interpolator for radial functions:
         Gk_mag = (Gk ** 2).sum(dim=-1).sqrt()
         Ginterp = Interpolator(Gk_mag, qp.ions.RadialFunction.DG)
-        return qp.electrons.Wavefunction(basis)
+        # Prepare output:
+        nk_mine, n_basis_each = Gk_mag.shape
+        proj = torch.empty((1, nk_mine, self.n_projectors, 1, n_basis_each),
+                           dtype=torch.complex128, device=self.rc.device)
+        # Compute projectors by species:
+        i_proj_start = 0
+        for i_ps, ps in enumerate(self.pseudopotentials):
+            n_proj_cur = ps.pqn_beta.n_tot * self.n_ions_type[i_ps]
+            i_proj_stop = i_proj_start + n_proj_cur
+            # Compute atomic template:
+            proj_atom = (Ginterp(ps.beta.f_t_coeff)[ps.pqn_beta.i_rf]  # radial
+                         * Ylm[ps.pqn_beta.i_lm])[:, None]  # angular
+            # Repeat by translation to each atom:
+            trans_cur = translations[:, self.slices[i_ps], None]
+            proj[0, :, i_proj_start:i_proj_stop, 0] = \
+                (proj_atom * trans_cur).flatten(0, 1).transpose(0, 1)
+            # Prepare for next species:
+            i_proj_start = i_proj_stop
+        return qp.electrons.Wavefunction(basis, coeff=proj)
+
+    @property
+    def n_projectors(self) -> int:
+        return self.D_all.shape[0]
+
+    def _collect_ps_matrix(self) -> None:
+        """Collect pseudopotential matrices across species and atoms.
+        Initializes `D_all`."""
+        n_proj = sum((ps.pqn_beta.n_tot * self.n_ions_type[i_ps])
+                     for i_ps, ps in enumerate(self.pseudopotentials))
+        self.D_all = torch.zeros((n_proj, n_proj), device=self.rc.device,
+                                 dtype=torch.complex128)
+        i_proj_start = 0
+        for i_ps, ps in enumerate(self.pseudopotentials):
+            D = ps.D[ps.pqn_beta.i_rf][:, ps.pqn_beta.i_rf].contiguous()
+            n_proj_atom = D.shape[0]
+            # TODO: Handle spin-angle transformations for relativistic case
+            # Set diagonal block for each atom:
+            for i_atom in range(self.n_ions_type[i_ps]):
+                i_proj_stop = i_proj_start + n_proj_atom
+                slice_cur = slice(i_proj_start, i_proj_stop)
+                self.D_all[slice_cur, slice_cur] = D
+                i_proj_start = i_proj_stop
