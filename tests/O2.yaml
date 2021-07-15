@@ -13,7 +13,8 @@ electrons:
   spin-polarized: yes
   fillings:
     M: 2.
-  xc: 
+    M-constrain: yes
+  xc:
     functional: gga-xc-pbe
   scf:
     mix-density: no  # mix potential instead

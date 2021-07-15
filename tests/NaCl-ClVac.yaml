@@ -30,7 +30,7 @@ electrons:
   fillings:
     n-bands-extra: 20
   basis:
-    real-wavefunctions: yes
+#    real-wavefunctions: yes
 #  chefsi: {filter-order: 10}
   scf:
     mix-density: no  # mix potential instead

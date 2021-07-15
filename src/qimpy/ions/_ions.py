@@ -291,6 +291,7 @@ class Ions(qp.Constructable):
                                                        ).flatten(1, 2)
             # Prepare for next species:
             i_proj_start = i_proj_stop
+        proj[basis.pad_index_mine] = 0.  # project out padded entries
         return qp.electrons.Wavefunction(basis, coeff=proj)
 
     @property

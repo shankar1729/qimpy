@@ -371,7 +371,7 @@ class Fillings(qp.Constructable):
         if el.spin_polarized:
             M = results['NM'][1:]
             if self.M_constrain:
-                self.B = mu_B[1:]
+                self.B = torch.from_numpy(mu_B[1:]).to(self.rc.device)
             else:
                 self.M = M
             M_str = '  M: ' \
