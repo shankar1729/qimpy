@@ -56,7 +56,7 @@ class Electrons(qp.Constructable):
                  spin_polarized: bool = False, spinorial: bool = False,
                  fillings: Optional[Union[dict, 'Fillings']] = None,
                  basis: Optional[Union[dict, 'Basis']] = None,
-                 xc: Optional[Union[dict, 'XC']] = None, lcao: bool = False,
+                 xc: Optional[Union[dict, 'XC']] = None, lcao: bool = True,
                  davidson: Optional[Union[dict, 'Davidson']] = None,
                  chefsi:  Optional[Union[dict, 'CheFSI']] = None,
                  scf:  Optional[Union[dict, 'SCF']] = None) -> None:

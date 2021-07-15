@@ -278,7 +278,8 @@ class Ions(qp.Constructable):
         Ginterp = Interpolator(Gk_mag, qp.ions.RadialFunction.DG)
         # Prepare output:
         nk_mine, n_basis_each = Gk_mag.shape
-        proj = torch.empty((1, nk_mine, self.n_projectors, 1, n_basis_each),
+        n_proj_tot = self.n_atomic_orbitals if get_psi else self.n_projectors
+        proj = torch.empty((1, nk_mine, n_proj_tot, 1, n_basis_each),
                            dtype=torch.complex128, device=self.rc.device)
         # Compute projectors by species:
         i_proj_start = 0
