@@ -92,12 +92,11 @@ class Fillings(qp.Constructable):
         M_constrain
             Whether to hold magnetization fixed to `M` in occupation updates:
             this only matters when `smearing` is not None.
-        n_bands : {'x<scale>', 'atomic', int}, default: 'x1.'
-            Number of bands, specified as a scale relative to the minimum
-            number of bands to accommodate electrons i.e. 'x1.5' implies
-            use 1.5 times the minimum number. Alternately, 'atomic' sets
-            the number of bands to the number of atomic orbitals. Finally,
-            an integer explicitly sets the number of bands.
+        n_bands : {'atomic', 'x<scale>', int}, default: 'atomic'
+            Number of bands, set to the number of atomic orbitals, or
+            specified as a scale relative to the minimum number of bands
+            to accommodate electrons ('x1.5' implies 1.5 x n_bands_min).
+            Alternately, an integer explicitly sets the number of bands.
         n_bands_extra : {'x<scale>', int}, default: 'x0.1'
             Number of extra bands retained by diagonalizers, necessary to
             converge any degenerate subspaces straddling n_bands. This could
@@ -165,16 +164,16 @@ class Fillings(qp.Constructable):
                         f'  constrained: {self.M_constrain}'
                         f'  B: {self.rc.fmt(self.B)}')
 
-        self._initialize_n_bands(n_bands, n_bands_extra)
+        self._initialize_n_bands(ions, n_bands, n_bands_extra)
         self._initialize_f()
 
-    def _initialize_n_bands(self,
+    def _initialize_n_bands(self, ions: 'Ions',
                             n_bands: Optional[Union[int, str]] = None,
                             n_bands_extra: Optional[Union[int, str]] = None
                             ) -> None:
         # Determine number of bands:
         if n_bands is None:
-            n_bands = 'x1'
+            n_bands = 'atomic'
         if isinstance(n_bands, int):
             self.n_bands = n_bands
             assert(self.n_bands >= 1)
@@ -183,7 +182,7 @@ class Fillings(qp.Constructable):
             assert isinstance(n_bands, str)
             if n_bands == 'atomic':
                 n_bands_method = 'atomic'
-                raise NotImplementedError('n_bands from atomic orbitals')
+                self.n_bands = ions.n_atomic_orbitals
             else:
                 assert n_bands.startswith('x')
                 n_bands_scale = float(n_bands[1:])

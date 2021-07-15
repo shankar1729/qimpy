@@ -298,6 +298,11 @@ class Ions(qp.Constructable):
     def n_projectors(self) -> int:
         return self.D_all.shape[0]
 
+    @property
+    def n_atomic_orbitals(self) -> int:
+        return sum((ps.pqn_psi.n_tot * self.n_ions_type[i_ps])
+                   for i_ps, ps in enumerate(self.pseudopotentials))
+
     def _collect_ps_matrix(self) -> None:
         """Collect pseudopotential matrices across species and atoms.
         Initializes `D_all`."""
