@@ -318,7 +318,27 @@ class Fillings(qp.Constructable):
             NM_err_mu_B = NM_mu_B.to(self.rc.cpu).numpy()
             return NM_err[i_free], NM_err_mu_B[i_free][:, i_free]
 
-        if len(i_free):
+        if len(i_free) == 0:
+            compute_NM(np.array([]))  # both mu and B are fixed
+        elif not self.M_constrain:
+            # Only mu is free: use a stable bracketing algorithm
+            # --- Find a bracketing interval:
+            def root_func1d(mu: float) -> float:
+                return compute_NM([mu])[0]
+
+            def expand_range(sign: int) -> float:
+                mu_limit = self.mu
+                dmu = sign * sigma_cur
+                while sign * root_func1d(mu_limit) <= 0.:
+                    mu_limit += dmu
+                    dmu *= 2.
+                return mu_limit
+
+            sigma_cur = self.sigma
+            mu_min = expand_range(-1)
+            mu_max = expand_range(+1)
+            self.mu = optimize.brentq(root_func1d, mu_min, mu_max)
+        else:  # B is free: use a quasi-Newton method
             # Find mu and/or B to match N and/or M as appropriate:
             # --- start with a larger sigma and reduce down for stability:
             eig_diff_max = self.rc.comm_k.allreduce(
@@ -336,20 +356,23 @@ class Fillings(qp.Constructable):
                 raise ValueError('Density/magnetization constraint failed:'
                                  ' check if n_bands is sufficient or if'
                                  ' mu/B guesses are reasonable.')
-        else:
-            compute_NM(np.array([]))  # both mu and B are fixed
 
         # Update fillings and entropy accordingly:
         self.f = results['f']
         energy['-TS'] = -self.sigma * self.rc.comm_k.allreduce(
             (w_sk * results['S']).sum().item(), qp.MPI.SUM)
+        # --- update n_electrons or mu, depending on which is free
         n_electrons = results['NM'][0].item()
         if self.mu_constrain:
             self.n_electrons = n_electrons
-        # --- compute magnetization
+        else:
+            self.mu = mu_B[0].item()
+        # --- update magnetization or B, depending on which is free
         if el.spin_polarized:
             M = results['NM'][1:]
-            if not self.M_constrain:
+            if self.M_constrain:
+                self.B = mu_B[1:]
+            else:
                 self.M = M
             M_str = '  M: ' \
                     f'{self.rc.fmt(M, floatmode="fixed", precision=5)}'

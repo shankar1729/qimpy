@@ -1,3 +1,5 @@
+from typing import List
+
 
 class Energy(dict):
     """Energy of system with access to components"""
@@ -7,7 +9,7 @@ class Energy(dict):
         return float(sum(self.values()))
 
     def __repr__(self) -> str:
-        terms = [[], []]  # collect normal and Legendre terms separately
+        terms: List[List[str]] = [[], []]  # collect terms with +/- separately
         for name, value in sorted(self.items()):
             term_index = (1 if (name[0] in '+-') else 0)
             terms[term_index].append(f'{name:>9s} = {value:25.16f}')
