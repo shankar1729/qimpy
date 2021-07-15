@@ -107,9 +107,33 @@ class Fillings(qp.Constructable):
         super().__init__(co=co)
         self.electrons = electrons
 
+        # Magnetic field and magnetization mode:
+        def check_magnetic(x: Union[float, Sequence[float]],
+                           x_name: str) -> torch.Tensor:
+            """Ensure that x = M or B is appropriate for spin mode."""
+            x_len = (3 if electrons.spinorial else 1)
+            if x:
+                if not electrons.spin_polarized:
+                    raise ValueError(f'{x_name} only allowed for'
+                                     f' spin-polarized calculations')
+                x_arr = torch.tensor(x, device=self.rc.device).flatten()
+                if x_len != len(x_arr):
+                    prefix = ('' if electrons.spinorial else 'non-')
+                    raise ValueError(f'{x_name} must have exactly {x_len} '
+                                     f'components in {prefix}spinorial mode')
+                return x_arr
+            else:
+                return torch.zeros(x_len, device=self.rc.device)
+        self.B = check_magnetic(B, 'B')
+        self.M = check_magnetic(M, 'M')
+        self.M_constrain = bool(M_constrain)
+
         # Number of electrons and bands:
         self.n_electrons = ions.Z_tot - charge
-        self.n_bands_min = int(np.ceil(self.n_electrons / electrons.w_spin))
+        M_mag = (abs(self.M.item()) if (electrons.spin_polarized
+                                        and not electrons.spinorial) else 0.)
+        self.n_bands_min = int(np.ceil((self.n_electrons + 0.5*M_mag)
+                                       * electrons.n_spinor / 2))
 
         # Smearing:
         self.smearing = smearing.lower() if smearing else None
@@ -136,27 +160,6 @@ class Fillings(qp.Constructable):
             raise ValueError('mu must be specified for mu_constrain = True')
         qp.log.info(f'mu: initial: {self.mu}'
                     f'  constrained: {self.mu_constrain}')
-
-        # Magnetic field and magnetization mode:
-        def check_magnetic(x: Union[float, Sequence[float]],
-                           x_name: str) -> torch.Tensor:
-            """Ensure that x = M or B is appropriate for spin mode."""
-            x_len = (3 if electrons.spinorial else 1)
-            if x:
-                if not electrons.spin_polarized:
-                    raise ValueError(f'{x_name} only allowed for'
-                                     f' spin-polarized calculations')
-                x_arr = torch.tensor(x, device=self.rc.device).flatten()
-                if x_len != len(x_arr):
-                    prefix = ('' if electrons.spinorial else 'non-')
-                    raise ValueError(f'{x_name} must have exactly {x_len} '
-                                     f'components in {prefix}spinorial mode')
-                return x_arr
-            else:
-                return torch.zeros(x_len, device=self.rc.device)
-        self.B = check_magnetic(B, 'B')
-        self.M = check_magnetic(M, 'M')
-        self.M_constrain = bool(M_constrain)
         if electrons.spin_polarized:
             qp.log.info(f'M: initial: {self.rc.fmt(self.M)}'
                         f'  constrained: {self.M_constrain}'
