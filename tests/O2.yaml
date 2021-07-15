@@ -1,0 +1,22 @@
+lattice:
+  system: cubic
+  a: 20.  # bohrs
+
+ions:
+  pseudopotentials:
+    - ../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
+  coordinates:
+    - [O, 0., 0., -0.057]
+    - [O, 0., 0., +0.057]
+
+electrons:
+  spin-polarized: yes
+  fillings:
+    M: 2.
+  xc: 
+    functional: gga-xc-pbe
+  scf:
+    mix-density: no  # mix potential instead
+
+checkpoint: null  # disable reading checkpoint
+checkpoint-out: O2.h5  # but still create it

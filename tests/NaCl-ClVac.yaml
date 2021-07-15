@@ -34,3 +34,6 @@ electrons:
 #  chefsi: {filter-order: 10}
   scf:
     mix-density: no  # mix potential instead
+
+checkpoint: null  # disable reading checkpoint
+checkpoint-out: NaCl-ClVac.h5  # but still create it
