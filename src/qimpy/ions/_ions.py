@@ -258,8 +258,12 @@ class Ions(qp.Constructable):
         """
         return qp.utils.cis((-2*np.pi) * (iG @ self.positions[atom_slice].T))
 
-    def _get_projectors(self, basis: 'Basis') -> 'Wavefunction':
-        """Get projectors corresponding to specified `basis`."""
+    def _get_projectors(self, basis: 'Basis',
+                        get_psi: bool = False) -> 'Wavefunction':
+        """Get projectors corresponding to specified `basis`.
+        If get_psi is True, get atomic orbitals instead. This mode is only for
+        internal use by :meth:`get_atomic_orbitals`, which does additional
+        transformations on the spin and spinorial dimensions."""
         from .quintic_spline import Interpolator
         iGk = basis.iG[:, basis.mine] + basis.k[:, None]  # fractional G + k
         Gk = iGk @ basis.lattice.Gbasis.T  # Cartesian G + k (of this process)
@@ -279,11 +283,14 @@ class Ions(qp.Constructable):
         # Compute projectors by species:
         i_proj_start = 0
         for i_ps, ps in enumerate(self.pseudopotentials):
-            n_proj_cur = ps.pqn_beta.n_tot * self.n_ions_type[i_ps]
+            # Select projectors (beta) or orbitals (psi) as requested:
+            pqn = ps.pqn_psi if get_psi else ps.pqn_beta
+            f_t_coeff = (ps.psi if get_psi else ps.beta).f_t_coeff
+            # Current range:
+            n_proj_cur = pqn.n_tot * self.n_ions_type[i_ps]
             i_proj_stop = i_proj_start + n_proj_cur
             # Compute atomic template:
-            proj_atom = (Ginterp(ps.beta.f_t_coeff)[ps.pqn_beta.i_rf]  # radial
-                         * Ylm[ps.pqn_beta.i_lm]  # angular
+            proj_atom = (Ginterp(f_t_coeff)[pqn.i_rf] * Ylm[pqn.i_lm]
                          ).transpose(0, 1)[:, None]  # k,1,i_proj,G
             # Repeat by translation to each atom:
             trans_cur = translations[:, self.slices[i_ps], None]  # k,atom,1,G
@@ -293,6 +300,19 @@ class Ions(qp.Constructable):
             i_proj_start = i_proj_stop
         proj[basis.pad_index_mine] = 0.  # project out padded entries
         return qp.electrons.Wavefunction(basis, coeff=proj)
+
+    def get_atomic_orbitals(self, basis: 'Basis') -> 'Wavefunction':
+        """Get atomic orbitals (across all species) for specified `basis`."""
+        psi = self._get_projectors(basis, get_psi=True)
+        if basis.n_spinor == 2:
+            # TODO: implement spin-angle transformations here
+            raise NotImplementedError("Relativistic atomic orbitals")
+        else:
+            if basis.n_spins == 1:
+                return psi  # no modifications needed compared to projectors
+            else:  # basis.n_spins == 2:
+                coeff_spin = psi.coeff.tile(2, 1, 1, 1, 1)  # repeat for spin
+                return qp.electrons.Wavefunction(basis, coeff=coeff_spin)
 
     @property
     def n_projectors(self) -> int:

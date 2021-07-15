@@ -249,11 +249,18 @@ def _isub(self: 'Wavefunction', other: 'Wavefunction') -> 'Wavefunction':
 
 
 def _getitem(self: 'Wavefunction', index: Any) -> 'Wavefunction':
-    """Propagate slicing to coeff and proj if present"""
+    """Propagate getting slices to coeff and proj if present"""
     coeff = self.coeff[index]
     proj = None if (self.proj is None) else self.proj[index]
     return qp.electrons.Wavefunction(self.basis, coeff, proj,
                                      self.band_division)
+
+
+def _setitem(self: 'Wavefunction', index: Any, value: 'Wavefunction') -> None:
+    """Propagate setting slices to coeff and proj if present"""
+    self.coeff[index] = value.coeff
+    if (self.proj is not None) and (value.proj is not None):
+        self.proj[index] = value.proj
 
 
 def _cat(self: 'Wavefunction', other: 'Wavefunction',

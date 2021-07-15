@@ -6,7 +6,7 @@ from ._wavefunction_init import _randomize, \
 from ._wavefunction_split import _split_bands, _split_basis
 from ._wavefunction_ops import _norm, _band_norm, _band_ke, _band_spin, \
     _dot, _dot_O, _overlap, _matmul, _orthonormalize, \
-    _mul, _imul, _add, _iadd, _sub, _isub, _getitem, _cat
+    _mul, _imul, _add, _iadd, _sub, _isub, _getitem, _setitem, _cat
 from typing import Callable, Optional, Union, TYPE_CHECKING
 if TYPE_CHECKING:
     from ..utils import TaskDivision, Checkpoint
@@ -178,4 +178,5 @@ class Wavefunction:
     __sub__: BinaryOp = _sub
     __isub__: BinaryOp = _isub
     __getitem__ = _getitem
+    __setitem__ = _setitem
     cat = _cat  # join wavefunctions

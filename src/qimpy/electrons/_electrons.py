@@ -24,8 +24,8 @@ class Electrons(qp.Constructable):
     """Electronic subsystem"""
     __slots__ = ('kpoints', 'spin_polarized', 'spinorial', 'n_spins',
                  'n_spinor', 'w_spin', 'fillings',
-                 'basis', 'xc', 'diagonalize', 'scf', 'C',
-                 'eig', 'deig_max', 'n', 'tau', 'V_ks', 'V_tau')
+                 'basis', 'xc', 'diagonalize', 'scf', 'C', '_n_bands_done',
+                 'lcao', 'eig', 'deig_max', 'n', 'tau', 'V_ks', 'V_tau')
     kpoints: 'Kpoints'  #: Set of kpoints (mesh or path)
     spin_polarized: bool  #: Whether calculation is spin-polarized
     spinorial: bool  #: Whether calculation is relativistic / spinorial
@@ -38,6 +38,8 @@ class Electrons(qp.Constructable):
     diagonalize: 'Davidson'  #: Hamiltonian diagonalization method
     scf: 'SCF'  #: Self-consistent field method
     C: 'Wavefunction'  #: Electronic wavefunctions
+    _n_bands_done: int  # Number of bands in C that have been initialized
+    lcao: bool  # Whether to initialize C, eig usinG LCAO
     eig: torch.Tensor  #: Electronic orbital eigenvalues
     deig_max: float  #: Estimate of accuracy of current `eig`
     n: 'FieldH'  #: Electron density (and magnetization, if `spin_polarized`)
@@ -54,7 +56,7 @@ class Electrons(qp.Constructable):
                  spin_polarized: bool = False, spinorial: bool = False,
                  fillings: Optional[Union[dict, 'Fillings']] = None,
                  basis: Optional[Union[dict, 'Basis']] = None,
-                 xc: Optional[Union[dict, 'XC']] = None,
+                 xc: Optional[Union[dict, 'XC']] = None, lcao: bool = False,
                  davidson: Optional[Union[dict, 'Davidson']] = None,
                  chefsi:  Optional[Union[dict, 'CheFSI']] = None,
                  scf:  Optional[Union[dict, 'SCF']] = None) -> None:
@@ -71,7 +73,7 @@ class Electrons(qp.Constructable):
         k_mesh : qimpy.electrons.Kmesh or dict, optional
             Uniform k-point mesh for Brillouin-zone integration.
             Specify only one of k_mesh or k_path.
-            Default: use default qimpy.electrons.Kmesh()
+            Default: use default `qimpy.electrons.Kmesh()`
         k_path : qimpy.electrons.Kpath or dict, optional
             Path of k-points through Brillouin zone, typically for band
             structure calculations. Specify only one of k_mesh or k_path.
@@ -89,17 +91,22 @@ class Electrons(qp.Constructable):
             Default: False
         fillings : qimpy.electrons.Fillings or None, optional
             Electron occupations and charge / chemical potential control.
-            Default: use default qimpy.electrons.Fillings()
+            Default: use default `qimpy.electrons.Fillings()`
         basis : qimpy.electrons.Basis or None, optional
             Wavefunction basis set (plane waves).
-            Default: use default qimpy.electrons.Basis()
-        xc : qimpy.electrons.XC or None, optional
+            Default: use default `qimpy.electrons.Basis()`
+        xc : qimpy.electrons.xc.XC or None, optional
             Exchange-correlation functional.
-            Default: use LDA. TODO: update when more options added.
+            Default: use default `qimpy.electrons.xc.XC()`
+        lcao: bool, optional = True
+            Whether to perform linear combination of atomic orbitals to
+            initialize wavefunctions. If False, initialize wavefunctions
+            to bandwidth-limited random numbers. (If starting from a
+            checkpoint with wavefunctions, this option has no effect.)
         davidson : qimpy.electrons.Davidson or dict, optional
             Diagonalize Kohm-Sham Hamiltonian using the Davidson method.
             Specify only one of davidson or chefsi.
-            Default: use default qimpy.electrons.Davidson()
+            Default: use default `qimpy.electrons.Davidson()`
         chefsi : qimpy.electrons.CheFSI or dict, optional
             Diagonalize Kohm-Sham Hamiltonian using the Chebyshev Filter
             Subspace Iteration (CheFSI) method.
@@ -144,37 +151,30 @@ class Electrons(qp.Constructable):
                        ions=ions, symmetries=symmetries, kpoints=self.kpoints,
                        n_spins=self.n_spins, n_spinor=self.n_spinor)
 
-        # Initial wavefunctions:
+        # Initialize exchange-correlation functional:
+        self.construct('xc', qp.electrons.xc.XC, xc,
+                       spin_polarized=spin_polarized)
+
+        # Initial wavefunctions and eigenvalues:
+        self._n_bands_done = 0
         self.C = qp.electrons.Wavefunction(self.basis,
                                            n_bands=self.fillings.n_bands)
         if self._checkpoint_has('C'):
             qp.log.info('Loading wavefunctions C')
-            n_bands_done = self.C.read(cast('Checkpoint', self.checkpoint_in),
-                                       self.path + 'C')
-        else:
-            n_bands_done = 0
-        if n_bands_done < self.fillings.n_bands:
-            qp.log.info('Randomizing {} bands of wavefunctions C '.format(
-                f'{self.fillings.n_bands - n_bands_done}'
-                if n_bands_done else 'all'))
-            self.C.randomize(b_start=n_bands_done)
-        self.C = self.C.orthonormalize()
+            self._n_bands_done = self.C.read(cast('Checkpoint',
+                                                  self.checkpoint_in),
+                                             self.path + 'C')
+        self.lcao = lcao
         self.eig = torch.zeros(self.C.coeff.shape[:3], dtype=torch.double,
                                device=rc.device)
+        self.deig_max = np.nan  # eigenvalues completely wrong
         if self._checkpoint_has('eig'):
             qp.log.info('Loading band eigenvalues eig')
-            n_bands_done = self.fillings.read_band_scalars(
-                cast('Checkpoint', self.checkpoint_in),
-                self.path + 'eig', self.eig)
-        else:
-            n_bands_done = 0  # number for which eigenvalues are ready
-        self.deig_max = (np.nan  # (some) eigenvalues completely wrong
-                         if (n_bands_done < self.fillings.n_bands)
-                         else np.inf)  # not fully wrong, but accuracy unknown
-
-        # Initialize exchange-correlation functional:
-        self.construct('xc', qp.electrons.xc.XC, xc,
-                       spin_polarized=spin_polarized)
+            if self.fillings.read_band_scalars(cast('Checkpoint',
+                                                    self.checkpoint_in),
+                                               self.path + 'eig', self.eig
+                                               ) == self.fillings.n_bands:
+                self.deig_max = np.inf  # not fully wrong, but accuracy unknown
 
         # Initialize diagonalizer:
         n_options = np.count_nonzero([(d is not None)
@@ -193,6 +193,27 @@ class Electrons(qp.Constructable):
 
         # Initialize SCF:
         self.construct('scf', qp.electrons.SCF, scf, comm=rc.comm_kb)
+
+    def initialize_wavefunctions(self, ions: 'Ions') -> None:
+        """Initialize wavefunctions to LCAO / random (if not from checkpoint).
+        (This needs to happen after ions have been updated in order to get
+        atomic orbitals, which in turn depends on electrons.__init__ being
+        completed; hence this is outside the __init__.)"""
+        if self.lcao and not self._n_bands_done:
+            n_atomic = ions.n_atomic_orbitals
+            if n_atomic < self.C.n_bands():
+                self.C[:, :, :n_atomic] = \
+                    ions.get_atomic_orbitals(self.basis)
+            else:
+                self.C = ions.get_atomic_orbitals(self.basis)
+            self._n_bands_done = n_atomic
+        if self._n_bands_done < self.fillings.n_bands:
+            qp.log.info('Randomizing {} bands of wavefunctions C '.format(
+                f'{self.fillings.n_bands - self._n_bands_done}'
+                if self._n_bands_done else 'all'))
+            self.C.randomize(b_start=self._n_bands_done)
+            self._n_bands_done = self.C.n_bands()
+        self.C = self.C.orthonormalize()
 
     @property
     def n_densities(self) -> int:
