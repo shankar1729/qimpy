@@ -7,13 +7,14 @@ class Energy(dict):
         return float(sum(self.values()))
 
     def __repr__(self) -> str:
-        result = ''
-        for name, value in self.items():
-            if value:
-                result += f'{name:>9s} = {value:25.16f}\n'
-        result += ('-' * 37)
-        result += f'\n{self.name():>9s} = {float(self):25.16f}'
-        return result
+        terms = [[], []]  # collect normal and Legendre terms separately
+        for name, value in sorted(self.items()):
+            term_index = (1 if (name[0] in '+-') else 0)
+            terms[term_index].append(f'{name:>9s} = {value:25.16f}')
+        terms[0].extend(terms[1])
+        terms[0].append('-' * 37)  # separator
+        terms[0].append(f'{self.name():>9s} = {float(self):25.16f}')  # total
+        return '\n'.join(terms[0])
 
     def name(self) -> str:
         """Appropriate name of (free) energy based on components."""

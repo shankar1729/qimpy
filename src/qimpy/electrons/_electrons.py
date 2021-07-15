@@ -219,7 +219,7 @@ class Electrons(qp.Constructable):
         rho = self.n[0]  # total charge density
         VH = system.coulomb(rho)  # Hartree potential
         self.V_ks[0] += system.ions.Vloc + VH
-        system.energy['EH'] = 0.5 * (rho ^ VH).item()
+        system.energy['Ehartree'] = 0.5 * (rho ^ VH).item()
         system.energy['Eloc'] = (rho ^ system.ions.Vloc).item()
 
     def update(self, system: 'System') -> None:
