@@ -34,7 +34,7 @@ def _apply_potential(self: 'Basis', V: 'FieldH',
         Vdata[0, 1] = Vdata_in[1] - 1j*Vdata_in[2]
     elif n_densities == 2:
         Vdata = torch.empty((2, 1, 1, 1) + Vdata_in.shape[1:],
-                            dtype=C.coeff.dtype, device=self.rc.device)
+                            dtype=Vdata_in.dtype, device=self.rc.device)
         Vdata[0, 0, 0, 0] = (Vdata_in[0] + Vdata_in[1])
         Vdata[1, 0, 0, 0] = (Vdata_in[0] - Vdata_in[1])
     else:  # n_densities == 1:

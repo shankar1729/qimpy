@@ -27,8 +27,8 @@ ions:
     - [Cl, 0.50, 0.50, 0.50]
 
 electrons:
-#  basis:
-#    real-wavefunctions: yes
+  basis:
+    real-wavefunctions: yes
 #  chefsi: {filter-order: 10}
   scf:
     mix-density: no  # mix potential instead
