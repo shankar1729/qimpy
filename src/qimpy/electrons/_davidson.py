@@ -167,6 +167,7 @@ class Davidson(qp.Constructable):
             norm_exp = Cexp.band_norm()
             self._regularize(Cexp, norm_exp, self._i_iter)
             Cexp *= (1./norm_exp[..., None, None])
+            Cexp.constrain()
             n_bands_new = n_bands_cur + Cexp.n_bands()
 
             # Expansion subspace overlaps:

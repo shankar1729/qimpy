@@ -10,6 +10,8 @@ ions:
     - [O, 0., 0., +0.057]
 
 electrons:
+  basis:
+    real-wavefunctions: yes
   spin-polarized: yes
   fillings:
     M: 2.

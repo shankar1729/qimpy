@@ -80,11 +80,7 @@ def _apply_potential(self: 'Basis', V: 'FieldH',
         b_start = b_stop
         b_stop += b_size
 
-    # Enforce hermitian conjugacy for real wavefunctions:
-    if self.real_wavefunctions:
-        coeff[..., self.index_z0] += coeff[..., self.index_z0_conj].conj()
-        coeff[..., self.index_z0] *= 0.5
-    coeff[self.pad_index] = 0.
+    VC.constrain()  # project out spurious entries (padding and real symmetry)
     watch.stop()
 
     # Restore V*C to the same configuration (basis or band-split) as C:

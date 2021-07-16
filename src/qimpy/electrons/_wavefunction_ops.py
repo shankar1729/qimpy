@@ -271,3 +271,22 @@ def _cat(self: 'Wavefunction', other: 'Wavefunction',
             else torch.cat((self.proj, other.proj), dim=dim))
     return qp.electrons.Wavefunction(self.basis, coeff, proj,
                                      self.band_division)
+
+
+def _constrain(self: 'Wavefunction'):
+    """Enforce Hermitian symmetry for real wavefunctions. This is required in
+    diagonalizers to prevent runaway of hermiticity-breaking round-off errors.
+    """
+    basis = self.basis
+    if self.band_division or (basis.rc.n_procs_b == 1):
+        # All basis entries together on each process:
+        self.coeff[basis.pad_index] = 0.
+        if basis.real_wavefunctions:
+            self.coeff[..., basis.index_z0] \
+                += self.coeff[..., basis.index_z0_conj].conj()
+            self.coeff[..., basis.index_z0] *= 0.5
+    else:
+        # Basis is distributed over MPI:
+        self.coeff[basis.pad_index_mine] = 0.
+        if basis.real_wavefunctions:
+            raise NotImplementedError("basis-parallel enforce-real")

@@ -35,7 +35,7 @@ def _initialize_device(device: torch.device) -> None:
 
 
 def get_harmonics(l_max: int, r: torch.Tensor) -> torch.Tensor:
-    """Compute real solid harmonics for each l <= l_max.
+    """Compute real solid harmonics :math:`r^l Y_{lm}(r)` for each l <= l_max.
     Contains l=0, followed by all m for l=1, and so on till l_max."""
     if not _YLM_PROD:
         _initialize_device(r.device)
@@ -59,6 +59,23 @@ def get_harmonics(l_max: int, r: torch.Tensor) -> torch.Tensor:
         result[l**2:(l+1)**2] = Yl
         Yprev = Yl
     return result
+
+
+def get_harmonics_t(l_max: int, G: torch.Tensor) -> torch.Tensor:
+    """Same as :func:`get_harmonics`, but in reciprocal space. The result
+    is a complex tensor containing :math:`(iG)^l Y_{lm}(G)`, where the extra
+    phase factor is from the Fourier transform of spherical harmonics. This is
+    required for the corresponding real-space version to be real."""
+    # Prepare phase factors:
+    phase = []
+    phase_cur = 1. + 0.j
+    for l in range(l_max+1):
+        phase.extend([phase_cur] * (2*l + 1))  # repeated for m
+        phase_cur *= 1.j
+    # Multiply real harmonics:
+    return get_harmonics(l_max, G) * torch.tensor(phase, device=G.device
+                                                  ).view((len(phase),) + (1,)
+                                                         * (len(G.shape) - 1))
 
 
 if __name__ == "__main__":
