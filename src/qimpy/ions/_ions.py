@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from ..utils import RunConfig
     from ._pseudopotential import Pseudopotential
     from .._system import System
-    from ..grid import FieldR, FieldH
+    from ..grid import Grid, FieldR, FieldH
     from ..electrons import Wavefunction, Basis
 
 
@@ -342,3 +342,22 @@ class Ions(qp.Constructable):
                 slice_cur = slice(i_proj_start, i_proj_stop)
                 self.D_all[slice_cur, slice_cur] = D
                 i_proj_start = i_proj_stop
+
+    def get_atomic_density(self, grid: 'Grid',
+                           M_tot: torch.Tensor) -> 'FieldH':
+        """Get atomic reference density (for LCAO) on `grid`.
+        The magnetization mode and overall magnitude is set by `M_tot`."""
+        from .quintic_spline import Interpolator
+        iG = grid.get_mesh('H').to(torch.double)  # half-space
+        G = ((iG @ grid.lattice.Gbasis.T)**2).sum(dim=-1).sqrt()
+        Ginterp = Interpolator(G, qp.ions.RadialFunction.DG)
+        # Collect density from each atom:
+        n_densities = 1 + M_tot.shape[0]
+        n = qp.grid.FieldH(grid, shape_batch=(n_densities,))
+        for i_type, ps in enumerate(self.pseudopotentials):
+            rho_i = Ginterp(ps.rho_atom.f_t_coeff / grid.lattice.volume)
+            SF = self.translation_phase(iG, self.slices[i_type])
+            n.data[0] += rho_i[0] * SF.sum(dim=-1)
+            # TODO: include magnetization
+        qp.log.info(f'N0: {n.o * grid.lattice.volume}')
+        return n

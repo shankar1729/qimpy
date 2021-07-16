@@ -14,7 +14,7 @@ ions:
 electrons:
   k-mesh:
     offset: [0.5, 0.5, 0.5] #Monkhorst-Pack
-    size: [4, 4, 4]
+    size: [8, 8, 8]
 
 grid:
   ke-cutoff: 100

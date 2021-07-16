@@ -194,18 +194,21 @@ class Electrons(qp.Constructable):
         # Initialize SCF:
         self.construct('scf', qp.electrons.SCF, scf, comm=rc.comm_kb)
 
-    def initialize_wavefunctions(self, ions: 'Ions') -> None:
+    def initialize_wavefunctions(self, system: 'System') -> None:
         """Initialize wavefunctions to LCAO / random (if not from checkpoint).
         (This needs to happen after ions have been updated in order to get
         atomic orbitals, which in turn depends on electrons.__init__ being
         completed; hence this is outside the __init__.)"""
+        n_atomic = 0
         if self.lcao and not self._n_bands_done:
-            n_atomic = ions.n_atomic_orbitals
+            n_atomic = system.ions.n_atomic_orbitals
+            qp.log.info(f'Setting {n_atomic} bands of wavefunctions C'
+                        ' to atomic orbitals')
             if n_atomic < self.C.n_bands():
                 self.C[:, :, :n_atomic] = \
-                    ions.get_atomic_orbitals(self.basis)
+                    system.ions.get_atomic_orbitals(self.basis)
             else:
-                self.C = ions.get_atomic_orbitals(self.basis)
+                self.C = system.ions.get_atomic_orbitals(self.basis)
             self._n_bands_done = n_atomic
         if self._n_bands_done < self.fillings.n_bands:
             qp.log.info('Randomizing {} bands of wavefunctions C '.format(
@@ -213,7 +216,19 @@ class Electrons(qp.Constructable):
                 if self._n_bands_done else 'all'))
             self.C.randomize(b_start=self._n_bands_done)
             self._n_bands_done = self.C.n_bands()
-        self.C = self.C.orthonormalize()
+        # Diagonalize LCAO subspace hamiltonian:
+        if n_atomic:
+            qp.log.info('Setting wavefunctions to LCAO eigenvectors')
+            self.n = system.ions.get_atomic_density(system.grid,
+                                                    self.fillings.M)
+            self.tau = qp.grid.FieldH(system.grid, shape_batch=(0,))  # TODO
+            self.update_potential(system)
+            C_OC = self.C.dot_O(self.C)
+            C_HC = self.C ^ self.hamiltonian(self.C)
+            self.eig, V = qp.utils.eighg(C_HC, C_OC)
+            self.C = self.C @ V  # Set to eigenvectors
+        else:
+            self.C = self.C.orthonormalize()  # For random / checkpoint case
 
     @property
     def n_densities(self) -> int:

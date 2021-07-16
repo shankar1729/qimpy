@@ -13,11 +13,11 @@ electrons:
   spin-polarized: yes
   fillings:
     M: 2.
-    M-constrain: yes
+    M-constrain: no
   xc: 
     functional: gga-xc-pbe
   scf:
-    mix-density: no  # mix potential instead
+    #mix-density: no  # mix potential instead
 
 checkpoint: null  # disable reading checkpoint
 checkpoint-out: O2.h5  # but still create it
