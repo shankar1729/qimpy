@@ -266,8 +266,8 @@ class Fillings(qp.Constructable):
         if np.isnan(self.mu):
             n_full = int(np.floor(self.n_electrons /
                                   (el.w_spin * el.n_spins)))
-            self.mu = self.rc.comm_kb.allreduce(eig[:, :, n_full].min().item(),
-                                                qp.MPI.MIN)
+            self.mu = qp.utils.globalreduce.min(eig[:, :, n_full],
+                                                self.rc.comm_kb)
 
         # Weights that generate number / magnetization and their targets:
         if el.spin_polarized:
@@ -342,8 +342,8 @@ class Fillings(qp.Constructable):
         else:  # B is free: use a quasi-Newton method
             # Find mu and/or B to match N and/or M as appropriate:
             # --- start with a larger sigma and reduce down for stability:
-            eig_diff_max = self.rc.comm_k.allreduce(eig.diff(dim=-1).max(),
-                                                    qp.MPI.MAX)
+            eig_diff_max = qp.utils.globalreduce.max(eig.diff(dim=-1),
+                                                     self.rc.comm_k)
             sigma_cur = max(self.sigma, min(0.1, eig_diff_max))
             final_step = False
             while not final_step:
@@ -360,8 +360,8 @@ class Fillings(qp.Constructable):
 
         # Update fillings and entropy accordingly:
         self.f = results['f']
-        energy['-TS'] = -self.sigma * self.rc.comm_k.allreduce(
-            (w_sk * results['S']).sum().item(), qp.MPI.SUM)
+        energy['-TS'] = -self.sigma * qp.utils.globalreduce.sum(
+            w_sk * results['S'], self.rc.comm_k)
         # --- update n_electrons or mu, depending on which is free
         n_electrons = results['NM'][0].item()
         if self.mu_constrain:

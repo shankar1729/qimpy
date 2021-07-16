@@ -105,21 +105,22 @@ class Davidson(qp.Constructable):
         """Compute the sum over band eigenvalues, averaged over k"""
         electrons = self.electrons
         n_bands = electrons.fillings.n_bands
-        return self.rc.comm_k.allreduce((electrons.basis.w_sk
-                                         * electrons.eig[..., :n_bands]
-                                         ).sum().item(), qp.MPI.SUM)
+        return qp.utils.globalreduce.sum(electrons.basis.w_sk
+                                         * electrons.eig[..., :n_bands],
+                                         self.rc.comm_k)
 
     def _check_deig(self, deig: torch.Tensor,
                     eig_threshold: float) -> Tuple[float, int]:
         """Return maximum change in eigenvalues and how many
         eigenvalues are converged at all spin and k"""
         n_bands = self.electrons.fillings.n_bands
-        deig_max = self.rc.comm_kb.allreduce(deig[..., :n_bands].max().item(),
-                                             qp.MPI.MAX)
+        deig_max = qp.utils.globalreduce.max(deig[..., :n_bands],
+                                             self.rc.comm_kb)
         pending = torch.where((deig[..., :n_bands]
                                > eig_threshold).flatten(0, 1).any(dim=0))[0]
-        n_eigs_done = self.rc.comm_kb.allreduce(
-            pending[0].item() if len(pending) else n_bands, qp.MPI.MIN)
+        n_eigs_done = self.rc.comm_kb.allreduce(pending[0].item()
+                                                if len(pending) else n_bands,
+                                                qp.MPI.MIN)
         return deig_max, n_eigs_done
 
     def __call__(self, n_iterations: Optional[int] = None,

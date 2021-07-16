@@ -134,11 +134,10 @@ class Basis(qp.Constructable):
         within_cutoff = (self.get_ke() < ke_cutoff)  # mask of which iG to keep
         # --- determine statistics of basis count across all k:
         self.n = within_cutoff.count_nonzero(dim=1)
-        self.n_min = rc.comm_k.allreduce(self.n.min().item(), qp.MPI.MIN)
-        self.n_max = rc.comm_k.allreduce(self.n.max().item(), qp.MPI.MAX)
+        self.n_min = qp.utils.globalreduce.min(self.n, rc.comm_k)
+        self.n_max = qp.utils.globalreduce.max(self.n, rc.comm_k)
         self.n_tot = qp.utils.ceildiv(self.n_max, rc.n_procs_b) * rc.n_procs_b
-        self.n_avg = rc.comm_k.allreduce((self.n * self.wk).sum().item(),
-                                         qp.MPI.SUM)
+        self.n_avg = qp.utils.globalreduce.sum(self.n * self.wk, rc.comm_k)
         self.n_ideal = ((2.*ke_cutoff)**1.5) * lattice.volume / (6 * np.pi**2)
         qp.log.info(f'n_basis:  min: {self.n_min}  max: {self.n_max}'
                     f'  avg: {self.n_avg:.3f}  ideal: {self.n_ideal:.3f}')
@@ -186,8 +185,8 @@ class Basis(qp.Constructable):
             self.Gweight_mine = torch.zeros(div.n_each, device=self.rc.device)
             self.Gweight_mine[:div.n_mine] = torch.where(
                 self.iG[0, div.i_start:div.i_stop, 2] == 0, 1., 2.)
-            Gweight_sum = rc.comm_b.allreduce(self.Gweight_mine.sum().item(),
-                                              qp.MPI.SUM)
+            Gweight_sum = qp.utils.globalreduce.sum(self.Gweight_mine,
+                                                    rc.comm_b)
             qp.log.info(f'basis weight sum: {Gweight_sum:g}')
 
     def get_ke(self, basis_slice: slice = slice(None)) -> torch.Tensor:

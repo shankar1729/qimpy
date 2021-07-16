@@ -53,7 +53,7 @@ class SCF(qp.utils.Pulay['FieldH']):
         iG = grid.get_mesh('H').to(torch.double)  # half-space
         Gsq = ((iG @ grid.lattice.Gbasis.T) ** 2).sum(dim=-1)
         # --- regularize Gsq by q_kappa or min(G!=0) as appropriate
-        Gsq_min = self.comm.allreduce(Gsq[Gsq > 0.].min().item(), qp.MPI.MIN)
+        Gsq_min = qp.utils.globalreduce.min(Gsq[Gsq > 0.], self.comm)
         q_kappa_sq = 0. if (self.q_kappa is None) else (self.q_kappa ** 2)
         Gsq_reg = ((Gsq + q_kappa_sq) if q_kappa_sq
                    else torch.clamp(Gsq, min=Gsq_min))
@@ -76,7 +76,7 @@ class SCF(qp.utils.Pulay['FieldH']):
         # Compute eigenvalue difference for extra convergence threshold:
         eig_cur = electrons.eig[..., :electrons.fillings.n_bands]
         deig = (eig_cur - eig_prev).abs()
-        deig_max = self.rc.comm_kb.allreduce(deig.max().item(), qp.MPI.MAX)
+        deig_max = qp.utils.globalreduce.max(deig, self.rc.comm_kb)
         return [deig_max]
 
     @property

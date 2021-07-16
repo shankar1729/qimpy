@@ -200,6 +200,8 @@ def _fft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
     """
     if v.dtype.is_complex:
         # Complex to complex forward transform:
+        if v.shape[:-3].count(0):  # zero-sized batches
+            return v
         if self.n_procs == 1:
             return torch.fft.fftn(v, s=self.shape, norm='forward')
         return parallel_transform(
@@ -210,6 +212,9 @@ def _fft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
     else:
         # Real to complex forward transform:
         assert v.dtype.is_floating_point
+        if v.shape[:-3].count(0):  # zero-sized batches
+            return torch.zeros(v.shape[:-3] + self.shapeH_mine,
+                               dtype=COMPLEX_TYPE[v.dtype], device=v.device)
         if self.n_procs == 1:
             return torch.fft.rfftn(v, s=self.shape, norm='forward')
         assert v.dtype.is_floating_point
@@ -251,6 +256,8 @@ def _ifft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
 
     if shape2 == self.shape[2]:
         # Complex to complex inverse transform:
+        if v.shape[:-3].count(0):  # zero-sized batches
+            return v
         if self.n_procs == 1:
             return torch.fft.ifftn(v, s=self.shape, norm='forward')
         return parallel_transform(
@@ -261,6 +268,9 @@ def _ifft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
     else:
         # Complex to real inverse transform:
         assert shape2 == self.shapeH[2]
+        if v.shape[:-3].count(0):  # zero-sized batches
+            return torch.zeros(v.shape[:-3] + self.shapeR_mine,
+                               dtype=REAL_TYPE[v.dtype], device=v.device)
         if self.n_procs == 1:
             return torch.fft.irfftn(v, s=self.shape, norm='forward')
         assert v.dtype.is_complex
@@ -274,45 +284,45 @@ def _ifft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
 
 
 # Maps between corresponding real and complex types:
-realType = {
+REAL_TYPE = {
     torch.complex128: torch.double,
     torch.complex64: torch.float}
-complexType = {
+COMPLEX_TYPE = {
     torch.double: torch.complex128,
     torch.float: torch.complex64}
 
 
 # --- Wrappers to torch FFTs that are safe for zero sizes ---
 def safe_fft(v: torch.Tensor) -> torch.Tensor:
-    return v if v.shape.count(0) else torch.fft.fft(v, norm='forward')
+    return torch.fft.fft(v, norm='forward') if v.numel() else v
 
 
 def safe_fft2(v: torch.Tensor) -> torch.Tensor:
-    return v if v.shape.count(0) else torch.fft.fft2(v, norm='forward')
+    return torch.fft.fft2(v, norm='forward') if v.numel() else v
 
 
 def safe_ifft(v: torch.Tensor) -> torch.Tensor:
-    return v if v.shape.count(0) else torch.fft.ifft(v, norm='forward')
+    return torch.fft.ifft(v, norm='forward') if v.numel() else v
 
 
 def safe_ifft2(v: torch.Tensor) -> torch.Tensor:
-    return v if v.shape.count(0) else torch.fft.ifft2(v, norm='forward')
+    return torch.fft.ifft2(v, norm='forward') if v.numel() else v
 
 
 def safe_rfft(v: torch.Tensor) -> torch.Tensor:
-    if v.shape.count(0):
-        return torch.zeros(v.shape[:-1] + (v.shape[-1]//2+1,),
-                           dtype=complexType[v.dtype], device=v.device)
-    else:
+    if v.numel():
         return torch.fft.rfft(v, norm='forward')
+    else:
+        return torch.zeros(v.shape[:-1] + (v.shape[-1]//2+1,),
+                           dtype=COMPLEX_TYPE[v.dtype], device=v.device)
 
 
 def safe_irfft(v: torch.Tensor) -> torch.Tensor:
-    if v.shape.count(0):
-        return torch.zeros(v.shape[:-1] + (2*(v.shape[-1]-1),),
-                           dtype=realType[v.dtype], device=v.device)
-    else:
+    if v.numel():
         return torch.fft.irfft(v, norm='forward')
+    else:
+        return torch.zeros(v.shape[:-1] + (2*(v.shape[-1]-1),),
+                           dtype=REAL_TYPE[v.dtype], device=v.device)
 
 
 # Test / benchmark parallelization of FFTs:

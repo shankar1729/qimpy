@@ -9,8 +9,8 @@ if TYPE_CHECKING:
 
 def _norm(self: 'Wavefunction') -> float:
     """Return overall norm of wavefunctions"""
-    return np.sqrt(self.basis.rc.comm_kb.allreduce(self.coeff.norm().item()**2,
-                                                   qp.MPI.SUM))
+    return np.sqrt(qp.utils.globalreduce.sum(qp.utils.abs_squared(self.coeff),
+                                             self.basis.rc.comm_kb))
 
 
 def _band_norms(self: 'Wavefunction', mode: str) -> torch.Tensor:

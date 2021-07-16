@@ -40,7 +40,6 @@ def get_harmonics(l_max: int, r: torch.Tensor) -> torch.Tensor:
     if not _YLM_PROD:
         _initialize_device(r.device)
     assert(l_max <= shdata.L_MAX)
-    out_shape = (-1,) + r.shape[:-1]  # m, followed by shape of r
     result = torch.empty(((l_max+1)**2,) + r.shape[:-1],
                          dtype=r.dtype, device=r.device)
     if l_max >= 0:
@@ -48,14 +47,15 @@ def get_harmonics(l_max: int, r: torch.Tensor) -> torch.Tensor:
         result[0] = _YLM_RECUR[0]
     if l_max >= 1:
         # l = 1: proportional to (y, z, x) for m = (-1, 0, +1):
-        Y1 = (_YLM_RECUR[1] * r.flatten(0, -2).T[(1, 2, 0), :]).view(out_shape)
+        Y1 = (_YLM_RECUR[1] * r.flatten(0, -2).T[(1, 2, 0), :]
+              ).view((3,) + r.shape[:-1])
         result[1:4] = Y1
         Yprev = Y1
     for l in range(2, l_max+1):
         # l > 1: compute from product of harmonics at l = 1 and l - 1:
         Yl = (_YLM_RECUR[l]
               @ (Yprev[:, None, :] * Y1[None, :, :]).view(3*(2*l - 1), -1)
-              ).view(out_shape)
+              ).view((2*l+1,) + r.shape[:-1])
         result[l**2:(l+1)**2] = Yl
         Yprev = Yl
     return result
