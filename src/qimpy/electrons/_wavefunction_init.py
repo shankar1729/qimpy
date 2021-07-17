@@ -85,18 +85,20 @@ def _randomize(self: 'Wavefunction', seed: int = 0, b_start: int = 0,
 
     # Enforce Hermitian symmetry in real case:
     if basis.real_wavefunctions:
-        # Find subset of iG_z = 0 in current process range:
-        index_z0 = basis.real.index_z0
-        sel = torch.where(torch.logical_and(index_z0 >= basis_start,
-                                            index_z0 < basis_stop))[0]
-        index_z0_local = index_z0[sel] - basis_start
+        # Pick subset of iG_z = 0 in current process range:
+        if self.band_division is None:
+            iz0 = basis.real.iz0_mine_local
+            iz0_conj = basis.real.iz0_mine_conj
+        else:
+            iz0 = basis.real.iz0
+            iz0_conj = basis.real.iz0_conj
         # Create random complex numbers based on conjugate-index seed:
-        x = init_state(basis.real.index_z0_conj[sel])
+        x = init_state(iz0_conj)
         for i_discard in range(n_bands_prev + 1):
             _randn(x)  # get RNG to position appropriate for starting band
         for b_local in range(b_stop_local - b_start_local):
-            coeff_cur[:, :, b_local, :, index_z0_local] += _randn(x).conj()
-        coeff_cur[..., index_z0_local] *= np.sqrt(0.5)  # keep variance = 1
+            coeff_cur[:, :, b_local, :, iz0] += _randn(x).conj()
+        coeff_cur[..., iz0] *= np.sqrt(0.5)  # keep variance = 1
 
     # Mask out inactive basis elements:
     coeff_cur[pad_index] = 0.
@@ -144,16 +146,11 @@ def _randomize_selected(self: 'Wavefunction', i_spin: torch.Tensor,
 
     # Enforce Hermitian symmetry in real case:
     if basis.real_wavefunctions:
-        # Find subset of iG_z = 0 in current process range:
-        sel = torch.where(torch.logical_and(
-            basis.real.index_z0 >= basis.division.i_start,
-            basis.real.index_z0 < basis.division.i_stop))[0]
-        index_z0_local = basis.real.index_z0[sel] - basis.division.i_start
         # Create random complex numbers based on conjugate-index seed:
-        x = init_state(basis.real.index_z0_conj[sel])
+        iz0_local = basis.real.iz0_mine_local
+        x = init_state(basis.real.iz0_mine_conj)
         _randn(x)  # warm-up RNG: discard one output after seed
-        self.coeff[(i_spin, i_k, i_band)][...,
-                                          index_z0_local] += _randn(x).conj()
+        self.coeff[(i_spin, i_k, i_band)][..., iz0_local] += _randn(x).conj()
 
     # Mask out inactive basis elements:
     self.coeff[basis.pad_index_mine] = 0.

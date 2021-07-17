@@ -267,12 +267,6 @@ class Ions(qp.Constructable):
         from .quintic_spline import Interpolator
         iGk = basis.iG[:, basis.mine] + basis.k[:, None]  # fractional G + k
         Gk = iGk @ basis.lattice.Gbasis.T  # Cartesian G + k (of this process)
-        # Get harmonics (per l,m):
-        l_max = max(ps.l_max for ps in self.pseudopotentials)
-        Ylm_t = qp.ions.spherical_harmonics.get_harmonics_t(l_max, Gk)
-        # Get per-atom translations:
-        translations = (self.translation_phase(iGk).transpose(1, 2)  # k,atom,G
-                        / np.sqrt(basis.lattice.volume))  # due to factor in C
         # Prepare interpolator for radial functions:
         Gk_mag = (Gk ** 2).sum(dim=-1).sqrt()
         Ginterp = Interpolator(Gk_mag, qp.ions.RadialFunction.DG)
@@ -281,6 +275,14 @@ class Ions(qp.Constructable):
         n_proj_tot = self.n_atomic_orbitals if get_psi else self.n_projectors
         proj = torch.empty((1, nk_mine, n_proj_tot, 1, n_basis_each),
                            dtype=torch.complex128, device=self.rc.device)
+        if not n_proj_tot:  # no ions or all local pseudopotentials
+            return qp.electrons.Wavefunction(basis, coeff=proj)
+        # Get harmonics (per l,m):
+        l_max = max(ps.l_max for ps in self.pseudopotentials)
+        Ylm_t = qp.ions.spherical_harmonics.get_harmonics_t(l_max, Gk)
+        # Get per-atom translations:
+        translations = (self.translation_phase(iGk).transpose(1, 2)  # k,atom,G
+                        / np.sqrt(basis.lattice.volume))  # due to factor in C
         # Compute projectors by species:
         i_proj_start = 0
         for i_ps, ps in enumerate(self.pseudopotentials):

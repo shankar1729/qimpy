@@ -274,19 +274,15 @@ def _cat(self: 'Wavefunction', other: 'Wavefunction',
 
 
 def _constrain(self: 'Wavefunction'):
-    """Enforce Hermitian symmetry for real wavefunctions. This is required in
-    diagonalizers to prevent runaway of hermiticity-breaking round-off errors.
+    """Enforce basis constraints on wavefunction coefficients.
+    This includes setting padded coefficients to zero, and imposing
+    Hermitian symmetry in Gz = 0 coefficients for real wavefunctions.
     """
     basis = self.basis
-    if self.band_division or (basis.rc.n_procs_b == 1):
-        # All basis entries together on each process:
-        self.coeff[basis.pad_index] = 0.
-        if basis.real_wavefunctions:
-            self.coeff[..., basis.real.index_z0] \
-                += self.coeff[..., basis.real.index_z0_conj].conj()
-            self.coeff[..., basis.real.index_z0] *= 0.5
-    else:
-        # Basis is distributed over MPI:
-        self.coeff[basis.pad_index_mine] = 0.
-        if basis.real_wavefunctions:
-            raise NotImplementedError("basis-parallel enforce-real")
+    # Padded coefficients:
+    pad_index = (basis.pad_index if self.band_division
+                 else basis.pad_index_mine)
+    self.coeff[pad_index] = 0.
+    # Real wavefunction symmetry:
+    if basis.real_wavefunctions:
+        basis.real.symmetrize(self.coeff)

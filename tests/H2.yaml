@@ -11,7 +11,9 @@ ions:
     - [H, 0., 0., +0.035]
 
 electrons:
-  xc: 
+  basis:
+    real-wavefunctions: yes
+  xc:
     functional: gga-xc-pbe
   scf:
     mix-density: no  # mix potential instead
