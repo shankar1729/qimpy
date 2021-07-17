@@ -2,6 +2,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from ._basis_ops import _apply_ke, _apply_potential, _collect_density
+from ._basis_real import BasisReal
 from typing import Optional, Tuple, Union, TYPE_CHECKING
 if TYPE_CHECKING:
     from ..utils import RunConfig, TaskDivision
@@ -19,8 +20,7 @@ class Basis(qp.Constructable):
                  'k', 'wk', 'w_sk', 'real_wavefunctions', 'ke_cutoff', 'grid',
                  'iG', 'n', 'n_min', 'n_max', 'n_avg', 'n_tot', 'n_ideal',
                  'fft_index', 'fft_block_size', 'pad_index', 'pad_index_mine',
-                 'division', 'mine', 'index_z0', 'index_z0_conj',
-                 'Gweight_mine')
+                 'division', 'mine', 'real')
     lattice: 'Lattice'  #: Lattice vectors of unit cell
     ions: 'Ions'  #: Ionic system: implicit part of basis for ultrasoft / PAW
     kpoints: 'Kpoints'  #: k-point set for which basis is initialized
@@ -47,9 +47,7 @@ class Basis(qp.Constructable):
     pad_index_mine: PadIndex  #: Subset of `pad_index` on this process
     division: 'TaskDivision'  #: Division of basis across `rc.comm_b`
     mine: slice  #: Slice of basis entries local to this process
-    index_z0: torch.Tensor  #: Index of Gz = 0 points (only for real case)
-    index_z0_conj: torch.Tensor  #: Hermitian conjugate points of `index_z0`
-    Gweight_mine: torch.Tensor  #: Weight of local plane waves (real case only)
+    real: 'BasisReal'  #: Extra indices for real wavefunctions
 
     apply_ke = _apply_ke
     apply_potential = _apply_potential
@@ -165,29 +163,8 @@ class Basis(qp.Constructable):
         self.pad_index_mine = (slice(None), pad_index[0], slice(None),
                                slice(None), pad_index[1])  # add other dims
 
-        # Extra book-keeping for real-wavefunction basis:
         if self.real_wavefunctions and kpoints.division.n_mine:
-            # Find conjugate pairs with iG_z = 0:
-            self.index_z0 = torch.where(self.iG[0, :, 2] == 0)[0]
-            # --- compute index of each point and conjugate in iG_z = 0 plane:
-            shapeH = self.grid.shapeH_mine
-            plane_index = self.fft_index[0, self.index_z0].div(
-                shapeH[2], rounding_mode='floor')
-            iG_conj = (-self.iG[0, self.index_z0, :2]) % torch.tensor(
-                shapeH[:2], device=rc.device)[None, :]
-            plane_index_conj = iG_conj[:, 0] * shapeH[1] + iG_conj[:, 1]
-            # --- map plane_index_conj to basis using full plane for look-up:
-            plane = torch.zeros(shapeH[0] * shapeH[1],
-                                dtype=self.index_z0.dtype, device=rc.device)
-            plane[plane_index] = self.index_z0
-            self.index_z0_conj = plane[plane_index_conj].clone().detach()
-            # Weight by element for overlaps (only for this process portion):
-            self.Gweight_mine = torch.zeros(div.n_each, device=self.rc.device)
-            self.Gweight_mine[:div.n_mine] = torch.where(
-                self.iG[0, div.i_start:div.i_stop, 2] == 0, 1., 2.)
-            Gweight_sum = qp.utils.globalreduce.sum(self.Gweight_mine,
-                                                    rc.comm_b)
-            qp.log.info(f'basis weight sum: {Gweight_sum:g}')
+            self.real = BasisReal(self)
 
     def get_ke(self, basis_slice: slice = slice(None)) -> torch.Tensor:
         """Kinetic energy (KE) of each plane wave in basis in :math:`E_h`

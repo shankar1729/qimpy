@@ -21,7 +21,7 @@ def _band_norms(self: 'Wavefunction', mode: str) -> torch.Tensor:
     coeff_sq = qp.utils.abs_squared(self.coeff)
     if mode == 'ke':
         coeff_sq *= basis.get_ke(basis.mine)[None, :, None, None, :]
-    result = ((coeff_sq @ basis.Gweight_mine).sum(dim=-1)
+    result = ((coeff_sq @ basis.real.Gweight_mine).sum(dim=-1)
               if basis.real_wavefunctions
               else coeff_sq.sum(dim=(-2, -1)))
     if basis.division.n_procs > 1:
@@ -49,7 +49,7 @@ def _band_spin(self: 'Wavefunction') -> torch.Tensor:
     assert(coeff.shape[-2] == 2)  # must be spinorial
     # Compute spin density matrix per band:
     rho_s = (torch.einsum('skbxg, g, skbyg -> skbxy',
-                          coeff.conj(), basis.Gweight_mine, coeff)
+                          coeff.conj(), basis.real.Gweight_mine, coeff)
              if basis.real_wavefunctions
              else torch.einsum('skbxg, skbyg -> skbxy', coeff.conj(), coeff))
     if basis.division.n_procs > 1:
@@ -92,7 +92,7 @@ def _dot(self: 'Wavefunction', other: 'Wavefunction') -> torch.Tensor:
     assert(not self.band_division)
     watch = qp.utils.StopWatch('Wavefunction.dot', basis.rc)
     # Prepare left operand:
-    C1 = (self.coeff * basis.Gweight_mine.view(1, 1, 1, 1, -1)
+    C1 = (self.coeff * basis.real.Gweight_mine.view(1, 1, 1, 1, -1)
           if basis.real_wavefunctions
           else self.coeff).flatten(-2).conj()  # merge spinor & basis dims
     # Prepare right operand:
@@ -282,9 +282,9 @@ def _constrain(self: 'Wavefunction'):
         # All basis entries together on each process:
         self.coeff[basis.pad_index] = 0.
         if basis.real_wavefunctions:
-            self.coeff[..., basis.index_z0] \
-                += self.coeff[..., basis.index_z0_conj].conj()
-            self.coeff[..., basis.index_z0] *= 0.5
+            self.coeff[..., basis.real.index_z0] \
+                += self.coeff[..., basis.real.index_z0_conj].conj()
+            self.coeff[..., basis.real.index_z0] *= 0.5
     else:
         # Basis is distributed over MPI:
         self.coeff[basis.pad_index_mine] = 0.

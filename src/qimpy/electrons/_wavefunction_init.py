@@ -86,11 +86,12 @@ def _randomize(self: 'Wavefunction', seed: int = 0, b_start: int = 0,
     # Enforce Hermitian symmetry in real case:
     if basis.real_wavefunctions:
         # Find subset of iG_z = 0 in current process range:
-        sel = torch.where(torch.logical_and(basis.index_z0 >= basis_start,
-                                            basis.index_z0 < basis_stop))[0]
-        index_z0_local = basis.index_z0[sel] - basis_start
+        index_z0 = basis.real.index_z0
+        sel = torch.where(torch.logical_and(index_z0 >= basis_start,
+                                            index_z0 < basis_stop))[0]
+        index_z0_local = index_z0[sel] - basis_start
         # Create random complex numbers based on conjugate-index seed:
-        x = init_state(basis.index_z0_conj[sel])
+        x = init_state(basis.real.index_z0_conj[sel])
         for i_discard in range(n_bands_prev + 1):
             _randn(x)  # get RNG to position appropriate for starting band
         for b_local in range(b_stop_local - b_start_local):
@@ -145,11 +146,11 @@ def _randomize_selected(self: 'Wavefunction', i_spin: torch.Tensor,
     if basis.real_wavefunctions:
         # Find subset of iG_z = 0 in current process range:
         sel = torch.where(torch.logical_and(
-            basis.index_z0 >= basis.division.i_start,
-            basis.index_z0 < basis.division.i_stop))[0]
-        index_z0_local = basis.index_z0[sel] - basis.division.i_start
+            basis.real.index_z0 >= basis.division.i_start,
+            basis.real.index_z0 < basis.division.i_stop))[0]
+        index_z0_local = basis.real.index_z0[sel] - basis.division.i_start
         # Create random complex numbers based on conjugate-index seed:
-        x = init_state(basis.index_z0_conj[sel])
+        x = init_state(basis.real.index_z0_conj[sel])
         _randn(x)  # warm-up RNG: discard one output after seed
         self.coeff[(i_spin, i_k, i_band)][...,
                                           index_z0_local] += _randn(x).conj()
