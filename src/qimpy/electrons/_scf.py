@@ -37,13 +37,13 @@ class SCF(qp.utils.Pulay['FieldH']):
         self.q_metric = q_metric
         self.q_kappa = q_kappa
         self.n_eig_steps = n_eig_steps
-        self.eig_threshold = eig_threshold
+        self.eig_threshold = float(eig_threshold)
         self.mix_density = mix_density
         super().__init__(co=co, comm=comm, name='SCF',
                          n_iterations=n_iterations,
-                         energy_threshold=energy_threshold,
-                         residual_threshold=residual_threshold,
-                         extra_thresholds={'|deig|': eig_threshold},
+                         energy_threshold=float(energy_threshold),
+                         residual_threshold=float(residual_threshold),
+                         extra_thresholds={'|deig|': self.eig_threshold},
                          n_history=n_history, mix_fraction=mix_fraction)
 
     def update(self, system: 'System') -> None:
