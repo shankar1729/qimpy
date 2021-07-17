@@ -1,63 +1,20 @@
 import qimpy as qp
 import numpy as np
-import sys
-from abc import ABC, abstractmethod
+from ._optimizable import Optimizable, ConvergenceCheck
 from collections import deque
-from typing import TypeVar, Generic, Sequence, Deque, Tuple, Dict,\
-    Optional, TYPE_CHECKING
+from abc import ABC, abstractmethod
+from typing import TypeVar, Generic, Sequence, Dict, Deque, Optional, \
+    TYPE_CHECKING
 if TYPE_CHECKING:
-    from ..utils import RunConfig
     from .._energy import Energy
-
-
-class ConvergenceCheck(Deque[bool]):
-    """Check quantity stays unchanged a certain number of times."""
-    __slots__ = ('threshold', 'n_check')
-    threshold: float  #: Convergence threshold
-    n_check: int  #: Number of consecutive checks that must pass at convergence
-
-    def __init__(self, threshold: float, n_check: int = 2) -> None:
-        """Initialize convergence check to specified `threshold`.
-        The check must pass `n_check` consecutive times."""
-        self.threshold = threshold
-        self.n_check = n_check
-        super().__init__(maxlen=n_check)
-
-    def check(self, v: float) -> bool:
-        """Return if converged, given latest quantity `v` to check."""
-        self.append(abs(v) < self.threshold)
-        return all(converged for converged in self)
-
-
-T = TypeVar('T')
-
-
-class Optimizable(ABC):
-    """Class requirements for use as vector space in optimization algorithms.
-    This is required in :class:`Pulay` and :class:`Minimize`, for example."""
-    @abstractmethod
-    def __add__(self: T, other: T) -> T: ...
-    @abstractmethod
-    def __iadd__(self: T, other: T) -> T: ...
-    @abstractmethod
-    def __sub__(self: T, other: T) -> T: ...
-    @abstractmethod
-    def __isub__(self: T, other: T) -> T: ...
-    @abstractmethod
-    def __mul__(self: T, other: float) -> T: ...
-    @abstractmethod
-    def __rmul__(self: T, other: float) -> T: ...
-    @abstractmethod
-    def overlap(self: T, other: T) -> float: ...
-
 
 Variable = TypeVar('Variable', bound=Optimizable)
 
 
 class Pulay(Generic[Variable], ABC, qp.Constructable):
     """Abstract base class implementing the Pulay mixing algorithm.
-    The mixed `Variable` must be a class supporting vector-space operators
-    +, +=, -, -=, * for scalar multiply and method overlap() for inner product.
+    The mixed `Variable` must support vector-space operators as specified
+    by the `Optimizable` abstract base class.
     """
     __slots__ = ('comm', 'name', 'n_iterations', 'energy_threshold',
                  'residual_threshold', 'extra_thresholds', 'n_history',

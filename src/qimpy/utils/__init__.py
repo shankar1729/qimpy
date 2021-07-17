@@ -4,7 +4,7 @@ __all__ = [
     'prime_factorization', 'fft_suitable', 'ceildiv', 'cis', 'abs_squared',
     'ortho_matrix', 'eighg', 'globalreduce',
     'log_config', 'RunConfig', 'StopWatch',
-    'Pulay', 'ConvergenceCheck', 'Optimizable',
+    'Optimizable', 'ConvergenceCheck', 'Pulay', 'Minimize',
     'TaskDivision', 'TaskDivisionCustom', 'BufferView', 'Checkpoint']
 
 from ._math import prime_factorization, fft_suitable, ceildiv, \
@@ -13,7 +13,9 @@ from . import globalreduce
 from ._log import log_config
 from ._runconfig import RunConfig
 from ._stopwatch import StopWatch
+from ._optimizable import Optimizable, ConvergenceCheck
+from ._pulay import Pulay
+from ._minimize import Minimize
 from ._taskdivision import TaskDivision, TaskDivisionCustom
 from ._bufferview import BufferView
-from ._pulay import Pulay, ConvergenceCheck, Optimizable
 from ._checkpoint import Checkpoint
