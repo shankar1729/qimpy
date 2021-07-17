@@ -361,5 +361,5 @@ class Ions(qp.Constructable):
             SF = self.translation_phase(iG, self.slices[i_type])
             n.data[0] += rho_i[0] * SF.sum(dim=-1)
             # TODO: include magnetization
-        qp.log.info(f'N0: {n.o * grid.lattice.volume}')
+        # qp.log.info(f'N0: {n.o * grid.lattice.volume}')
         return n

@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from ._chefsi import CheFSI
     from ._scf import SCF
     from ._wavefunction import Wavefunction
+    from ._lcao import LCAO
     from .xc import XC
 
 
@@ -38,8 +39,8 @@ class Electrons(qp.Constructable):
     diagonalize: 'Davidson'  #: Hamiltonian diagonalization method
     scf: 'SCF'  #: Self-consistent field method
     C: 'Wavefunction'  #: Electronic wavefunctions
-    _n_bands_done: int  # Number of bands in C that have been initialized
-    lcao: bool  # Whether to initialize C, eig usinG LCAO
+    _n_bands_done: int  #: Number of bands in C that have been initialized
+    lcao: Optional['LCAO']  #: If present, use LCAO to initialize C, eig
     eig: torch.Tensor  #: Electronic orbital eigenvalues
     deig_max: float  #: Estimate of accuracy of current `eig`
     n: 'FieldH'  #: Electron density (and magnetization, if `spin_polarized`)
@@ -56,7 +57,8 @@ class Electrons(qp.Constructable):
                  spin_polarized: bool = False, spinorial: bool = False,
                  fillings: Optional[Union[dict, 'Fillings']] = None,
                  basis: Optional[Union[dict, 'Basis']] = None,
-                 xc: Optional[Union[dict, 'XC']] = None, lcao: bool = True,
+                 xc: Optional[Union[dict, 'XC']] = None,
+                 lcao: Optional[Union[dict, bool, 'LCAO']] = None,
                  davidson: Optional[Union[dict, 'Davidson']] = None,
                  chefsi:  Optional[Union[dict, 'CheFSI']] = None,
                  scf:  Optional[Union[dict, 'SCF']] = None) -> None:
@@ -89,20 +91,21 @@ class Electrons(qp.Constructable):
             True, if relativistic / spin-orbit calculations which require
             2-component spinorial wavefunctions, else False.
             Default: False
-        fillings : qimpy.electrons.Fillings or None, optional
+        fillings : qimpy.electrons.Fillings or dict, optional
             Electron occupations and charge / chemical potential control.
             Default: use default `qimpy.electrons.Fillings()`
-        basis : qimpy.electrons.Basis or None, optional
+        basis : qimpy.electrons.Basis or dict, optional
             Wavefunction basis set (plane waves).
             Default: use default `qimpy.electrons.Basis()`
-        xc : qimpy.electrons.xc.XC or None, optional
+        xc : qimpy.electrons.xc.XC or dict, optional
             Exchange-correlation functional.
             Default: use default `qimpy.electrons.xc.XC()`
-        lcao: bool, optional = True
-            Whether to perform linear combination of atomic orbitals to
-            initialize wavefunctions. If False, initialize wavefunctions
-            to bandwidth-limited random numbers. (If starting from a
+        lcao: qimpy.electrons.LCAO or dict or False, optional
+            Parameters to perform linear combination of atomic orbitals to
+            initialize wavefunctions, or False to disable and to start with
+            bandwidth-limited random numbers instead. (If starting from a
             checkpoint with wavefunctions, this option has no effect.)
+            Default: use default `qimpy.electrons.LCAO()`
         davidson : qimpy.electrons.Davidson or dict, optional
             Diagonalize Kohm-Sham Hamiltonian using the Davidson method.
             Specify only one of davidson or chefsi.
@@ -164,7 +167,6 @@ class Electrons(qp.Constructable):
             self._n_bands_done = self.C.read(cast('Checkpoint',
                                                   self.checkpoint_in),
                                              self.path + 'C')
-        self.lcao = lcao
         self.eig = torch.zeros(self.C.coeff.shape[:3], dtype=torch.double,
                                device=rc.device)
         self.deig_max = np.nan  # eigenvalues completely wrong
@@ -175,6 +177,14 @@ class Electrons(qp.Constructable):
                                                self.path + 'eig', self.eig
                                                ) == self.fillings.n_bands:
                 self.deig_max = np.inf  # not fully wrong, but accuracy unknown
+
+        # Initialize LCAO subspace initializer:
+        if isinstance(lcao, bool):
+            if lcao:
+                raise ValueError("lcao must be False or LCAO parameters")
+            self.lcao = None
+        else:
+            self.construct('lcao', qp.electrons.LCAO, lcao)
 
         # Initialize diagonalizer:
         n_options = np.count_nonzero([(d is not None)
@@ -200,7 +210,7 @@ class Electrons(qp.Constructable):
         atomic orbitals, which in turn depends on electrons.__init__ being
         completed; hence this is outside the __init__.)"""
         n_atomic = 0
-        if self.lcao and not self._n_bands_done:
+        if (self.lcao is not None) and not self._n_bands_done:
             n_atomic = system.ions.n_atomic_orbitals
             qp.log.info(f'Setting {n_atomic} bands of wavefunctions C'
                         ' to atomic orbitals')
@@ -219,14 +229,8 @@ class Electrons(qp.Constructable):
         # Diagonalize LCAO subspace hamiltonian:
         if n_atomic:
             qp.log.info('Setting wavefunctions to LCAO eigenvectors')
-            self.n = system.ions.get_atomic_density(system.grid,
-                                                    self.fillings.M)
-            self.tau = qp.grid.FieldH(system.grid, shape_batch=(0,))  # TODO
-            self.update_potential(system)
-            C_OC = self.C.dot_O(self.C)
-            C_HC = self.C ^ self.hamiltonian(self.C)
-            self.eig, V = qp.utils.eighg(C_HC, C_OC)
-            self.C = self.C @ V  # Set to eigenvectors
+            assert self.lcao is not None
+            self.lcao.update(system)
         else:
             self.C = self.C.orthonormalize()  # For random / checkpoint case
 
