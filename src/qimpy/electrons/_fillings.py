@@ -254,8 +254,11 @@ class Fillings(qp.Constructable):
         """Update fillings `f` and chemical potential `mu`, if needed.
         Set corresponding energy components in `energy`.
         """
-        if (self.sigma is None) or np.isnan(self.electrons.deig_max):
-            return  # Fixed fillings, or eigenvalues not yet available
+        if self.sigma is None:  # Fixed fillings
+            return
+        if np.isnan(self.electrons.deig_max):  # Eigenvalues not yet available
+            energy.setdefault('-TS', 0.)  # Ensure correct energy name
+            return
 
         assert self._smearing_func is not None
         el = self.electrons
