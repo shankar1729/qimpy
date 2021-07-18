@@ -1,25 +1,17 @@
-from abc import ABC, abstractmethod
-from typing import TypeVar, Deque
+from typing import Protocol, TypeVar, Deque
 
 T = TypeVar('T')
 
 
-class Optimizable(ABC):
+class Optimizable(Protocol):
     """Class requirements for use as vector space in optimization algorithms.
     This is required in :class:`Pulay` and :class:`Minimize`, for example."""
-    @abstractmethod
     def __add__(self: T, other: T) -> T: ...
-    @abstractmethod
     def __iadd__(self: T, other: T) -> T: ...
-    @abstractmethod
     def __sub__(self: T, other: T) -> T: ...
-    @abstractmethod
     def __isub__(self: T, other: T) -> T: ...
-    @abstractmethod
     def __mul__(self: T, other: float) -> T: ...
-    @abstractmethod
     def __rmul__(self: T, other: float) -> T: ...
-    @abstractmethod
     def overlap(self: T, other: T) -> float: ...
 
 

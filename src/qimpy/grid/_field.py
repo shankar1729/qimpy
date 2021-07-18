@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 FieldType = TypeVar('FieldType', bound='Field')  #: Type for field ops.
 
 
-class Field(qp.utils.Optimizable):
+class Field:
     """Abstract base class for scalar/vector fields in real/reciprocal space.
     Provides common operators for fields in either space, but any fields
     used must specifically be in real (:class:`FieldR` and :class:`FieldC`),
