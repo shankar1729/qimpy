@@ -65,12 +65,12 @@ def _cg(self: 'Minimize[Vector]') -> 'Energy':
         if converged:
             qp.log.info(f'{self.name}: Converged on '
                         f'{", ".join(converged)} criteria.')
-            break
+            return state.energy
         if not np.isfinite(E):
             qp.log.info(f'{self.name}: Stopping due to non-finite energy.')
-            break
+            return state.energy
         if i_iter == self.n_iterations:
-            break
+            return state.energy
 
         # Direction update:
         g_Kg = self._sync(state.gradient.overlap(state.K_gradient))
@@ -84,7 +84,6 @@ def _cg(self: 'Minimize[Vector]') -> 'Energy':
             # --- nonlinear CG variants:
             if self.cg_type == 'polak-ribiere':
                 beta = (g_Kg - g_prev_Kg) / g_prev_Kg_prev
-                g_prev_Kg_prev: float = g_Kg
             elif self.cg_type == 'hestenes-stiefel':
                 g_prev_d = self._sync(g_prev.overlap(direction))
                 beta = (g_Kg - g_prev_Kg) / (g_d - g_prev_d)
@@ -98,7 +97,35 @@ def _cg(self: 'Minimize[Vector]') -> 'Energy':
         along_gradient = False
         direction = self.constrain((beta * direction - state.K_gradient)
                                    if beta else ((-1.) * state.K_gradient))
+        g_prev_Kg_prev: float = g_Kg
         if g_prev_used:
             g_prev = state.gradient  # for next direction update
 
-    return qp.Energy()  # TODO
+        # Line minimization:
+        step_size_test = min(step_size_test, self.safe_step_size(direction))
+        E, step_size, success = line_minimize(self, direction, step_size_test,
+                                              state)
+        if success:
+            if self.step_size.should_update:
+                step_size_test = (step_size  # use if reasonable
+                                  if (step_size >= self.step_size.minimum)
+                                  else self.step_size.initial)  # else reset
+        else:
+            qp.log.info(f'{self.name}: Undoing step.')
+            self.step(direction, -step_size)
+            self.compute(state, energy_only=False)
+            E = self._sync(float(state.energy))
+            if beta:
+                # Step failed, but not along gradient direction:
+                qp.log.info(f'{self.name}: Step failed:'
+                            ' resetting search direction.')
+                along_gradient = True  # forget current search direction
+            else:
+                # Step failed along gradient direction:
+                qp.log.info(f'{self.name}: Step failed along gradient: likely'
+                            ' at roundoff / inner-solve accuracy limit.')
+                return state.energy
+
+    qp.log.info(f'{self.name}: Not converged in {self.n_iterations}'
+                ' iterations.')
+    return state.energy

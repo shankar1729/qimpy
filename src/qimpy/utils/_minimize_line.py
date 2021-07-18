@@ -6,12 +6,12 @@ if TYPE_CHECKING:
 
 
 LineMinimize = Callable[['Minimize[Vector]', 'Vector', float,
-                         'MinimizeState[Vector]'], Tuple[float, bool]]
+                         'MinimizeState[Vector]'], Tuple[float, float, bool]]
 
 
 def _constant(self: 'Minimize[Vector]', direction: 'Vector',
               step_size_test: float, state: 'MinimizeState[Vector]'
-              ) -> Tuple[float, bool]:
+              ) -> Tuple[float, float, bool]:
     """Take a pre-specified step size."""
     step_size = step_size_test  # Constant specified step size
     self.step(direction, step_size)
@@ -20,8 +20,8 @@ def _constant(self: 'Minimize[Vector]', direction: 'Vector',
     if not np.isfinite(E):
         qp.log.info(f'{self.name}: constant step failed with'
                     f' {state.energy.name} = {E}')
-        return step_size, False
-    return step_size, True
+        return E, step_size, False
+    return E, step_size, True
 
 
 LINE_MINIMIZE: Dict[str, LineMinimize] = {
@@ -45,7 +45,8 @@ if __name__ == '__main__':
             super().__init__(co=co, comm=co.rc.comm,
                              name='TestMinimize', n_iterations=40,
                              energy_threshold=1e-6, extra_thresholds={},
-                             method='cg', line_minimize='constant')
+                             method='gradient', line_minimize='constant',
+                             step_size={'initial': 0.1})
             lattice = qp.lattice.Lattice(co=co, system='Orthorhombic',
                                          a=1., b=1., c=10.)
             ions = qp.ions.Ions(co=co, pseudopotentials=[], coordinates=[])
