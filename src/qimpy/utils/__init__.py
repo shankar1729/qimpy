@@ -15,7 +15,7 @@ from ._runconfig import RunConfig
 from ._stopwatch import StopWatch
 from ._optimizable import Optimizable, ConvergenceCheck
 from ._pulay import Pulay
-from ._minimize import Minimize
+from ._minimize import Minimize, MinimizeState
 from ._taskdivision import TaskDivision, TaskDivisionCustom
 from ._bufferview import BufferView
 from ._checkpoint import Checkpoint

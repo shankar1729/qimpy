@@ -113,10 +113,9 @@ class Pulay(Generic[Variable], ABC, qp.Constructable):
         dE = E - Eprev
 
         # Initialize convergence checks:
-        checks = {
-            'd' + energy.name(): ConvergenceCheck(self.energy_threshold),
-            '|residual|': ConvergenceCheck(self.residual_threshold)
-        }
+        Ename = energy.name()
+        checks = {'d' + Ename: ConvergenceCheck(self.energy_threshold),
+                  '|residual|': ConvergenceCheck(self.residual_threshold)}
         for extra_name, extra_threshold in self.extra_thresholds.items():
             checks[extra_name] = ConvergenceCheck(extra_threshold)
 
@@ -130,7 +129,6 @@ class Pulay(Generic[Variable], ABC, qp.Constructable):
             Eprev = E
             E = self._sync(float(energy))
             dE = E - Eprev
-            Ename = energy.name()
 
             # Cache residual:
             residual = self.residual
@@ -157,8 +155,8 @@ class Pulay(Generic[Variable], ABC, qp.Constructable):
                 qp.log.info(f'{self.name}: Converged on '
                             f'{", ".join(converged)} criteria.')
                 break
-            if np.isnan(E):
-                qp.log.info(f'{self.name}: Stopping due to NaN energy.')
+            if not np.isfinite(E):
+                qp.log.info(f'{self.name}: Stopping due to non-finite energy.')
                 break
 
             # Pulay mixing / DIIS step:
@@ -185,4 +183,4 @@ class Pulay(Generic[Variable], ABC, qp.Constructable):
 
     def _sync(self, v: float) -> float:
         """Ensure `v` is consistent on `comm`."""
-        return v if (self.comm is None) else self.comm.bcast(v)
+        return self.comm.bcast(v)
