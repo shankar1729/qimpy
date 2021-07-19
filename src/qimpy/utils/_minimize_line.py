@@ -18,73 +18,110 @@ def _constant(self: 'Minimize[Vector]', direction: 'Vector',
     self.compute(state, energy_only=False)
     E = self._sync(float(state.energy))
     if not np.isfinite(E):
-        qp.log.info(f'{self.name}: constant step failed with'
+        qp.log.info(f'{self.name}: Constant step failed with'
                     f' {state.energy.name} = {E}')
         return E, step_size, False
     return E, step_size, True
 
 
+def _quadratic(self: 'Minimize[Vector]', direction: 'Vector',
+               step_size_test: float, state: 'MinimizeState[Vector]'
+               ) -> Tuple[float, float, bool]:
+    """Take a quadratic step calculated from an energy-only test step.
+    Adjusts step size to back off if energy increases."""
+
+    # Check initial point:
+    step_size_prev = 0.  # cumulative progress along direction
+    E = self._sync(float(state.energy))
+    E_orig = E
+    g_d = self._sync(state.gradient.overlap(direction))
+    if g_d > 0.:
+        qp.log.info(f'{self.name}: Bad step direction with positive'
+                    ' gradient component')
+        return E_orig, step_size_prev, False
+
+    # Test step and quadratic step size prediction:
+    for i_step in range(self.step_size.n_adjust):
+        # Check test step size:
+        if step_size_test < self.step_size.minimum:
+            qp.log.info(f'{self.name}: Test step size below threshold.')
+            return E, step_size_prev, False
+        # Try test step:
+        self.step(direction, step_size_test - step_size_prev)
+        self.compute(state, energy_only=True)  # gradients not needed
+        E_test = self._sync(float(state.energy))
+        step_size_prev = step_size_test
+        # Check if step left valid domain:
+        if not np.isfinite(E_test):
+            # Back off from difficult region
+            step_size_test *= self.step_size.reduce_factor
+            qp.log.info(f'{self.name}: Test step failed with'
+                        f' {state.energy.name} = {E_test:.3e};'
+                        f' reducing test step size to {step_size_test:.3e}.')
+            continue
+        # Predict step size (quadratic based on gradient and two energies):
+        step_size = (0.5 * (step_size_test**2) * g_d
+                     / (step_size_test * g_d + E - E_test))
+        # Check reasonableness of predicted step:
+        if step_size < 0.:
+            # Curvature has wrong sign, but E_test < E, so accept step
+            # for now and try descending further next time:
+            step_size_test *= self.step_size.grow_factor
+            qp.log.info(f'{self.name}: Wrong curvature in test step,'
+                        f' growing test step size to {step_size_test:.3e}.')
+            self.compute(state, energy_only=False)
+            E = self._sync(float(state.energy))
+            return E, step_size_prev, True
+        if step_size / step_size_test > self.step_size.grow_factor:
+            step_size_test *= self.step_size.grow_factor
+            qp.log.info(f'{self.name}: Predicted step size growth'
+                        f' > {self.step_size.grow_factor},'
+                        f' growing test step size to {step_size_test:.3e}.')
+            continue
+        if step_size / step_size_test < self.step_size.reduce_factor:
+            step_size_test *= self.step_size.reduce_factor
+            qp.log.info(f'{self.name}: Predicted step size reduction'
+                        f' < {self.step_size.reduce_factor},'
+                        f' reducing test step size to {step_size_test:.3e}.')
+            continue
+        # Successful test step:
+        break
+    if not np.isfinite(E_test):
+        qp.log.info(f'{self.name}: Test step failed {self.step_size.n_adjust}'
+                    ' times. Quitting step.')
+        return E_orig, step_size_prev, False
+
+    # Actual step:
+    for i_step in range(self.step_size.n_adjust):
+        # Try the step:
+        self.step(direction, step_size - step_size_prev)
+        self.compute(state, energy_only=False)
+        E = self._sync(float(state.energy))
+        step_size_prev = step_size
+        if not np.isfinite(E):
+            step_size *= self.step_size.reduce_factor
+            qp.log.info(f'{self.name}: Step failed with'
+                        f' {state.energy.name} = {E:.3e};'
+                        f' reducing step size to {step_size:.3e}.')
+            continue
+        if E > E_orig:
+            step_size *= self.step_size.reduce_factor
+            qp.log.info(f'{self.name}: Step increased'
+                        f' {state.energy.name} by {E - E_orig:.3e};'
+                        f' reducing step size to {step_size:.3e}.')
+            continue
+        # Step successful:
+        break
+    if (not np.isfinite(E)) or (E > E_orig):
+        qp.log.info(f'{self.name}: Step failed to reduce {state.energy.name}'
+                    f' after {self.step_size.n_adjust} attempts.'
+                    ' Quitting step.')
+        return E_orig, step_size_prev, False
+
+    return E, step_size_prev, True
+
+
 LINE_MINIMIZE: Dict[str, LineMinimize] = {
-    'constant': _constant
+    'constant': _constant,
+    'quadratic': _quadratic
 }
-
-
-if __name__ == '__main__':
-    import numpy as np
-    import torch
-    from typing import Sequence
-
-    class TestFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
-        grid: qp.grid.Grid  #: Dummy grid for the fields below
-        x: qp.grid.FieldR  #: State of test system
-        x0: qp.grid.FieldR  #: True solution
-        E0: float  #: True minimum energy
-        M: Sequence[torch.Tensor]  #: Matrices defining even terms in energy
-
-        def __init__(self, co: qp.ConstructOptions):
-            super().__init__(co=co, comm=co.rc.comm,
-                             name='TestMinimize', n_iterations=40,
-                             energy_threshold=1e-6, extra_thresholds={},
-                             method='gradient', line_minimize='constant',
-                             step_size={'initial': 0.1})
-            lattice = qp.lattice.Lattice(co=co, system='Orthorhombic',
-                                         a=1., b=1., c=10.)
-            ions = qp.ions.Ions(co=co, pseudopotentials=[], coordinates=[])
-            symmetries = qp.symmetries.Symmetries(co=co, lattice=lattice,
-                                                  ions=ions)
-            grid = qp.grid.Grid(co=co, lattice=lattice, symmetries=symmetries,
-                                shape=(1, 1, 3), comm=self.rc.comm)
-            self.grid = grid
-            self.x = qp.grid.FieldR(grid, data=torch.tensor(
-                [1., 4., 5.], device=self.rc.device).view(grid.shape))
-            self.x0 = qp.grid.FieldR(grid, data=torch.tensor(
-                [2., 3., 4.], device=self.rc.device).view(grid.shape))
-            self.E0 = 7.
-            torch.random.manual_seed(0)
-            self.M = []
-            for i_M in range(2):
-                self.M.append(torch.randn((3, 3), device=self.rc.device))
-
-        def step(self, direction: qp.grid.FieldR, step_size: float) -> None:
-            self.x += step_size * direction
-
-        def compute(self, state, energy_only):  # type: ignore
-            E = self.E0
-            E_x = torch.zeros_like(self.x0.data)
-            for i_M, M in enumerate(self.M):
-                v = M @ (self.x - self.x0).data[0, 0]
-                v_norm_sq = (v**2).sum().item()
-                E += v_norm_sq ** (i_M + 1)
-                E_x[0, 0] += ((i_M + 1) * (v_norm_sq ** i_M)) * (M.T @ v)
-            state.energy['E'] = E
-            if not energy_only:
-                state.gradient = qp.grid.FieldR(self.grid, data=E_x)
-                state.K_gradient = qp.grid.FieldR(self.grid, data=E_x)
-
-    def main():
-        qp.utils.log_config()
-        rc = qp.utils.RunConfig()
-        co = qp.ConstructOptions(rc=rc)
-        tf = TestFunction(co=co)
-        tf.minimize()
-    main()
