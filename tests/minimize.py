@@ -16,7 +16,7 @@ class TestFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
                          name='TestMinimize', n_iterations=40,
                          energy_threshold=1e-8,
                          extra_thresholds={'|grad|': 1e-8},
-                         method='l-bfgs', line_minimize='quadratic')
+                         method='l-bfgs')
         lattice = qp.lattice.Lattice(co=co, system='Orthorhombic',
                                      a=1., b=1., c=10.)
         ions = qp.ions.Ions(co=co, pseudopotentials=[], coordinates=[])

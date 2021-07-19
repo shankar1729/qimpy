@@ -34,7 +34,7 @@ def _quadratic(self: 'Minimize[Vector]', direction: 'Vector',
     E = self._sync(float(state.energy))
     E_orig = E
     g_d = self._sync(state.gradient.overlap(direction))
-    if g_d > 0.:
+    if g_d >= 0.:
         qp.log.info(f'{self.name}: Bad step direction with positive'
                     ' gradient component')
         return E_orig, step_size_prev, False
@@ -117,7 +117,96 @@ def _quadratic(self: 'Minimize[Vector]', direction: 'Vector',
     return E, step_size_prev, True
 
 
+def _wolfe(self: 'Minimize[Vector]', direction: 'Vector',
+           step_size_test: float, state: 'MinimizeState[Vector]'
+           ) -> Tuple[float, float, bool]:
+    """Take cubic steps till the Wolfe energy and gradient criteria are
+    satisfied. This uses a full energy and gradient test step, and does not
+    take a cubic step at all if the Wolfe criteria is satisfied at first."""
+
+    # Check initial point:
+    step_size_prev = 0.  # cumulative progress along direction
+    E = self._sync(float(state.energy))
+    g_d = self._sync(state.gradient.overlap(direction))
+    if g_d >= 0.:
+        qp.log.info(f'{self.name}: Bad step direction with positive'
+                    ' gradient component')
+        return E, step_size_prev, False
+    # --- remember initial energy and gradient projection for Wolfe check:
+    E0 = E_prev = E
+    g_d0 = g_d_prev = g_d
+
+    # Cubic steps till Wolfe criteria are satisfied:
+    step_size = step_size_test  # initial tentative step
+    step_size_prev = 0.  # other point in cubic interval
+    step_size_state = 0.  # where state is along the line
+    for i_step in range(self.step_size.n_adjust + 1):
+        self.step(direction, step_size - step_size_state)
+        step_size_state = step_size
+        E = self._compute(state, energy_only=False)
+        g_d = self._sync(state.gradient.overlap(direction))
+        if i_step == self.step_size.n_adjust:
+            break  # Reached step limit of line minimize
+        # Make sure within domain:
+        if not np.isfinite(E):
+            step_size = step_size_prev + (self.step_size.reduce_factor
+                                          * (step_size - step_size_prev))
+            qp.log.info(f'{self.name}: Step failed with {state.energy.name}'
+                        f' = {E:.3e}; reducing step size to {step_size:.3e}.')
+            continue
+        # Check Wolfe criteria:
+        wolfe_E = (E - E0) / (abs(step_size) * g_d0)
+        wolfe_g = g_d / g_d0
+        if (wolfe_E >= self.wolfe.energy) and (wolfe_g <= self.wolfe.gradient):
+            return E, step_size_state, True
+        qp.log.info(f'{self.name}: Wolfe criteria failed at step size'
+                    f' = {step_size:.3e}: reduction {wolfe_E:.3e} in energy'
+                    f' and {wolfe_g:.3f} in gradient.)')
+        # Cubic step:
+        # independent coordinates: step_size_prev, step_size
+        # corresponding energies E_prev, E and derivatives g_d_prev, g_d
+        # transform [step_size_prev, step_size] to unit interval in t:
+        Eprime_prev = g_d_prev * (step_size - step_size_prev)
+        Eprime = g_d * (step_size - step_size_prev)
+        deltaE = E - E_prev
+        # dE/dt is a quadratic A t^2 - 2B t + C with coefficients:
+        A = 3*(Eprime_prev + Eprime - 2*deltaE)
+        B = 2*Eprime_prev + Eprime - 3*deltaE
+        C = Eprime_prev
+        # Solve quadratic:
+        t_min = np.nan  # location of minimum of E (NAN if no minimum)
+        Dsq = B*B - A*C  # discriminant^2
+        if Dsq >= 0.:  # dE/dt has at least one root
+            t_opt = ((B + np.sqrt(Dsq))/A if (B > 0)
+                     else C/(B - np.sqrt(Dsq)))  # only root with E''(t) > 0
+            E_opt = E_prev + t_opt*(C + t_opt*(-B + t_opt*A/3))
+            if np.isfinite(t_opt) and (E_opt < min(E, E_prev)):
+                t_min = t_opt  # well-defined minimum lower than endpoints
+        # Pick best, bounded step:
+        if np.isfinite(t_min):  # local minimum available
+            t_min = min(t_min, self.step_size.grow_factor)  # forward bound
+            t_min = max(t_min, 1.-self.step_size.grow_factor)  # reverse bound
+        else:  # no local minimum lower than endpoints within interval:
+            # therefore E(t) must decrease away from at least one endpoint
+            if Eprime <= 0.:  # E(t) decreases for t >~ 1
+                t_min = self.step_size.grow_factor
+            else:  # E(t) decreases for t <~ 0
+                t_min = 1. - self.step_size.grow_factor
+        step_size_new = step_size_prev + t_min*(step_size - step_size_prev)
+        # Pick next interval:
+        if E < E_prev:
+            step_size_prev = step_size
+            E_prev = E
+            g_d_prev = g_d
+        step_size = step_size_new
+
+    if (not np.isfinite(E)) or (E > E0):
+        return E0, step_size_prev, False  # minimize will roll back state
+    return E, step_size_prev, True
+
+
 LINE_MINIMIZE: Dict[str, LineMinimize] = {
     'constant': _constant,
-    'quadratic': _quadratic
+    'quadratic': _quadratic,
+    'wolfe': _wolfe
 }
