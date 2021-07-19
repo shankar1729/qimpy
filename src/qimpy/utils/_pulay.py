@@ -113,7 +113,7 @@ class Pulay(Generic[Variable], ABC, qp.Constructable):
         dE = E - Eprev
 
         # Initialize convergence checks:
-        Ename = energy.name()
+        Ename = energy.name
         checks = {'d' + Ename: ConvergenceCheck(self.energy_threshold),
                   '|residual|': ConvergenceCheck(self.residual_threshold)}
         for extra_name, extra_threshold in self.extra_thresholds.items():

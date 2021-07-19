@@ -15,9 +15,10 @@ class Energy(dict):
             terms[term_index].append(f'{name:>9s} = {value:25.16f}')
         terms[0].extend(terms[1])
         terms[0].append('-' * 37)  # separator
-        terms[0].append(f'{self.name():>9s} = {float(self):25.16f}')  # total
+        terms[0].append(f'{self.name:>9s} = {float(self):25.16f}')  # total
         return '\n'.join(terms[0])
 
+    @property
     def name(self) -> str:
         """Appropriate name of (free) energy based on components."""
         if '-muN' in self:

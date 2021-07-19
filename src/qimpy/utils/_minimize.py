@@ -134,6 +134,40 @@ class Minimize(Generic[Vector], ABC, qp.Constructable):
         """Minimize, and return optimized energy of system"""
         return _lbfgs(self) if (self.method == "l-bfgs") else _cg(self)
 
+    def finite_difference_test(self, direction: Vector,
+                               step_sizes: Optional[Sequence[float]] = None
+                               ) -> None:
+        """Check gradient implementation by taking steps along `direction`.
+        This will print ratio of actual energy differences along steps of
+        various sizes in `step_sizes` and the expected energy difference
+        based on the gradient. A correct implementation should show a ratio
+        approaching 1 for a range of step sizes, with deviations at lower
+        step sizes due to round off error and at higher step sizes due to
+        nonlinearity."""
+        qp.log.info(f'{self.name}: {"-"*12} Finite difference test {"-"*12}')
+        if step_sizes is None:
+            step_sizes = np.logspace(-9, 1, 11).tolist()
+        # Initial state with gradient:
+        state = qp.utils.MinimizeState['Vector']()
+        self.compute(state, energy_only=False)
+        E0 = self._sync(float(state.energy))
+        dE_step = self._sync(state.gradient.overlap(direction)
+                             )  # directional derivative along step direction
+        # Finite difference derivatives:
+        step_size_prev = 0.  # cumulative progress along step:
+        for step_size in sorted(step_sizes):
+            self.step(direction, step_size - step_size_prev)
+            step_size_prev = step_size
+            self.compute(state, energy_only=True)
+            deltaE = self._sync(float(state.energy)) - E0
+            dE_expected = dE_step * step_size
+            qp.log.info(f'{self.name}: step size: {step_size:.3e}'
+                        f'  d{state.energy.name}'
+                        f' ratio: {deltaE/dE_expected:.11f}')
+        qp.log.info(f'{self.name}: {"-"*48}')
+        # Restore original position:
+        self.step(direction, -step_size_prev)
+
     def _sync(self, v: float) -> float:
         """Ensure `v` is consistent on `comm`."""
         return self.comm.bcast(v)

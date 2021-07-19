@@ -29,7 +29,7 @@ def _cg(self: 'Minimize[Vector]') -> 'Energy':
     line_minimize = LINE_MINIMIZE[self.line_minimize]
 
     # Initialize convergence checkers:
-    Ename = state.energy.name()
+    Ename = state.energy.name
     checks = {'d' + Ename: qp.utils.ConvergenceCheck(self.energy_threshold)}
     for extra_name, extra_threshold in self.extra_thresholds.items():
         checks[extra_name] = qp.utils.ConvergenceCheck(extra_threshold)
