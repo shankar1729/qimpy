@@ -161,7 +161,7 @@ def _wolfe(self: 'Minimize[Vector]', direction: 'Vector',
             return E, step_size_state, True
         qp.log.info(f'{self.name}: Wolfe criteria failed at step size'
                     f' = {step_size:.3e}: reduction {wolfe_E:.3e} in energy'
-                    f' and {wolfe_g:.3f} in gradient.)')
+                    f' and {wolfe_g:.3f} in gradient.')
         # Cubic step:
         # independent coordinates: step_size_prev, step_size
         # corresponding energies E_prev, E and derivatives g_d_prev, g_d

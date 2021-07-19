@@ -53,14 +53,14 @@ def _lbfgs(self: 'Minimize[Vector]') -> 'Energy':
         alpha: Deque[float] = deque()  # scale factors to each history entry
         for h in reversed(history):
             alpha_i = h.rho * self._sync(h.s.overlap(direction))
-            direction += alpha_i * h.Ky
+            direction -= alpha_i * h.Ky
             alpha.append(alpha_i)
         if gamma:
             direction *= gamma  # scaling to keep reasonable step size ~ 1
         for h in history:
             alpha_i = alpha.pop()
             beta = h.rho * self._sync(h.Ky.overlap(direction))
-            direction += (beta - alpha_i) * h.s
+            direction += (alpha_i - beta) * h.s
         direction = self.constrain(direction)
         if len(history) == self.n_history:
             history.popleft()  # save memory by removing oldest here, when full
