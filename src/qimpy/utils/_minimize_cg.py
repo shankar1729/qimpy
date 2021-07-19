@@ -15,8 +15,7 @@ def _cg(self: 'Minimize[Vector]') -> 'Energy':
 
     # Initial energy and gradients:
     state = qp.utils.MinimizeState['Vector']()
-    self.compute(state, energy_only=False)
-    E = self._sync(float(state.energy))
+    E = self._compute(state, energy_only=False)
     E_prev = 0.
     along_gradient = True  # Whether current search direction is along gradient
     direction: 'Vector'  #: Search direction (initialized at 0th iteration)
@@ -25,7 +24,6 @@ def _cg(self: 'Minimize[Vector]') -> 'Energy':
                        or (self.cg_type == 'fletcher-reeves')
                        )  # whether previous gradient used in direction update
     step_size_test = self.step_size.initial  # test step size
-    step_size = step_size_test  # actual step size taken
     line_minimize = LINE_MINIMIZE[self.line_minimize]
     checks = _initialize_convergence_checks(self, state)
 
@@ -35,8 +33,7 @@ def _cg(self: 'Minimize[Vector]') -> 'Energy':
         if self.report(i_iter):
             qp.log.info(f'{self.name}: State modified externally:'
                         ' resetting search direction.')
-            self.compute(state, energy_only=False)  # update energy, gradients
-            E = self._sync(float(state.energy))
+            E = self._compute(state, energy_only=False)
             along_gradient = True
 
         # Check and report convergence:
@@ -86,8 +83,7 @@ def _cg(self: 'Minimize[Vector]') -> 'Energy':
         else:
             qp.log.info(f'{self.name}: Undoing step.')
             self.step(direction, -step_size)
-            self.compute(state, energy_only=False)
-            E = self._sync(float(state.energy))
+            E = self._compute(state, energy_only=False)
             if beta:
                 # Step failed, but not along gradient direction:
                 qp.log.info(f'{self.name}: Step failed:'

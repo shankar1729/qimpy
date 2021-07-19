@@ -53,6 +53,7 @@ class Minimize(Generic[Vector], ABC, qp.Constructable):
     cg_type: str  #: Polak-Ribiere, Fletcher-Reeves or Hestenes-Stiefel
     line_minimize: str  #: Line minimization: Auto, Constant, Quadratic, Wolfe
     step_size: StepSize  #: Step size options
+    n_history: int  #: Maximum history size (only used for L-BFGS)
     wolfe: Wolfe  #: Wolfe line minimize stopping conditions
 
     #: Names and thresholds for any additional convergence quantities. These
@@ -66,7 +67,7 @@ class Minimize(Generic[Vector], ABC, qp.Constructable):
                  energy_threshold: float, extra_thresholds: Dict[str, float],
                  method: str, cg_type: str = 'polak-ribiere',
                  line_minimize: str = 'auto', step_size: Optional[dict] = None,
-                 wolfe: Optional[dict] = None) -> None:
+                 n_history: int = 15, wolfe: Optional[dict] = None) -> None:
         """Initialize minimization algorithm parameters."""
         super().__init__(co=co)
         self.comm = comm
@@ -76,6 +77,7 @@ class Minimize(Generic[Vector], ABC, qp.Constructable):
         self.extra_thresholds = extra_thresholds
         self.step_size = Minimize.StepSize(**qp.dict_input_cleanup(
             {} if (step_size is None) else step_size))
+        self.n_history = n_history
         self.wolfe = Minimize.Wolfe(**qp.dict_input_cleanup(
             {} if (wolfe is None) else wolfe))
 
@@ -149,8 +151,7 @@ class Minimize(Generic[Vector], ABC, qp.Constructable):
             step_sizes = np.logspace(-9, 1, 11).tolist()
         # Initial state with gradient:
         state = qp.utils.MinimizeState['Vector']()
-        self.compute(state, energy_only=False)
-        E0 = self._sync(float(state.energy))
+        E0 = self._compute(state, energy_only=False)
         dE_step = self._sync(state.gradient.overlap(direction)
                              )  # directional derivative along step direction
         # Finite difference derivatives:
@@ -158,8 +159,7 @@ class Minimize(Generic[Vector], ABC, qp.Constructable):
         for step_size in sorted(step_sizes):
             self.step(direction, step_size - step_size_prev)
             step_size_prev = step_size
-            self.compute(state, energy_only=True)
-            deltaE = self._sync(float(state.energy)) - E0
+            deltaE = self._compute(state, energy_only=True) - E0
             dE_expected = dE_step * step_size
             qp.log.info(f'{self.name}: step size: {step_size:.3e}'
                         f'  d{state.energy.name}'
@@ -171,3 +171,14 @@ class Minimize(Generic[Vector], ABC, qp.Constructable):
     def _sync(self, v: float) -> float:
         """Ensure `v` is consistent on `comm`."""
         return self.comm.bcast(v)
+
+    def _compute(self, state: MinimizeState[Vector],
+                 energy_only: bool) -> float:
+        """Internal helper to prepare `state`, call `compute`
+        and return `_sync`'d energy."""
+        MinimizeState.__init__(state)  # prevent use of old results
+        for attr_name in ('gradient', 'K_gradient'):
+            if hasattr(state, attr_name):
+                delattr(state, attr_name)
+        self.compute(state, energy_only)
+        return self._sync(float(state.energy))

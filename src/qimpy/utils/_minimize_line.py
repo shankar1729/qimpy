@@ -15,8 +15,7 @@ def _constant(self: 'Minimize[Vector]', direction: 'Vector',
     """Take a pre-specified step size."""
     step_size = step_size_test  # Constant specified step size
     self.step(direction, step_size)
-    self.compute(state, energy_only=False)
-    E = self._sync(float(state.energy))
+    E = self._compute(state, energy_only=False)
     if not np.isfinite(E):
         qp.log.info(f'{self.name}: Constant step failed with'
                     f' {state.energy.name} = {E}')
@@ -48,9 +47,8 @@ def _quadratic(self: 'Minimize[Vector]', direction: 'Vector',
             return E, step_size_prev, False
         # Try test step:
         self.step(direction, step_size_test - step_size_prev)
-        self.compute(state, energy_only=True)  # gradients not needed
-        E_test = self._sync(float(state.energy))
         step_size_prev = step_size_test
+        E_test = self._compute(state, energy_only=True)  # gradient not needed
         # Check if step left valid domain:
         if not np.isfinite(E_test):
             # Back off from difficult region
@@ -69,8 +67,7 @@ def _quadratic(self: 'Minimize[Vector]', direction: 'Vector',
             step_size_test *= self.step_size.grow_factor
             qp.log.info(f'{self.name}: Wrong curvature in test step,'
                         f' growing test step size to {step_size_test:.3e}.')
-            self.compute(state, energy_only=False)
-            E = self._sync(float(state.energy))
+            E = self._compute(state, energy_only=False)
             return E, step_size_prev, True
         if step_size / step_size_test > self.step_size.grow_factor:
             step_size_test *= self.step_size.grow_factor
@@ -95,9 +92,8 @@ def _quadratic(self: 'Minimize[Vector]', direction: 'Vector',
     for i_step in range(self.step_size.n_adjust):
         # Try the step:
         self.step(direction, step_size - step_size_prev)
-        self.compute(state, energy_only=False)
-        E = self._sync(float(state.energy))
         step_size_prev = step_size
+        E = self._compute(state, energy_only=False)
         if not np.isfinite(E):
             step_size *= self.step_size.reduce_factor
             qp.log.info(f'{self.name}: Step failed with'
