@@ -1,6 +1,6 @@
 import qimpy as qp
 import numpy as np
-from typing import TYPE_CHECKING
+from typing import Dict, Tuple, TYPE_CHECKING
 from ._minimize_line import LINE_MINIMIZE
 if TYPE_CHECKING:
     from ._minimize import Minimize, MinimizeState, Vector
@@ -27,12 +27,7 @@ def _cg(self: 'Minimize[Vector]') -> 'Energy':
     step_size_test = self.step_size.initial  # test step size
     step_size = step_size_test  # actual step size taken
     line_minimize = LINE_MINIMIZE[self.line_minimize]
-
-    # Initialize convergence checkers:
-    Ename = state.energy.name
-    checks = {'d' + Ename: qp.utils.ConvergenceCheck(self.energy_threshold)}
-    for extra_name, extra_threshold in self.extra_thresholds.items():
-        checks[extra_name] = qp.utils.ConvergenceCheck(extra_threshold)
+    checks = _initialize_convergence_checks(self, state)
 
     # Iterate till convergence (or iteration limit):
     for i_iter in range(self.n_iterations + 1):
@@ -45,31 +40,9 @@ def _cg(self: 'Minimize[Vector]') -> 'Energy':
             along_gradient = True
 
         # Check and report convergence:
-        line = f'{self.name}: {i_iter}  {Ename}: {E:+.11f}  '
-        dE = E - E_prev
-        E_prev = E
-        values = [dE] + [self._sync(v) for v in state.extra]
-        converged = []
-        for i_check, (check_name, check) in enumerate(checks.items()):
-            if not (i_check or i_iter):
-                continue  # dE not available at first iteration
-            value = values[i_check]
-            value_str = (f'{value:.3e}' if (check_name[0] == '|')
-                         else f'{value:+.3e}')
-            line += f'  {check_name:s}: {value_str}'
-            if check.check(value):
-                converged.append(check_name)
-        line += f'  t[s]: {self.rc.clock():.2f}'
-        qp.log.info(line)
-        # --- stopping criteria:
-        if converged:
-            qp.log.info(f'{self.name}: Converged on '
-                        f'{", ".join(converged)} criteria.')
-            return state.energy
-        if not np.isfinite(E):
-            qp.log.info(f'{self.name}: Stopping due to non-finite energy.')
-            return state.energy
-        if i_iter == self.n_iterations:
+        E, E_prev, should_exit = _check_convergence(self, state, i_iter,
+                                                    checks, E, E_prev)
+        if should_exit:
             return state.energy
 
         # Direction update:
@@ -129,3 +102,51 @@ def _cg(self: 'Minimize[Vector]') -> 'Energy':
     qp.log.info(f'{self.name}: Not converged in {self.n_iterations}'
                 ' iterations.')
     return state.energy
+
+
+def _initialize_convergence_checks(self: 'Minimize[Vector]',
+                                   state: 'MinimizeState[Vector]'
+                                   ) -> Dict[str, 'ConvergenceCheck']:
+    """Initialize convergence checkers for energy and `extra_thresholds`."""
+    Ename = state.energy.name
+    checks = {'d' + Ename: qp.utils.ConvergenceCheck(self.energy_threshold)}
+    for extra_name, extra_threshold in self.extra_thresholds.items():
+        checks[extra_name] = qp.utils.ConvergenceCheck(extra_threshold)
+    return checks
+
+
+def _check_convergence(self: 'Minimize[Vector]',
+                       state: 'MinimizeState[Vector]', i_iter: int,
+                       checks: Dict[str, 'ConvergenceCheck'],
+                       E: float, E_prev: float) -> Tuple[float, float, bool]:
+    """Check and report convergence progress."""
+    # Report convergence progress:
+    Ename = state.energy.name
+    line = f'{self.name}: {i_iter}  {Ename}: {E:+.11f}  '
+    dE = E - E_prev
+    E_prev = E
+    values = [dE] + [self._sync(v) for v in state.extra]
+    converged = []
+    for i_check, (check_name, check) in enumerate(checks.items()):
+        if not (i_check or i_iter):
+            continue  # dE not available at first iteration
+        value = values[i_check]
+        value_str = (f'{value:.3e}' if (check_name[0] == '|')
+                     else f'{value:+.3e}')
+        line += f'  {check_name:s}: {value_str}'
+        if check.check(value):
+            converged.append(check_name)
+    line += f'  t[s]: {self.rc.clock():.2f}'
+    qp.log.info(line)
+
+    # Stopping criteria:
+    if converged:
+        qp.log.info(f'{self.name}: Converged on '
+                    f'{", ".join(converged)} criteria.')
+        return E, E_prev, True
+    if not np.isfinite(E):
+        qp.log.info(f'{self.name}: Stopping due to non-finite energy.')
+        return E, E_prev, True
+    if i_iter == self.n_iterations:
+        return E, E_prev, True
+    return E, E_prev, False
