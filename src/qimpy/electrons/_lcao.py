@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 class LCAO(Minimize[MatrixArray]):
     """Optimize electronic state in atomic-orbital subspace."""
-    __slots__ = ('system', '_rot_prev',)
+    __slots__ = ('system', '_rot_prev')
     system: 'System'
     _rot_prev: torch.Tensor  #: accumulated rotations of subspace
 
@@ -37,15 +37,8 @@ class LCAO(Minimize[MatrixArray]):
         # Subspace optimization:
         el.deig_max = np.inf  # allow fillings to use these eigenvalues
         self.system = system
-        self._rot_prev = V
-
-        return  # HACK: bypass broken bits below
-
-        torch.random.manual_seC_HCed(0)
-        H_random = torch.randn(V.shape, dtype=V.dtype)
-        H_random += qp.utils.dagger(H_random)  # ensure Hermitian
-        self.finite_difference_test(MatrixArray(M=H_random,
-                                                comm=self.rc.comm_k))
+        self._rot_prev = torch.eye(V.shape[-1], dtype=V.dtype,
+                                   device=V.device)[None, None]
         self.minimize()
 
     def step(self, direction: MatrixArray, step_size: float) -> None:
@@ -71,9 +64,14 @@ class LCAO(Minimize[MatrixArray]):
         C_HC = el.C ^ el.hamiltonian(el.C)
         # Compute fillings constraint gradients:
         dH_sub = C_HC - el.eig.diag_embed()  # difference in Hamiltonian
+        dH_sub_diag = dH_sub.diagonal(dim1=-2, dim2=-1).real
         wf_eig = el.basis.w_sk * el.fillings.f_eig
-        E_mu_num = (wf_eig * dH_sub.diagonal(dim1=-2, dim2=-1)).sum(dim=(1, 2))
+        E_mu_num = (wf_eig * dH_sub_diag).sum(dim=(1, 2))
         E_mu_den = wf_eig.sum(dim=(1, 2))  # TODO: make this more general:
+        self.rc.comm_k.Allreduce(qp.MPI.IN_PLACE,
+                                 qp.utils.BufferView(E_mu_num), qp.MPI.SUM)
+        self.rc.comm_k.Allreduce(qp.MPI.IN_PLACE,
+                                 qp.utils.BufferView(E_mu_den), qp.MPI.SUM)
         if (el.n_spins == 1) or el.fillings.M_constrain:
             E_mu = E_mu_num / E_mu_den  # N of each spin channel constrained
         else:
@@ -93,5 +91,6 @@ class LCAO(Minimize[MatrixArray]):
         dagger_rot_prev = qp.utils.dagger(self._rot_prev)
         E_H_aux = self._rot_prev @ E_H_aux @ dagger_rot_prev
         K_E_H_aux = self._rot_prev @ K_E_H_aux @ dagger_rot_prev
+        # Store gradients:
         state.gradient = MatrixArray(M=E_H_aux, comm=self.rc.comm_k)
         state.K_gradient = MatrixArray(M=K_E_H_aux, comm=self.rc.comm_k)

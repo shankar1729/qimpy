@@ -76,4 +76,4 @@ class MatrixArray:
         result = self.M.flatten().vdot(other.M.flatten())
         return self.comm.allreduce(float(result.real.item()
                                          if result.is_complex()
-                                         else result.item()))
+                                         else result.item()), op=qp.MPI.SUM)

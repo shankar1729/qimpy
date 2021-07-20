@@ -16,6 +16,8 @@ electrons:
   k-mesh:
     offset: [0.5, 0.5, 0.5] #Monkhorst-Pack
     size: [8, 8, 8]
+  xc: 
+    functional: gga-xc-pbe
 
 checkpoint: null  # disable reading checkpoint
 checkpoint-out: Cu.h5  # but still create it

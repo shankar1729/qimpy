@@ -15,7 +15,8 @@ if TYPE_CHECKING:
 
 SmearingResults = collections.namedtuple('SmearingResults',
                                          ['f', 'f_eig', 'S'])
-SmearingFunc = Callable[[torch.Tensor, float, float], SmearingResults]
+SmearingFunc = Callable[[torch.Tensor, Union[float, torch.Tensor], float],
+                        SmearingResults]
 
 
 class Fillings(qp.Constructable):
@@ -69,9 +70,11 @@ class Fillings(qp.Constructable):
             Width of the smearing function (in :math:`E_h`), corresponding
             to the Gaussian width :math:`\\sigma` in the Gaussian, Cold and
             M-P schemes, and to :math:`2k_BT` in the Fermi-Dirac scheme.
+            Defaults to 0.002 if neither `sigma` or `kT` are specified.
         kT
             :math:`k_BT` for Fermi-Dirac occupations, amounting to
             :math:`\\sigma/2` for the other Gaussian-based smearing schemes.
+            Defaults to 0.001 if neither `sigma` or `kT` are specified.
             Specify only one of sigma or kT.
         mu
             Electron chemical potential :math:`\mu`. This serves as an initial
@@ -365,7 +368,7 @@ class Fillings(qp.Constructable):
                                  ' mu/B guesses are reasonable.')
 
         # Update fillings and entropy accordingly:
-        energy['-TS'] = -self.sigma * qp.utils.globalreduce.sum(
+        energy['-TS'] = (-0.5 * self.sigma) * qp.utils.globalreduce.sum(
             w_sk * results['S'], self.rc.comm_k)
         # --- update n_electrons or mu, depending on which is free
         n_electrons = results['NM'][0].item()
@@ -418,17 +421,17 @@ class Fillings(qp.Constructable):
         return n_bands_in
 
 
-def _smearing_fermi(eig: torch.Tensor, mu: float,
+def _smearing_fermi(eig: torch.Tensor, mu: Union[float, torch.Tensor],
                     sigma: float) -> SmearingResults:
     """Compute Fermi-Dirac occupations, its energy derivative and entropy.
     Note that sigma is taken as 2 kT to keep width consistent."""
-    f = torch.sigmoid((mu - eig)/(0.5*sigma))
+    f = torch.special.expit((mu - eig)/(0.5*sigma))
     f_eig = f * (1 - f) / (-0.5*sigma)
     S = -f.xlogy(f) - (1-f).xlogy(1-f)
     return SmearingResults(f, f_eig, S)
 
 
-def _smearing_gauss(eig: torch.Tensor, mu: float,
+def _smearing_gauss(eig: torch.Tensor, mu: Union[float, torch.Tensor],
                     sigma: float) -> SmearingResults:
     """Compute Gaussian (erfc) occupations, energy derivative and entropy."""
     x = (eig - mu) / sigma
@@ -438,7 +441,7 @@ def _smearing_gauss(eig: torch.Tensor, mu: float,
     return SmearingResults(f, f_eig, S)
 
 
-def _smearing_mp1(eig: torch.Tensor, mu: float,
+def _smearing_mp1(eig: torch.Tensor, mu: Union[float, torch.Tensor],
                   sigma: float) -> SmearingResults:
     """Compute first-order Methfessel-Paxton occupations, energy derivative
     and entropy."""
@@ -450,7 +453,7 @@ def _smearing_mp1(eig: torch.Tensor, mu: float,
     return SmearingResults(f, f_eig, S)
 
 
-def _smearing_cold(eig: torch.Tensor, mu: float,
+def _smearing_cold(eig: torch.Tensor, mu: Union[float, torch.Tensor],
                    sigma: float) -> SmearingResults:
     """Compute Cold smearing occupations, energy derivative and entropy."""
     x = (eig - mu) / sigma + np.sqrt(0.5)  # note: not centered at mu
