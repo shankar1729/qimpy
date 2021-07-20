@@ -173,7 +173,7 @@ class Davidson(qp.Constructable):
             # Expansion subspace overlaps:
             C_OC = torch.eye(n_bands_cur, device=V.device)[None, None]
             C_OCexp = el.C.dot_O(Cexp)
-            Cexp_OC = C_OCexp.conj().transpose(-2, -1)
+            Cexp_OC = qp.utils.dagger(C_OCexp)
             Cexp_OCexp = Cexp.dot_O(Cexp)
             dims_new = (n_spins, nk_mine, n_bands_new, n_bands_new)
             C_OC_new = torch.zeros(dims_new, device=V.device, dtype=V.dtype)
@@ -186,7 +186,7 @@ class Davidson(qp.Constructable):
             HCexp = el.hamiltonian(Cexp)
             C_HC = torch.diag_embed(el.eig)
             C_HCexp = el.C ^ HCexp
-            Cexp_HC = C_HCexp.conj().transpose(-2, -1)
+            Cexp_HC = qp.utils.dagger(C_HCexp)
             Cexp_HCexp = Cexp ^ HCexp
             C_HC_new = torch.zeros(dims_new, device=V.device, dtype=V.dtype)
             C_HC_new[:, :, :n_bands_cur, :n_bands_cur] = C_HC

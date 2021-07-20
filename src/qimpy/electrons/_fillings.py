@@ -23,7 +23,7 @@ class Fillings(qp.Constructable):
     __slots__ = ('electrons', 'n_electrons',
                  'n_bands_min', 'n_bands', 'n_bands_extra',
                  'smearing', 'sigma', 'mu_constrain', 'M_constrain',
-                 'mu', 'B', 'M', 'f', '_smearing_func')
+                 'mu', 'B', 'M', 'f', 'f_eig', '_smearing_func')
     electrons: 'Electrons'
     n_electrons: float  #: Number of electrons
     n_bands_min: int  #: Minimum number of bands to accomodate `n_electrons`
@@ -37,6 +37,7 @@ class Fillings(qp.Constructable):
     M: torch.Tensor  #: Total magnetization (vector in spinorial mode)
     M_constrain: bool  #: Whether to constrain magnetization
     f: torch.Tensor  #: Electronic occupations
+    f_eig: torch.Tensor  #: Derivative of `f` with electronic eigenvalues
     _smearing_func: Optional[SmearingFunc]  #: Smearing function calculator
 
     def __init__(self, *, co: qp.ConstructOptions,
@@ -249,6 +250,7 @@ class Fillings(qp.Constructable):
                 self.f[i_spin, :, :n_full] = 1.  # full fillings
                 if f_sum > n_full:
                     self.f[i_spin, :, n_full] = (f_sum - n_full)  # left overs
+        self.f_eig = torch.zeros_like(self.f)
 
     def update(self, energy: 'Energy') -> None:
         """Update fillings `f` and chemical potential `mu`, if needed.
@@ -292,7 +294,7 @@ class Fillings(qp.Constructable):
             NM_target = np.array([self.n_electrons])
             mu_B = np.array([self.mu])
             i_free = np.where([not self.mu_constrain])[0]
-        results = {}  # populated with NM, f and S by compute_NM
+        results = {}  # populated with NM and S by compute_NM
 
         def compute_NM(params):
             """Compute electron number and magnetization from eigenvalues.
@@ -314,8 +316,9 @@ class Fillings(qp.Constructable):
                                          qp.utils.BufferView(tensor),
                                          qp.MPI.SUM)
                 self.rc.comm_kb.Bcast(qp.utils.BufferView(tensor))
+            self.f = f
+            self.f_eig = f_eig
             results['NM'] = NM
-            results['f'] = f
             results['S'] = S
             # Compute errors:
             NM_err = NM.to(self.rc.cpu).numpy() - NM_target
@@ -362,7 +365,6 @@ class Fillings(qp.Constructable):
                                  ' mu/B guesses are reasonable.')
 
         # Update fillings and entropy accordingly:
-        self.f = results['f']
         energy['-TS'] = -self.sigma * qp.utils.globalreduce.sum(
             w_sk * results['S'], self.rc.comm_k)
         # --- update n_electrons or mu, depending on which is free

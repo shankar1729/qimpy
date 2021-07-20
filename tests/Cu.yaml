@@ -1,0 +1,21 @@
+lattice:
+  system: cubic
+  modification: face-centered
+  a: 6.822  # bohrs
+  
+ions:
+  pseudopotentials:
+    - ../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
+  coordinates:
+    - [Cu, 0., 0., 0.]
+
+electrons:
+  fillings:
+    smearing: Gauss
+    sigma: 0.02
+  k-mesh:
+    offset: [0.5, 0.5, 0.5] #Monkhorst-Pack
+    size: [8, 8, 8]
+
+checkpoint: null  # disable reading checkpoint
+checkpoint-out: Cu.h5  # but still create it

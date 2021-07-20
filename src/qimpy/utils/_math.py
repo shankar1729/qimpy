@@ -42,6 +42,12 @@ def cis(x: torch.Tensor) -> torch.Tensor:
     return torch.polar(torch.ones_like(x), x)
 
 
+def dagger(x: torch.Tensor) -> torch.Tensor:
+    """Conjugate transpose of a batch of matrices. Matrix dimensions are
+    assumed to be the final two, with all preceding dimensions batched over."""
+    return x.conj().transpose(-2, -1)
+
+
 def abs_squared(x: torch.Tensor) -> torch.Tensor:
     """Compute absolute value squared of complex or real tensor.
     Avoids complex multiply and square root for efficiency."""
@@ -73,13 +79,12 @@ def ortho_matrix(O: torch.Tensor, use_cholesky: bool = True) -> torch.Tensor:
         identity = torch.eye(O.shape[-1], device=O.device,
                              dtype=O.dtype).view((1,) * (len(O.shape) - 2)
                                                  + O.shape[-2:])
-        return torch.triangular_solve(identity, torch.linalg.cholesky(O),
-                                      upper=False)[0].transpose(-2, -1).conj()
+        return dagger(torch.triangular_solve(
+            identity, torch.linalg.cholesky(O), upper=False)[0])
     else:
         # Symmetric orthonormalization matrix:
         lbda, V = torch.linalg.eigh(O)
-        return V @ ((1./torch.sqrt(lbda))[..., None]
-                    * V.transpose(-2, -1).conj())
+        return V @ ((1./torch.sqrt(lbda))[..., None] * dagger(V))
 
 
 def eighg(H: torch.Tensor, O: torch.Tensor,
@@ -106,5 +111,5 @@ def eighg(H: torch.Tensor, O: torch.Tensor,
         Eigenvectors (same shape as H and O)
     """
     U = ortho_matrix(O, use_cholesky)
-    E, V = torch.linalg.eigh(U.transpose(-2, -1).conj() @ (H @ U))
+    E, V = torch.linalg.eigh(dagger(U) @ (H @ U))
     return E, U @ V  # transform eigenvectors back to original basis
