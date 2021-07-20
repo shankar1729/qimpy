@@ -21,7 +21,6 @@ def _read_upf(self: 'Pseudopotential', filename: str, rc: 'RunConfig'):
     rc : qimpy.utils.RunConfig
         Current run configuration.
     """
-    watch = qp.utils.StopWatch('read_upf', rc)
     qp.log.info(f"\nReading '{filename}':")
     upf = ET.fromstring(open(filename, 'r').read().replace('&', '&amp;'))
     assert(upf.tag == 'UPF')
@@ -202,7 +201,6 @@ def _read_upf(self: 'Pseudopotential', filename: str, rc: 'RunConfig'):
         self.rho_atom = qp.ions.RadialFunction(self.r, self.dr)
     if not hasattr(self, 'n_core'):
         self.n_core = qp.ions.RadialFunction(self.r, self.dr)
-    watch.stop()
 
 
 if __name__ == '__main__':

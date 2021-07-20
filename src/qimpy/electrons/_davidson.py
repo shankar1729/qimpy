@@ -195,10 +195,12 @@ class Davidson(qp.Constructable):
             C_HC_new[:, :, n_bands_cur:, n_bands_cur:] = Cexp_HCexp
 
             # Solve expanded subspace generalized eigenvalue problem:
+            watch = qp.utils.StopWatch('Davidson.eighg', self.rc)
             eig_new, V_new = qp.utils.eighg(C_HC_new, C_OC_new)
             n_bands_next = min(n_bands_new, n_bands_max)  # number to retain
             Vcur = V_new[:, :, :n_bands_cur, :n_bands_next]  # cur -> next C
             Vexp = V_new[:, :, n_bands_cur:, :n_bands_next]  # exp -> next C
+            watch.stop()
 
             # Update C to optimum n_bands_next subspace from [C, Cexp]:
             el.C = el.C @ Vcur
