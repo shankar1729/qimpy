@@ -159,10 +159,12 @@ def _matmul(self: 'Wavefunction', mat: torch.Tensor) -> 'Wavefunction':
     C = self.coeff.flatten(-2)  # merge spinor & basis dims at input
     C_out = mat.transpose(-2, -1) @ C
     C_out = C_out.view(C_out.shape[:-1] + self.coeff.shape[-2:])  # un-merge
-    proj_out = ((self.proj @ mat) if self.proj else None)
+    result = qp.electrons.Wavefunction(self.basis, coeff=C_out,
+                                       band_division=self.band_division)
+    if self._proj_is_valid():
+        result._proj = self._proj @ mat
     watch.stop()
-    return qp.electrons.Wavefunction(self.basis, C_out, proj_out,
-                                     self.band_division)
+    return result
 
 
 def _orthonormalize(self: 'Wavefunction') -> 'Wavefunction':
@@ -181,10 +183,13 @@ def _mul(self: 'Wavefunction',
         is_band_scale = (scale.shape[-2:] == (1, 1))
     if not is_suitable:
         return NotImplemented
-    coeff = self.coeff * scale
-    proj = ((self.proj * scale) if (self.proj and is_band_scale) else None)
-    return qp.electrons.Wavefunction(self.basis, coeff, proj,
-                                     self.band_division)
+    result = qp.electrons.Wavefunction(self.basis, coeff=self.coeff * scale,
+                                       band_division=self.band_division)
+    if is_band_scale and self._proj_is_valid():
+        assert self._proj is not None
+        result._proj = self._proj * scale
+        result._proj_version = self._proj_version
+    return result
 
 
 def _imul(self: 'Wavefunction',
@@ -196,11 +201,11 @@ def _imul(self: 'Wavefunction',
     if not is_suitable:
         return NotImplemented
     self.coeff *= scale
-    if self.proj:
-        if is_band_scale:
-            self.proj *= scale
-        else:
-            self.proj = None
+    if is_band_scale and self._proj_is_valid():
+        assert self._proj is not None
+        self._proj *= scale
+    else:
+        self._proj_invalidate()
     return self
 
 
@@ -208,10 +213,15 @@ def _add(self: 'Wavefunction', other: 'Wavefunction') -> 'Wavefunction':
     if not isinstance(other, qp.electrons.Wavefunction):
         return NotImplemented
     assert(self.basis is other.basis)
-    coeff = self.coeff + other.coeff
-    proj = ((self.proj + other.proj) if (self.proj and other.proj) else None)
-    return qp.electrons.Wavefunction(self.basis, coeff, proj,
-                                     self.band_division)
+    result = qp.electrons.Wavefunction(self.basis,
+                                       coeff=(self.coeff + other.coeff),
+                                       band_division=self.band_division)
+    if self._proj_is_valid() and other._proj_is_valid():
+        assert self._proj is not None
+        assert other._proj is not None
+        result._proj = self._proj + other._proj
+        result._proj_version = self._proj_version
+    return result
 
 
 def _iadd(self: 'Wavefunction', other: 'Wavefunction') -> 'Wavefunction':
@@ -219,10 +229,12 @@ def _iadd(self: 'Wavefunction', other: 'Wavefunction') -> 'Wavefunction':
         return NotImplemented
     assert(self.basis is other.basis)
     self.coeff += other.coeff
-    if self.proj and other.proj:
-        self.proj += other.proj
+    if self._proj_is_valid() and other._proj_is_valid():
+        assert self._proj is not None
+        assert other._proj is not None
+        self._proj += other._proj
     else:
-        self.proj = None
+        self._proj_invalidate()
     return self
 
 
@@ -230,10 +242,15 @@ def _sub(self: 'Wavefunction', other: 'Wavefunction') -> 'Wavefunction':
     if not isinstance(other, qp.electrons.Wavefunction):
         return NotImplemented
     assert(self.basis is other.basis)
-    coeff = self.coeff - other.coeff
-    proj = ((self.proj - other.proj) if (self.proj and other.proj) else None)
-    return qp.electrons.Wavefunction(self.basis, coeff, proj,
-                                     self.band_division)
+    result = qp.electrons.Wavefunction(self.basis,
+                                       coeff=(self.coeff - other.coeff),
+                                       band_division=self.band_division)
+    if self._proj_is_valid() and other._proj_is_valid():
+        assert self._proj is not None
+        assert other._proj is not None
+        result._proj = self._proj - other._proj
+        result._proj_version = self._proj_version
+    return result
 
 
 def _isub(self: 'Wavefunction', other: 'Wavefunction') -> 'Wavefunction':
@@ -241,36 +258,50 @@ def _isub(self: 'Wavefunction', other: 'Wavefunction') -> 'Wavefunction':
         return NotImplemented
     assert(self.basis is other.basis)
     self.coeff -= other.coeff
-    if self.proj and other.proj:
-        self.proj -= other.proj
+    if self._proj_is_valid() and other._proj_is_valid():
+        assert self._proj is not None
+        assert other._proj is not None
+        self._proj -= other._proj
     else:
-        self.proj = None
+        self._proj_invalidate()
     return self
 
 
 def _getitem(self: 'Wavefunction', index: Any) -> 'Wavefunction':
     """Propagate getting slices to coeff and proj if present"""
-    coeff = self.coeff[index]
-    proj = None if (self.proj is None) else self.proj[index]
-    return qp.electrons.Wavefunction(self.basis, coeff, proj,
-                                     self.band_division)
+    result = qp.electrons.Wavefunction(self.basis, coeff=self.coeff[index],
+                                       band_division=self.band_division)
+    if self._proj_is_valid():
+        assert self._proj is not None
+        result._proj = self._proj[index]
+        result._proj_version = self._proj_version
+    return result
 
 
-def _setitem(self: 'Wavefunction', index: Any, value: 'Wavefunction') -> None:
-    """Propagate setting slices to coeff and proj if present"""
-    self.coeff[index] = value.coeff
-    if (self.proj is not None) and (value.proj is not None):
-        self.proj[index] = value.proj
+def _setitem(self: 'Wavefunction', index: Any, other: 'Wavefunction') -> None:
+    """Propagate setting slices to `coeff` and `proj` if present"""
+    self.coeff[index] = other.coeff
+    if self._proj_is_valid() and other._proj_is_valid():
+        assert self._proj is not None
+        assert other._proj is not None
+        self._proj[index] = other._proj
+    else:
+        self._proj_invalidate()
 
 
 def _cat(self: 'Wavefunction', other: 'Wavefunction',
          dim: int = 2) -> 'Wavefunction':
     """Join wavefunctions along specified dimension (default: 2 => bands)"""
-    coeff = torch.cat((self.coeff, other.coeff), dim=dim)
-    proj = (None if ((self.proj is None) or (other.proj is None))
-            else torch.cat((self.proj, other.proj), dim=dim))
-    return qp.electrons.Wavefunction(self.basis, coeff, proj,
-                                     self.band_division)
+    result = qp.electrons.Wavefunction(self.basis,
+                                       coeff=torch.cat((self.coeff,
+                                                        other.coeff), dim=dim),
+                                       band_division=self.band_division)
+    if self._proj_is_valid() and other._proj_is_valid():
+        assert self._proj is not None
+        assert other._proj is not None
+        result._proj = torch.cat((self._proj, other._proj), dim=dim)
+        result._proj_version = self._proj_version
+    return result
 
 
 def _constrain(self: 'Wavefunction'):

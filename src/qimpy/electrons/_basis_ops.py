@@ -14,7 +14,7 @@ def _apply_ke(self: 'Basis', C: 'Wavefunction') -> 'Wavefunction':
     basis_slice = (slice(None) if C.band_division else self.mine)
     coeff = C.coeff * self.get_ke(basis_slice)[None, :, None, None, :]
     watch.stop()
-    return qp.electrons.Wavefunction(self, coeff,
+    return qp.electrons.Wavefunction(self, coeff=coeff,
                                      band_division=C.band_division)
 
 

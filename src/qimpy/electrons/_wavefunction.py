@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 class Wavefunction:
     """Electronic wavefunctions including coefficients and projections"""
+    __slots__ = ('basis', 'coeff', 'band_division', '_proj', '_proj_version')
     basis: 'Basis'  #: Corresponding basis
 
     #: Wavefunction coefficients (n_spins x nk x n_bands x n_spinor x n_basis)
@@ -23,17 +24,19 @@ class Wavefunction:
 
     #: Projections of each band on all pseudopotential projectors
     #: (n_spins x nk x n_bands x n_spinor x n_projectors)
-    proj: Optional[torch.Tensor]
+    #: Access this using property `proj` instead, which takes care of
+    #: automatically calculating and invalidating this when necessary.
+    _proj: Optional[torch.Tensor]
+    _proj_version: int  #: `Ions.beta_version` for which `_proj` is valid
 
     #: If present, wavefunctions are split along bands instead of
     #: along the 'home position' of split along basis.
     band_division: Optional['TaskDivision']
 
-    def __init__(self, basis: 'Basis', coeff: Optional[torch.Tensor] = None,
-                 proj: Optional[torch.Tensor] = None,
+    def __init__(self, basis: 'Basis', *, coeff: Optional[torch.Tensor] = None,
                  band_division: Optional['TaskDivision'] = None,
-                 n_bands: int = 0, n_spins: int = 0, n_spinor: int = 0,
-                 randomize: bool = False) -> None:
+                 n_bands: int = 0, n_spins: int = 0, n_spinor: int = 0
+                 ) -> None:
         """Initialize wavefunctions of specified size or with given
         coefficients.
 
@@ -45,8 +48,6 @@ class Wavefunction:
             Wavefunction coefficients in specified basis.
             If not provided, one of `band_division` or `n_bands` must be
             provided to initialize zero wavefunctions of determined size.
-        proj
-            Projections to pseudopotential projectors for each ion species
         band_division
             If None, wavefunctions are MPI-split over basis coefficients,
             which is the default or "home" position for the wavefunctions.
@@ -66,8 +67,8 @@ class Wavefunction:
             Used only if coeff is None, and n_bands or band_division is given
         """
         self.basis = basis
-        self.proj = proj
         self.band_division = band_division
+        self._proj_invalidate()
         if coeff is None:
             # Initialize zero coefficients:
             assert(n_bands or band_division)
@@ -81,10 +82,23 @@ class Wavefunction:
             self.coeff = torch.zeros(
                 (n_spins, nk_mine, n_bands, n_spinor, n_basis),
                 dtype=torch.cdouble, device=basis.rc.device)
-            self.proj = None  # invalidate any previous projections
+            # Projections of zero wavefunctions are always zero:
+            self._proj = torch.zeros(
+                (n_spins, nk_mine, basis.ions.n_projectors, n_bands),
+                dtype=torch.cdouble, device=basis.rc.device)
+            self._proj_version = basis.ions.beta_version
         else:
             # Set provided coefficients:
             self.coeff = coeff
+
+    def _proj_invalidate(self) -> None:
+        """Invalidate cached projections."""
+        self._proj = None
+        self._proj_version = 0
+
+    def _proj_is_valid(self) -> bool:
+        """Check whether cached projections are still valid."""
+        return self._proj_version == self.basis.ions.beta_version
 
     def zeros_like(self, n_bands: int = 0) -> 'Wavefunction':
         """Create a zero Wavefunction similar to the present one.
@@ -95,11 +109,14 @@ class Wavefunction:
                             n_spinor=self.coeff.shape[3])
 
     def clone(self) -> 'Wavefunction':
-        """Create a copy"""
-        return Wavefunction(
-            self.basis, self.coeff.clone().detach(),
-            None if (self.proj is None) else self.proj.clone().detach(),
-            band_division=self.band_division)
+        """Create an independent copy (not a view / reference)."""
+        result = Wavefunction(self.basis, coeff=self.coeff.clone().detach(),
+                              band_division=self.band_division)
+        if self._proj_is_valid():
+            assert self._proj is not None
+            result._proj = self._proj.clone().detach()
+            result._proj_version = self._proj_version
+        return result
 
     def n_bands(self) -> int:
         """Get number of bands in wavefunction"""
@@ -123,6 +140,7 @@ class Wavefunction:
         size = (n_spins, nk_mine, n_bands_in, n_spinor, basis_n_mine)
         self.coeff[:, :, :n_bands_in, :, :basis_n_mine] = \
             checkpoint.read_slice_complex(dset, offset, size)
+        self._proj_invalidate()
         return n_bands_in
 
     def write(self, checkpoint: 'Checkpoint', path: str) -> None:

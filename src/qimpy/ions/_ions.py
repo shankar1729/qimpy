@@ -16,7 +16,8 @@ class Ions(qp.Constructable):
     """Ionic system: ionic geometry and pseudopotentials. """
     __slots__ = ('n_ions', 'n_types', 'symbols', 'n_ions_type', 'slices',
                  'pseudopotentials', 'positions', 'types', 'M_initial',
-                 'Z', 'Z_tot', 'rho', 'Vloc', 'n_core', 'beta', 'D_all')
+                 'Z', 'Z_tot', 'rho', 'Vloc', 'n_core',
+                 'beta', 'beta_version', 'D_all')
     n_ions: int  #: number of ions
     n_types: int  #: number of distinct ion types
     n_ions_type: List[int]  #: number of ions of each type
@@ -32,6 +33,7 @@ class Ions(qp.Constructable):
     Vloc: 'FieldH'  #: local potential due to ions (including from rho)
     n_core: 'FieldH'  #: partial core electronic density (for inclusion in XC)
     beta: 'Wavefunction'  #: pseudopotential projectors
+    beta_version: int  #: version of `beta` to invalidate cached projections
     D_all: torch.Tensor  #: nonlocal pseudopotential matrix (all atoms)
 
     def __init__(self, *, co: qp.ConstructOptions,
@@ -166,6 +168,7 @@ class Ions(qp.Constructable):
             else:
                 raise ValueError(f'no pseudopotential found for {symbol}')
         self._collect_ps_matrix()  # collect pseudopotential across all atoms
+        self.beta_version = 0
 
         # Calculate total ionic charge (needed for number of electrons):
         self.Z = torch.tensor([ps.Z for ps in self.pseudopotentials],
@@ -249,6 +252,7 @@ class Ions(qp.Constructable):
 
         # Update pseudopotential projectors:
         self.beta = self._get_projectors(system.electrons.basis)
+        self.beta_version += 1  # will auto-invalidate cached projections
 
     def translation_phase(self, iG: torch.Tensor,
                           atom_slice: slice = slice(None)) -> torch.Tensor:
