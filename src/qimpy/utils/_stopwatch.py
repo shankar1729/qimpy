@@ -72,8 +72,14 @@ class StopWatch:
         """Print statistics of all timings measured using class StopWatch."""
         cls._process_cuda_events()
         qp.log.info('')
+        t_total = 0.
+        n_calls_total = 0
         for name, times in sorted(cls._stats.items()):
             t = np.array(times)
+            t_total += t.sum()
+            n_calls_total += len(t)
             qp.log.info(
                 f'StopWatch: {name:30s}  {t.mean():10.6f} +/- {t.std():10.6f}'
                 f' s, {len(t):4d} calls, {t.sum():10.6f} s total')
+        qp.log.info(f'StopWatch: {"Total":30s}    {"-"*25} {n_calls_total:5d}'
+                    f' calls, {t_total:10.6f} s total')

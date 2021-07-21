@@ -124,7 +124,7 @@ def _randomize_selected(self: 'Wavefunction', i_spin: torch.Tensor,
     assert(self.band_division is None)
     basis = self.basis
     n_bands = self.n_bands()
-    watch = qp.utils.StopWatch('Wavefunction.randomize_selected', basis.rc)
+    watch = qp.utils.StopWatch('Wavefunction.randomize_sel', basis.rc)
 
     # Initialize random number state based on global coeff index and seed:
     def init_state(basis_index: torch.Tensor) -> torch.Tensor:
