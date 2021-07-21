@@ -91,6 +91,19 @@ class Wavefunction:
             # Set provided coefficients:
             self.coeff = coeff
 
+    @property
+    def proj(self) -> torch.Tensor:
+        """Projection of wavefunction on current projector in :class:`Ions`.
+        This is computed, cached and invalidated automatically."""
+        if self._proj_is_valid():
+            assert self._proj is not None
+            return self._proj
+        else:
+            ions = self.basis.ions
+            self._proj = ions.beta ^ self
+            self._proj_version = ions.beta_version
+            return self._proj
+
     def _proj_invalidate(self) -> None:
         """Invalidate cached projections."""
         self._proj = None

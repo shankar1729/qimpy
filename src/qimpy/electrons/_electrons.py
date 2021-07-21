@@ -274,7 +274,7 @@ class Electrons(qp.Constructable):
             self.C.band_ke()[:, :, :f.shape[2]] * self.basis.w_sk * f,
             self.rc.comm_k)
         # Nonlocal projector:
-        beta_C = system.ions.beta ^ self.C[:, :, :self.fillings.n_bands]
+        beta_C = self.C.proj[..., :self.fillings.n_bands]
         system.energy['Enl'] = qp.utils.globalreduce.sum(
             ((beta_C.conj() * (system.ions.D_all @ beta_C)).sum(dim=-2)
              * self.basis.w_sk * f).real, self.rc.comm_k)
