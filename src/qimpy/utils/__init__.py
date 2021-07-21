@@ -2,14 +2,15 @@
 # List exported symbols for doc generation
 __all__ = [
     'prime_factorization', 'fft_suitable', 'ceildiv', 'cis', 'dagger',
-    'abs_squared', 'ortho_matrix', 'eighg', 'globalreduce',
+    'abs_squared', 'accum_norm_', 'accum_prod_',
+    'ortho_matrix', 'eighg', 'globalreduce',
     'log_config', 'RunConfig', 'StopWatch',
     'Optimizable', 'ConvergenceCheck', 'MatrixArray',
     'Pulay', 'Minimize', 'MinimizeState',
     'TaskDivision', 'TaskDivisionCustom', 'BufferView', 'Checkpoint']
 
 from ._math import prime_factorization, fft_suitable, ceildiv, \
-    cis, dagger, abs_squared, ortho_matrix, eighg
+    cis, dagger, abs_squared, accum_norm_, accum_prod_, ortho_matrix, eighg
 from . import globalreduce
 from ._log import log_config
 from ._runconfig import RunConfig

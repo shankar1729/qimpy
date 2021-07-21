@@ -145,6 +145,7 @@ class RunConfig:
             self.n_threads = cores
         assert(self.n_threads >= 1)
         torch.set_num_threads(self.n_threads)
+        self.no_grad = torch.no_grad()
 
         # Report total resources:
         run_totals = np.array([self.n_threads,  n_gpus])

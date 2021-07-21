@@ -191,6 +191,8 @@ class Basis(qp.Constructable):
         if self.fft_block_size:
             return self.fft_block_size
         else:
+            if not (n_batch and n_bands):
+                return 1  # Irrelevant since no FFTs to perform anyway
             # TODO: better heuristics on how much data to FFT at once:
             min_data = 16_000_000 if self.rc.use_cuda else 100_000
             min_block = qp.utils.ceildiv(min_data,

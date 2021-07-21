@@ -108,8 +108,7 @@ def _collect_density(self: 'Basis', C: 'Wavefunction', f: torch.Tensor,
         assert coeff.shape[-2] == 2  # must be spinorial
     if C.band_division is not None:
         f = f[:, :, C.band_division.i_start:C.band_division.i_stop]
-    prefac = (f * (self.w_sk / self.lattice.volume)).view(f.shape
-                                                          + (1, 1, 1, 1))
+    prefac = f * (self.w_sk / self.lattice.volume)
 
     # Determine FFT type and dimensions:
     watch = qp.utils.StopWatch('Basis.collect_density', self.rc)
@@ -118,6 +117,11 @@ def _collect_density(self: 'Basis', C: 'Wavefunction', f: torch.Tensor,
     n_spins, nk, n_bands_mine, n_spinor = coeff.shape[:-1]
     ik = torch.arange(nk, device=coeff.device)[:, None]
     index = (slice(None), ik, slice(None), slice(None), self.fft_index)
+    if not need_Mvec:
+        # Make fillings prefactor broadcast with spinor (summed over below):
+        prefac = prefac[..., None]
+        if n_spinor > 1:
+            prefac = prefac.tile((1, 1, 1, n_spinor))
 
     # Collect density with blocked FFTs:
     fft_block_size = self.get_fft_block_size(n_spins*nk, n_bands_mine)
@@ -140,15 +144,14 @@ def _collect_density(self: 'Basis', C: 'Wavefunction', f: torch.Tensor,
         # Expand -> ifft -> collect | |^2
         Cb[index] = coeff[:, :, b_start:b_stop].permute(1, 4, 0, 2, 3)
         ICb = self.grid.ifft(Cb.view((n_spins, nk, b_size, n_spinor) + shapeG))
+        prefac_cur = prefac[:, :, b_start:b_stop]
         if need_Mvec:
-            rho_diag += (prefac[:, :, b_start:b_stop]
-                         * qp.utils.abs_squared(ICb)).sum(dim=(0, 1, 2))
-            rho_dn_up += (prefac[:, :, b_start:b_stop, 0]
-                          * ICb[:, :, :, 1].conj()
-                          * ICb[:, :, :, 0]).sum(dim=(0, 1, 2))
+            qp.utils.accum_norm_(prefac_cur, ICb, out=rho_diag, start_dim=0)
+            qp.utils.accum_prod_(prefac_cur,
+                                 ICb[:, :, :, 1].conj(), ICb[:, :, :, 0],
+                                 out=rho_dn_up, start_dim=0)
         else:
-            rho_diag += (prefac[:, :, b_start:b_stop]
-                         * qp.utils.abs_squared(ICb)).sum(dim=(1, 2, 3))
+            qp.utils.accum_norm_(prefac_cur, ICb, out=rho_diag, start_dim=1)
         # Advance to next block of data:
         b_start = b_stop
         b_stop += b_size

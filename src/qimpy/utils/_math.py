@@ -57,6 +57,73 @@ def abs_squared(x: torch.Tensor) -> torch.Tensor:
         return x.square()
 
 
+def accum_norm_(f: torch.Tensor, x: torch.Tensor, out: torch.Tensor,
+                start_dim: int, safe_mode: bool = False) -> None:
+    """Accumulate :math:`f |x|^2` to `out` in-place. The result is accumulated
+    over dimensions `start_dim` to number of dimensions of `f`. Dimensions of
+    `f` must match the starting dimensions of `x`. Dimensions of `out` must
+    match `f` up to `start_dim`, and then equal to those of `x` beyond
+    the dimensions of `f`.
+    This is equivalent to performing:
+
+    `out += (f[..., #] * abs_squared(x)).sum(dim=(start_dim ... len(f.shape)))`
+
+    where `f[..., #]` indicates broadcasting `f` to match initial dimensions
+    of `x`. This pattern is used in density computation, and is extremely
+    inefficient as written due to multiple passes through the data of `x`.
+    If `safe_mode` is set to True, this function returns the above naive
+    implementation for checking correctness conveniently.
+    This function optimizes this evaluation as much as possible while staying
+    in pure Python, and is a prime candidate for C++ re-implementation."""
+    stop_dim = len(f.shape)
+    if safe_mode:
+        n_extra = len(x.shape) - stop_dim
+        out += (f.view(f.shape + (1,)*n_extra) * abs_squared(x)
+                ).sum(dim=tuple(range(start_dim, stop_dim)))
+        return
+    assert f.shape == x.shape[:stop_dim]
+    assert f.shape[:start_dim] == out.shape[:start_dim]
+    assert x.shape[stop_dim:] == out.shape[start_dim:]
+    f_np = f.cpu().numpy()
+    for index_in in np.argwhere(f_np):
+        index = tuple(index_in)
+        f_cur = f_np[index]  # this is a scalar
+        x_cur = x[index]  # this will typically have extra dimenions
+        out_cur = out[index[:start_dim]] if start_dim else out
+        if x_cur.is_complex():
+            for x_component in (x_cur.real, x_cur.imag):
+                out_cur.addcmul_(x_component, x_component, value=f_cur)
+        else:
+            out_cur.addcmul_(x_cur, x_cur, value=f_cur)
+
+
+def accum_prod_(f: torch.Tensor, x: torch.Tensor, y: torch.Tensor,
+                out: torch.Tensor, start_dim: int,
+                safe_mode: bool = False) -> None:
+    """Accumulate :math:`f x y` to `out` in-place.
+    Similar to `accum_norm_`, except for a product of two tensors `x` and `y`,
+    instead of the norm of a single tensor `x`. See :func:`accum_norm` for
+    details on the indexing and dimensions that are summed."""
+    stop_dim = len(f.shape)
+    if safe_mode:
+        n_extra = len(x.shape) - stop_dim
+        out += (f.view(f.shape + (1,)*n_extra) * x * y
+                ).sum(dim=tuple(range(start_dim, stop_dim)))
+        return
+    assert f.shape == x.shape[:stop_dim]
+    assert f.shape[:start_dim] == out.shape[:start_dim]
+    assert x.shape[stop_dim:] == out.shape[start_dim:]
+    assert x.shape == y.shape
+    f_np = f.cpu().numpy()
+    for index_in in np.argwhere(f_np):
+        index = tuple(index_in)
+        f_cur = f_np[index]  # this is a scalar
+        x_cur = x[index]  # this will typically have extra dimenions
+        y_cur = y[index]
+        out_cur = out[index[:start_dim]] if start_dim else out
+        out_cur.addcmul_(x_cur, y_cur, value=f_cur)
+
+
 def ortho_matrix(O: torch.Tensor, use_cholesky: bool = True) -> torch.Tensor:
     """Return orthonormalization matrix of a basis.
     The basis is specified by its overlap matrix or metric, `O`.
