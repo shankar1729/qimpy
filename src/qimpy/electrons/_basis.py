@@ -57,7 +57,7 @@ class Basis(qp.Constructable):
                  lattice: 'Lattice', ions: 'Ions', symmetries: 'Symmetries',
                  kpoints: 'Kpoints', n_spins: int, n_spinor: int,
                  ke_cutoff: float = 20., real_wavefunctions: bool = False,
-                 grid: Optional[dict] = None, fft_block_size: int = 1) -> None:
+                 grid: Optional[dict] = None, fft_block_size: int = 0) -> None:
         """Initialize plane-wave basis with `ke_cutoff`.
 
         Parameters
@@ -92,6 +92,8 @@ class Basis(qp.Constructable):
             Number of wavefunction bands to FFT simultaneously.
             Higher numbers require more memory, but can achieve
             better occupancy of GPUs or high-core-count CPUs.
+            The default of 0 auto-selects the block size based on the number
+            of bands and k-points being processed by each process
         """
         super().__init__(co=co)
         rc = self.rc
@@ -181,3 +183,17 @@ class Basis(qp.Constructable):
         """
         return 0.5 * (((self.iG[:, basis_slice] + self.k[:, None, :])
                        @ self.lattice.Gbasis.T) ** 2).sum(dim=-1)
+
+    def get_fft_block_size(self, n_batch: int, n_bands: int) -> int:
+        """Number of FFTs to perform together. Equals `fft_block_size`, if
+        that is non-zero, and uses a heuristic based on batch dimension
+        and number of bands, if manually specified."""
+        if self.fft_block_size:
+            return self.fft_block_size
+        else:
+            # TODO: better heuristics on how much data to FFT at once:
+            min_data = 16_000_000 if self.rc.use_cuda else 100_000
+            min_block = qp.utils.ceildiv(min_data,
+                                         n_batch * np.prod(self.grid.shape))
+            max_block = qp.utils.ceildiv(n_bands, 16)  # based on memory limit
+            return min(min_block, max_block)

@@ -55,11 +55,12 @@ def _apply_potential(self: 'Basis', V: 'FieldH',
     index = (slice(None), ik, slice(None), slice(None), self.fft_index)
 
     # Apply potential with blocked FFTs:
-    n_blocks = qp.utils.ceildiv(n_bands_mine, self.fft_block_size)
+    fft_block_size = self.get_fft_block_size(n_spins*nk, n_bands_mine)
+    n_blocks = qp.utils.ceildiv(n_bands_mine, fft_block_size)
     b_start = 0
-    b_stop = self.fft_block_size
-    b_size = self.fft_block_size
-    Cb = torch.zeros((n_spins, nk, self.fft_block_size, n_spinor, fft_nG),
+    b_stop = fft_block_size
+    b_size = fft_block_size
+    Cb = torch.zeros((n_spins, nk, fft_block_size, n_spinor, fft_nG),
                      dtype=coeff.dtype, device=coeff.device)  # FFT buffer
 
     for iBlock in range(n_blocks):
@@ -119,11 +120,12 @@ def _collect_density(self: 'Basis', C: 'Wavefunction', f: torch.Tensor,
     index = (slice(None), ik, slice(None), slice(None), self.fft_index)
 
     # Collect density with blocked FFTs:
-    n_blocks = qp.utils.ceildiv(n_bands_mine, self.fft_block_size)
+    fft_block_size = self.get_fft_block_size(n_spins*nk, n_bands_mine)
+    n_blocks = qp.utils.ceildiv(n_bands_mine, fft_block_size)
     b_start = 0
-    b_stop = self.fft_block_size
-    b_size = self.fft_block_size
-    Cb = torch.zeros((n_spins, nk, self.fft_block_size, n_spinor, fft_nG),
+    b_stop = fft_block_size
+    b_size = fft_block_size
+    Cb = torch.zeros((n_spins, nk, fft_block_size, n_spinor, fft_nG),
                      dtype=coeff.dtype, device=coeff.device)  # FFT buffer
     rho_diag = torch.zeros((2 if need_Mvec else n_spins,)
                            + self.grid.shapeR_mine, device=coeff.device)
