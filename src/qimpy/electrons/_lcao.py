@@ -72,6 +72,7 @@ class LCAO(Minimize[MatrixArray]):
                                  qp.utils.BufferView(E_mu_num), qp.MPI.SUM)
         self.rc.comm_k.Allreduce(qp.MPI.IN_PLACE,
                                  qp.utils.BufferView(E_mu_den), qp.MPI.SUM)
+        E_mu_den.clamp_(max=-1e-20)  # avoid 0/0 in large-gap corner cases
         if (el.n_spins == 1) or el.fillings.M_constrain:
             E_mu = E_mu_num / E_mu_den  # N of each spin channel constrained
         else:

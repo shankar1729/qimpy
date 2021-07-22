@@ -357,12 +357,41 @@ class Ions(qp.Constructable):
         iG = grid.get_mesh('H').to(torch.double)  # half-space
         G = ((iG @ grid.lattice.Gbasis.T)**2).sum(dim=-1).sqrt()
         Ginterp = Interpolator(G, qp.ions.RadialFunction.DG)
+        # Compute magnetization on each atom if needed:
+        n_mag = M_tot.shape[0]
+        if n_mag:
+            if self.M_initial is not None:
+                if n_mag == 1:
+                    if len(self.M_initial.shape) != 1:
+                        raise ValueError('Per-ion magnetization must be a'
+                                         ' scalar in non-spinorial mode')
+                else:  # n_mag == 3:
+                    if len(self.M_initial.shape) != 3:
+                        raise ValueError('Per-ion magnetization must be a'
+                                         ' 3-vector in spinorial mode')
+                M_initial = self.M_initial.view((self.n_ions, n_mag))
+            else:
+                M_initial = torch.zeros((self.n_ions, n_mag),
+                                        device=M_tot.device)
+            # Get fractional magnetization of each atom:
+            M_frac = M_initial / self.Z[self.types, None]
+            if M_tot.norm().item():
+                # Correct to match overall magnetization, if specified:
+                M_frac += ((M_tot - M_initial.sum(dim=0))/self.Z_tot)[None, :]
+            # Make sure fractional magnetization in range:
+            M_frac_max = 0.9  # need some minority spin for numerical stability
+            M_frac *= (M_frac_max
+                       / M_frac.norm(dim=1).clamp(min=M_frac_max))[:, None]
+
         # Collect density from each atom:
-        n_densities = 1 + M_tot.shape[0]
+        n_densities = 1 + n_mag
         n = qp.grid.FieldH(grid, shape_batch=(n_densities,))
         for i_type, ps in enumerate(self.pseudopotentials):
             rho_i = Ginterp(ps.rho_atom.f_t_coeff / grid.lattice.volume)
             SF = self.translation_phase(iG, self.slices[i_type])
             n.data[0] += rho_i[0] * SF.sum(dim=-1)
-            # TODO: include magnetization
+            if n_mag:
+                for i_ion, M_ion in enumerate(M_frac[self.slices[i_type]]):
+                    n.data[1:] += (rho_i * SF[None, ..., i_ion]
+                                   * M_ion.view((n_mag, 1, 1, 1)))
         return n

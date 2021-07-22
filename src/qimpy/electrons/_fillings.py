@@ -120,7 +120,8 @@ class Fillings(qp.Constructable):
                 if not electrons.spin_polarized:
                     raise ValueError(f'{x_name} only allowed for'
                                      f' spin-polarized calculations')
-                x_arr = torch.tensor(x, device=self.rc.device).flatten()
+                x_arr = torch.tensor(x, device=self.rc.device,
+                                     dtype=torch.double).flatten()
                 if x_len != len(x_arr):
                     prefix = ('' if electrons.spinorial else 'non-')
                     raise ValueError(f'{x_name} must have exactly {x_len} '
