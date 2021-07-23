@@ -283,6 +283,12 @@ class FieldH(Field):
             return self
         return _change_recip(self, grid)
 
+    def symmetrize(self) -> None:
+        """Symmetrize field in-place."""
+        watch = qp.utils.StopWatch('FieldH.symmetrize', self.grid.rc)
+        self.grid.field_symmetrizer(self)
+        watch.stop()
+
 
 class FieldG(Field):
     """Complex fields in (full) reciprocal space."""

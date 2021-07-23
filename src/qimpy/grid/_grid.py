@@ -6,7 +6,7 @@ from typing import Optional, Sequence, Tuple, Dict, TYPE_CHECKING
 if TYPE_CHECKING:
     from ..utils import RunConfig, TaskDivision
     from ..lattice import Lattice
-    from ..symmetries import Symmetries
+    from ..symmetries import Symmetries, FieldSymmetrizer
 
 
 class Grid(qp.Constructable):
@@ -16,11 +16,14 @@ class Grid(qp.Constructable):
     and routines to convert fields between grids.
     """
     __slots__ = [
-        'lattice', 'comm', 'n_procs', 'i_proc', 'is_split', 'ke_cutoff',
+        'lattice', 'symmetries', '_field_symmetrizer',
+        'comm', 'n_procs', 'i_proc', 'is_split', 'ke_cutoff',
         'dV', 'shape', 'shapeH', 'shapeR_mine', 'shapeG_mine', 'shapeH_mine',
         'split0', 'split2', 'split2H', 'mesh1D',
         '_indices_fft', '_indices_ifft', '_indices_rfft', '_indices_irfft']
     lattice: 'Lattice'
+    symmetries: 'Symmetries'
+    _field_symmetrizer: Optional['FieldSymmetrizer']
     comm: Optional[qp.MPI.Comm]  #: Communicator to split grid and FFTs over
     n_procs: int  #: Size of comm
     i_proc: int  #: Rank within comm
@@ -57,7 +60,8 @@ class Grid(qp.Constructable):
             Lattice whose reciprocal lattice vectors define plane-wave basis
         symmetries
             Symmetries with which grid dimensions will be made commensurate,
-            or checked if specified explicitly by shape below.
+            checked if specified explicitly by shape below and used for
+            symmetrization of :class:`Field`'s associated with this grid.
         comm
             Communicator to split grid (and its FFTs) over, if provided.
         ke_cutoff_wavefunction
@@ -76,6 +80,8 @@ class Grid(qp.Constructable):
         """
         super().__init__(co=co)
         self.lattice = lattice
+        self.symmetries = symmetries
+        self._field_symmetrizer = None
 
         # MPI settings (identify local or split):
         self.comm = comm
@@ -176,3 +182,10 @@ class Grid(qp.Constructable):
                 [+1, -1, -1]]) * (np.array(self.shape) // 2)[None, :],
             device=self.rc.device, dtype=torch.double)
         return (iG_box @ self.lattice.Gbasis.T).norm(dim=1).max().item()
+
+    @property
+    def field_symmetrizer(self) -> 'FieldSymmetrizer':
+        """Symmetrizer for fields on this grid (initialized on first use)."""
+        if self._field_symmetrizer is None:
+            self._field_symmetrizer = qp.symmetries.FieldSymmetrizer(self)
+        return self._field_symmetrizer

@@ -247,7 +247,8 @@ class Electrons(qp.Constructable):
         need_Mvec = (self.spinorial and self.spin_polarized)
         self.n = (~(self.basis.collect_density(C, f, need_Mvec
                                                ))).to(system.grid)
-        # TODO: ultrasoft augmentation and symmetrization
+        # TODO: ultrasoft augmentation
+        self.n.symmetrize()
         self.tau = qp.grid.FieldH(system.grid, shape_batch=(0,))
         # TODO: actually compute KE density if required
 
@@ -262,6 +263,7 @@ class Electrons(qp.Constructable):
         self.V_ks[0] += system.ions.Vloc + VH
         system.energy['Ehartree'] = 0.5 * (rho ^ VH).item()
         system.energy['Eloc'] = (rho ^ system.ions.Vloc).item()
+        self.V_ks.symmetrize()
 
     def update(self, system: 'System') -> None:
         """Update electronic system to current wavefunctions and eigenvalues.
