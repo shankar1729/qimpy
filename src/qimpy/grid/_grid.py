@@ -19,7 +19,7 @@ class Grid(qp.Constructable):
         'lattice', 'symmetries', '_field_symmetrizer',
         'comm', 'n_procs', 'i_proc', 'is_split', 'ke_cutoff',
         'dV', 'shape', 'shapeH', 'shapeR_mine', 'shapeG_mine', 'shapeH_mine',
-        'split0', 'split2', 'split2H', 'mesh1D',
+        'split0', 'split2', 'split2H', '_mesh1D', '_mesh1D_mine',
         '_indices_fft', '_indices_ifft', '_indices_rfft', '_indices_irfft']
     lattice: 'Lattice'
     symmetries: 'Symmetries'
@@ -38,7 +38,8 @@ class Grid(qp.Constructable):
     split0: 'TaskDivision'  #: MPI division of real-space dimension 0
     split2: 'TaskDivision'  #: MPI division of reciprocal dimension 2
     split2H: 'TaskDivision'  #: MPI division of half-reciprocal dimension 2
-    mesh1D: Dict[str, Tuple[torch.Tensor, ...]]  #: 1D meshes for `get_mesh`
+    _mesh1D: Dict[str, Tuple[torch.Tensor, ...]]  # Global 1D meshes
+    _mesh1D_mine: Dict[str, Tuple[torch.Tensor, ...]]  # Local 1D meshes
     _indices_fft: IndicesType  #: All-to-all unscramble indices for `fft`
     _indices_ifft: IndicesType  #: All-to-all unscramble indices for `ifft`
     _indices_rfft: IndicesType  #: All-to-all unscramble indices for `rfft`
@@ -136,7 +137,7 @@ class Grid(qp.Constructable):
         self.dV = self.lattice.volume / float(np.prod(self.shape))
         _init_grid_fft(self)
 
-    def get_mesh(self, space: str) -> torch.Tensor:
+    def get_mesh(self, space: str, mine: bool = True) -> torch.Tensor:
         """Get mesh integer coordinates for real or reciprocal space
 
         Parameters
@@ -146,14 +147,19 @@ class Grid(qp.Constructable):
             'G' = full reciprocal space and 'H' = half or Hermitian-symmetric
             recipocal space resulting from FFT of real functions on grid.
 
+        mine
+            Only get local portion of mesh if True (default).
+            Otherwise, get the entire mesh, even if grid is split over MPI.
+
         Returns
         -------
         Tensor
             Integer tensor with dimensions shape_mine + (3,), where
             shape_mine is the relevant local dimensions of requested space
+            if mine is True (and with shape, instead if mine is False).
         """
-        return torch.stack(
-            torch.meshgrid(*self.mesh1D[space])).permute(1, 2, 3, 0)
+        mesh1D = (self._mesh1D_mine[space] if mine else self._mesh1D[space])
+        return torch.stack(torch.meshgrid(*mesh1D)).permute(1, 2, 3, 0)
 
     def get_gradient_operator(self, space: str) -> torch.Tensor:
         """Get gradient operator in reciprocal space.
@@ -170,7 +176,8 @@ class Grid(qp.Constructable):
             Tensor with dimensions (3,) + shape_mine, where
             shape_mine is the relevant local dimensions of requested space
         """
-        iG = torch.stack(torch.meshgrid(*self.mesh1D[space])).to(torch.double)
+        mesh1D = self._mesh1D_mine[space]
+        iG = torch.stack(torch.meshgrid(*mesh1D)).to(torch.double)
         return 1j * torch.tensordot(self.lattice.Gbasis, iG, dims=1)
 
     def get_Gmax(self) -> float:

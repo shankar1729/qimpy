@@ -39,8 +39,12 @@ def _init_grid_fft(self: 'Grid') -> None:
     iv1D = tuple(torch.arange(s, device=self.rc.device) for s in self.shape)
     iG1D = tuple(torch.where(iv <= self.shape[dim]//2, iv, iv-self.shape[dim])
                  for dim, iv in enumerate(iv1D))
-    # --- slice local parts of Real, G-space and Half g-space for self.mesh():
-    self.mesh1D = {
+    # --- slice parts of Real, G-space and Half G-space for `get_mesh`:
+    self._mesh1D = {  # Global versions:
+        'R': iv1D,
+        'G': iG1D,
+        'H': iG1D[:2] + (iG1D[2][:self.shapeH[2]],)}
+    self._mesh1D_mine = {  # Local versions:
         'R': (iv1D[0][self.split0.i_start:self.split0.i_stop],) + iv1D[1:],
         'G': iG1D[:2] + (iG1D[2][self.split2.i_start:self.split2.i_stop],),
         'H': iG1D[:2] + (iG1D[2][self.split2H.i_start:self.split2H.i_stop],)}

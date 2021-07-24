@@ -110,19 +110,21 @@ class Kmesh(Kpoints):
         mesh -= torch.floor(0.5 + mesh)  # wrap to [-0.5,0.5)
 
         # Compute mapping of arbitrary k-points to mesh:
-        def mesh_map(k):
+        def mesh_map(k: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
             # Sizes and dimensions on torch:
-            size_i = torch.tensor(size, dtype=int, device=rc.device)
-            size_f = size_i.to(float)  # need as both int and float
+            assert isinstance(size, np.ndarray)
+            size_i = torch.tensor(size, dtype=torch.int, device=rc.device)
+            size_f = size_i.to(torch.double)  # need as both int and float
             offset_f = torch.tensor(offset, device=rc.device)
             stride_i = torch.tensor([size[1]*size[2], size[2], 1],
-                                    dtype=int, device=rc.device)
+                                    dtype=torch.int, device=rc.device)
             not_found_index = size.prod()
             # Compute mesh coordinates:
             mesh_coord = k * size_f - offset_f
             int_coord = torch.round(mesh_coord)
             on_mesh = ((mesh_coord - int_coord).abs() < min_offset).all(dim=-1)
-            mesh_index = ((int_coord.to(int) % size_i) * stride_i).sum(dim=-1)
+            mesh_index = ((int_coord.to(torch.int) % size_i) * stride_i
+                          ).sum(dim=-1)
             return on_mesh, torch.where(on_mesh, mesh_index, not_found_index)
 
         # Check whether to add explicit inversion:
