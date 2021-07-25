@@ -1,5 +1,6 @@
 import numpy as np
 import qimpy as qp
+import torch
 from typing import Optional
 
 
@@ -38,8 +39,12 @@ class TaskDivision:
                         f'n_each: {self.n_each}  imbalance: {imbalance:.0f}%')
 
     def whose(self, i: int) -> int:
-        """Return process index i_proc responsible for task i"""
+        """Return process index `i_proc` responsible for task `i`"""
         return i // self.n_each
+
+    def whose_each(self, i: torch.Tensor) -> torch.Tensor:
+        """Return process index `i_proc` responsible for each task in `i`"""
+        return torch.div(i, self.n_each, rounding_mode='floor')
 
     def is_mine(self, i: int) -> bool:
         """Return whether current process is responsible for task i"""
