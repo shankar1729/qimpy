@@ -63,23 +63,25 @@ class FieldSymmetrizer:
         """Symmetrize field `v` in-place."""
         grid = self.grid
         assert v.grid == grid
-        n_batch = np.prod(v.data.shape[:-3])
-        n_grid = np.prod(grid.shapeH_mine)
+        n_batch = int(np.prod(v.data.shape[:-3]))
+        n_grid = int(np.prod(grid.shapeH_mine))
         v_data = v.data.view((n_batch, n_grid))  # flatten batch, grid
 
         # Collect data by orbits, transfering over MPI as needed:
         # TODO
 
         # Symmetrize in each orbit:
-        v_orbits = v_data[:, self.index]
+        index = (torch.arange(n_batch, device=v_data.device)[:, None, None],
+                 self.index[None])
+        v_orbits = v_data[index]
         v_orbits[:, self.is_conj] = v_orbits[:, self.is_conj].conj()
 
         v_sym = (v_orbits * self.phase[None]).mean(dim=1)
         v_orbits = v_sym[:, None] * self.phase[None].conj()
 
         v_orbits[:, self.is_conj] = v_orbits[:, self.is_conj].conj()
-        v_data[0] = 0.
-        v_data[0].index_put_((self.index,), v_orbits[0], accumulate=True)
+        v_data.zero_()
+        v_data.index_put_(index, v_orbits, accumulate=True)
         v_data *= self.inv_multiplicity[None]
 
         # Set results back to original grid, transfering over MPI as needed:
