@@ -91,13 +91,18 @@ class FieldSymmetrizer:
         else:
             self.index = index  # direct grid index by orbits in non-MPI mode
 
-        self.imag_scale = torch.ones_like(is_conj)
-        self.imag_scale[is_conj] = -1
-        self.phase = qp.utils.cis((-2*np.pi) * (iH_reduced[:, None]
-                                                * trans).sum(dim=-1))
         self.n_orbits_mine = is_conj.shape[0]
         self.n_sym = is_conj.shape[1]
         self.inv_multiplicity = (1./self.n_sym) / multiplicity
+
+        # Combine translation phase and conjugation into a 2 x 2 real matrix:
+        phase = qp.utils.cis((-2*np.pi)
+                             * (iH_reduced[:, None] * trans).sum(dim=-1))
+        self.phase_conj = (phase.real[..., None, None]
+                           * torch.eye(2, device=grid.rc.device)[None, None])
+        self.phase_conj[..., 0, 1] = phase.imag
+        self.phase_conj[..., 1, 0] = -phase.imag
+        self.phase_conj[:, :, 1][is_conj] *= -1
         qp.log.info(f'Initialized field symmetrization in {len(index)} orbits')
 
     def __call__(self, v: 'FieldH') -> None:
@@ -110,10 +115,9 @@ class FieldSymmetrizer:
         v_data = v.data.reshape((n_batch, n_grid))  # flatten batch, grid
         i_batch = torch.arange(n_batch, device=v_data.device)
 
-        watch1 = qp.utils.StopWatch('FieldH.symm_gather', self.grid.rc)
-
         # Collect data by orbits, transfering over MPI as needed:
         if grid.n_procs > 1:
+            assert grid.comm is not None
             # Send data from grid to process containing orbit:
             src_data = v_data[:, self.grid_index].T.contiguous()
             dest_data = torch.empty((len(self.recv_index), n_batch),
@@ -134,24 +138,16 @@ class FieldSymmetrizer:
             index = (i_batch[:, None, None], self.index[None])
             v_orbits = v_data[index]
 
-        watch1.stop()
         # Symmetrize in each orbit:
-        self._conjugate(v_orbits)
-
-        watch2 = qp.utils.StopWatch('FieldH.symm_perform', self.grid.rc)
-
-        v_sym = torch.einsum('bos, os -> bo', v_orbits, self.phase)
-        v_orbits = v_sym[..., None] * self.phase[None].conj()
-
-        watch2.stop()
-
-        self._conjugate(v_orbits)
-
-        watch3 = qp.utils.StopWatch('FieldH.symm_scatter', self.grid.rc)
+        v_sym = torch.einsum('bosx, osxy -> boy',
+                             torch.view_as_real(v_orbits), self.phase_conj)
+        v_orbits = torch.view_as_complex(torch.einsum('boy, osxy -> bosx',
+                                                      v_sym, self.phase_conj))
 
         # Set results back to original grid, transfering over MPI as needed:
         v_data.zero_()
         if grid.n_procs > 1:
+            assert grid.comm is not None
             # Rerrange data and send to process that holds grid point:
             dest_data = v_orbits.flatten(1).T[self.recv_index].contiguous()
             grid.comm.Alltoallv((qp.utils.BufferView(dest_data),
@@ -164,15 +160,7 @@ class FieldSymmetrizer:
         else:
             v_data.index_put_(index, v_orbits, accumulate=True)
 
-        watch3.stop()
-
         # Account for multiple accumulated rotations of same grid point:
         v_data *= self.inv_multiplicity[None]
         v.data = v_data.view(v.data.shape)
-        watch.stop()
-
-    def _conjugate(self, v_orbits: torch.Tensor) -> None:
-        """Conjugate entries of `v_orbits` from Gz < 0 half in-place."""
-        watch = qp.utils.StopWatch('FieldH.symm_conj', self.grid.rc)
-        v_orbits.imag *= self.imag_scale
         watch.stop()
