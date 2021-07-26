@@ -85,26 +85,32 @@ class FieldSymmetrizer:
             self.recv_prev = recv_prev.to(grid.rc.cpu).numpy()
             self.grid_index = grid_index
             self.recv_index = recv_index
-            self.orbit_index = local_index[recv_index]  # inverse of recv_index
+            self.orbit_index = torch.empty_like(local_index)
+            self.orbit_index[recv_index] = local_index  # inverse of recv_index
 
         else:
             self.index = index  # direct grid index by orbits in non-MPI mode
 
-        self.is_conj = is_conj
+        self.imag_scale = torch.ones_like(is_conj)
+        self.imag_scale[is_conj] = -1
         self.phase = qp.utils.cis((-2*np.pi) * (iH_reduced[:, None]
                                                 * trans).sum(dim=-1))
         self.n_orbits_mine = is_conj.shape[0]
         self.n_sym = is_conj.shape[1]
         self.inv_multiplicity = (1./self.n_sym) / multiplicity
+        qp.log.info(f'Initialized field symmetrization in {len(index)} orbits')
 
     def __call__(self, v: 'FieldH') -> None:
         """Symmetrize field `v` in-place."""
         grid = self.grid
+        watch = qp.utils.StopWatch('FieldH.symmetrize', grid.rc)
         assert v.grid == grid
         n_batch = int(np.prod(v.data.shape[:-3]))
         n_grid = int(np.prod(grid.shapeH_mine))
         v_data = v.data.reshape((n_batch, n_grid))  # flatten batch, grid
         i_batch = torch.arange(n_batch, device=v_data.device)
+
+        watch1 = qp.utils.StopWatch('FieldH.symm_gather', self.grid.rc)
 
         # Collect data by orbits, transfering over MPI as needed:
         if grid.n_procs > 1:
@@ -128,14 +134,20 @@ class FieldSymmetrizer:
             index = (i_batch[:, None, None], self.index[None])
             v_orbits = v_data[index]
 
-        qp.log.info(v_orbits[0, :10, :4].abs())
-        exit()  # TODO DEBUG HERE
-
+        watch1.stop()
         # Symmetrize in each orbit:
-        v_orbits[:, self.is_conj] = v_orbits[:, self.is_conj].conj()
-        v_sym = (v_orbits * self.phase[None]).sum(dim=-1)
+        self._conjugate(v_orbits)
+
+        watch2 = qp.utils.StopWatch('FieldH.symm_perform', self.grid.rc)
+
+        v_sym = torch.einsum('bos, os -> bo', v_orbits, self.phase)
         v_orbits = v_sym[..., None] * self.phase[None].conj()
-        v_orbits[:, self.is_conj] = v_orbits[:, self.is_conj].conj()
+
+        watch2.stop()
+
+        self._conjugate(v_orbits)
+
+        watch3 = qp.utils.StopWatch('FieldH.symm_scatter', self.grid.rc)
 
         # Set results back to original grid, transfering over MPI as needed:
         v_data.zero_()
@@ -152,6 +164,15 @@ class FieldSymmetrizer:
         else:
             v_data.index_put_(index, v_orbits, accumulate=True)
 
+        watch3.stop()
+
         # Account for multiple accumulated rotations of same grid point:
         v_data *= self.inv_multiplicity[None]
         v.data = v_data.view(v.data.shape)
+        watch.stop()
+
+    def _conjugate(self, v_orbits: torch.Tensor) -> None:
+        """Conjugate entries of `v_orbits` from Gz < 0 half in-place."""
+        watch = qp.utils.StopWatch('FieldH.symm_conj', self.grid.rc)
+        v_orbits.imag *= self.imag_scale
+        watch.stop()

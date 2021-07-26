@@ -285,9 +285,7 @@ class FieldH(Field):
 
     def symmetrize(self) -> None:
         """Symmetrize field in-place."""
-        watch = qp.utils.StopWatch('FieldH.symmetrize', self.grid.rc)
         self.grid.field_symmetrizer(self)
-        watch.stop()
 
 
 class FieldG(Field):
