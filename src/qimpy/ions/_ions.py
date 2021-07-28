@@ -276,7 +276,8 @@ class Ions(qp.Constructable):
         Ginterp = Interpolator(Gk_mag, qp.ions.RadialFunction.DG)
         # Prepare output:
         nk_mine, n_basis_each = Gk_mag.shape
-        n_proj_tot = self.n_atomic_orbitals if get_psi else self.n_projectors
+        n_proj_tot = (self.n_orbital_projectors if get_psi
+                      else self.n_projectors)
         proj = torch.empty((1, nk_mine, n_proj_tot, 1, n_basis_each),
                            dtype=torch.complex128, device=self.rc.device)
         if not n_proj_tot:  # no ions or all local pseudopotentials
@@ -311,9 +312,44 @@ class Ions(qp.Constructable):
     def get_atomic_orbitals(self, basis: 'Basis') -> 'Wavefunction':
         """Get atomic orbitals (across all species) for specified `basis`."""
         psi = self._get_projectors(basis, get_psi=True)
-        if basis.n_spinor == 2:
-            # TODO: implement spin-angle transformations here
-            raise NotImplementedError("Relativistic atomic orbitals")
+        n_spinor = basis.n_spinor
+        if n_spinor == 2:
+            # Convert projectors to orbitals with spinor components:
+            proj = psi.coeff
+            n_spins, nk_mine, _, _, n_basis_each = proj.shape
+            n_psi_tot = self.n_atomic_orbitals(n_spinor)
+            psi_s = torch.empty((n_spins, nk_mine, n_psi_tot,
+                                 n_spinor, n_basis_each),
+                                dtype=torch.complex128, device=self.rc.device)
+            i_proj_start = 0
+            i_psi_start = 0
+            for i_ps, ps in enumerate(self.pseudopotentials):
+                # Slices of input projectors and output orbitals:
+                n_ions_i = self.n_ions_type[i_ps]
+                n_proj_each = ps.n_orbital_projectors
+                n_psi_each = ps.n_atomic_orbitals(n_spinor)
+                i_proj_stop = i_proj_start + n_ions_i * n_proj_each
+                i_psi_stop = i_psi_start + n_ions_i * n_psi_each
+                proj_cur = proj[:, :, i_proj_start:i_proj_stop, 0]  # no spinor
+                psi_cur = psi_s[:, :, i_psi_start:i_psi_stop]  # spinorial
+                # Convert projectors to orbitals for this species:
+                if ps.is_relativistic:
+                    # TODO: implement spin-angle transformations here
+                    proj_cur = proj_cur.view((n_spins, nk_mine, n_ions_i,
+                                              n_proj_each, n_basis_each))
+                    psi_cur = psi_cur.view((n_spins, nk_mine, n_ions_i,
+                                            n_psi_each, n_spinor, n_basis_each)
+                                           )
+                    raise NotImplementedError("Relativistic atomic orbitals")
+                else:
+                    # Repeat twice as pure up and down spinorial orbitals:
+                    psi_cur.zero_()
+                    for i_spinor in range(n_spinor):
+                        psi_cur[:, :, i_spinor::n_spinor, i_spinor] = proj_cur
+                # Move to next species:
+                i_proj_start = i_proj_stop
+                i_psi_start = i_psi_stop
+            return qp.electrons.Wavefunction(basis, coeff=psi_s)
         else:
             if basis.n_spins == 1:
                 return psi  # no modifications needed compared to projectors
@@ -323,18 +359,26 @@ class Ions(qp.Constructable):
 
     @property
     def n_projectors(self) -> int:
-        return self.D_all.shape[0]
+        """Total number of pseudopotential projectors."""
+        return sum((ps.n_projectors * self.n_ions_type[i_ps])
+                   for i_ps, ps in enumerate(self.pseudopotentials))
 
     @property
-    def n_atomic_orbitals(self) -> int:
-        return sum((ps.pqn_psi.n_tot * self.n_ions_type[i_ps])
+    def n_orbital_projectors(self) -> int:
+        """Total number of projectors used to generate atomic orbitals."""
+        return sum((ps.n_orbital_projectors * self.n_ions_type[i_ps])
+                   for i_ps, ps in enumerate(self.pseudopotentials))
+
+    def n_atomic_orbitals(self, n_spinor: int) -> int:
+        """Total number of atomic orbitals. This depends on the number
+        of spinorial components `n_spinor`."""
+        return sum((ps.n_atomic_orbitals(n_spinor) * self.n_ions_type[i_ps])
                    for i_ps, ps in enumerate(self.pseudopotentials))
 
     def _collect_ps_matrix(self) -> None:
         """Collect pseudopotential matrices across species and atoms.
         Initializes `D_all`."""
-        n_proj = sum((ps.pqn_beta.n_tot * self.n_ions_type[i_ps])
-                     for i_ps, ps in enumerate(self.pseudopotentials))
+        n_proj = self.n_projectors
         self.D_all = torch.zeros((n_proj, n_proj), device=self.rc.device,
                                  dtype=torch.complex128)
         i_proj_start = 0

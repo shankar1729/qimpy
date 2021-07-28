@@ -34,8 +34,10 @@ class FieldSymmetrizer:
         min_equiv_index = get_index(iH)[0]  # lowest equivalent index
         for rot_i in rot:
             # iH transforms by rot.T, so no transpose on right-multiply:
-            min_equiv_index = torch.minimum(min_equiv_index,
-                                            get_index(iH @ rot_i)[0])
+            index, is_conj = get_index(iH @ rot_i)
+            min_equiv_index = torch.where(
+                is_conj, min_equiv_index,  # should be reachable without conj
+                torch.minimum(min_equiv_index, index))
         iH_reduced = iH[min_equiv_index.unique()]
 
         # Set up indices and multiplicities of each point in reduced set:

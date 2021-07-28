@@ -1,0 +1,20 @@
+lattice:
+  system: cubic
+  a: 20.  # bohrs
+
+ions:
+  pseudopotentials:
+    - ../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
+  coordinates:
+    - [H, +0.046, 0., 0.]
+    - [O, -0.046, 0., 0.]
+
+electrons:
+  fillings:
+    charge: -1
+  basis:
+    real-wavefunctions: yes
+  xc:
+    functional: gga-xc-pbe
+
+checkpoint: null

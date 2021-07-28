@@ -15,8 +15,8 @@ class Pseudopotential:
     Currently supports norm-conserving pseudopotentials."""
     __slots__ = ('rc', 'element', 'atomic_number', 'is_paw', 'Z', 'l_max',
                  'r', 'dr', 'rho_atom', 'n_core', 'Vloc', 'ion_width',
-                 'beta', 'psi', 'j_beta', 'j_psi', 'eig_psi', 'D',
-                 'Gmax', 'pqn_beta', 'pqn_psi')
+                 'beta', 'psi', 'is_relativistic', 'j_beta', 'j_psi',
+                 'eig_psi', 'D', 'Gmax', 'pqn_beta', 'pqn_psi')
     rc: 'RunConfig'
     element: str  #: Chemical symbol of element
     atomic_number: int  #: Atomic number of element
@@ -31,6 +31,7 @@ class Pseudopotential:
     ion_width: float  #: Gaussian width to extract long-ranged part of Vloc
     beta: 'RadialFunction'  #: Nonlocal projectors
     psi: 'RadialFunction'  #: Atomic orbitals
+    is_relativistic: bool  #: Whether this is a relativistic pseudopotential
     j_beta: np.ndarray  #: l+s of each projector (if relativistic)
     j_psi: np.ndarray  #: l+s of each atomic orbital (if relativistic)
     eig_psi: np.ndarray  #: Energy eigenvalue of each atomic orbital
@@ -84,3 +85,27 @@ class Pseudopotential:
             qp.ions.RadialFunction.transform(transform_list, Gmax,
                                              self.rc.comm_kb, self.element)
             self.Gmax = Gmax
+
+    @property
+    def n_projectors(self) -> int:
+        """Number of projectors per atom (including m quantum numbers)."""
+        return self.pqn_beta.n_tot
+
+    @property
+    def n_orbital_projectors(self) -> int:
+        """Number of projectors used to generate atomic orbitals.
+        This is same as the number of atomic orbitals in non-spinorial mode,
+        exactly half that for non-relativistic pseudopotentials in spinorial
+        mode and smaller than the number of atomic orbitals by the number
+        of l = 0 orbitals for relativistic pseudopotentials."""
+        return self.pqn_psi.n_tot
+
+    def n_atomic_orbitals(self, n_spinor: int) -> int:
+        """Number of orbitals per atom."""
+        if self.is_relativistic:
+            if n_spinor != 2:
+                raise ValueError("Relativistic pseudopotentials require"
+                                 " spinorial calculations")
+            raise NotImplementedError('Relativistic orbitals')
+        else:
+            return self.pqn_psi.n_tot * n_spinor

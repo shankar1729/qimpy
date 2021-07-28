@@ -188,7 +188,7 @@ class Fillings(qp.Constructable):
             assert isinstance(n_bands, str)
             if n_bands == 'atomic':
                 n_bands_method = 'atomic'
-                self.n_bands = ions.n_atomic_orbitals
+                self.n_bands = ions.n_atomic_orbitals(self.electrons.n_spinor)
                 if self.n_bands < self.n_bands_min:
                     qp.log.warning(f'Note: {self.n_bands} atomic orbitals'
                                    f' < n_bands_min = {self.n_bands_min}')

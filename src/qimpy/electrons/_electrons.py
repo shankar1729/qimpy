@@ -211,7 +211,7 @@ class Electrons(qp.Constructable):
         completed; hence this is outside the __init__.)"""
         n_atomic = 0
         if (self.lcao is not None) and not self._n_bands_done:
-            n_atomic = system.ions.n_atomic_orbitals
+            n_atomic = system.ions.n_atomic_orbitals(self.n_spinor)
             qp.log.info(f'Setting {n_atomic} bands of wavefunctions C'
                         ' to atomic orbitals')
             if n_atomic < self.C.n_bands():

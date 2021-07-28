@@ -14,10 +14,10 @@ electrons:
   xc:
     functional: gga-xc-pbe
   spin-polarized: yes
-  #spinorial: yes
+  spinorial: yes
   fillings:
-    #M: [1, 0, 0]
-    M: 1
+    M: [0, 1, 0]
+    #M: 1
   scf:
     mix-density: no  # mix potential instead
 

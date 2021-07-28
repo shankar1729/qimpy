@@ -64,6 +64,7 @@ def _read_upf(self: 'Pseudopotential', filename: str, rc: 'RunConfig'):
     # --- Valence properties:
     self.Z = float(section.attrib["z_valence"])
     self.l_max = int(section.attrib["l_max"])
+    self.is_relativistic = (section.attrib["relativistic"] == "full")
     n_grid = int(section.attrib["mesh_size"])
     n_beta = int(section.attrib["number_of_proj"])
     n_psi = int(section.attrib["number_of_wfc"])
@@ -174,6 +175,7 @@ def _read_upf(self: 'Pseudopotential', filename: str, rc: 'RunConfig'):
                 np.fromstring(section.text, sep=' ') / (4*np.pi*(r**2)))
 
         elif section.tag == 'PP_SPIN_ORB':
+            assert self.is_relativistic
             self.j_beta = np.zeros(n_beta)   # j for each projector
             self.j_psi = np.zeros(n_psi)     # j for each orbital
             for entry in section:
