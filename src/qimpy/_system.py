@@ -1,6 +1,7 @@
 import qimpy as qp
 import numpy as np
-from typing import Union, Optional, TYPE_CHECKING
+import torch
+from typing import Union, Optional, Dict, List, Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from ._energy import Energy
     from .utils import RunConfig
@@ -48,12 +49,18 @@ class System(qp.Constructable):
         self.checkpoint_out = (checkpoint if checkpoint_out is None
                                else checkpoint_out)
 
+        # Determine any global axes that break symmetries:
+        axes: Dict[str, np.ndarray] = {}
+        _add_axis(axes, 'magnetization', electrons, ['fillings', 'M'])
+        _add_axis(axes, 'magnetic field',  electrons, ['fillings', 'B'])
+        # TODO: similarly account for applied electric fields
+
         super().__init__(qp.ConstructOptions(rc=rc,
                                              checkpoint_in=checkpoint_in))
         self.construct('lattice', qp.lattice.Lattice, lattice)
         self.construct('ions', qp.ions.Ions, ions)
         self.construct('symmetries', qp.symmetries.Symmetries, symmetries,
-                       lattice=self.lattice, ions=self.ions)
+                       lattice=self.lattice, ions=self.ions, axes=axes)
         self.construct('electrons', qp.electrons.Electrons, electrons,
                        lattice=self.lattice, ions=self.ions,
                        symmetries=self.symmetries)
@@ -83,3 +90,24 @@ class System(qp.Constructable):
         if self.checkpoint_out:
             self.save_checkpoint(qp.utils.Checkpoint(self.checkpoint_out,
                                                      rc=self.rc, mode='w'))
+
+
+def _add_axis(axes: Dict[str, np.ndarray], name: str,
+              obj: Any, path: List[str]) -> None:
+    """Add `name`d axis that should reduce symmetries to `axes`. Check from
+    `path` within object `obj`, which could be a dictionary of parameters."""
+    if obj is None:
+        return
+    if len(path):
+        # Recur down to the appropriate sub-object:
+        if isinstance(obj, dict):
+            if path[0] in obj:
+                _add_axis(axes, name, obj[path[0]], path[1:])
+        else:
+            if hasattr(obj, path[0]):
+                _add_axis(axes, name, getattr(obj, path[0]), path[1:])
+    else:
+        # Check if object itself is suitable as an axis:
+        axis = np.array(obj, dtype=float).flatten()
+        if len(axis) == 3:
+            axes[name] = axis

@@ -1,9 +1,10 @@
 import qimpy as qp
+import numpy as np
 import torch
 from ._lattice import _get_lattice_point_group, _symmetrize_lattice
 from ._ions import _get_space_group, _symmetrize_positions
 from ._grid import _check_grid_shape, _get_grid_shape
-from typing import List, TYPE_CHECKING
+from typing import List, Dict, TYPE_CHECKING
 if TYPE_CHECKING:
     from ..utils import RunConfig
     from ..lattice import Lattice
@@ -34,6 +35,7 @@ class Symmetries(qp.Constructable):
 
     def __init__(self, *, co: qp.ConstructOptions,
                  lattice: 'Lattice', ions: 'Ions',
+                 axes: Dict[str, np.ndarray] = {},
                  tolerance: float = 1e-6) -> None:
         """Determine space group from `lattice` and `ions`."""
         super().__init__(co=co)
@@ -47,6 +49,18 @@ class Symmetries(qp.Constructable):
         lattice_sym = _get_lattice_point_group(lattice.Rbasis, tolerance)
         qp.log.info(f'Found {lattice_sym.shape[0]} point-group symmetries'
                     ' of the Bravais lattice')
+
+        # Reduce symmetries by any global axes:
+        sym_axis = ((lattice.Rbasis @ lattice_sym)
+                    @ torch.linalg.inv(lattice.Rbasis))  # Cartesian axes
+        for axis_name, axis_np in axes.items():
+            axis = torch.from_numpy(axis_np).to(rc.device)
+            sel = torch.where((sym_axis @ axis - axis).norm(dim=-1)
+                              < tolerance)[0]
+            lattice_sym = lattice_sym[sel]
+            sym_axis = sym_axis[sel]
+            qp.log.info(f'Reduced to {len(sel)} point-group symmetries'
+                        f' with {axis_name}')
 
         # Space group:
         self.rot, self.trans, self.ion_map = _get_space_group(
