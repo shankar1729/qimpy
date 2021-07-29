@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from typing import Optional
 
 
@@ -64,4 +65,36 @@ class PseudoQuantumNumbers:
                 return D_nlms
         else:
             # Spin-angle transformations:
+            for l in range(3):
+                Cl = get_Ylm_to_spin_angle(l)
+                print(l)
+                print(Cl[:, :2*l])
+                print(Cl[:, 2*l:])
+                print()
+
+            exit()
             raise NotImplementedError('Spin-angle transformations')
+
+
+def get_Ylm_to_spin_angle(l: int) -> np.ndarray:
+    """Create 2(2l+1) x 2(2l+1) matrix transforming from (m, s) to (j, mj).
+    The (m, s) indices are along the first dimension, with inner s index.
+    The (j, mj) indices along the second dimension have an inner mj index.
+    """
+    n_m = 2*l + 1
+    n_minus = n_m - 1  # number of mj at j = l - 1/2
+    n_plus = n_m + 1  # number of mj at j = l + 1/2
+    # Initialize Clebsch Gordon coefficients:
+    C = np.zeros((2, n_m, n_minus + n_plus))  # s, m, (j,mj)
+    if n_minus:
+        m = np.arange(-l+1, l+1)
+        i_mj = (l-1) + m
+        C[0, (l-1)+m, i_mj] = np.sqrt((l+1)-m)
+        C[1, l+m, i_mj] = -np.sqrt(l+m)
+    if n_plus:
+        m = np.arange(-l, l+1)
+        i_mj = n_minus + (l+1) + m
+        C[0, l+m, i_mj] = np.sqrt((l+1)+m)
+        C[1, l+m, i_mj-1] = np.sqrt((l+1)-m)
+    C *= np.sqrt(1./n_m)
+    return C.swapaxes(0, 1).reshape(n_m*2, n_m*2)
