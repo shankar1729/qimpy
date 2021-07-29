@@ -31,7 +31,7 @@ def _apply_potential(self: 'Basis', V: 'FieldH',
         Vdata[0, 0] = (Vdata_in[0] + Vdata_in[3])
         Vdata[1, 1] = (Vdata_in[0] - Vdata_in[3])
         Vdata[1, 0] = Vdata_in[1] + 1j*Vdata_in[2]
-        Vdata[0, 1] = Vdata_in[1] - 1j*Vdata_in[2]
+        Vdata[0, 1] = Vdata[1, 0].conj()
     elif n_densities == 2:
         Vdata = torch.empty((2, 1, 1, 1) + Vdata_in.shape[1:],
                             dtype=Vdata_in.dtype, device=self.rc.device)
@@ -148,7 +148,7 @@ def _collect_density(self: 'Basis', C: 'Wavefunction', f: torch.Tensor,
         if need_Mvec:
             qp.utils.accum_norm_(prefac_cur, ICb, out=rho_diag, start_dim=0)
             qp.utils.accum_prod_(prefac_cur,
-                                 ICb[:, :, :, 1].conj(), ICb[:, :, :, 0],
+                                 ICb[:, :, :, 1], ICb[:, :, :, 0].conj(),
                                  out=rho_dn_up, start_dim=0)
         else:
             qp.utils.accum_norm_(prefac_cur, ICb, out=rho_diag, start_dim=1)

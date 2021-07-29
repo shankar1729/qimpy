@@ -49,9 +49,9 @@ def _band_spin(self: 'Wavefunction') -> torch.Tensor:
     assert(coeff.shape[-2] == 2)  # must be spinorial
     # Compute spin density matrix per band:
     rho_s = (torch.einsum('skbxg, g, skbyg -> skbxy',
-                          coeff.conj(), basis.real.Gweight_mine, coeff)
+                          coeff, basis.real.Gweight_mine, coeff.conj())
              if basis.real_wavefunctions
-             else torch.einsum('skbxg, skbyg -> skbxy', coeff.conj(), coeff))
+             else torch.einsum('skbxg, skbyg -> skbxy', coeff, coeff.conj()))
     if basis.division.n_procs > 1:
         basis.rc.comm_b.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(rho_s),
                                   op=qp.MPI.SUM)
