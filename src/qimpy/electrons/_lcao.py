@@ -14,10 +14,12 @@ class LCAO(Minimize[MatrixArray]):
     _rot_prev: torch.Tensor  #: accumulated rotations of subspace
 
     def __init__(self, *, co: qp.ConstructOptions, n_iterations: int = 30,
-                 energy_threshold: float = 1E-6) -> None:
+                 energy_threshold: float = 1E-6,
+                 gradient_threshold: float = 1E-8) -> None:
         """Set stopping criteria for initial subspace optimization."""
         super().__init__(co=co, comm=co.rc.comm_kb, name='LCAO', method='cg',
-                         n_iterations=n_iterations, extra_thresholds={},
+                         n_iterations=n_iterations,
+                         extra_thresholds={'|grad|': gradient_threshold},
                          energy_threshold=energy_threshold)
 
     def update(self, system: 'System') -> None:
@@ -95,3 +97,4 @@ class LCAO(Minimize[MatrixArray]):
         # Store gradients:
         state.gradient = MatrixArray(M=E_H_aux, comm=self.rc.comm_k)
         state.K_gradient = MatrixArray(M=K_E_H_aux, comm=self.rc.comm_k)
+        state.extra = [np.sqrt(state.gradient.overlap(state.gradient))]
