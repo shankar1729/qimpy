@@ -282,7 +282,8 @@ class Fillings(qp.Constructable):
         if el.spin_polarized:
             if el.spinorial:
                 w_NM = torch.cat((torch.ones_like(eig)[None, ...],
-                                  el.C.band_spin()), dim=0)
+                                  el.C.band_spin()[..., :self.n_bands]),
+                                 dim=0)
                 M_len = 3
             else:
                 w_NM = torch.tensor([[1, 1], [1, -1]],

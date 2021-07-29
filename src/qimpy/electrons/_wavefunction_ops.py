@@ -73,8 +73,12 @@ def _dot(self: 'Wavefunction', other: 'Wavefunction') -> torch.Tensor:
     Parameters
     ----------
     other: qimpy.electrons.Wavefunction
-        Dimensions must match self for spinor and basis, can differ for bands,
-        and must be broadcastable for preceding dimensions (spin and k)
+        Dimensions must match self for basis, can differ for bands,
+        and must be broadcastable for preceding dimensions (spin and k).
+        If the spinor dimensions are different, as utilized for non-spinorial
+        projectors in spinorial calculations, the spinor dimenion is not
+        contracted over and instead integrated as adjacent bands of the
+        non-spinorial input.
     overlap: bool, default: False
         If True, include the overlap operator in the product. The overlap
         operator is identity for norm-conserving pseudopotentials, but
@@ -83,7 +87,10 @@ def _dot(self: 'Wavefunction', other: 'Wavefunction') -> torch.Tensor:
     Returns
     -------
     torch.Tensor
-        Dimensions: n_spins x nk_mine x n_bands(self) x n_bands(other)
+        Dimensions: n_spins x nk_mine x n_bands(self) x n_bands(other).
+        If only one of the two inputs is spinorial, then n_bands
+        of the non-spinorial one is effectively doubled,
+        including spinor compponents in adjacent entries.
     """
     if not isinstance(other, qp.electrons.Wavefunction):
         return NotImplemented
@@ -91,12 +98,18 @@ def _dot(self: 'Wavefunction', other: 'Wavefunction') -> torch.Tensor:
     assert(basis is other.basis)
     assert(not self.band_division)
     watch = qp.utils.StopWatch('Wavefunction.dot', basis.rc)
+    # Determine spinor handling:
+    spinorial1 = (self.coeff.shape[-2] == 2)
+    spinorial2 = (other.coeff.shape[-2] == 2)
+    flatten = ((-2, -1)  # standard case: merge spinor and basis dims below
+               if (spinorial1 == spinorial2)
+               else (-3, -2))  # merge band and spinor when only one spinorial
     # Prepare left operand:
     C1 = (self.coeff * basis.real.Gweight_mine.view(1, 1, 1, 1, -1)
           if basis.real_wavefunctions
-          else self.coeff).flatten(-2).conj()  # merge spinor & basis dims
+          else self.coeff).flatten(*flatten).conj()
     # Prepare right operand:
-    C2 = other.coeff.flatten(-2).transpose(-2, -1)  # last dim now band2
+    C2 = other.coeff.flatten(*flatten).transpose(-2, -1)  # last dim now band2
     # Compute local inner product and reduce:
     result = (C1 @ C2)
     if basis.real_wavefunctions:
@@ -104,6 +117,19 @@ def _dot(self: 'Wavefunction', other: 'Wavefunction') -> torch.Tensor:
     if basis.division.n_procs > 1:
         basis.rc.comm_b.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(result),
                                   op=qp.MPI.SUM)
+    # Handle one-sided spinorial projections:
+    if spinorial1 != spinorial2:
+        n_spins, nk_mine, n_bands1, n_bands2 = result.shape
+        if spinorial1:  # spinorial2 is False
+            # Move the adjacent spinor 'bands' in 1 to adjacent bands in 2
+            split_shape = (n_spins, nk_mine, n_bands1//2, 2, n_bands2)
+            new_shape = (n_spins, nk_mine, n_bands1//2, n_bands2*2)
+        else:  # spinorial2 is True and spinorial1 is False
+            # Move the adjacent spinor 'bands' in 2 to adjacent bands in 1
+            split_shape = (n_spins, nk_mine, n_bands1, n_bands2//2, 2)
+            new_shape = (n_spins, nk_mine, n_bands1*2, n_bands2//2)
+        # In both cases, move length 2 dim to the other of last two dims:
+        result = result.view(split_shape).transpose(-2, -1).reshape(new_shape)
     watch.stop()
     return result
 
@@ -141,27 +167,47 @@ def _matmul(self: 'Wavefunction', mat: torch.Tensor) -> 'Wavefunction':
     Parameters
     ----------
     mat : torch.Tensor
-        Last two dimensions specify transformation in band space,
-        so final dimension should match n_bands of the wavefunction
-        and penultimate dimension determines n_bands of output.
-        Preceding dimensions should be broadcastable with spin and k
+        Last two dimensions specify transformation in band space:
+        penultimate dimension should match n_bands of the wavefunction
+        and final dimension determines n_bands of output.
+        Preceding dimensions should be broadcastable with spin and k.
+        For the special case of non-spinorial projectors in spinorial
+        calculations, penultimate dimension will be twice of n_bands.
 
     Returns
     -------
     qimpy.electrons.Wavefunction
-        The result will have n_bands = mat.shape[-2], same basis and spinor as
-        input, and spin and k determined by broadcasting with mat.shape[:-2]
+        The result will have n_bands = mat.shape[-1], same basis as input,
+        and spin and k determined by broadcasting with mat.shape[:-2].
+        The output will have the same spinor components as input, except
+        for non-spinorial projectors in spinorial calculations, where
+        the result will be spinorial.
     """
     if not isinstance(mat, torch.Tensor):
         return NotImplemented
     watch = qp.utils.StopWatch('Wavefunction.matmul', self.basis.rc)
-    # Prepare input view:
+    # Prepare spinor handling:
+    n_bands_in, n_spinor_in, n_basis = self.coeff.shape[-3:]
+    n_bands_out = mat.shape[-1]
+    if n_bands_in == mat.shape[-2]:
+        matT = mat.transpose(-2, -1)
+        n_spinor_out = n_spinor_in
+    else:
+        # Non-spinorial projector at input, spinorial wavefunction output
+        assert n_spinor_in == 1
+        assert n_bands_in * 2 == mat.shape[-2]
+        split_shape = mat.shape[:-2] + (n_bands_in, 2, n_bands_out)
+        new_shape = mat.shape[:-2] + (n_bands_out*2, n_bands_in)
+        matT = mat.view(split_shape).transpose(-3, -1).reshape(new_shape)
+        n_spinor_out = 2
+    # Operate on spinor-flattened input and extract spinor at output:
     C = self.coeff.flatten(-2)  # merge spinor & basis dims at input
-    C_out = mat.transpose(-2, -1) @ C
-    C_out = C_out.view(C_out.shape[:-1] + self.coeff.shape[-2:])  # un-merge
+    C_out = matT @ C
+    C_out = C_out.view(C_out.shape[:-2]  # unmerge spinor from bands / basis
+                       + (n_bands_out, n_spinor_out, n_basis))
     result = qp.electrons.Wavefunction(self.basis, coeff=C_out,
                                        band_division=self.band_division)
-    if self._proj_is_valid():
+    if self._proj_is_valid() and (n_spinor_in == n_spinor_out):
         result._proj = self._proj @ mat
     watch.stop()
     return result

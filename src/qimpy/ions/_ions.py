@@ -167,7 +167,6 @@ class Ions(qp.Constructable):
                     qp.ions.Pseudopotential(fname, rc))
             else:
                 raise ValueError(f'no pseudopotential found for {symbol}')
-        self._collect_ps_matrix()  # collect pseudopotential across all atoms
         self.beta_version = 0
 
         # Calculate total ionic charge (needed for number of electrons):
@@ -250,7 +249,8 @@ class Ions(qp.Constructable):
         # --- include long-range electrostatic part of Vloc:
         self.Vloc += system.coulomb(self.rho, correct_G0_width=True)
 
-        # Update pseudopotential projectors:
+        # Update pseudopotential matrix and projectors:
+        self._collect_ps_matrix(system.electrons.n_spinor)
         self.beta = self._get_projectors(system.electrons.basis)
         self.beta_version += 1  # will auto-invalidate cached projections
 
@@ -375,22 +375,32 @@ class Ions(qp.Constructable):
         return sum((ps.n_atomic_orbitals(n_spinor) * self.n_ions_type[i_ps])
                    for i_ps, ps in enumerate(self.pseudopotentials))
 
-    def _collect_ps_matrix(self) -> None:
+    def _collect_ps_matrix(self, n_spinor: int) -> None:
         """Collect pseudopotential matrices across species and atoms.
         Initializes `D_all`."""
-        n_proj = self.n_projectors
+        n_proj = self.n_projectors * n_spinor
         self.D_all = torch.zeros((n_proj, n_proj), device=self.rc.device,
                                  dtype=torch.complex128)
         i_proj_start = 0
         for i_ps, ps in enumerate(self.pseudopotentials):
-            D = ps.pqn_beta.expand_matrix(ps.D)
-            n_proj_atom = D.shape[0]
-            # TODO: Handle spin-angle transformations for relativistic case
+            D_nlm = ps.pqn_beta.expand_matrix(ps.D)  # adds m components
+            n_proj_atom = D_nlm.shape[0] * n_spinor
+            if n_spinor == 1:
+                D_nlms = D_nlm
+            else:  # n_spinor == 2
+                # Repeat for spinor component:
+                D_nlms = torch.zeros((n_proj_atom, n_proj_atom),
+                                     dtype=D_nlm.dtype, device=D_nlm.device)
+                for i_spinor in range(n_spinor):
+                    D_nlms[i_spinor::n_spinor, i_spinor::n_spinor] = D_nlm
+                # Spin-angle transformations:
+                if ps.is_relativistic:
+                    raise NotImplementedError('Spin-angle transformations')
             # Set diagonal block for each atom:
             for i_atom in range(self.n_ions_type[i_ps]):
                 i_proj_stop = i_proj_start + n_proj_atom
                 slice_cur = slice(i_proj_start, i_proj_stop)
-                self.D_all[slice_cur, slice_cur] = D
+                self.D_all[slice_cur, slice_cur] = D_nlms
                 i_proj_start = i_proj_stop
 
     def get_atomic_density(self, grid: 'Grid',
