@@ -383,19 +383,8 @@ class Ions(qp.Constructable):
                                  dtype=torch.complex128)
         i_proj_start = 0
         for i_ps, ps in enumerate(self.pseudopotentials):
-            D_nlm = ps.pqn_beta.expand_matrix(ps.D)  # adds m components
-            n_proj_atom = D_nlm.shape[0] * n_spinor
-            if n_spinor == 1:
-                D_nlms = D_nlm
-            else:  # n_spinor == 2
-                # Repeat for spinor component:
-                D_nlms = torch.zeros((n_proj_atom, n_proj_atom),
-                                     dtype=D_nlm.dtype, device=D_nlm.device)
-                for i_spinor in range(n_spinor):
-                    D_nlms[i_spinor::n_spinor, i_spinor::n_spinor] = D_nlm
-                # Spin-angle transformations:
-                if ps.is_relativistic:
-                    raise NotImplementedError('Spin-angle transformations')
+            D_nlms = ps.pqn_beta.expand_matrix(ps.D, n_spinor, ps.j_beta)
+            n_proj_atom = D_nlms.shape[0]
             # Set diagonal block for each atom:
             for i_atom in range(self.n_ions_type[i_ps]):
                 i_proj_stop = i_proj_start + n_proj_atom

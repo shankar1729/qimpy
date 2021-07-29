@@ -64,13 +64,17 @@ def _read_upf(self: 'Pseudopotential', filename: str, rc: 'RunConfig'):
     # --- Valence properties:
     self.Z = float(section.attrib["z_valence"])
     self.l_max = int(section.attrib["l_max"])
-    self.is_relativistic = (section.attrib["relativistic"] == "full")
     n_grid = int(section.attrib["mesh_size"])
     n_beta = int(section.attrib["number_of_proj"])
     n_psi = int(section.attrib["number_of_wfc"])
     qp.log.info(f"  {self.Z:g} valence electrons, {n_psi}"
                 f" orbitals, {n_beta} projectors, {n_grid}"
                 f" radial grid points, with l_max = {self.l_max}")
+
+    # --- relativity:
+    self.is_relativistic = (section.attrib["relativistic"] == "full")
+    self.j_psi = None
+    self.j_beta = None
 
     # Get radial grid and integration weight before any radial functions:
     section = upf.find('PP_MESH')
@@ -176,24 +180,25 @@ def _read_upf(self: 'Pseudopotential', filename: str, rc: 'RunConfig'):
 
         elif section.tag == 'PP_SPIN_ORB':
             assert self.is_relativistic
-            self.j_beta = np.zeros(n_beta)   # j for each projector
-            self.j_psi = np.zeros(n_psi)     # j for each orbital
+            j_beta = np.zeros(n_beta)   # j for each projector
+            j_psi = np.zeros(n_psi)     # j for each orbital
             for entry in section:
                 if entry.tag.startswith('PP_RELBETA.'):
                     # Check projector number:
                     i_beta = int(entry.tag[11:]) - 1
                     assert((i_beta >= 0) and (i_beta < n_beta))
                     # Get projector's total angular momentum:
-                    self.j_beta[i_beta] = entry.attrib['jjj']
+                    j_beta[i_beta] = entry.attrib['jjj']
                 elif entry.tag.startswith('PP_RELWFC.'):
                     # Check orbital number:
                     i_psi = int(entry.tag[10:]) - 1
                     assert((i_psi >= 0) and (i_psi < n_psi))
                     # Get orbital's total angular momentum:
-                    self.j_psi[i_psi] = entry.attrib['jchi']
+                    j_psi[i_psi] = entry.attrib['jchi']
                 else:
                     qp.log.info(f"  NOTE: ignored section '{entry.tag}'")
-
+            self.j_beta = torch.tensor(j_beta, device=rc.device)
+            self.j_psi = torch.tensor(j_psi, device=rc.device)
         else:
             qp.log.info(f"  NOTE: ignored section '{section.tag}'")
 

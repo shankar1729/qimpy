@@ -1,4 +1,5 @@
 import torch
+from typing import Optional
 
 
 class PseudoQuantumNumbers:
@@ -39,8 +40,28 @@ class PseudoQuantumNumbers:
             i_start = i_stop
         self.i_lm = self.l*(self.l + 1) + self.m
 
-    def expand_matrix(self, D: torch.Tensor) -> torch.Tensor:
-        """Expand matrix `D` from (n, l) basis to include m."""
-        D_out = D[self.i_rf][:, self.i_rf].contiguous()
-        D_out[self.i_lm[None] != self.i_lm[:, None]] = 0.  # spherical symmetry
-        return D_out
+    def expand_matrix(self, D: torch.Tensor, n_spinor: int,
+                      j: Optional[torch.Tensor]) -> torch.Tensor:
+        """Expand matrix `D` from (n, l) basis to include m and s.
+        Spin s is included explicitly only of n_spinor is 2.
+        Additionally, if j is specified (relativistic pseudopotential),
+        the expanded matrix includes spin-angle overlap factors;
+        n_spinor must be 2 for this mode."""
+        # Repeat for all m components:
+        D_nlm = D[self.i_rf][:, self.i_rf].contiguous()
+        # Handle spinor components:
+        if j is None:
+            D_nlm[self.i_lm[None] != self.i_lm[:, None]] = 0.  # delta_{lm,lm'}
+            if n_spinor == 1:
+                return D_nlm
+            else:  # n_spinor == 2
+                # Repeat for spinor component:
+                n_nlms = D_nlm.shape[0] * n_spinor
+                D_nlms = torch.zeros((n_nlms, n_nlms), dtype=D_nlm.dtype,
+                                     device=D_nlm.device)
+                for i_spinor in range(n_spinor):
+                    D_nlms[i_spinor::n_spinor, i_spinor::n_spinor] = D_nlm
+                return D_nlms
+        else:
+            # Spin-angle transformations:
+            raise NotImplementedError('Spin-angle transformations')

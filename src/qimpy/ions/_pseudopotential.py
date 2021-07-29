@@ -2,7 +2,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from ._read_upf import _read_upf
-from typing import TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from ._radial_function import RadialFunction
     from ._pseudo_quantum_numbers import PseudoQuantumNumbers
@@ -32,8 +32,8 @@ class Pseudopotential:
     beta: 'RadialFunction'  #: Nonlocal projectors
     psi: 'RadialFunction'  #: Atomic orbitals
     is_relativistic: bool  #: Whether this is a relativistic pseudopotential
-    j_beta: np.ndarray  #: l+s of each projector (if relativistic)
-    j_psi: np.ndarray  #: l+s of each atomic orbital (if relativistic)
+    j_beta: Optional[torch.Tensor]  #: l+s of projectors (if relativistic)
+    j_psi: Optional[torch.Tensor]  #: l+s of atomic orbitals (if relativistic)
     eig_psi: np.ndarray  #: Energy eigenvalue of each atomic orbital
     D: torch.Tensor  #: Descreened nonlocal pseudopotential matrix
 
