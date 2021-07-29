@@ -86,15 +86,11 @@ def get_Ylm_to_spin_angle(l: int) -> np.ndarray:
     n_plus = n_m + 1  # number of mj at j = l + 1/2
     # Initialize Clebsch Gordon coefficients:
     C = np.zeros((2, n_m, n_minus + n_plus))  # s, m, (j,mj)
+    C_entries = np.sqrt(1. - np.arange(n_m)/n_m)  # unique entries at this l
     if n_minus:
-        m = np.arange(-l+1, l+1)
-        i_mj = (l-1) + m
-        C[0, (l-1)+m, i_mj] = np.sqrt((l+1)-m)
-        C[1, l+m, i_mj] = -np.sqrt(l+m)
+        np.fill_diagonal(C[0, 0:, :n_minus], C_entries[1:])
+        np.fill_diagonal(C[1, 1:, :n_minus], -C_entries[:0:-1])
     if n_plus:
-        m = np.arange(-l, l+1)
-        i_mj = n_minus + (l+1) + m
-        C[0, l+m, i_mj] = np.sqrt((l+1)+m)
-        C[1, l+m, i_mj-1] = np.sqrt((l+1)-m)
-    C *= np.sqrt(1./n_m)
+        np.fill_diagonal(C[0, :, n_minus+1:], C_entries[::-1])
+        np.fill_diagonal(C[1, :, n_minus+0:], C_entries)
     return C.swapaxes(0, 1).reshape(n_m*2, n_m*2)
