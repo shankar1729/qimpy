@@ -1,0 +1,22 @@
+lattice:
+  system: cubic
+  modification: face-centered
+  a: 20.  # bohrs
+
+ions:
+  pseudopotentials:
+    - ../../../../Pseudopotentials/DOJO/FR/$ID.upf
+  coordinates:
+    - [H, 0., 0., 0.]
+
+electrons:
+  xc:
+    functional: gga-xc-pbe
+  spin-polarized: yes
+  spinorial: yes
+  fillings:
+    M: [0, 0.8, -0.6]
+    n-bands: 2
+  lcao: no
+
+checkpoint: null
