@@ -16,7 +16,5 @@ electrons:
   spinorial: yes
   fillings:
     M: [0, 0.8, -0.6]
-    n-bands: 2
-  lcao: no
 
 checkpoint: null

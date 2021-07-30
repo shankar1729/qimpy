@@ -57,8 +57,8 @@ class Pseudopotential:
         assert(filename[-4:].lower() == '.upf')
         self.read_upf(filename, rc)
         self.Gmax = 0.  # reciprocal space versions not yet initialized
-        self.pqn_beta = qp.ions.PseudoQuantumNumbers(self.beta.l)
-        self.pqn_psi = qp.ions.PseudoQuantumNumbers(self.psi.l)
+        self.pqn_beta = qp.ions.PseudoQuantumNumbers(self.beta.l, self.j_beta)
+        self.pqn_psi = qp.ions.PseudoQuantumNumbers(self.psi.l, self.j_psi)
 
     def update(self, Gmax: float, ion_width: float) -> None:
         """Update to support calculation of G upto `Gmax`.
@@ -105,7 +105,7 @@ class Pseudopotential:
         if self.is_relativistic:
             if n_spinor != 2:
                 raise ValueError("Relativistic pseudopotentials require"
-                                 " spinorial calculations")
-            raise NotImplementedError('Relativistic orbitals')
+                                 " spinorial calculation")
+            return self.pqn_psi.n_tot_s
         else:
             return self.pqn_psi.n_tot * n_spinor

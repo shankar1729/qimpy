@@ -334,13 +334,11 @@ class Ions(qp.Constructable):
                 psi_cur = psi_s[:, :, i_psi_start:i_psi_stop]  # spinorial
                 # Convert projectors to orbitals for this species:
                 if ps.is_relativistic:
-                    # TODO: implement spin-angle transformations here
-                    proj_cur = proj_cur.view((n_spins, nk_mine, n_ions_i,
+                    proj_cur = proj_cur.view((nk_mine, n_ions_i,
                                               n_proj_each, n_basis_each))
-                    psi_cur = psi_cur.view((n_spins, nk_mine, n_ions_i,
-                                            n_psi_each, n_spinor, n_basis_each)
-                                           )
-                    raise NotImplementedError("Relativistic atomic orbitals")
+                    Ylm_to_spin_angle = ps.pqn_psi.get_spin_angle_transform()
+                    psi_cur[0] = torch.einsum('kipg, psb -> kibsg', proj_cur,
+                                              Ylm_to_spin_angle).flatten(1, 2)
                 else:
                     # Repeat twice as pure up and down spinorial orbitals:
                     psi_cur.zero_()
@@ -383,7 +381,7 @@ class Ions(qp.Constructable):
                                  dtype=torch.complex128)
         i_proj_start = 0
         for i_ps, ps in enumerate(self.pseudopotentials):
-            D_nlms = ps.pqn_beta.expand_matrix(ps.D, n_spinor, ps.j_beta)
+            D_nlms = ps.pqn_beta.expand_matrix(ps.D, n_spinor)
             n_proj_atom = D_nlms.shape[0]
             # Set diagonal block for each atom:
             for i_atom in range(self.n_ions_type[i_ps]):

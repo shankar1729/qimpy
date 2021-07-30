@@ -6,29 +6,41 @@ from typing import Optional
 
 class PseudoQuantumNumbers:
     """Quantum numbers of pseudo-atom in projector or orbital order."""
-    __slots__ = ('n_tot', 'l_max', 'i_rf', 'n', 'l', 'm', 'i_lm')
+    __slots__ = ('n_tot', 'l_max', 'i_rf', 'n', 'l', 'm', 'i_lm',
+                 'is_relativistic', 'n_tot_s', 'i_rfs', 'ls', 'j', 'mj',
+                 'i_ljm', 'i_lms', 'i_ljms')
     n_tot: int  #: total number of projectors / orbitals (accounting for m)
     l_max: int  #: maximum l of projectors / orbitals
     i_rf: torch.Tensor  #: index of radial function (across all l)
-    n: torch.Tensor  #: pseudo-principal quantum number (for each l, 1-based)
+    n: torch.Tensor  #: pseudo-principal quantum number (for each l,j, 1-based)
     l: torch.Tensor  #: orbital angular momentum
     m: torch.Tensor  #: azimuthal quantum number
     i_lm: torch.Tensor  #: combined (l, m) index into solid harmonics array
 
-    def __init__(self, l: torch.Tensor) -> None:
+    # Extra properties for relativistic pseudopotentials:
+    is_relativistic: bool  #: whether this pseudopotential is relativistic
+    n_tot_s: int  #: total number of spinorial states
+    ls: torch.Tensor  #: orbital angular momentum in spinor-expanded set
+    j: torch.Tensor  #: total angular momentum of each spinorial orbital
+    mj: torch.Tensor  #: total azimuthal angular momentum
+    i_ljm: torch.Tensor  #: combined (l, j, m_j) index used for orbitals
+    i_lms: torch.Tensor  #: combined (l, m_l, s) index used for projectors
+    i_ljms: torch.Tensor  #: combined (l, j, m_l, s) index used for projectors
+
+    def __init__(self, l: torch.Tensor, j: Optional[torch.Tensor]) -> None:
         """Initialize given `l` of each projector / orbital of a
         pseudopotential. The input corresponds to the distinct radial functions
         read from a pseudoptential, while the members of this class are for
         each projector function including spherical harmonics."""
         self.n_tot = int((2*l + 1).sum().item())
-        self.l_max = l.max().item()
+        self.l_max = int(l.max().item())
         self.n = torch.zeros(self.n_tot, dtype=torch.long, device=l.device)
         self.l = torch.zeros_like(self.n)
         self.m = torch.zeros_like(self.n)
         self.i_rf = torch.zeros_like(self.n)
         # Initialize one l at a time:
         i_start = 0
-        n_l = [0] * int(self.l_max + 1)
+        n_l = [0] * (self.l_max + 1)
         for i_rf, l_iter in enumerate(l):
             # Size of shell at current m:
             l_i = l_iter.item()
@@ -44,14 +56,82 @@ class PseudoQuantumNumbers:
             i_start = i_stop
         self.i_lm = self.l*(self.l + 1) + self.m
 
-    def expand_matrix(self, D: torch.Tensor, n_spinor: int,
-                      j: Optional[torch.Tensor]) -> torch.Tensor:
-        """Expand matrix `D` from (n, l) basis to include m and s.
-        Spin s is included explicitly only of n_spinor is 2.
-        Additionally, if j is specified (relativistic pseudopotential),
-        the expanded matrix includes spin-angle overlap factors;
-        n_spinor must be 2 for this mode."""
         if j is None:
+            self.is_relativistic = False
+        else:
+            self.is_relativistic = True
+            self._initialize_relativistic(l, j)
+
+    def _initialize_relativistic(self, l: torch.Tensor,
+                                 j: torch.Tensor) -> None:
+        """Initialize the relativistic quantum numbers and indices."""
+        assert ((j - l).abs() == 0.5).all()
+        self.n_tot_s = int((2*j + 1).sum().item())
+        self.n = torch.zeros(self.n_tot_s, dtype=torch.long, device=l.device)
+        self.ls = torch.zeros_like(self.n)
+        self.j = torch.zeros_like(self.n, dtype=j.dtype)  # half-integral
+        self.mj = torch.zeros_like(self.j)
+        # Initialize one l, j set at a time:
+        i_start = 0
+        n_lj = [0] * (2*self.l_max + 1)
+        for i_rf, l_iter in enumerate(l):
+            # Size of shell at current m:
+            l_i = l_iter.item()
+            j_i = j[i_rf].item()
+            lj_i = (2*l_i - 1) if (j_i < l_i) else (2*l_i)
+            n_lj[lj_i] += 1  # starts at 1 for first of each l, j
+            mj_count = int(2*j_i + 1)
+            i_stop = i_start + mj_count
+            # Assign properties for this shell:
+            self.n[i_start:i_stop] = n_lj[lj_i]
+            self.ls[i_start:i_stop] = l_i
+            self.j[i_start:i_stop] = j_i
+            self.mj[i_start:i_stop] = (torch.arange(mj_count, device=l.device)
+                                       - j_i)
+            # To next shell:
+            i_start = i_stop
+        self.i_ljm = (self.ls*(2*self.j + 1)  # from previous l,j
+                      + self.j + self.mj).to(torch.long)  # within current l,j
+        print(torch.stack((self.n, self.ls, self.i_ljm)).T)
+        print(torch.stack((self.j, self.mj)).T)
+        self._set_projector_spinor_indices(j)
+
+    def _set_projector_spinor_indices(self, j: torch.Tensor) -> None:
+        """Set the indices from projectors into Ylm overlaps and transforms.
+        This sets i_ljms, an index from the spinor-repeated (l, j, m, s) basis,
+        and not from the (l, j, mj) basis used for spinorial orbitals,
+        and hence is separated into its own function for clarity.
+        Also sets i_lms which is an (l, m, s) basis used for indexing
+        spin-angle transformations from projectors."""
+        # Set up indices with spinor repetition as n_tot x 2 tensors:
+        i_lms = 2 * self.i_lm[:, None].tile((1, 2))
+        i_lms[:, 1] += 1  # Index is now 2*(l(l+1) + m) + s
+        l = self.l[:, None]
+        # Accumulate offsets into the Ylm overlaps array
+        # These are sorted by l, j (=l+/-1/2), m_l (2l+1 entries) and s
+        i_ljms = i_lms + (2 * (l ** 2) - 2)  # offset from previous l
+        sel_plus = torch.where(j[self.i_rf] > self.l)[0]
+        i_ljms[sel_plus] += 2 * (2 * l[sel_plus] + 1)  # offset from j = l-1/2
+        self.i_ljms = i_ljms.flatten()
+        self.i_lms = i_lms.flatten()
+
+    def expand_matrix(self, D: torch.Tensor, n_spinor: int) -> torch.Tensor:
+        """Expand matrix `D` from (n, l) basis to include m and s.
+        Spin s is included explicitly only if `n_spinor` is 2.
+        Additionally, if pseudopotential is relativistic, the expanded matrix
+        includes spin-angle overlap factors; n_spinor must be 2 for this mode.
+        """
+        if self.is_relativistic:
+            if n_spinor != 2:
+                raise ValueError("Relativistic pseudopotentials require"
+                                 " spinorial calculation")
+            # Collect matrix with spinor repetition:
+            i_rf = self.i_rf[:, None].tile((1, 2)).flatten()  # spinor repeat
+            D_nljms = D[i_rf][:, i_rf].contiguous()
+            # Apply spin-angle overlaps (akin to delta_{lm,lm'} above):
+            f_lj = torch.from_numpy(get_Ylm_overlaps(self.l_max)).to(D.device)
+            return D_nljms * f_lj[self.i_ljms][:, self.i_ljms]
+        else:
             # Non-relativistic pseuodopotential:
             D_nlm = D[self.i_rf][:, self.i_rf].contiguous()
             D_nlm[self.i_lm[None] != self.i_lm[:, None]] = 0.  # delta_{lm,lm'}
@@ -65,23 +145,18 @@ class PseudoQuantumNumbers:
                 for i_spinor in range(n_spinor):
                     D_nlms[i_spinor::n_spinor, i_spinor::n_spinor] = D_nlm
                 return D_nlms
-        else:
-            # Relativistic pseudopotential:
-            # Compute indices into (l, j, m_l) basis:
-            i_lms = 2*self.i_lm[:, None].tile((1, 2))
-            i_lms[:, 1] += 1  # Index is now 2*(l(l+1) + m) + s
-            l = self.l[:, None]
-            i_ljm = i_lms + (2*(l ** 2) - 2)  # offset from previous l
-            sel_plus = torch.where(j[self.i_rf] > self.l)[0]
-            i_ljm[sel_plus] += 2 * (2*l[sel_plus]+1)  # offset from j = l-1/2
-            # Collect matrix:
-            i_rf = self.i_rf[:, None].tile((1, 2)).flatten()
-            D_nljm = D[i_rf][:, i_rf].contiguous()
-            # Apply spin-angle overlaps (akin to delta_{lm,lm'} above):
-            i_ljm = i_ljm.flatten()
-            f_lj_all = torch.from_numpy(get_Ylm_overlaps(self.l_max)
-                                        ).to(D.device)  # spin-angle overlaps
-            return D_nljm * f_lj_all[i_ljm][:, i_ljm]
+
+    def get_spin_angle_transform(self) -> torch.Tensor:
+        """Return transformation matrix from (l, j, m_l), s to (l, j, m_j).
+        Only for relativistic cases, with output shape n_tot x 2 x n_tot_s.
+        """
+        print(f'{self.l_max = }')
+        C = torch.from_numpy(get_Ylm_to_spin_angle_all(self.l_max)
+                             ).to(self.l.device)
+        C_out = C[self.i_lms][:, self.i_ljm].reshape((self.n_tot, 2,
+                                                      self.n_tot_s))
+        # TODO: correct behavior for duplicate shells
+        return C_out
 
 
 @lru_cache
@@ -120,6 +195,25 @@ def get_Ylm_to_spin_angle(l: int) -> np.ndarray:
 
 
 @lru_cache
+def get_Ylm_to_spin_angle_all(l_max: int) -> np.ndarray:
+    """Cumulative spin angle transformation matrix up to l = `l_max`.
+    Result is a block-diagonal square matrix of dimension 2(l_max+1)^2,
+    with 2(2l+1) square blocks for each l (containing both j = l +/- 1/2).
+    """
+    C = get_Ylm_to_spin_angle(l_max)
+    if l_max == 0:
+        return C
+    else:
+        C_prev = get_Ylm_to_spin_angle_all(l_max - 1)
+        n_prev = C_prev.shape[0]
+        n_tot = n_prev + C.shape[0]
+        C_tot = np.zeros((n_tot, n_tot), dtype=np.complex128)
+        C_tot[:n_prev, :n_prev] = C_prev
+        C_tot[n_prev:, n_prev:] = C
+        return C_tot
+
+
+@lru_cache
 def get_Ylm_overlaps(l_max: int) -> np.ndarray:
     """Compute spin-angle overlap matrix of Ylm up to `l_max`.
     Contains overlaps for (l=0, j=1/2), (l=1, j=1/2), (l=1, j=3/2) etc.,
@@ -140,8 +234,8 @@ def get_Ylm_overlaps(l_max: int) -> np.ndarray:
         i_minus = C_prev.shape[0]  # start index of j = l_max - 1/2
         i_plus = i_minus + O_minus.shape[0]  # start index of j = l_max + 1/2
         n_tot = i_plus + O_plus.shape[0]  # total entries including l_max
-        C = np.zeros((n_tot, n_tot), dtype=np.complex128)
-        C[:i_minus, :i_minus] = C_prev
-        C[i_minus:i_plus, i_minus:i_plus] = O_minus
-        C[i_plus:, i_plus:] = O_plus
-        return C
+        C_tot = np.zeros((n_tot, n_tot), dtype=np.complex128)
+        C_tot[:i_minus, :i_minus] = C_prev
+        C_tot[i_minus:i_plus, i_minus:i_plus] = O_minus
+        C_tot[i_plus:, i_plus:] = O_plus
+        return C_tot
