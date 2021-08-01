@@ -100,7 +100,7 @@ def _quadratic(self: 'Minimize[Vector]', direction: 'Vector',
                         f' {state.energy.name} = {E:.3e};'
                         f' reducing step size to {step_size:.3e}.')
             continue
-        if E > E_orig:
+        if E > E_orig + self.energy_threshold:
             step_size *= self.step_size.reduce_factor
             qp.log.info(f'{self.name}: Step increased'
                         f' {state.energy.name} by {E - E_orig:.3e};'
@@ -108,7 +108,7 @@ def _quadratic(self: 'Minimize[Vector]', direction: 'Vector',
             continue
         # Step successful:
         break
-    if (not np.isfinite(E)) or (E > E_orig):
+    if (not np.isfinite(E)) or (E > E_orig + self.energy_threshold):
         qp.log.info(f'{self.name}: Step failed to reduce {state.energy.name}'
                     f' after {self.step_size.n_adjust} attempts.'
                     ' Quitting step.')
