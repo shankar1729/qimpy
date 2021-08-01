@@ -114,8 +114,8 @@ class Fillings(qp.Constructable):
         def check_magnetic(x: Union[float, Sequence[float]],
                            x_name: str) -> torch.Tensor:
             """Ensure that x = M or B is appropriate for spin mode."""
-            x_len = (3 if electrons.spinorial else
-                     (1 if electrons.spin_polarized else 0))
+            x_len = ((3 if electrons.spinorial else 1)
+                     if electrons.spin_polarized else 0)
             if x:
                 if not electrons.spin_polarized:
                     raise ValueError(f'{x_name} only allowed for'

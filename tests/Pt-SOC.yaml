@@ -11,7 +11,6 @@ ions:
 
 electrons:
   spinorial: yes
-  spin-polarized: yes
   fillings:
     smearing: Gauss
     sigma: 0.02
