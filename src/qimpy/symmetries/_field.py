@@ -24,7 +24,7 @@ class FieldSymmetrizer:
             iH_wrapped = iH % shapeR
             is_conj = (iH_wrapped[..., 2] >= shapeH[2])  # in redundant half
             iH_wrapped[is_conj] = (-iH_wrapped[is_conj]) % shapeR
-            return iH_wrapped @ strideH, is_conj
+            return _bmm(iH_wrapped, strideH), is_conj
 
         # Find symmetry-reduced set:
         iH = grid.get_mesh('H', mine=False).view(-1, 3)  # global mesh
@@ -34,14 +34,14 @@ class FieldSymmetrizer:
         min_equiv_index = get_index(iH)[0]  # lowest equivalent index
         for rot_i in rot:
             # iH transforms by rot.T, so no transpose on right-multiply:
-            index, is_conj = get_index(iH @ rot_i)
+            index, is_conj = get_index(_bmm(iH, rot_i))
             min_equiv_index = torch.where(
                 is_conj, min_equiv_index,  # should be reachable without conj
                 torch.minimum(min_equiv_index, index))
         iH_reduced = iH[min_equiv_index.unique()]
 
         # Set up indices and multiplicities of each point in reduced set:
-        index, is_conj = get_index((iH_reduced @ rot).transpose(0, 1))
+        index, is_conj = get_index(_bmm(iH_reduced, rot).transpose(0, 1))
         _, multiplicity = index.unique(sorted=True, return_counts=True)
 
         if grid.n_procs > 1:
@@ -68,7 +68,7 @@ class FieldSymmetrizer:
             strideH_local = torch.tensor(
                 [shapeH[1] * grid.shapeH_mine[2], grid.shapeH_mine[2], 1],
                 dtype=torch.long, device=rc.device)
-            grid_index = iH_local @ strideH_local
+            grid_index = _bmm(iH_local, strideH_local)
             multiplicity = multiplicity.view(
                 grid.shapeH)[..., div_src.i_start:div_src.i_stop].flatten()
 
@@ -166,3 +166,12 @@ class FieldSymmetrizer:
         v_data *= self.inv_multiplicity[None]
         v.data = v_data.view(v.data.shape)
         watch.stop()
+
+
+def _bmm(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """Bacth matrix multiply / dot product for integer tensors.
+     This is not yet supported by torch.cuda"""
+    if len(B.shape) >= 2:  # matrix multiply
+        return (A[..., None] * B[..., None, :, :]).sum(dim=-2)
+    else:  # len(B.shape) == 1:  # dot product
+        return (A * B).sum(dim=-1)
