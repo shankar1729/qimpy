@@ -7,3 +7,6 @@ QimPy Reference
    :recursive:
 
    qimpy
+
+
+.. yaml::
