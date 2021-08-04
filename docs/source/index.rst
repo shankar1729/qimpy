@@ -9,4 +9,4 @@ QimPy Reference
    qimpy
 
 
-.. yaml::
+.. yamldoc::
