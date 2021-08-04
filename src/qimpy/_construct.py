@@ -1,21 +1,19 @@
+from __future__ import annotations
 import qimpy as qp
-from typing import Optional, List, Union, TypeVar, Type, NamedTuple, final, \
-    TYPE_CHECKING
-if TYPE_CHECKING:
-    from .utils import Checkpoint, RunConfig
+from typing import Optional, List, Union, TypeVar, Type, NamedTuple, final
 
 
 ClassType = TypeVar('ClassType')
-ConstructableType = TypeVar('ConstructableType', bound="Constructable")
-ConstructableType2 = TypeVar('ConstructableType2', bound="Constructable")
+ConstructableType = TypeVar('ConstructableType', bound='Constructable')
+ConstructableType2 = TypeVar('ConstructableType2', bound='Constructable')
 
 
 class ConstructOptions(NamedTuple):
     """Options passed through `__init__` of all Constructable objects."""
-    rc: 'RunConfig'  #: Current run configuration
-    parent: Optional['Constructable'] = None  #: Parent in heirarchy
+    rc: qp.utils.RunConfig  #: Current run configuration
+    parent: Optional[qp.Constructable] = None  #: Parent in heirarchy
     attr_name: str = ''  #: Attribute name of object within parent
-    checkpoint_in: Optional['Checkpoint'] = None \
+    checkpoint_in: Optional[qp.utils.Checkpoint] = None \
         #: If present, load data from this checkpoint file during construction
 
 
@@ -23,11 +21,11 @@ class Constructable:
     """Base class of dict-constructable and serializable objects
     in QimPy heirarchy."""
     __slots__ = ('parent', 'children', 'path', 'rc', 'checkpoint_in')
-    parent: Optional['Constructable']  #: Parent object in heirarchy (if any)
-    children: List['Constructable']  #: Child objects in heirarchy
+    parent: Optional[qp.Constructable]  #: Parent object in heirarchy (if any)
+    children: List[qp.Constructable]  #: Child objects in heirarchy
     path: str  #: Object's absolute path in heirarchy (includes trailing /)
-    rc: 'RunConfig'  #: Current run configuration
-    checkpoint_in: Optional['Checkpoint'] \
+    rc: qp.utils.RunConfig  #: Current run configuration
+    checkpoint_in: Optional[qp.utils.Checkpoint] \
         #: If present, load data from this checkpoint file during construction
 
     def __init__(self, co: ConstructOptions, **kwargs):
@@ -39,7 +37,7 @@ class Constructable:
         self.checkpoint_in = co.checkpoint_in
 
     @final
-    def save_checkpoint(self, checkpoint: 'Checkpoint') -> None:
+    def save_checkpoint(self, checkpoint: qp.utils.Checkpoint) -> None:
         """Save `self` and all children in heirarchy to `checkpoint`.
         Override `_save_checkpoint` to implement the save functionality."""
         # Save quantities in self:
@@ -50,7 +48,7 @@ class Constructable:
         for child in self.children:
             child.save_checkpoint(checkpoint)
 
-    def _save_checkpoint(self, checkpoint: 'Checkpoint') -> List[str]:
+    def _save_checkpoint(self, checkpoint: qp.utils.Checkpoint) -> List[str]:
         """Override to save required quantities to `self.path`
         within `checkpoint`. Return names of objects saved (for logging)."""
         return []

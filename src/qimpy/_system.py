@@ -1,42 +1,54 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Union, Optional, Dict, List, Any, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ._energy import Energy
-    from .utils import RunConfig
-    from .lattice import Lattice
-    from .ions import Ions
-    from .symmetries import Symmetries
-    from .electrons import Electrons
-    from .grid import Grid, Coulomb
-    from .utils import Checkpoint
+from typing import Union, Optional, Dict, List, Any
 
 
 class System(qp.Constructable):
     """Overall system to calculate within QimPy"""
     __slots__ = ('lattice', 'ions', 'symmetries', 'electrons',
                  'grid', 'coulomb', 'energy', 'checkpoint_out')
-    lattice: 'Lattice'  #: Lattice vectors / unit cell definition
-    ions: 'Ions'  #: Ionic positions and pseudopotentials
-    symmetries: 'Symmetries'  #: Point and space group symmetries
-    electrons: 'Electrons'  #: Electronic sub-system
-    grid: 'Grid'  #: Charge-density grid
-    coulomb: 'Coulomb'  #: Coulomb interactions on charge-density grid
-    energy: 'Energy'  #: Energy components
+    lattice: qp.lattice.Lattice  #: Lattice vectors / unit cell definition
+    ions: qp.ions.Ions  #: Ionic positions and pseudopotentials
+    symmetries: qp.symmetries.Symmetries  #: Point and space group symmetries
+    electrons: qp.electrons.Electrons  #: Electronic sub-system
+    grid: qp.grid.Grid  #: Charge-density grid
+    coulomb: qp.grid.Coulomb  #: Coulomb interactions on charge-density grid
+    energy: qp.Energy  #: Energy components
     checkpoint_out: Optional[str]  #: Filename for output checkpoint
 
-    def __init__(self, *, rc: 'RunConfig',
-                 lattice: Union['Lattice', dict],
-                 ions: Union['Ions', dict, None] = None,
-                 symmetries: Union['Symmetries', dict, None] = None,
-                 electrons: Union['Electrons', dict, None] = None,
-                 grid: Union['Grid', dict, None] = None,
+    def __init__(self, *, rc: qp.utils.RunConfig,
+                 lattice: Union[qp.lattice.Lattice, dict],
+                 ions: Union[qp.ions.Ions, dict, None] = None,
+                 symmetries: Union[qp.symmetries.Symmetries, dict,
+                                   None] = None,
+                 electrons: Union[qp.electrons.Electrons, dict, None] = None,
+                 grid: Union[qp.grid.Grid, dict, None] = None,
                  checkpoint: Optional[str] = None,
                  checkpoint_out: Optional[str] = None):
         """Compose a System to calculate from its pieces. Each piece
         could be provided as an object or a dictionary of parameters
-        suitable for initializing that object"""
+        suitable for initializing that object.
+
+        Parameters
+        ----------
+        lattice
+            Lattice vectors / unit cell definition. :yaml:
+        ions
+            Ionic positions and pseudopotentials. :yaml:
+        symmetries
+            Point and space group symmetries. :yaml:
+        electrons
+            Electronic sub-system. :yaml:
+        grid
+            Charge-density grid. :yaml:
+        checkpoint
+            Checkpoint file to read at start-up. :yaml:
+        checkpoint_out
+            Checkpoint file to write.
+            If unspecified, defaults to `checkpoint`. :yaml:
+        """
 
         # Set in and out checkpoints:
         try:

@@ -1,12 +1,8 @@
-QimPy Reference
-===============
+QimPy Documentation
+===================
 
-.. autosummary::
-   :toctree: api
-   :template: module.rst
-   :recursive:
+.. toctree::
+    :maxdepth: 1
 
-   qimpy
-
-
-.. yamldoc::
+    api
+    inputfile
