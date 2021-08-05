@@ -1,6 +1,7 @@
 from docutils.parsers.rst import Directive
 from docutils import nodes
-from typing import get_type_hints, Dict
+from typing import get_type_hints, get_args, get_origin, \
+    Dict, Sequence, List, Tuple
 import importlib
 import inspect
 
@@ -9,34 +10,58 @@ class YamlDocDirective(Directive):
 
     has_content = True
 
-    def run(self):
+    def run(self) -> list:
+        rootclass = get_class_from_path(self.content[0])
+        constructable = get_class_from_path(self.content[1]
+                                            if (len(self.content) > 1)
+                                            else 'qimpy.Constructable')
 
-        # Split class name into module and class:
-        full_class_path = self.content[0].split('.')
-        module_name = '.'.join(full_class_path[:-1])
-        class_name = full_class_path[-1]
-
-        # Import module and get root class:
-        rootclass = getattr(importlib.import_module(module_name), class_name)
-        param_types = get_type_hints(rootclass.__init__)
-        param_docs = get_parameters(rootclass.__init__.__doc__)
-        signature = inspect.signature(rootclass.__init__)
-
-        # Report only parameters which have a [YAML] in their docstring:
+        # Recursively add documentation:
         nodelist = []
-        for param_name, param_type in param_types.items():
-            if param_name in param_docs:
-                param_doc = param_docs[param_name]
-                if ':yaml:' in param_doc:
-                    param_doc = param_doc.replace(':yaml:', '')
-                    default_value = signature.parameters[param_name].default
-                    default_str = ('' if (default_value is inspect._empty)
-                                   else f' = {default_value}')
-                    param_text = f'{param_name} ({param_type})' \
-                                 f'{default_str}:\n {param_doc}'
-                    nodelist.append(nodes.paragraph(text=param_text))
-
+        add_class(rootclass, 0, nodelist, constructable)
         return nodelist
+
+
+def get_class_from_path(full_class_name: str) -> type:
+    """Get class from fully-qualified name."""
+    # Split class name into module and class:
+    full_class_path = full_class_name.split('.')
+    module_name = '.'.join(full_class_path[:-1])
+    class_name = full_class_path[-1]
+    # Import module and get class:
+    module = importlib.import_module(module_name)
+    return getattr(module, class_name)
+
+
+def add_class(cls: type, level: int, nodelist: list,
+              constructable: type) -> None:
+    """Recursively add documentation for class `cls` at depth `level`
+    to `nodelist`. Here, `constructable` specifies the base class of all
+    objects that are dict/yaml initializable (eg. qimpy.Constructable)."""
+    # Get parameter types, documentation and default values:
+    assert issubclass(cls, constructable)
+    param_types = get_type_hints(cls.__init__)
+    param_docs = get_parameters(cls.__init__.__doc__)
+    signature = inspect.signature(cls.__init__)
+
+    # Report only parameters which have a [YAML] in their docstring:
+    for param_name, param_type in param_types.items():
+        if param_name in param_docs:
+            param_doc = param_docs[param_name]
+            if ':yaml:' in param_doc:
+                param_doc = param_doc.replace(':yaml:', '')
+                default_value = signature.parameters[param_name].default
+                default_str = ('' if (default_value is inspect._empty)
+                               else f' = {default_value}')
+                param_text = f'LEVEL{level} {param_name} ({param_type})' \
+                             f'{default_str}: {param_doc}'
+                nodelist.append(nodes.paragraph(text=param_text))
+                # Recur down on compound objects:
+                for cls_option in get_args(param_type):
+                    print(f'Within {cls}: {cls_option}')
+                    if (inspect.isclass(cls_option)
+                            and issubclass(cls_option, constructable)):
+                        add_class(cls_option, level+1, nodelist, constructable)
 
 
 def get_parameters(docstr: str) -> Dict[str, str]:

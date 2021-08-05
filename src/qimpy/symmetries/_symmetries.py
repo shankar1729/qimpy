@@ -1,14 +1,11 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
 from ._lattice import _get_lattice_point_group, _symmetrize_lattice
 from ._ions import _get_space_group, _symmetrize_positions
 from ._grid import _check_grid_shape, _get_grid_shape
-from typing import List, Dict, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ..utils import RunConfig
-    from ..lattice import Lattice
-    from ..ions import Ions
+from typing import List, Dict
 
 
 class Symmetries(qp.Constructable):
@@ -18,8 +15,8 @@ class Symmetries(qp.Constructable):
 
     __slots__ = ('lattice', 'ions', 'tolerance', 'n_sym',
                  'rot', 'trans', 'ion_map', 'i_id', 'i_inv')
-    lattice: 'Lattice'  #: Corresponding lattice vectors
-    ions: 'Ions'  #: Corresponding ionic geometry
+    lattice: qp.lattice.Lattice  #: Corresponding lattice vectors
+    ions: qp.ions.Ions  #: Corresponding ionic geometry
     tolerance: float  #: Relative error threshold in detecting symmetries
     n_sym: int  #: Number of space group operations
     rot: torch.Tensor  #: Rotations in fractional coordinates (n_sym x 3 x 3)
@@ -34,10 +31,16 @@ class Symmetries(qp.Constructable):
     get_grid_shape = _get_grid_shape
 
     def __init__(self, *, co: qp.ConstructOptions,
-                 lattice: 'Lattice', ions: 'Ions',
+                 lattice: qp.lattice.Lattice, ions: qp.ions.Ions,
                  axes: Dict[str, np.ndarray] = {},
                  tolerance: float = 1e-6) -> None:
-        """Determine space group from `lattice` and `ions`."""
+        """Determine space group from `lattice` and `ions`.
+
+        Parameters
+        ----------
+        tolerance
+            Threshold for detecting symmetries. :yaml:
+        """
         super().__init__(co=co)
         rc = self.rc
         self.lattice = lattice

@@ -51,14 +51,14 @@ class Ions(qp.Constructable):
             and params is an optional dictionary of additional per-ion
             parameters including initial magnetic moments, relaxation
             constraints etc. TODO
-            Ions of the same type must be specified consecutively.
+            Ions of the same type must be specified consecutively. :yaml:
         pseudopotentials:
             Names of individual pseudopotential files or templates for
             families of pseudopotentials. Templates are specified by
             including a $ID in the name which is replaced by the chemical
             symbol of the element. The list of specified file names and
             templates is processed in order, and the first match for
-            each element takes precedence.
+            each element takes precedence. :yaml:
         """
         super().__init__(co=co)
         rc = self.rc

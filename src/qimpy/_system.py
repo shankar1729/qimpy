@@ -40,7 +40,7 @@ class System(qp.Constructable):
         symmetries
             Point and space group symmetries. :yaml:
         electrons
-            Electronic sub-system. :yaml:
+            Electronic sub-system.
         grid
             Charge-density grid. :yaml:
         checkpoint

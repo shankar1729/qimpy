@@ -2,11 +2,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from ._fft import _init_grid_fft, _fft, _ifft, IndicesType, MethodFFT
-from typing import Optional, Sequence, Tuple, Dict, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ..utils import RunConfig, TaskDivision
-    from ..lattice import Lattice
-    from ..symmetries import Symmetries, FieldSymmetrizer
+from typing import Optional, Sequence, Tuple, Dict
 
 
 class Grid(qp.Constructable):
@@ -21,9 +17,9 @@ class Grid(qp.Constructable):
         'dV', 'shape', 'shapeH', 'shapeR_mine', 'shapeG_mine', 'shapeH_mine',
         'split0', 'split2', 'split2H', '_mesh1D', '_mesh1D_mine',
         '_indices_fft', '_indices_ifft', '_indices_rfft', '_indices_irfft']
-    lattice: 'Lattice'
-    symmetries: 'Symmetries'
-    _field_symmetrizer: Optional['FieldSymmetrizer']
+    lattice: qp.lattice.Lattice
+    symmetries: qp.symmetries.Symmetries
+    _field_symmetrizer: Optional[qp.symmetries.FieldSymmetrizer]
     comm: Optional[qp.MPI.Comm]  #: Communicator to split grid and FFTs over
     n_procs: int  #: Size of comm
     i_proc: int  #: Rank within comm
@@ -35,9 +31,9 @@ class Grid(qp.Constructable):
     shapeR_mine: Tuple[int, ...]  #: Local real grid dimensions
     shapeG_mine: Tuple[int, ...]  #: Local reciprocal grid dimensions
     shapeH_mine: Tuple[int, ...]  #: Local half-reciprocal grid dimensions
-    split0: 'TaskDivision'  #: MPI division of real-space dimension 0
-    split2: 'TaskDivision'  #: MPI division of reciprocal dimension 2
-    split2H: 'TaskDivision'  #: MPI division of half-reciprocal dimension 2
+    split0: qp.utils.TaskDivision  #: MPI split of real-space dimension 0
+    split2: qp.utils.TaskDivision  #: MPI split of reciprocal dimension 2
+    split2H: qp.utils.TaskDivision  #: MPI split of half-reciprocal dimension 2
     _mesh1D: Dict[str, Tuple[torch.Tensor, ...]]  # Global 1D meshes
     _mesh1D_mine: Dict[str, Tuple[torch.Tensor, ...]]  # Local 1D meshes
     _indices_fft: IndicesType  #: All-to-all unscramble indices for `fft`
@@ -48,8 +44,10 @@ class Grid(qp.Constructable):
     fft: MethodFFT = _fft
     ifft: MethodFFT = _ifft
 
-    def __init__(self, *, co: qp.ConstructOptions, lattice: 'Lattice',
-                 symmetries: 'Symmetries', comm: Optional[qp.MPI.Comm],
+    def __init__(self, *, co: qp.ConstructOptions,
+                 lattice: qp.lattice.Lattice,
+                 symmetries: qp.symmetries.Symmetries,
+                 comm: Optional[qp.MPI.Comm],
                  ke_cutoff_wavefunction: Optional[float] = None,
                  ke_cutoff: Optional[float] = None,
                  shape: Optional[Sequence[int]] = None) -> None:
@@ -68,16 +66,16 @@ class Grid(qp.Constructable):
         ke_cutoff_wavefunction
             Plane-wave kinetic-energy cutoff in :math:`E_h` for any electronic
             wavefunctions to be used with this grid. This is an internally set
-            parameter (should not be specified in dict / YAML input) that
-            effectively sets the default for ke_cutoff.
+            parameter that effectively sets the default for `ke_cutoff` to
+            `4 * ke_cutoff_wavefunction`, and has no effect if either
+            `ke_cutoff` or `shape` is specified explicitly.
         ke_cutoff
             Plane-wave kinetic-energy cutoff in :math:`E_h` for the grid
-            (i.e. the charge-density cutoff). This supercedes the default
-            of `4 * ke_cutoff_wavefunction` (if specified), but may be
-            superceded by explicitly specified shape
+            (i.e. the charge-density cutoff). This has no effect if `shape`
+            is specified explicitly. :yaml:
         shape
             Explicit grid dimensions. Highest precedence, and if specified,
-            will supercede ke_cutoff
+            will supercede `ke_cutoff`. :yaml:
         """
         super().__init__(co=co)
         self.lattice = lattice
@@ -191,7 +189,7 @@ class Grid(qp.Constructable):
         return (iG_box @ self.lattice.Gbasis.T).norm(dim=1).max().item()
 
     @property
-    def field_symmetrizer(self) -> 'FieldSymmetrizer':
+    def field_symmetrizer(self) -> qp.symmetries.FieldSymmetrizer:
         """Symmetrizer for fields on this grid (initialized on first use)."""
         if self._field_symmetrizer is None:
             self._field_symmetrizer = qp.symmetries.FieldSymmetrizer(self)
