@@ -29,7 +29,7 @@ class YamlDocDirective(Directive):
             tbody += row
         # --- group
         tgroup = nodes.tgroup(cols=2)
-        for colwidth in (1, 1):
+        for colwidth in (30, 70):
             tgroup += nodes.colspec(colwidth=colwidth)
         tgroup += tbody
         # --- overall table
@@ -57,19 +57,18 @@ class YamlDocDirective(Directive):
                     default_value = signature.parameters[param_name].default
                     default_str = ('' if (default_value is inspect._empty)
                                    else f' {default_value}')
-                    pad = '␣' * (2*level)
+                    pad = '\u00A0' * (2*level)  # using non-breaking spaces
                     # Command cell:
                     cell_cmd = nodes.entry()
                     cell_cmd += nodes.paragraph(text=f'{pad}{param_name}:'
                                                      f'{default_str}')
                     # Documentation cell:
-                    node = nodes.paragraph()
+                    cell_doc = nodes.entry()
                     viewlist = ViewList()
                     for i_line, line in enumerate(param_doc.split('\n')):
+                        print(i_line, line)
                         viewlist.append(line, 'memory.rst', i_line)
-                    self.state.nested_parse(viewlist, 0, node)
-                    cell_doc = nodes.entry()
-                    cell_doc += node
+                    self.state.nested_parse(viewlist, 0, cell_doc)
                     # Collect row:
                     row = nodes.row()
                     row += cell_cmd
@@ -100,9 +99,10 @@ def get_parameters(docstr: str) -> Dict[str, str]:
     result: Dict[str, str] = {}
     lines = docstr.split('\n')
     parameter_start = len(lines)
-    parameter_indent = -1
+    parameter_indent = -1  # indent amount of parameter
+    desc_indent = -1  # indent amount of parameter description
     param_name = None
-    param_desc = None
+    param_desc = []
     for i_line, line_raw in enumerate(lines):
         line = line_raw.lstrip()
         n_indent = len(line_raw) - len(line)
@@ -114,22 +114,25 @@ def get_parameters(docstr: str) -> Dict[str, str]:
         if i_line < parameter_start:
             continue
         # Parse parameters:
-        rel_indent = n_indent - parameter_indent
-        if rel_indent == 0:
+        if n_indent == parameter_indent:
             # Flush previous parameter, if any:
             if param_name and param_desc:
-                result[param_name] = param_desc
+                result[param_name] = '\n'.join(param_desc).strip('\n')
             # Start new parameter
             param_name = line.split(':')[0].strip()
-            param_desc = ''
+            param_desc = []
+            desc_indent = -1
         elif line:
-            param_desc += '\n' + ' '*rel_indent + line
+            if desc_indent == -1:
+                desc_indent = n_indent  # based on first line in this desc
+            rel_indent = n_indent - desc_indent
+            param_desc.append(' '*rel_indent + line)
         else:
-            param_desc += '\n'  # Blank lines important in ReST formatting
+            param_desc.append('')  # Blank lines important in ReST formatting
 
     # Flush last parameter:
     if param_name and param_desc:
-        result[param_name] = param_desc
+        result[param_name] = '\n'.join(param_desc).strip('\n')
     return result
 
 
@@ -140,4 +143,4 @@ def yaml_role(name, rawtext, text, lineno, inliner, options={}, content=[]):
 
 def setup(app):
     app.add_directive('yamldoc', YamlDocDirective)
-    app.add_role('yaml', yaml_role)
+    app.add_role_to_domain('py', 'yaml', yaml_role)
