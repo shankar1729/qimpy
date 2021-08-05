@@ -17,15 +17,30 @@ class YamlDocDirective(Directive):
                                             if (len(self.content) > 1)
                                             else 'qimpy.Constructable')
 
-        # Recursively add documentation:
-        nodelist = []
-        self.add_class(rootclass, 0, nodelist, constructable)
-        return nodelist
+        # Recursively add documentation, one entry per row:
+        # --- each row has a command column and a documentation column
+        rowlist = []
+        self.add_class(rootclass, 0, rowlist, constructable)
 
-    def add_class(self, cls: type, level: int, nodelist: list,
+        # Collect into a table:
+        # --- body
+        tbody = nodes.tbody()
+        for row in rowlist:
+            tbody += row
+        # --- group
+        tgroup = nodes.tgroup(cols=2)
+        for colwidth in (1, 1):
+            tgroup += nodes.colspec(colwidth=colwidth)
+        tgroup += tbody
+        # --- overall table
+        table = nodes.table()
+        table += tgroup
+        return [table]
+
+    def add_class(self, cls: type, level: int, rowlist: List[nodes.row],
                   constructable: type) -> None:
         """Recursively add documentation for class `cls` at depth `level`
-        to `nodelist`. Here, `constructable` specifies the base class of all
+        to `rowlist`. Here, `constructable` specifies the base class of all
         objects that are dict/yaml initializable (eg. qimpy.Constructable)."""
         # Get parameter types, documentation and default values:
         assert issubclass(cls, constructable)
@@ -41,21 +56,31 @@ class YamlDocDirective(Directive):
                     param_doc = param_doc.replace(':yaml:', '')
                     default_value = signature.parameters[param_name].default
                     default_str = ('' if (default_value is inspect._empty)
-                                   else f' = {default_value}')
+                                   else f' {default_value}')
+                    pad = '␣' * (2*level)
+                    # Command cell:
+                    cell_cmd = nodes.entry()
+                    cell_cmd += nodes.paragraph(text=f'{pad}{param_name}:'
+                                                     f'{default_str}')
+                    # Documentation cell:
                     node = nodes.paragraph()
                     viewlist = ViewList()
-                    viewlist.append(f'LEVEL{level} {param_name} ({param_type})'
-                                    f'{default_str}', 'memory.rst', 0)
                     for i_line, line in enumerate(param_doc.split('\n')):
-                        viewlist.append(line, 'memory.rst', i_line+1)
+                        viewlist.append(line, 'memory.rst', i_line)
                     self.state.nested_parse(viewlist, 0, node)
-                    nodelist.append(node)
+                    cell_doc = nodes.entry()
+                    cell_doc += node
+                    # Collect row:
+                    row = nodes.row()
+                    row += cell_cmd
+                    row += cell_doc
+                    rowlist.append(row)
 
                     # Recur down on compound objects:
                     for cls_option in get_args(param_type):
                         if (inspect.isclass(cls_option)
                                 and issubclass(cls_option, constructable)):
-                            self.add_class(cls_option, level+1, nodelist,
+                            self.add_class(cls_option, level+1, rowlist,
                                            constructable)
 
 
