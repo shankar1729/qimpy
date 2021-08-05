@@ -62,12 +62,12 @@ class Fillings(qp.Constructable):
             occupations fixed at their initial values. :yaml:
         sigma
             Width of the smearing function (in :math:`E_h`), corresponding
-            to the Gaussian width :math:`\\sigma` in the Gaussian, Cold and
+            to the Gaussian width :math:`\sigma` in the Gaussian, Cold and
             M-P schemes, and to :math:`2k_BT` in the Fermi-Dirac scheme.
             Defaults to 0.002 if neither `sigma` or `kT` are specified. :yaml:
         kT
             :math:`k_BT` for Fermi-Dirac occupations, amounting to
-            :math:`\\sigma/2` for the other Gaussian-based smearing schemes.
+            :math:`\sigma/2` for the other Gaussian-based smearing schemes.
             Defaults to 0.001 if neither `sigma` or `kT` are specified.
             Specify only one of sigma or kT. :yaml:
         mu
