@@ -1,27 +1,24 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Optional, Tuple, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ..utils import RunConfig
-    from ._electrons import Electrons
-    from ._wavefunction import Wavefunction
+from typing import Optional, Tuple
 
 
 class Davidson(qp.Constructable):
     """Davidson diagonalization of Hamiltonian in `electrons`."""
     __slots__ = ('electrons', 'n_iterations', 'eig_threshold',
                  '_line_prefix', '_norm_cut', '_i_iter', '_HC')
-    electrons: 'Electrons'  #: Electronic system to diagonalize
+    electrons: qp.electrons.Electrons  #: Electronic system to diagonalize
     n_iterations: int  #: Number of diagonalization iterations
     eig_threshold: float  #: Eigenvalue convergence threshold (in :math:`E_h`)
     _line_prefix: str
     _norm_cut: float
     _i_iter: int
-    _HC: 'Wavefunction'  # Used only for coordination with sub-classes
+    _HC: qp.electrons.Wavefunction  #: Used for coordination with sub-classes
 
     def __init__(self, *, co: qp.ConstructOptions,
-                 electrons: 'Electrons', n_iterations: int = 100,
+                 electrons: qp.electrons.Electrons, n_iterations: int = 100,
                  eig_threshold: float = 1E-8) -> None:
         """Initialize diagonalizer with stopping criteria.
 
@@ -30,12 +27,12 @@ class Davidson(qp.Constructable):
         n_iterations
             Number of diagonalization iterations in fixed-Hamiltonian
             calculations; the self-consistent field method overrides this
-            when diagonalizing in an inner loop
+            when diagonalizing in an inner loop. :yaml:
         eig_threshold
-            Maximum change in any eigenvalue from the previous iteration
-            to consider as converged for fixed-Hamiltonian calculations;
-            the self-consistent field method overrides this when
-            diagonalizing in an inner loop
+            Maximum change in any eigenvalue (in :math:`E_h`) from the previous
+            iteration to consider converged for fixed-Hamiltonian calculations;
+            the self-consistent field method overrides this when diagonalizing
+            in an inner loop. :yaml:
         """
         super().__init__(co=co)
         self.electrons = electrons
@@ -71,8 +68,8 @@ class Davidson(qp.Constructable):
         if converge_failed and (not inner_loop):
             qp.log.info(f'{line_prefix}: Failed to converge')
 
-    def _precondition(self, Cerr: 'Wavefunction',
-                      KEref: torch.Tensor) -> 'Wavefunction':
+    def _precondition(self, Cerr: qp.electrons.Wavefunction,
+                      KEref: torch.Tensor) -> qp.electrons.Wavefunction:
         """Inverse-kinetic preconditioner on the Cerr in eigenpairs,
         using the per-band kinetic energy KEref"""
         watch = qp.utils.StopWatch('Davidson.precondition', self.rc)
@@ -84,7 +81,7 @@ class Davidson(qp.Constructable):
         watch.stop()
         return result
 
-    def _regularize(self, C: 'Wavefunction', norm: torch.Tensor,
+    def _regularize(self, C: qp.electrons.Wavefunction, norm: torch.Tensor,
                     i_iter: int) -> None:
         """Regularize low-norm bands of C by randomizing them,
         using seed based on current iteration number i_iter"""

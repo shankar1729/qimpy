@@ -1,11 +1,7 @@
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Union, Sequence, Tuple, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ..utils import RunConfig, TaskDivision
-    from ..symmetries import Symmetries
-    from ..lattice import Lattice
+from typing import Union, Sequence, Tuple
 
 
 class Kpoints(qp.Constructable):
@@ -14,7 +10,7 @@ class Kpoints(qp.Constructable):
     __slots__ = ('k', 'wk', 'division')
     k: torch.Tensor  #: Array of k-points (N x 3)
     wk: torch.Tensor  #: Integration weights for each k (adds to 1)
-    division: 'TaskDivision'  #: Division of k-points across `rc.comm_k`
+    division: qp.utils.TaskDivision  #: Division of k-points across `rc.comm_k`
 
     def __init__(self, *, co: qp.ConstructOptions,
                  k: torch.Tensor, wk: torch.Tensor) -> None:
@@ -43,7 +39,8 @@ class Kmesh(Kpoints):
     invert: torch.Tensor  #: Inversion factor (1, -1) in reduction of each k
 
     def __init__(self, *, co: qp.ConstructOptions,
-                 symmetries: 'Symmetries', lattice: 'Lattice',
+                 symmetries: qp.symmetries.Symmetries,
+                 lattice: qp.lattice.Lattice,
                  offset: Union[Sequence[float], np.ndarray] = (0., 0., 0.),
                  size: Union[float, Sequence[int], np.ndarray] = (1, 1, 1),
                  use_inversion: bool = True) -> None:
@@ -59,21 +56,21 @@ class Kmesh(Kpoints):
             Offset k-point mesh by this amount in k-mesh coordinates
             i.e. by offset / size in fractional reciprocal coordinates.
             For example, use [0.5, 0.5, 0.5] for the Monkhorst-Pack scheme.
-            Default: [0., 0., 0.] selects Gamma-centered mesh.
+            Default: [0., 0., 0.] selects Gamma-centered mesh. :yaml:
         size
             If given as a list of 3 integers, number of k-points along each
             reciprocal lattice direction. Instead, a single float specifies
             the minimum real-space size of the k-point sampled supercell
             i.e. pick number of k-points along dimension i = ceil(size / L_i),
             where L_i is the length of lattice vector i (in bohrs).
-            Default: [1, 1, 1] selects a single k-point = offset.
-        use_inversion : bool, optional
+            Default: [1, 1, 1] selects a single k-point = offset. :yaml:
+        use_inversion
             Whether to use inversion in k-space (i.e. complex conjugation
             in real space) to additionally reduce k-points for systems
             without inversion symmetry in real space. Default: True;
             you should need to only disable this when interfacing with
-            codes that do not support this symmetry eg. BerkeleyGW."""
-
+            codes that do not support this symmetry eg. BerkeleyGW. :yaml:
+        """
         rc = co.rc
         assert rc is not None
 
@@ -166,8 +163,8 @@ class Kpath(Kpoints):
     """Path of k-points traversing Brillouin zone.
     Typically used only for band structure calculations."""
 
-    def __init__(self, *, co: qp.ConstructOptions,
-                 lattice: 'Lattice', dk: float, points: list) -> None:
+    def __init__(self, *, co: qp.ConstructOptions, lattice: qp.lattice.Lattice,
+                 dk: float, points: list) -> None:
         """Initialize k-path with spacing `dk` connecting `points`.
 
         Parameters
@@ -178,11 +175,11 @@ class Kpath(Kpoints):
             for determining path lengths.
         dk
             Maximum distance (in :math:`a_0^{-1}`) between adjacent points
-            on k-path
+            on k-path. :yaml:
         points
             List of special k-points along path: each point should contain
             three fractional coordinates (float) and optionally a string
-            label for this point for use in band structure plots.
+            label for this point for use in band structure plots. :yaml:
         """
         rc = co.rc
         assert rc is not None

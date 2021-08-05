@@ -1,28 +1,35 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
 from ..utils import Minimize, MinimizeState, MatrixArray
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from .. import System
 
 
 class LCAO(Minimize[MatrixArray]):
     """Optimize electronic state in atomic-orbital subspace."""
     __slots__ = ('system', '_rot_prev')
-    system: 'System'
+    system: qp.System
     _rot_prev: torch.Tensor  #: accumulated rotations of subspace
 
     def __init__(self, *, co: qp.ConstructOptions, n_iterations: int = 30,
                  energy_threshold: float = 1E-6,
                  gradient_threshold: float = 1E-8) -> None:
-        """Set stopping criteria for initial subspace optimization."""
+        """Set stopping criteria for initial subspace optimization.
+        Parameters
+        ----------
+        energy_threshold
+            Convergence threshold on energy difference (in :math:`E_h`) between
+            consecutive iterations. :yaml:
+        gradient_threshold
+            Convergence threshold on norm of energy gradient with respect to
+            subspace Hamiltonian (dimensionless). :yaml:
+        """
         super().__init__(co=co, comm=co.rc.comm_kb, name='LCAO', method='cg',
                          n_iterations=n_iterations,
                          extra_thresholds={'|grad|': gradient_threshold},
                          energy_threshold=energy_threshold)
 
-    def update(self, system: 'System') -> None:
+    def update(self, system: qp.System) -> None:
         """Set wavefunctions to optimum subspace of atomic orbitals."""
         el = system.electrons
         # Initialize based on reference atomic density:

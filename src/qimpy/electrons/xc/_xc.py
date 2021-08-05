@@ -2,12 +2,9 @@ import qimpy as qp
 import numpy as np
 import torch
 from . import lda, gga
-from .functional import Functional,\
+from .functional import Functional, \
     get_libxc_functional_names, FunctionalsLibxc
-from typing import TYPE_CHECKING, Tuple, List, Dict, Optional, Union
-if TYPE_CHECKING:
-    from ...grid import FieldH
-    from ...utils import RunConfig
+from typing import Tuple, List, Dict, Optional, Union
 
 
 N_CUT = 1e-16  # Regularization threshold for densities
@@ -23,26 +20,32 @@ class XC(qp.Constructable):
 
     def __init__(self, *, co: qp.ConstructOptions, spin_polarized: bool,
                  functional: Union[str, List[str]] = 'gga-pbe'):
-        """Initialize functional from name or list of names.
-        Each entry in the list must be one of the internal functionals:
+        """Initialize exchange-correlation functional.
 
-        {INTERNAL_FUNCTIONAL_NAMES}
+        Parameters
+        ----------
+        functional
+            Name or list of names of an exchange-correlation functional.
+            Each entry in the list must be one of the internal functionals:
 
-        or a Libxc functional name (if available).
-        Run the code with functional: 'list' to print the names of available
-        functionals including those from Libxc (and exit immediately).
-        The names are case insensitive, and may use hyphens or underscores.
+            {INTERNAL_FUNCTIONAL_NAMES}
 
-        Additionally, for Libxc functionals, a combined xc name will expand
-        to separate x and c names for convenience, where appropriate.
-        Therefore, 'gga-pbe' (default) will use the internal PBE GGA,
-        while 'gga-xc-pbe' will use 'gga_x_pbe' + 'gga_c_pbe' from Libxc.
+            or a Libxc functional name (if available). Run the code with
+            functional: 'list' to print the names of available functionals
+            including those from Libxc (and exit immediately).
+            The names are case insensitive, and may use hyphens or underscores.
 
-        Finally, each functional name in the list can have an optional "*num"
-        suffix (no spaces) to scale the functional by num. For example,
-        the specification 'gga-pbe*0.5 lda-pz*0.5' may be used to compute
-        a 50-50 mix of two functionals. Warning: there is no normalization or
-        check to make the fractions of exchange or correlation to add up to 1.
+            Additionally, for Libxc functionals, a combined xc name will expand
+            to separate x and c names for convenience, where appropriate.
+            Therefore, 'gga-pbe' (default) will use the internal PBE GGA,
+            while 'gga-xc-pbe' will use 'gga_x_pbe' + 'gga_c_pbe' from Libxc.
+
+            Finally, each functional name in the list can have an optional
+            "*num" suffix (no spaces) to scale the functional by num.
+            For example, the specification 'gga-pbe*0.5 lda-pz*0.5' may be used
+            to compute a 50-50 mix of two functionals. Warning: there is no
+            normalization or check to make the fractions of exchange or
+            correlation to add up to 1. :yaml:
         """
         super().__init__(co=co)
         qp.log.info('\nInitializing XC:')
@@ -74,8 +77,8 @@ class XC(qp.Constructable):
         self.need_lap = any(func.needs_lap for func in self._functionals)
         self.need_tau = any(func.needs_tau for func in self._functionals)
 
-    def __call__(self, n_t: 'FieldH', tau_t: 'FieldH'
-                 ) -> Tuple[float, 'FieldH', 'FieldH']:
+    def __call__(self, n_t: qp.grid.FieldH, tau_t: qp.grid.FieldH
+                 ) -> Tuple[float, qp.grid.FieldH, qp.grid.FieldH]:
         """Compute exchange-correlation energy and potential.
         Here, `n_t` and `tau_t` are the electron density and KE density
         (used if `need_tau` is True) in reciprocal space."""

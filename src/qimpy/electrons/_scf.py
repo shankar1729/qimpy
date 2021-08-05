@@ -1,15 +1,11 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Optional, Sequence, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ..utils import RunConfig
-    from .._energy import Energy
-    from ..grid import FieldH
-    from .._system import System
+from typing import Optional, Sequence
 
 
-class SCF(qp.utils.Pulay['FieldH']):
+class SCF(qp.utils.Pulay[qp.grid.FieldH]):
     """Electronic self-consistent field iteration."""
     __slots__ = ('mix_fraction_mag', 'q_kerker', 'q_metric', 'q_kappa',
                  'n_eig_steps', 'eig_threshold', 'mix_density',
@@ -21,7 +17,7 @@ class SCF(qp.utils.Pulay['FieldH']):
     n_eig_steps: int  #: Number of eigenvalue steps per cycle
     eig_threshold: float  #: Eigenvalue convergence threshold
     mix_density: bool  #: Mix density if True, else mix potential
-    system: 'System'  #: Current system being optimized
+    system: qp.System  #: Current system being optimized
     K_kerker: torch.Tensor  #: Kernel for Kerker mixing (preconditioner)
     K_metric: torch.Tensor  #: Kernel for metric used in Pulay overlaps
 
@@ -32,6 +28,43 @@ class SCF(qp.utils.Pulay['FieldH']):
                  q_kerker: float = 0.8, q_metric: float = 0.8,
                  q_kappa: Optional[float] = None, n_eig_steps: int = 2,
                  eig_threshold: float = 1e-8, mix_density: bool = True):
+        """Initialize parameters of self-consistent field iteration (SCF).
+
+        Parameters
+        ----------
+        n_iterations
+            Number of self-consistent field iterations / cycles. :yaml:
+        energy_threshold
+            Convergence threshold on energy difference (in :math:`E_h`) between
+            consecutive iterations. :yaml:
+        residual_threshold
+            Convergence threshold on the norm of the residual i.e. difference
+            in mixed variable (density / potential) between consecutive
+            iterations. :yaml:
+        n_history
+            Number of previous residuals and variables to use in the Pulay
+            mixing algorithm. :yaml:
+        mix_fraction
+            Fraction of new variable (density / poitential) to mix into the
+            current variable. :yaml:
+        mix_fraction_mag
+            Different `mix_fraction` for magnetization degrees of freedom.
+            :yaml:
+        q_kerker
+            Characteristic wavevector for Kerker mixing. :yaml:
+        q_metric
+            Characteristic wavevector controlling Pulay metric. :yaml:
+        q_kappa
+            Long-range cutoff wavevector important for grand-canonical SCF.
+            If unspecified, set based on Debye screening length. :yaml:
+        n_eig_steps
+            Number of inner eigenvalue iterations for each SCF cycle. :yaml:
+        eig_threshold
+            Convergence threshold on maximum eigenvalue change (in :math:`E_h`)
+            between SCF cycles. :yaml:
+        mix_density
+            Whether to mix density (if True) or potential (if False). :yaml:
+        """
         self.mix_fraction_mag = mix_fraction_mag
         self.q_kerker = q_kerker
         self.q_metric = q_metric
@@ -46,7 +79,7 @@ class SCF(qp.utils.Pulay['FieldH']):
                          extra_thresholds={'|deig|': self.eig_threshold},
                          n_history=n_history, mix_fraction=mix_fraction)
 
-    def update(self, system: 'System') -> None:
+    def update(self, system: qp.System) -> None:
         self.system = system
         # Initialize preconditioner and metric:
         grid = system.grid
@@ -80,17 +113,17 @@ class SCF(qp.utils.Pulay['FieldH']):
         return [deig_max]
 
     @property
-    def energy(self) -> 'Energy':
+    def energy(self) -> qp.Energy:
         return self.system.energy
 
     @property
-    def variable(self) -> 'FieldH':
+    def variable(self) -> qp.grid.FieldH:
         """Get density or potential, depending on `mix_density`."""
         electrons = self.system.electrons
         return electrons.n if self.mix_density else electrons.V_ks
 
     @variable.setter
-    def variable(self, v: 'FieldH') -> None:
+    def variable(self, v: qp.grid.FieldH) -> None:
         """Set density or potential, depending on `mix_density`."""
         electrons = self.system.electrons
         if self.mix_density:
@@ -99,11 +132,11 @@ class SCF(qp.utils.Pulay['FieldH']):
         else:
             electrons.V_ks = v
 
-    def precondition(self, v: 'FieldH') -> 'FieldH':
+    def precondition(self, v: qp.grid.FieldH) -> qp.grid.FieldH:
         result = qp.grid.FieldH(v.grid, data=(v.data * self.K_kerker))
         if result.data.shape[0] > 1:  # Different fraction for magnetization
             result.data[1:] *= (self.mix_fraction_mag / self.mix_fraction)
         return result
 
-    def metric(self, v: 'FieldH') -> 'FieldH':
+    def metric(self, v: qp.grid.FieldH) -> qp.grid.FieldH:
         return qp.grid.FieldH(v.grid, data=(v.data * self.K_metric))

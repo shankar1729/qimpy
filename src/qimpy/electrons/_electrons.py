@@ -1,24 +1,9 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
 from ._hamiltonian import _hamiltonian
-from typing import Union, Optional, List, cast, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ..utils import Checkpoint, RunConfig
-    from ..lattice import Lattice
-    from ..ions import Ions
-    from ..symmetries import Symmetries
-    from ..grid import FieldR, FieldH
-    from .. import System
-    from ._kpoints import Kpoints, Kmesh, Kpath
-    from ._fillings import Fillings
-    from ._basis import Basis
-    from ._davidson import Davidson
-    from ._chefsi import CheFSI
-    from ._scf import SCF
-    from ._wavefunction import Wavefunction
-    from ._lcao import LCAO
-    from .xc import XC
+from typing import Union, Optional, List, cast
 
 
 class Electrons(qp.Constructable):
@@ -27,94 +12,87 @@ class Electrons(qp.Constructable):
                  'n_spinor', 'w_spin', 'fillings',
                  'basis', 'xc', 'diagonalize', 'scf', 'C', '_n_bands_done',
                  'lcao', 'eig', 'deig_max', 'n', 'tau', 'V_ks', 'V_tau')
-    kpoints: 'Kpoints'  #: Set of kpoints (mesh or path)
+    kpoints: qp.electrons.Kpoints  #: Set of kpoints (mesh or path)
     spin_polarized: bool  #: Whether calculation is spin-polarized
     spinorial: bool  #: Whether calculation is relativistic / spinorial
     n_spins: int  #: Number of spin channels
     n_spinor: int  #: Number of spinor components
     w_spin: float  #: Spin weight (degeneracy factor)
-    fillings: 'Fillings'  #: Occupation factor / smearing scheme
-    basis: 'Basis'  #: Plane-wave basis for wavefunctions
-    xc: 'XC'  #: Exchange-correlation functional
-    diagonalize: 'Davidson'  #: Hamiltonian diagonalization method
-    scf: 'SCF'  #: Self-consistent field method
-    C: 'Wavefunction'  #: Electronic wavefunctions
+    fillings: qp.electrons.Fillings  #: Occupation factor / smearing scheme
+    basis: qp.electrons.Basis  #: Plane-wave basis for wavefunctions
+    xc: qp.electrons.xc.XC  #: Exchange-correlation functional
+    diagonalize: qp.electrons.Davidson  #: Hamiltonian diagonalization method
+    scf: qp.electrons.SCF  #: Self-consistent field method
+    C: qp.electrons.Wavefunction  #: Electronic wavefunctions
     _n_bands_done: int  #: Number of bands in C that have been initialized
-    lcao: Optional['LCAO']  #: If present, use LCAO to initialize C, eig
+    lcao: Optional[qp.electrons.LCAO]  #: If present, use LCAO initialization
     eig: torch.Tensor  #: Electronic orbital eigenvalues
     deig_max: float  #: Estimate of accuracy of current `eig`
-    n: 'FieldH'  #: Electron density (and magnetization, if `spin_polarized`)
-    tau: 'FieldH'  #: KE density (only for meta-GGAs)
-    V_ks: 'FieldH'  #: Kohn-Sham potential (local part)
-    V_tau: 'FieldH'  #: KE potential
+    n: qp.grid.FieldH  \
+        #: Electron density (and magnetization, if `spin_polarized`)
+    tau: qp.grid.FieldH  #: KE density (only for meta-GGAs)
+    V_ks: qp.grid.FieldH  #: Kohn-Sham potential (local part)
+    V_tau: qp.grid.FieldH  #: KE potential
 
     hamiltonian = _hamiltonian
 
     def __init__(self, *, co: qp.ConstructOptions,
-                 lattice: 'Lattice', ions: 'Ions', symmetries: 'Symmetries',
-                 k_mesh: Optional[Union[dict, 'Kmesh']] = None,
-                 k_path: Optional[Union[dict, 'Kpath']] = None,
+                 lattice: qp.lattice.Lattice, ions: qp.ions.Ions,
+                 symmetries: qp.symmetries.Symmetries,
+                 k_mesh: Optional[Union[dict, qp.electrons.Kmesh]] = None,
+                 k_path: Optional[Union[dict, qp.electrons.Kpath]] = None,
                  spin_polarized: bool = False, spinorial: bool = False,
-                 fillings: Optional[Union[dict, 'Fillings']] = None,
-                 basis: Optional[Union[dict, 'Basis']] = None,
-                 xc: Optional[Union[dict, 'XC']] = None,
-                 lcao: Optional[Union[dict, bool, 'LCAO']] = None,
-                 davidson: Optional[Union[dict, 'Davidson']] = None,
-                 chefsi:  Optional[Union[dict, 'CheFSI']] = None,
-                 scf:  Optional[Union[dict, 'SCF']] = None) -> None:
+                 fillings: Optional[Union[dict, qp.electrons.Fillings]] = None,
+                 basis: Optional[Union[dict, qp.electrons.Basis]] = None,
+                 xc: Optional[Union[dict, qp.electrons.xc.XC]] = None,
+                 lcao: Optional[Union[dict, bool, qp.electrons.LCAO]] = None,
+                 davidson: Optional[Union[dict, qp.electrons.Davidson]] = None,
+                 chefsi:  Optional[Union[dict, qp.electrons.CheFSI]] = None,
+                 scf:  Optional[Union[dict, qp.electrons.SCF]] = None) -> None:
         """Initialize from components and/or dictionary of options.
 
         Parameters
         ----------
-        lattice : qimpy.lattice.Lattice
+        lattice
             Lattice (unit cell) to associate with electronic wave functions
-        ions : qimpy.ions.Ions
+        ions
             Ionic system interacting with the electrons
-        symmetries : qimpy.symmetries.Symmetries
+        symmetries
             Symmetries for k-point reduction and density symmetrization
-        k_mesh : qimpy.electrons.Kmesh or dict, optional
+        k_mesh
             Uniform k-point mesh for Brillouin-zone integration.
-            Specify only one of k_mesh or k_path.
-            Default: use default `qimpy.electrons.Kmesh()`
-        k_path : qimpy.electrons.Kpath or dict, optional
-            Path of k-points through Brillouin zone, typically for band
-            structure calculations. Specify only one of k_mesh or k_path.
-            Default: None
-        spin_polarized : bool, optional
+            Specify only one of k_mesh or k_path. :yaml:
+        k_path
+            Path of k-points through Brillouin zone, usually for band structure
+            calculations. Specify only one of k_mesh or k_path. :yaml:
+        spin_polarized
             True, if electronic system has spin polarization / magnetization
             (i.e. breaks time reversal symmetry), else False.
             Spin polarization is treated explicitly with two sets of orbitals
             for up and down spins if spinorial = False, and implicitly by each
-            orbital being spinorial if spinorial = True.
-            Default: False
-        spinorial : bool, optional
+            orbital being spinorial if spinorial = True. :yaml:
+        spinorial
             True, if relativistic / spin-orbit calculations which require
-            2-component spinorial wavefunctions, else False.
-            Default: False
-        fillings : qimpy.electrons.Fillings or dict, optional
+            2-component spinorial wavefunctions, else False. :yaml:
+        fillings
             Electron occupations and charge / chemical potential control.
-            Default: use default `qimpy.electrons.Fillings()`
-        basis : qimpy.electrons.Basis or dict, optional
-            Wavefunction basis set (plane waves).
-            Default: use default `qimpy.electrons.Basis()`
-        xc : qimpy.electrons.xc.XC or dict, optional
-            Exchange-correlation functional.
-            Default: use default `qimpy.electrons.xc.XC()`
-        lcao: qimpy.electrons.LCAO or dict or False, optional
+            :yaml:
+        basis
+            Wavefunction basis set (plane waves). :yaml:
+        xc
+            Exchange-correlation functional. :yaml:
+        lcao
             Parameters to perform linear combination of atomic orbitals to
             initialize wavefunctions, or False to disable and to start with
             bandwidth-limited random numbers instead. (If starting from a
-            checkpoint with wavefunctions, this option has no effect.)
-            Default: use default `qimpy.electrons.LCAO()`
-        davidson : qimpy.electrons.Davidson or dict, optional
+            checkpoint with wavefunctions, this option has no effect.) :yaml:
+        davidson
             Diagonalize Kohm-Sham Hamiltonian using the Davidson method.
-            Specify only one of davidson or chefsi.
-            Default: use default `qimpy.electrons.Davidson()`
-        chefsi : qimpy.electrons.CheFSI or dict, optional
+            Specify only one of davidson or chefsi. :yaml:
+        chefsi
             Diagonalize Kohm-Sham Hamiltonian using the Chebyshev Filter
             Subspace Iteration (CheFSI) method.
-            Specify only one of davidson or chefsi.
-            Default: None
+            Specify only one of davidson or chefsi. :yaml:
         """
         super().__init__(co=co)
         rc = self.rc
@@ -164,7 +142,7 @@ class Electrons(qp.Constructable):
                                            n_bands=self.fillings.n_bands)
         if self._checkpoint_has('C'):
             qp.log.info('Loading wavefunctions C')
-            self._n_bands_done = self.C.read(cast('Checkpoint',
+            self._n_bands_done = self.C.read(cast(qp.utils.Checkpoint,
                                                   self.checkpoint_in),
                                              self.path + 'C')
         self.eig = torch.zeros(self.C.coeff.shape[:3], dtype=torch.double,
@@ -172,7 +150,7 @@ class Electrons(qp.Constructable):
         self.deig_max = np.nan  # eigenvalues completely wrong
         if self._checkpoint_has('eig'):
             qp.log.info('Loading band eigenvalues eig')
-            if self.fillings.read_band_scalars(cast('Checkpoint',
+            if self.fillings.read_band_scalars(cast(qp.utils.Checkpoint,
                                                     self.checkpoint_in),
                                                self.path + 'eig', self.eig
                                                ) == self.fillings.n_bands:
@@ -204,7 +182,7 @@ class Electrons(qp.Constructable):
         # Initialize SCF:
         self.construct('scf', qp.electrons.SCF, scf, comm=rc.comm_kb)
 
-    def initialize_wavefunctions(self, system: 'System') -> None:
+    def initialize_wavefunctions(self, system: qp.System) -> None:
         """Initialize wavefunctions to LCAO / random (if not from checkpoint).
         (This needs to happen after ions have been updated in order to get
         atomic orbitals, which in turn depends on electrons.__init__ being
@@ -239,7 +217,7 @@ class Electrons(qp.Constructable):
         """Number of electron density / magnetization components in `n`."""
         return (4 if self.spinorial else 2) if self.spin_polarized else 1
 
-    def update_density(self, system: 'System') -> None:
+    def update_density(self, system: qp.System) -> None:
         """Update electron density from wavefunctions and fillings.
         Result is in system grid in reciprocal space."""
         f = self.fillings.f
@@ -252,7 +230,7 @@ class Electrons(qp.Constructable):
         self.tau = qp.grid.FieldH(system.grid, shape_batch=(0,))
         # TODO: actually compute KE density if required
 
-    def update_potential(self, system: 'System') -> None:
+    def update_potential(self, system: qp.System) -> None:
         """Update density-dependent energy terms and electron potential."""
         # Exchange-correlation contributions:
         system.energy['Exc'], self.V_ks, self.V_tau = \
@@ -265,7 +243,7 @@ class Electrons(qp.Constructable):
         system.energy['Eloc'] = (rho ^ system.ions.Vloc).item()
         self.V_ks.symmetrize()
 
-    def update(self, system: 'System') -> None:
+    def update(self, system: qp.System) -> None:
         """Update electronic system to current wavefunctions and eigenvalues.
         This updates occupations, density, potential and electronic energy."""
         self.fillings.update(system.energy)
@@ -287,7 +265,7 @@ class Electrons(qp.Constructable):
             self.kpoints.plot(self.eig[..., :self.fillings.n_bands],
                               'bandstruct.pdf')
 
-    def _save_checkpoint(self, checkpoint: 'Checkpoint') -> List[str]:
+    def _save_checkpoint(self, checkpoint: qp.utils.Checkpoint) -> List[str]:
         n_bands = self.fillings.n_bands
         self.C[:, :, :n_bands].write(checkpoint, self.path + 'C')
         self.fillings.write_band_scalars(checkpoint, self.path + 'eig',

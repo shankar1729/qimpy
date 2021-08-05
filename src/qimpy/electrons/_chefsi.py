@@ -1,11 +1,9 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
 from ._davidson import Davidson
-from typing import Optional, Tuple, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ._electrons import Electrons
-    from ._wavefunction import Wavefunction
+from typing import Optional, Tuple
 
 
 class CheFSI(Davidson):
@@ -15,7 +13,7 @@ class CheFSI(Davidson):
     init_threshold: float  #: Threshold for Davidson initialization
 
     def __init__(self, *, co: qp.ConstructOptions,
-                 electrons: 'Electrons', n_iterations: int = 100,
+                 electrons: qp.electrons.Electrons, n_iterations: int = 100,
                  eig_threshold: float = 1E-8, filter_order: int = 10,
                  init_threshold: float = 1E-1) -> None:
         """Initialize with stopping criteria and filter order.
@@ -23,15 +21,21 @@ class CheFSI(Davidson):
         Parameters
         ----------
         n_iterations
-            See :class:`Davidson`
+            Number of diagonalization iterations in fixed-Hamiltonian
+            calculations; the self-consistent field method overrides this
+            when diagonalizing in an inner loop. :yaml:
         eig_threshold
-            See :class:`Davidson`
+            Maximum change in any eigenvalue (in :math:`E_h`) from the previous
+            iteration to consider converged for fixed-Hamiltonian calculations;
+            the self-consistent field method overrides this when diagonalizing
+            in an inner loop. :yaml:
         filter_order
             Order of the Chebyshev filter, which amounts to the number of
-            Hamiltonian evaluations per band per eigenvalue iteration
+            Hamiltonian evaluations per band per eigenvalue iteration. :yaml:
         init_threshold
             Eigenvalue threshold for the initial Davidson steps used to ensure
-            a reasonable starting point for CheFSI (needed for stability)
+            a reasonable starting point for CheFSI (required for stability).
+            :yaml:
         """
         super().__init__(co=co, electrons=electrons, n_iterations=n_iterations,
                          eig_threshold=eig_threshold)

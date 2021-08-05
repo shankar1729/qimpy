@@ -1,16 +1,10 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
 import collections
 from scipy import optimize
-from typing import Optional, Dict, Union, Callable, List, Sequence, cast, \
-    TYPE_CHECKING
-if TYPE_CHECKING:
-    from ..utils import Checkpoint, RunConfig
-    from ..ions import Ions
-    from ._electrons import Electrons
-    from .._system import System
-    from .. import Energy
+from typing import Optional, Dict, Union, Callable, List, Sequence, cast
 
 
 SmearingResults = collections.namedtuple('SmearingResults',
@@ -25,7 +19,7 @@ class Fillings(qp.Constructable):
                  'n_bands_min', 'n_bands', 'n_bands_extra',
                  'smearing', 'sigma', 'mu_constrain', 'M_constrain',
                  'mu', 'B', 'M', 'f', 'f_eig', '_smearing_func')
-    electrons: 'Electrons'
+    electrons: qp.electrons.Electrons
     n_electrons: float  #: Number of electrons
     n_bands_min: int  #: Minimum number of bands to accomodate `n_electrons`
     n_bands: int  #: Number of bands to calculate
@@ -42,7 +36,7 @@ class Fillings(qp.Constructable):
     _smearing_func: Optional[SmearingFunc]  #: Smearing function calculator
 
     def __init__(self, *, co: qp.ConstructOptions,
-                 ions: 'Ions', electrons: 'Electrons',
+                 ions: qp.ions.Ions, electrons: qp.electrons.Electrons,
                  charge: float = 0., smearing: str = 'gauss',
                  sigma: Optional[float] = None,
                  kT: Optional[float] = None,
@@ -65,47 +59,50 @@ class Fillings(qp.Constructable):
             'fermi', 'cold', 'mp1' select Gaussian, Fermi-Dirac, Cold and
             first order Methfessel-Paxton (MP1) smearing respectively.
             Use False (or None) to disable smearing and keep the electron
-            occupations fixed at their initial values.
+            occupations fixed at their initial values. :yaml:
         sigma
             Width of the smearing function (in :math:`E_h`), corresponding
             to the Gaussian width :math:`\\sigma` in the Gaussian, Cold and
             M-P schemes, and to :math:`2k_BT` in the Fermi-Dirac scheme.
-            Defaults to 0.002 if neither `sigma` or `kT` are specified.
+            Defaults to 0.002 if neither `sigma` or `kT` are specified. :yaml:
         kT
             :math:`k_BT` for Fermi-Dirac occupations, amounting to
             :math:`\\sigma/2` for the other Gaussian-based smearing schemes.
             Defaults to 0.001 if neither `sigma` or `kT` are specified.
-            Specify only one of sigma or kT.
+            Specify only one of sigma or kT. :yaml:
         mu
             Electron chemical potential :math:`\mu`. This serves as an initial
             guess (rarely needed) if `mu_constrain` is False, and otherwise,
-            it is the required target value to constrain :math:`\mu` to.
+            it is the required target value to constrain :math:`\mu` to. :yaml:
         mu_constrain
             Whether to hold chemical potential fixed to `mu` in
             occupation updates: this only matters when `smearing` is not None.
+            :yaml:
         B
             External magnetic field.
             Must be scalar for non-spinorial and 3-vector for spinorial modes.
             If `M_constrain` is True, then this is only an initial guess as the
             magnetic field then becomes a Legendre multiplier to constrain `M`.
+            :yaml:
         M
             Total magnetization (only for spin-polarized modes).
             Must be scalar for non-spinorial and 3-vector for spinorial modes.
             This magnetization is assigned to the initial occupations and it
             may change when smearing is present depending on `M_constrain`.
+            :yaml:
         M_constrain
             Whether to hold magnetization fixed to `M` in occupation updates:
-            this only matters when `smearing` is not None.
+            this only matters when `smearing` is not None. :yaml:
         n_bands : {'atomic', 'x<scale>', int}, default: 'atomic'
             Number of bands, set to the number of atomic orbitals, or
             specified as a scale relative to the minimum number of bands
             to accommodate electrons ('x1.5' implies 1.5 x n_bands_min).
-            Alternately, an integer explicitly sets the number of bands.
+            Alternately, an integer explicitly sets the number of bands. :yaml:
         n_bands_extra : {'x<scale>', int}, default: 'x0.1'
             Number of extra bands retained by diagonalizers, necessary to
             converge any degenerate subspaces straddling n_bands. This could
             be specified as a multiple of n_bands e.g. 'x0.1' = 0.1 x n_bands,
-            or could be specified as an explicit number of extra bands
+            or could be specified as an explicit number of extra bands. :yaml:
         """
         super().__init__(co=co)
         self.electrons = electrons
@@ -173,7 +170,7 @@ class Fillings(qp.Constructable):
         self._initialize_n_bands(ions, n_bands, n_bands_extra)
         self._initialize_f()
 
-    def _initialize_n_bands(self, ions: 'Ions',
+    def _initialize_n_bands(self, ions: qp.ions.Ions,
                             n_bands: Optional[Union[int, str]] = None,
                             n_bands_extra: Optional[Union[int, str]] = None
                             ) -> None:
@@ -230,7 +227,8 @@ class Fillings(qp.Constructable):
                              device=self.rc.device)
         if self._checkpoint_has('f'):
             qp.log.info("Loading fillings f")
-            self.read_band_scalars(cast('Checkpoint', self.checkpoint_in),
+            self.read_band_scalars(cast(qp.utils.Checkpoint,
+                                        self.checkpoint_in),
                                    self.path + 'f', self.f)
         else:
             # Compute fillings
@@ -256,7 +254,7 @@ class Fillings(qp.Constructable):
                     self.f[i_spin, :, n_full] = (f_sum - n_full)  # left overs
         self.f_eig = torch.zeros_like(self.f)
 
-    def update(self, energy: 'Energy') -> None:
+    def update(self, energy: qp.Energy) -> None:
         """Update fillings `f` and chemical potential `mu`, if needed.
         Set corresponding energy components in `energy`.
         """
@@ -391,11 +389,11 @@ class Fillings(qp.Constructable):
         qp.log.info(f'  FillingsUpdate:  mu: {self.mu:.9f}'
                     f'  n_electrons: {n_electrons:.6f}{M_str}')
 
-    def _save_checkpoint(self, checkpoint: 'Checkpoint') -> List[str]:
+    def _save_checkpoint(self, checkpoint: qp.utils.Checkpoint) -> List[str]:
         self.write_band_scalars(checkpoint, self.path + 'f', self.f)
         return ['f']
 
-    def write_band_scalars(self, checkpoint: 'Checkpoint', path: str,
+    def write_band_scalars(self, checkpoint: qp.utils.Checkpoint, path: str,
                            v: torch.Tensor) -> None:
         """Write `v` containing one scalar per band to `path` in `checkpoint`.
         This is useful for writing fillings, eigenvalues etc."""
@@ -408,7 +406,7 @@ class Fillings(qp.Constructable):
         if self.rc.i_proc_b == 0:
             checkpoint.write_slice(dset, offset, v[:, :, :self.n_bands])
 
-    def read_band_scalars(self, checkpoint: 'Checkpoint', path: str,
+    def read_band_scalars(self, checkpoint: qp.utils.Checkpoint, path: str,
                           v: torch.Tensor) -> int:
         """Read one scalar per band from `path` in `checkpoint` into `v`.
         Returns number of bands read, which may be <= `self.n_bands`.

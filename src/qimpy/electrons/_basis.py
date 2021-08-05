@@ -1,16 +1,10 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
 from ._basis_ops import _apply_ke, _apply_potential, _collect_density
 from ._basis_real import BasisReal
-from typing import Optional, Tuple, Union, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ..utils import RunConfig, TaskDivision
-    from ..lattice import Lattice
-    from ..ions import Ions
-    from ..symmetries import Symmetries
-    from ..grid import Grid
-    from ._kpoints import Kpoints
+from typing import Optional, Tuple, Union
 
 
 class Basis(qp.Constructable):
@@ -21,9 +15,9 @@ class Basis(qp.Constructable):
                  'iG', 'n', 'n_min', 'n_max', 'n_avg', 'n_tot', 'n_ideal',
                  'fft_index', 'fft_block_size', 'pad_index', 'pad_index_mine',
                  'division', 'mine', 'real')
-    lattice: 'Lattice'  #: Lattice vectors of unit cell
-    ions: 'Ions'  #: Ionic system: implicit part of basis for ultrasoft / PAW
-    kpoints: 'Kpoints'  #: k-point set for which basis is initialized
+    lattice: qp.lattice.Lattice  #: Lattice vectors of unit cell
+    ions: qp.ions.Ions  #: Ionic system: implicit in basis for ultrasoft / PAW
+    kpoints: qp.electrons.Kpoints  #: Corresponding k-point set
     n_spins: int  #: Default number of spin channels
     n_spinor: int  #: Default number of spinorial components
     k: torch.Tensor  #: Subset of k handled by this basis (due to MPI division)
@@ -31,7 +25,7 @@ class Basis(qp.Constructable):
     w_sk: torch.Tensor  #: Combined spin and k-point weights
     real_wavefunctions: bool  #: Whether wavefunctions are real
     ke_cutoff: float  #: Kinetic energy cutoff
-    grid: 'Grid'  #: Wavefunction grid (always process-local)
+    grid: qp.grid.Grid  #: Wavefunction grid (always process-local)
     iG: torch.Tensor  #: Plane waves in reciprocal lattice coordinates
     n: torch.Tensor  #: Number of plane waves for each `k`
     n_min: int  #: Minimum of `n` across all `k` (including on other processes)
@@ -45,17 +39,18 @@ class Basis(qp.Constructable):
         #: Indexing datatype for `pad_index` and `pad_index_mine`
     pad_index: PadIndex  #: Which basis entries are padding (beyond `n`)
     pad_index_mine: PadIndex  #: Subset of `pad_index` on this process
-    division: 'TaskDivision'  #: Division of basis across `rc.comm_b`
+    division: qp.utils.TaskDivision  #: Division of basis across `rc.comm_b`
     mine: slice  #: Slice of basis entries local to this process
-    real: 'BasisReal'  #: Extra indices for real wavefunctions
+    real: BasisReal  #: Extra indices for real wavefunctions
 
     apply_ke = _apply_ke
     apply_potential = _apply_potential
     collect_density = _collect_density
 
     def __init__(self, *, co: qp.ConstructOptions,
-                 lattice: 'Lattice', ions: 'Ions', symmetries: 'Symmetries',
-                 kpoints: 'Kpoints', n_spins: int, n_spinor: int,
+                 lattice: qp.lattice.Lattice, ions: qp.ions.Ions,
+                 symmetries: qp.symmetries.Symmetries,
+                 kpoints: qp.electrons.Kpoints, n_spins: int, n_spinor: int,
                  ke_cutoff: float = 20., real_wavefunctions: bool = False,
                  grid: Optional[dict] = None, fft_block_size: int = 0) -> None:
         """Initialize plane-wave basis with `ke_cutoff`.
@@ -67,33 +62,35 @@ class Basis(qp.Constructable):
         ions
             Ions that specify the pseudopotential portion of the basis;
             the basis implicitly depends on the ion positions for ultrasoft
-            or PAW due to the augmentation of all operators at each ion
+            or PAW due to the augmentation of all operators at each ion.
         symmetries
-            Symmetries with which the wavefunction grid should be commensurate
+            Symmetries with which the wavefunction grid should be commensurate.
         kpoints
             Set of k-points to initialize basis for. Note that the basis is
             only initialized for k-points to be operated on by current process
-            i.e. for k = kpoints.k[kpoints.i_start : kpoints.i_stop]
+            i.e. for k = kpoints.k[kpoints.i_start : kpoints.i_stop].
         n_spins
-            Default number of spin channels for wavefunctions in this basis
+            Default number of spin channels for wavefunctions in this basis.
         n_spinor
             Default number of spinor components for wavefunctions in this
-            basis. Also used only to check support for real_wavefunctions
+            basis. Also used only to check support for real_wavefunctions.
         ke_cutoff
-            Plane-wave kinetic-energy cutoff for wavefunctions in :math:`E_h`
+            Plane-wave kinetic-energy cutoff for wavefunctions in :math:`E_h`.
+            :yaml:
         real_wavefunctions
             If True, use wavefunctions that are real, instead of the
             default complex wavefunctions. This is only supported for
-            non-spinorial, Gamma-point-only calculations.
+            non-spinorial, Gamma-point-only calculations. :yaml:
         grid
-            Optionally override parameters (such as shape or ke_cutoff)
-            of the grid (qimpy.grid.Grid) used for wavefunction operations.
+            Optionally override parameters (such as `shape` or `ke_cutoff`)
+            of the grid (:class:`qimpy.grid.Grid`) used for wavefunction
+            operations. :yaml:
         fft_block_size
             Number of wavefunction bands to FFT simultaneously.
             Higher numbers require more memory, but can achieve
             better occupancy of GPUs or high-core-count CPUs.
             The default of 0 auto-selects the block size based on the number
-            of bands and k-points being processed by each process
+            of bands and k-points being processed by each process. :yaml:
         """
         super().__init__(co=co)
         rc = self.rc
