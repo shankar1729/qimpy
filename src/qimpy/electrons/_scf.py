@@ -33,37 +33,42 @@ class SCF(qp.utils.Pulay[qp.grid.FieldH]):
         Parameters
         ----------
         n_iterations
-            Number of self-consistent field iterations / cycles. :yaml:
+            Number of self-consistent field iterations / cycles.
+            :yaml:`inputfile`
         energy_threshold
             Convergence threshold on energy difference (in :math:`E_h`) between
-            consecutive iterations. :yaml:
+            consecutive iterations. :yaml:`inputfile`
         residual_threshold
             Convergence threshold on the norm of the residual i.e. difference
             in mixed variable (density / potential) between consecutive
-            iterations. :yaml:
+            iterations. :yaml:`inputfile`
         n_history
             Number of previous residuals and variables to use in the Pulay
-            mixing algorithm. :yaml:
+            mixing algorithm. :yaml:`inputfile`
         mix_fraction
             Fraction of new variable (density / poitential) to mix into the
-            current variable. :yaml:
+            current variable. :yaml:`inputfile`
         mix_fraction_mag
             Different `mix_fraction` for magnetization degrees of freedom.
-            :yaml:
+            :yaml:`inputfile`
         q_kerker
-            Characteristic wavevector for Kerker mixing. :yaml:
+            Characteristic wavevector for Kerker mixing. :yaml:`inputfile`
         q_metric
-            Characteristic wavevector controlling Pulay metric. :yaml:
+            Characteristic wavevector controlling Pulay metric.
+            :yaml:`inputfile`
         q_kappa
             Long-range cutoff wavevector important for grand-canonical SCF.
-            If unspecified, set based on Debye screening length. :yaml:
+            If unspecified, set based on Debye screening length.
+            :yaml:`inputfile`
         n_eig_steps
-            Number of inner eigenvalue iterations for each SCF cycle. :yaml:
+            Number of inner eigenvalue iterations for each SCF cycle.
+            :yaml:`inputfile`
         eig_threshold
             Convergence threshold on maximum eigenvalue change (in :math:`E_h`)
-            between SCF cycles. :yaml:
+            between SCF cycles. :yaml:`inputfile`
         mix_density
-            Whether to mix density (if True) or potential (if False). :yaml:
+            Whether to mix density (if True) or potential (if False).
+            :yaml:`inputfile`
         """
         self.mix_fraction_mag = mix_fraction_mag
         self.q_kerker = q_kerker

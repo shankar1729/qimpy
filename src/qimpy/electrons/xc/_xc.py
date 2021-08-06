@@ -45,7 +45,7 @@ class XC(qp.Constructable):
             For example, the specification 'gga-pbe*0.5 lda-pz*0.5' may be used
             to compute a 50-50 mix of two functionals. Warning: there is no
             normalization or check to make the fractions of exchange or
-            correlation to add up to 1. :yaml:
+            correlation to add up to 1. :yaml:`inputfile`
         """
         super().__init__(co=co)
         qp.log.info('\nInitializing XC:')

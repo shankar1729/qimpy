@@ -59,50 +59,54 @@ class Fillings(qp.Constructable):
             'fermi', 'cold', 'mp1' select Gaussian, Fermi-Dirac, Cold and
             first order Methfessel-Paxton (MP1) smearing respectively.
             Use False (or None) to disable smearing and keep the electron
-            occupations fixed at their initial values. :yaml:
+            occupations fixed at their initial values. :yaml:`inputfile`
         sigma
             Width of the smearing function (in :math:`E_h`), corresponding
             to the Gaussian width :math:`\sigma` in the Gaussian, Cold and
             M-P schemes, and to :math:`2k_BT` in the Fermi-Dirac scheme.
-            Defaults to 0.002 if neither `sigma` or `kT` are specified. :yaml:
+            Defaults to 0.002 if neither `sigma` or `kT` are specified.
+            :yaml:`inputfile`
         kT
             :math:`k_BT` for Fermi-Dirac occupations, amounting to
             :math:`\sigma/2` for the other Gaussian-based smearing schemes.
             Defaults to 0.001 if neither `sigma` or `kT` are specified.
-            Specify only one of sigma or kT. :yaml:
+            Specify only one of sigma or kT. :yaml:`inputfile`
         mu
             Electron chemical potential :math:`\mu`. This serves as an initial
             guess (rarely needed) if `mu_constrain` is False, and otherwise,
-            it is the required target value to constrain :math:`\mu` to. :yaml:
+            it is the required target value to constrain :math:`\mu` to.
+            :yaml:`inputfile`
         mu_constrain
             Whether to hold chemical potential fixed to `mu` in
             occupation updates: this only matters when `smearing` is not None.
-            :yaml:
+            :yaml:`inputfile`
         B
             External magnetic field.
             Must be scalar for non-spinorial and 3-vector for spinorial modes.
             If `M_constrain` is True, then this is only an initial guess as the
             magnetic field then becomes a Legendre multiplier to constrain `M`.
-            :yaml:
+            :yaml:`inputfile`
         M
             Total magnetization (only for spin-polarized modes).
             Must be scalar for non-spinorial and 3-vector for spinorial modes.
             This magnetization is assigned to the initial occupations and it
             may change when smearing is present depending on `M_constrain`.
-            :yaml:
+            :yaml:`inputfile`
         M_constrain
             Whether to hold magnetization fixed to `M` in occupation updates:
-            this only matters when `smearing` is not None. :yaml:
+            this only matters when `smearing` is not None. :yaml:`inputfile`
         n_bands : {'atomic', 'x<scale>', int}, default: 'atomic'
             Number of bands, set to the number of atomic orbitals, or
             specified as a scale relative to the minimum number of bands
             to accommodate electrons ('x1.5' implies 1.5 x n_bands_min).
-            Alternately, an integer explicitly sets the number of bands. :yaml:
+            Alternately, an integer explicitly sets the number of bands.
+            :yaml:`inputfile`
         n_bands_extra : {'x<scale>', int}, default: 'x0.1'
             Number of extra bands retained by diagonalizers, necessary to
             converge any degenerate subspaces straddling n_bands. This could
             be specified as a multiple of n_bands e.g. 'x0.1' = 0.1 x n_bands,
-            or could be specified as an explicit number of extra bands. :yaml:
+            or could be specified as an explicit number of extra bands.
+            :yaml:`inputfile`
         """
         super().__init__(co=co)
         self.electrons = electrons

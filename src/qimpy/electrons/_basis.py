@@ -76,21 +76,21 @@ class Basis(qp.Constructable):
             basis. Also used only to check support for real_wavefunctions.
         ke_cutoff
             Plane-wave kinetic-energy cutoff for wavefunctions in :math:`E_h`.
-            :yaml:
+            :yaml:`inputfile`
         real_wavefunctions
             If True, use wavefunctions that are real, instead of the
             default complex wavefunctions. This is only supported for
-            non-spinorial, Gamma-point-only calculations. :yaml:
+            non-spinorial, Gamma-point-only calculations. :yaml:`inputfile`
         grid
-            Optionally override parameters (such as `shape` or `ke_cutoff`)
-            of the grid (:class:`qimpy.grid.Grid`) used for wavefunction
-            operations. :yaml:
+            Optionally override parameters of the grid (such as `shape` or
+            `ke_cutoff`) used for wavefunction operations. :yaml:`inputfile`
         fft_block_size
             Number of wavefunction bands to FFT simultaneously.
             Higher numbers require more memory, but can achieve
             better occupancy of GPUs or high-core-count CPUs.
             The default of 0 auto-selects the block size based on the number
-            of bands and k-points being processed by each process. :yaml:
+            of bands and k-points being processed by each process.
+            :yaml:`inputfile`
         """
         super().__init__(co=co)
         rc = self.rc

@@ -19,10 +19,10 @@ class LCAO(Minimize[MatrixArray]):
         ----------
         energy_threshold
             Convergence threshold on energy difference (in :math:`E_h`) between
-            consecutive iterations. :yaml:
+            consecutive iterations. :yaml:`inputfile`
         gradient_threshold
             Convergence threshold on norm of energy gradient with respect to
-            subspace Hamiltonian (dimensionless). :yaml:
+            subspace Hamiltonian (dimensionless). :yaml:`inputfile`
         """
         super().__init__(co=co, comm=co.rc.comm_kb, name='LCAO', method='cg',
                          n_iterations=n_iterations,

@@ -56,20 +56,23 @@ class Kmesh(Kpoints):
             Offset k-point mesh by this amount in k-mesh coordinates
             i.e. by offset / size in fractional reciprocal coordinates.
             For example, use [0.5, 0.5, 0.5] for the Monkhorst-Pack scheme.
-            Default: [0., 0., 0.] selects Gamma-centered mesh. :yaml:
+            Default: [0., 0., 0.] selects Gamma-centered mesh.
+            :yaml:`inputfile`
         size
             If given as a list of 3 integers, number of k-points along each
             reciprocal lattice direction. Instead, a single float specifies
             the minimum real-space size of the k-point sampled supercell
             i.e. pick number of k-points along dimension i = ceil(size / L_i),
             where L_i is the length of lattice vector i (in bohrs).
-            Default: [1, 1, 1] selects a single k-point = offset. :yaml:
+            Default: [1, 1, 1] selects a single k-point = offset.
+            :yaml:`inputfile`
         use_inversion
             Whether to use inversion in k-space (i.e. complex conjugation
             in real space) to additionally reduce k-points for systems
             without inversion symmetry in real space. Default: True;
             you should need to only disable this when interfacing with
-            codes that do not support this symmetry eg. BerkeleyGW. :yaml:
+            codes that do not support this symmetry eg. BerkeleyGW.
+            :yaml:`inputfile`
         """
         rc = co.rc
         assert rc is not None
@@ -175,11 +178,12 @@ class Kpath(Kpoints):
             for determining path lengths.
         dk
             Maximum distance (in :math:`a_0^{-1}`) between adjacent points
-            on k-path. :yaml:
+            on k-path. :yaml:`inputfile`
         points
             List of special k-points along path: each point should contain
             three fractional coordinates (float) and optionally a string
-            label for this point for use in band structure plots. :yaml:
+            label for this point for use in band structure plots.
+            :yaml:`inputfile`
         """
         rc = co.rc
         assert rc is not None

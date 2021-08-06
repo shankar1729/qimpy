@@ -72,10 +72,10 @@ class Grid(qp.Constructable):
         ke_cutoff
             Plane-wave kinetic-energy cutoff in :math:`E_h` for the grid
             (i.e. the charge-density cutoff). This has no effect if `shape`
-            is specified explicitly. :yaml:
+            is specified explicitly. :yaml:`inputfile`
         shape
             Explicit grid dimensions. Highest precedence, and if specified,
-            will supercede `ke_cutoff`. :yaml:
+            will supercede `ke_cutoff`. :yaml:`inputfile`
         """
         super().__init__(co=co)
         self.lattice = lattice

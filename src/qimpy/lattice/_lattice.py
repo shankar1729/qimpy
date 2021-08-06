@@ -38,7 +38,7 @@ class Lattice(qp.Constructable):
         ----------
         system
             Specify lattice by crystal system and required geometry
-            parameters. Options include: :yaml:
+            parameters. Options include: :yaml:`inputfile`
 
             * cubic (specify `a`),
             * tetragonal (specify `a`, `c`)
@@ -49,33 +49,36 @@ class Lattice(qp.Constructable):
             * triclinic (specify `a`, `b`, `c`, `alpha`, `beta`, `gamma`)
 
         modification
-            Specify modification of lattice: :yaml:
+            Specify modification of lattice: :yaml:`inputfile`
 
             * body-centered (only for orthorhombic, tetragonal or cubic)
             * face-centered (only for orthorhombic or cubic)
             * base-centered (only for monoclinic)
 
         a
-            First lattice vector length in :math:`a_0` :yaml:
+            First lattice vector length in :math:`a_0`. :yaml:`inputfile`
         b
-            Second lattice vector length in :math:`a_0` :yaml:
+            Second lattice vector length in :math:`a_0`. :yaml:`inputfile`
         c
-            Third lattice vector length in :math:`a_0` :yaml:
+            Third lattice vector length in :math:`a_0`. :yaml:`inputfile`
         alpha
-            Angle between `b` and `c` in degrees :yaml:
+            Angle between `b` and `c` in degrees. :yaml:`inputfile`
         beta
-            Angle between `c` and `a` in degrees :yaml:
+            Angle between `c` and `a` in degrees. :yaml:`inputfile`
         gamma
-            Angle between `a` and `b` in degrees :yaml:
+            Angle between `a` and `b` in degrees. :yaml:`inputfile`
         vector1
-            First vector :math:`[x_1, y_1, z_1]` (in :math:`a_0`) :yaml:
+            First vector :math:`[x_1, y_1, z_1]` (in :math:`a_0`).
+            :yaml:`inputfile`
         vector2
-            Second vector :math:`[x_2, y_2, z_2]` (in :math:`a_0`) :yaml:
+            Second vector :math:`[x_2, y_2, z_2]` (in :math:`a_0`).
+            :yaml:`inputfile`
         vector3
-            Third vector :math:`[x_3, y_3, z_3]` (in :math:`a_0`) :yaml:
+            Third vector :math:`[x_3, y_3, z_3]` (in :math:`a_0`).
+            :yaml:`inputfile`
         scale
             Single scale factor for all lattice vectors, or separate factor
-            :math:`[s_1, s_2, s_3]` for each lattice vector :yaml:
+            :math:`[s_1, s_2, s_3]` for each lattice vector. :yaml:`inputfile`
         """
         super().__init__(co=co)
         qp.log.info('\n--- Initializing Lattice ---')

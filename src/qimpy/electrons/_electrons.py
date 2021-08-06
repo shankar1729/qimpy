@@ -61,38 +61,40 @@ class Electrons(qp.Constructable):
             Symmetries for k-point reduction and density symmetrization
         k_mesh
             Uniform k-point mesh for Brillouin-zone integration.
-            Specify only one of k_mesh or k_path. :yaml:
+            Specify only one of k_mesh or k_path. :yaml:`inputfile`
         k_path
             Path of k-points through Brillouin zone, usually for band structure
-            calculations. Specify only one of k_mesh or k_path. :yaml:
+            calculations. Specify only one of k_mesh or k_path.
+            :yaml:`inputfile`
         spin_polarized
             True, if electronic system has spin polarization / magnetization
             (i.e. breaks time reversal symmetry), else False.
             Spin polarization is treated explicitly with two sets of orbitals
             for up and down spins if spinorial = False, and implicitly by each
-            orbital being spinorial if spinorial = True. :yaml:
+            orbital being spinorial if spinorial = True. :yaml:`inputfile`
         spinorial
             True, if relativistic / spin-orbit calculations which require
-            2-component spinorial wavefunctions, else False. :yaml:
+            2-component spinorial wavefunctions, else False. :yaml:`inputfile`
         fillings
             Electron occupations and charge / chemical potential control.
-            :yaml:
+            :yaml:`inputfile`
         basis
-            Wavefunction basis set (plane waves). :yaml:
+            Wavefunction basis set (plane waves). :yaml:`inputfile`
         xc
-            Exchange-correlation functional. :yaml:
+            Exchange-correlation functional. :yaml:`inputfile`
         lcao
             Parameters to perform linear combination of atomic orbitals to
-            initialize wavefunctions, or False to disable and to start with
+            initialize wavefunctions. Set to False to disable and to start with
             bandwidth-limited random numbers instead. (If starting from a
-            checkpoint with wavefunctions, this option has no effect.) :yaml:
+            checkpoint with wavefunctions, this option has no effect.)
+            :yaml:`inputfile`
         davidson
             Diagonalize Kohm-Sham Hamiltonian using the Davidson method.
-            Specify only one of davidson or chefsi. :yaml:
+            Specify only one of davidson or chefsi. :yaml:`inputfile`
         chefsi
             Diagonalize Kohm-Sham Hamiltonian using the Chebyshev Filter
             Subspace Iteration (CheFSI) method.
-            Specify only one of davidson or chefsi. :yaml:
+            Specify only one of davidson or chefsi. :yaml:`inputfile`
         """
         super().__init__(co=co)
         rc = self.rc

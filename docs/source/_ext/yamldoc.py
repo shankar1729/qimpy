@@ -53,7 +53,6 @@ class YamlDocDirective(Directive):
             if param_name in param_docs:
                 param_doc = param_docs[param_name]
                 if ':yaml:' in param_doc:
-                    param_doc = param_doc.replace(':yaml:', '')
                     default_value = signature.parameters[param_name].default
                     default_str = ('' if (default_value is inspect._empty)
                                    else f' {default_value}')
@@ -62,6 +61,8 @@ class YamlDocDirective(Directive):
                     cell_cmd = nodes.entry()
                     cell_cmd += nodes.paragraph(text=f'{pad}{param_name}:'
                                                      f'{default_str}')
+                    # Replace :yaml: with a link to source code:
+                    param_doc = yaml_code_link(param_doc, cls)
                     # Documentation cell:
                     cell_doc = nodes.entry()
                     viewlist = ViewList()
@@ -74,7 +75,6 @@ class YamlDocDirective(Directive):
                     row += cell_cmd
                     row += cell_doc
                     rowlist.append(row)
-
                     # Recur down on compound objects:
                     for cls_option in get_args(param_type):
                         if (inspect.isclass(cls_option)
@@ -136,9 +136,29 @@ def get_parameters(docstr: str) -> Dict[str, str]:
     return result
 
 
+def yaml_code_link(docstr: str, cls: type) -> str:
+    """Link :yaml: in the input doc to class `cls` in the python API doc."""
+    key = ':yaml:'
+    target = f':class:`[API: {cls.__name__}]' \
+             f' <{cls.__module__}.{cls.__qualname__}>`'
+    i_start = docstr.find(key)
+    while i_start >= 0:
+        i_stop = docstr.find('`', (i_start + len(key) + 1)) + 1
+        fullkey = docstr[i_start:i_stop]  # includes `content` after key
+        docstr = docstr.replace(fullkey, target)
+        # Search for any other keys:
+        i_start = docstr.find(key)
+    return docstr
+
+
 def yaml_role(name, rawtext, text, lineno, inliner, options={}, content=[]):
-    """Process the :yaml: keyword in the python API documentation."""
-    return [nodes.Text('[YAML]')], []
+    """Link :yaml: in the python API docs to the input file docs."""
+    env = inliner.document.settings.env
+    app = env.app
+    dest_doc = text
+    uri = app.builder.get_relative_uri(env.docname, dest_doc)
+    return [nodes.reference(rawtext, '[Input file]',
+                            refuri=uri, **options)], []
 
 
 def setup(app):

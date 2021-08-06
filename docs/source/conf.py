@@ -29,11 +29,11 @@ author = 'QimPy Collaboration'
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'yamldoc',  # Extract YAML input file documentation from docstrings
     'sphinx.ext.autodoc',  # Core library for html generation from docstrings
     'sphinx.ext.autosummary',  # Create neat summary tables
     'sphinx.ext.coverage',  # Report missing documentation
     'sphinx.ext.napoleon',  # NumPy style docstrings
+    'yamldoc',  # Extract YAML input file documentation from docstrings
 ]
 autosummary_generate = True
 autosummary_imported_members = True
