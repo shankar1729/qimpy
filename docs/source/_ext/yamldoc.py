@@ -3,7 +3,9 @@ from sphinx.application import Sphinx
 from docutils.parsers.rst import Directive
 from docutils.statemachine import ViewList
 from docutils import nodes
-from typing import get_type_hints, get_args, Dict, List, Tuple, Optional
+from typing import get_type_hints, get_args, get_origin, \
+    Dict, List, Tuple, Optional, NamedTuple
+from collections.abc import Sequence
 import importlib
 import inspect
 import os
@@ -64,7 +66,7 @@ class YamlDocDirective(Directive):
                     cell_cmd += nodes.paragraph(text=f'{pad}{param_name}:'
                                                      f'{default_str}')
                     # Replace :yaml: with a link to source code:
-                    param_doc = yaml_code_link(param_doc, cls)
+                    param_doc = yaml_remove(param_doc)
                     # Documentation cell:
                     cell_doc = nodes.entry()
                     viewlist = ViewList()
@@ -151,16 +153,60 @@ def get_parameters(docstr: str) -> Tuple[str, Dict[str, str]]:
     return '\n'.join(header[:-2]), result
 
 
-def yaml_code_link(docstr: str, cls: type) -> str:
-    """Link :yaml: in the input doc to class `cls` in the python API doc."""
+PY_TO_YAML = {
+    'None': ':yamlkey:`null`',
+    'True': ':yamlkey:`yes`',
+    'False': ':yamlkey:`no`'
+}
+
+
+YAML_TYPE = {
+    str: ':yamltype:`string`',
+    float: ':yamltype:`float`',
+    int: ':yamltype:`int`',
+    bool: ':yamltype:`bool`',
+    list: ':yamltype:`list`',
+    tuple: ':yamltype:`tuple`',
+    type(None): ':yamltype:`null`'
+}
+
+
+SEQUENCE_TYPES = {list, tuple, Sequence}
+
+
+def yamlify(doc: str) -> str:
+    """Replace python keywords with yaml versions in `doc`"""
+    for py_word, yaml_word in PY_TO_YAML.items():
+        doc = doc.replace(py_word, yaml_word)
+    return doc
+
+
+def yamltype(cls: type) -> str:
+    """Return YAML name for type `cls`."""
+    result = YAML_TYPE.get(cls, None)
+    if result is not None:
+        return result
+    # Check for sequence types:
+    origin = get_origin(cls)
+    if origin in SEQUENCE_TYPES:
+        result = ':yamltype:`list`'
+        args = get_args(cls)
+        delim = ' and ' if (origin is tuple) else ' or '
+        if len(args):
+            result += ' of ' + delim.join(yamltype(arg) for arg in args) + ','
+        return result
+    # Fallback to python name:
+    return str(cls)
+
+
+def yaml_remove(docstr: str) -> str:
+    """Remove :yaml: roles in the input doc version of docstring."""
     key = ':yaml:'
-    target = f':class:`[API: {cls.__name__}]' \
-             f' <{cls.__module__}.{cls.__qualname__}>`'
     i_start = docstr.find(key)
     while i_start >= 0:
         i_stop = docstr.find('`', (i_start + len(key) + 1)) + 1
         fullkey = docstr[i_start:i_stop]  # includes `content` after key
-        docstr = docstr.replace(fullkey, target)
+        docstr = docstr.replace(fullkey, '')
         # Search for any other keys:
         i_start = docstr.find(key)
     return docstr
@@ -176,6 +222,22 @@ def yaml_role(name, rawtext, text, lineno, inliner, options={}, content=[]):
                             refuri=uri, **options)], []
 
 
+def yaml_highlight(rolename: str):
+    def role(name, rawtext, text, lineno, inliner, options={}, content=[]):
+        return [nodes.inline(text=text, classes=['yaml'+rolename])], []
+    return role
+
+
+class Parameter(NamedTuple):
+    """Parameter within `ClassInputDoc`."""
+    name: str  #: Parameter name
+    default: str  #: String representing default value, if any
+    summary: str  #: One-line summary
+    doc: str  #: Full doc-string.
+    classdoc: Optional[ClassInputDoc] = None  #: Documentation of this class
+    typename: str = ''  # Name of type (used only if no `classdoc`)
+
+
 class ClassInputDoc:
     """Input documentation extracted from a `constructable` subclass."""
 
@@ -186,7 +248,8 @@ class ClassInputDoc:
         are also sub-classes of `constructable`. Also adds `self` to classdocs
         to avoid writing `cls`'s documentation multiple times for overlapping
         input documentation trees."""
-        self.params: List[Tuple[str, str, Optional[ClassInputDoc]]] = []
+        self.cls = cls
+        self.params: List[Parameter] = []
         self.path = get_path_from_class(cls)
         classdocs[self.path] = self
 
@@ -204,7 +267,8 @@ class ClassInputDoc:
                     default_str = ('' if (default_value is inspect._empty)
                                    else f' {default_value}')
                     param_summary = f'{param_name}:{default_str}'
-                    param_doc = yaml_code_link(param_doc, cls)
+                    param_doc = yaml_remove(param_doc)
+                    typenames = []
                     # Recur down on compound objects:
                     param_class: Optional[ClassInputDoc] = None
                     for cls_option in get_args(param_type):
@@ -218,17 +282,44 @@ class ClassInputDoc:
                                 param_class = ClassInputDoc(cls_option,
                                                             constructable, app,
                                                             classdocs, outdir)
-                    self.params.append((param_summary, param_doc, param_class))
+                        else:
+                            typenames.append(yamltype(cls_option))
+                    if not typenames:
+                        typenames = [yamltype(param_type)]
+                    typename = ' or '.join(typenames).rstrip(',')
+                    param = Parameter(name=param_name,
+                                      default=yamlify(default_str),
+                                      summary=yamlify(param_summary),
+                                      doc=yamlify(param_doc),
+                                      classdoc=param_class,
+                                      typename=typename)
+                    self.params.append(param)
+
+        # Helper to write a title:
+        def write_title(file, title: str, underline: str) -> None:
+            file.write(f'{title}\n{underline * len(title)}\n\n')
 
         # Write ReST file:
         fname = os.path.join(outdir, self.path + '.rst')
         with open(fname, 'w') as fp:
             # Title:
-            title = f'{cls.__qualname__} input documentation'
-            fp.write(f'{title}\n{"=" * len(title)}\n\n')
+            write_title(fp, f'{cls.__qualname__} input documentation', '=')
             # Constructor header:
             fp.write(header)
-            fp.write(f'\n\nUsed to initialize class :class:`{self.path}`.\n')
+            fp.write(f'\n\nUsed to initialize class :class:`{self.path}`.\n\n')
+            # Parameter detailed docs:
+            write_title(fp, 'Parameters:', '-')
+            for param in self.params:
+                write_title(fp, param.name, '+')
+                if param.default:
+                    fp.write(f'*Default:* {param.default}\n\n')
+                if param.classdoc is None:
+                    fp.write(f'*Type:* {param.typename}\n\n')
+                else:
+                    fp.write(f'*Type:* :doc:`{param.classdoc.cls.__qualname__}'
+                             f' <{param.classdoc.path}>`\n\n')
+                fp.write(param.doc)
+                fp.write('\n\n')
 
 
 def create_yamldoc_rst_files(app: Sphinx) -> None:
@@ -268,4 +359,7 @@ def create_yamldoc_rst_files(app: Sphinx) -> None:
 def setup(app):
     app.add_directive('yamldoc', YamlDocDirective)
     app.add_role_to_domain('py', 'yaml', yaml_role)
+    app.add_role('yamlkey', yaml_highlight('key'))
+    app.add_role('yamltype', yaml_highlight('type'))
+    app.add_role('yamlcomment', yaml_highlight('comment'))
     app.connect('builder-inited', create_yamldoc_rst_files)

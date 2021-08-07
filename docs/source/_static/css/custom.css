@@ -4,3 +4,16 @@
 .wy-table-responsive {
     overflow: visible !important;
 }
+
+.yamlkey {
+    color: purple;
+}
+
+.yamltype {
+    font-weight: bold;
+    color: blue;
+}
+
+.yamlcomment {
+    color: grey;
+}
