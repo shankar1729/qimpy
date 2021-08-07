@@ -223,6 +223,18 @@ def yaml_role(name, rawtext, text, lineno, inliner, options={}, content=[]):
                             refuri=uri, **options)], []
 
 
+def yaml_param_role(name, rawtext, text, lineno, inliner,
+                    options={}, content=[]):
+    """Link :yamlparam: in the input file doc to detailed version."""
+    env = inliner.document.settings.env
+    app: Sphinx = env.app
+    dest_doc, param_name = text.split(':')
+    uri = (app.builder.get_relative_uri(env.docname, 'yamldoc/' + dest_doc)
+           + '#' + param_name)
+    return [nodes.reference(rawtext, param_name,
+                            refuri=uri, classes=['yamlparam'], **options)], []
+
+
 def yaml_highlight(rolename: str):
     def role(name, rawtext, text, lineno, inliner, options={}, content=[]):
         return [nodes.inline(text=text, classes=['yaml'+rolename])], []
@@ -334,12 +346,13 @@ class ClassInputDoc:
         Recursively includes templates of component classes within."""
         result = []
         for param in self.params:
+            name = f':yamlparam:`{self.path}:{param.name}`'
             value = ((param.default if param.default
-                      else f'[{param.typename}]')
+                      else f' [{param.typename}]')
                      if (param.classdoc is None)
                      else '')  # don't put value if class doc follows
             comment = ''  # TODO
-            result.append(f':yamlparam:`{param.name}`:{value}{comment}')
+            result.append(f'{name}:{value}{comment}')
             # Recur down to components:
             if param.classdoc is not None:
                 pad = '  '
@@ -385,8 +398,8 @@ def create_yamldoc_rst_files(app: Sphinx) -> None:
 def setup(app):
     app.add_directive('yamldoc', YamlDocDirective)
     app.add_role_to_domain('py', 'yaml', yaml_role)
+    app.add_role('yamlparam', yaml_param_role)
     app.add_role('yamlkey', yaml_highlight('key'))
     app.add_role('yamltype', yaml_highlight('type'))
-    app.add_role('yamlparam', yaml_highlight('param'))
     app.add_role('yamlcomment', yaml_highlight('comment'))
     app.connect('builder-inited', create_yamldoc_rst_files)
