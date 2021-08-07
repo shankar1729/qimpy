@@ -9,6 +9,11 @@
     color: purple;
 }
 
+.yamlparam {
+    color: purple;
+    font-weight: bold;
+}
+
 .yamltype {
     font-weight: bold;
     color: blue;

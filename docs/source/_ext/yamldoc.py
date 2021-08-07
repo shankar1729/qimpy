@@ -6,6 +6,7 @@ from docutils import nodes
 from typing import get_type_hints, get_args, get_origin, \
     Dict, List, Tuple, Optional, NamedTuple
 from collections.abc import Sequence
+from functools import lru_cache
 import importlib
 import inspect
 import os
@@ -287,7 +288,7 @@ class ClassInputDoc:
                     if not typenames:
                         typenames = [yamltype(param_type)]
                     typename = ' or '.join(typenames).rstrip(',')
-                    param = Parameter(name=param_name,
+                    param = Parameter(name=param_name.replace('_', '-'),
                                       default=yamlify(default_str),
                                       summary=yamlify(param_summary),
                                       doc=yamlify(param_doc),
@@ -307,6 +308,12 @@ class ClassInputDoc:
             # Constructor header:
             fp.write(header)
             fp.write(f'\n\nUsed to initialize class :class:`{self.path}`.\n\n')
+            # Template:
+            write_title(fp, 'YAML template:', '-')
+            fp.write('.. parsed-literal::\n\n')
+            for line in self.get_yaml_template():
+                fp.write(f'   {line}\n')
+            fp.write('\n')
             # Parameter detailed docs:
             write_title(fp, 'Parameters:', '-')
             for param in self.params:
@@ -320,6 +327,25 @@ class ClassInputDoc:
                              f' <{param.classdoc.path}>`\n\n')
                 fp.write(param.doc)
                 fp.write('\n\n')
+
+    @lru_cache
+    def get_yaml_template(self) -> List[str]:
+        """Return lines of a yaml template based on parameters.
+        Recursively includes templates of component classes within."""
+        result = []
+        for param in self.params:
+            value = ((param.default if param.default
+                      else f'[{param.typename}]')
+                     if (param.classdoc is None)
+                     else '')  # don't put value if class doc follows
+            comment = ''  # TODO
+            result.append(f':yamlparam:`{param.name}`:{value}{comment}')
+            # Recur down to components:
+            if param.classdoc is not None:
+                pad = '  '
+                for line in param.classdoc.get_yaml_template():
+                    result.append(pad + line)  # indent component template
+        return result
 
 
 def create_yamldoc_rst_files(app: Sphinx) -> None:
@@ -361,5 +387,6 @@ def setup(app):
     app.add_role_to_domain('py', 'yaml', yaml_role)
     app.add_role('yamlkey', yaml_highlight('key'))
     app.add_role('yamltype', yaml_highlight('type'))
+    app.add_role('yamlparam', yaml_highlight('param'))
     app.add_role('yamlcomment', yaml_highlight('comment'))
     app.connect('builder-inited', create_yamldoc_rst_files)
