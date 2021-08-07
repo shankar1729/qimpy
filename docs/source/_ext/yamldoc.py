@@ -67,7 +67,7 @@ class YamlDocDirective(Directive):
                     cell_cmd += nodes.paragraph(text=f'{pad}{param_name}:'
                                                      f'{default_str}')
                     # Replace :yaml: with a link to source code:
-                    param_doc = yaml_remove(param_doc)
+                    param_doc, _ = yaml_remove_split(param_doc)
                     # Documentation cell:
                     cell_doc = nodes.entry()
                     viewlist = ViewList()
@@ -200,17 +200,33 @@ def yamltype(cls: type) -> str:
     return str(cls)
 
 
-def yaml_remove(docstr: str) -> str:
-    """Remove :yaml: roles in the input doc version of docstring."""
+def yaml_remove_split(docstr: str) -> Tuple[str, str]:
+    """Remove :yaml: roles in the input doc version of docstring.
+    Additionally returns portion of string till first :yaml:,
+    which can be used as a summary."""
     key = ':yaml:'
     i_start = docstr.find(key)
+    summary = docstr[:i_start]
     while i_start >= 0:
         i_stop = docstr.find('`', (i_start + len(key) + 1)) + 1
         fullkey = docstr[i_start:i_stop]  # includes `content` after key
         docstr = docstr.replace(fullkey, '')
         # Search for any other keys:
         i_start = docstr.find(key)
-    return docstr
+
+    # Regularize white space in summary, and truncate it if too long:
+    summary = ' '.join(line.strip() for line in summary.split('\n'))
+    SUMMARY_MAX = 50
+    if len(summary) > SUMMARY_MAX:
+        # Try truncating after first sentence:
+        first_period = summary.find('.')
+        if first_period >= 0:
+            summary = summary[:first_period]
+    if len(summary) > SUMMARY_MAX:
+        # If still too long, limit by brute force at a word boundary:
+        stop_pos = summary[:SUMMARY_MAX].rfind(' ')
+        summary = summary[:stop_pos] + ' ...'  # indicate truncation
+    return docstr, summary
 
 
 def yaml_role(name, rawtext, text, lineno, inliner, options={}, content=[]):
@@ -279,8 +295,7 @@ class ClassInputDoc:
                     default_value = signature.parameters[param_name].default
                     default_str = ('' if (default_value is inspect._empty)
                                    else f' {default_value}')
-                    param_summary = f'{param_name}:{default_str}'
-                    param_doc = yaml_remove(param_doc)
+                    param_doc, param_summary = yaml_remove_split(param_doc)
                     typenames = []
                     # Recur down on compound objects:
                     param_class: Optional[ClassInputDoc] = None
@@ -351,7 +366,7 @@ class ClassInputDoc:
                       else f' [{param.typename}]')
                      if (param.classdoc is None)
                      else '')  # don't put value if class doc follows
-            comment = ''  # TODO
+            comment = f'  :yamlcomment:`# {param.summary}`'
             result.append(f'{name}:{value}{comment}')
             # Recur down to components:
             if param.classdoc is not None:
