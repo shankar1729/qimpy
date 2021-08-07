@@ -96,6 +96,16 @@ class ClassInputDoc:
             for line in self.get_yaml_template():
                 fp.write(f'   {line}\n')
             fp.write('\n')
+            # Component classes:
+            component_classdocs = [param.classdoc for param in self.params
+                                   if (param.classdoc is not None)]
+            if component_classdocs:
+                write_title(fp, 'Component classes:', '-')
+                fp.write('.. toctree::\n    :maxdepth: 1\n\n')
+                for classdoc in component_classdocs:
+                    fp.write(f'    {classdoc.cls.__qualname__}'
+                             f' <{classdoc.path}>\n')
+                fp.write('\n')
             # Parameter detailed docs:
             write_title(fp, 'Parameters:', '-')
             for param in self.params:
@@ -148,6 +158,14 @@ class YamlDocDirective(SphinxDirective):
         viewlist.append('', 'memory.rst', 1)
         for i_line, line in enumerate(classdoc.get_yaml_template()):
             viewlist.append('   ' + line, 'memory.rst', i_line + 2)
+
+        # Add TOC to include root class:
+        toclines = f'\nComponent classes:\n\n' \
+                   f'.. toctree::\n' \
+                   f'    :maxdepth: 1\n\n' \
+                   f'    {classdoc.cls.__qualname__} <yamldoc/{class_path}>\n'
+        for line in toclines.split('\n'):
+            viewlist.append(line, 'memory.rst', len(viewlist))
 
         # Parse:
         node = nodes.paragraph()
