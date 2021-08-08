@@ -191,6 +191,7 @@ def create_yamldoc_rst_files(app: Sphinx) -> None:
             if i_start >= 0:
                 tokens = line[(i_start + len(directive_key)):].split()
                 yamldoc_classnames.add(tokens[0])
+                os.utime(docfile)  # make sure file processed in this build
     print('[yamldoc] generating input documentation for root class(es):',
           ', '.join(yamldoc_classnames))
 
