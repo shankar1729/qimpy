@@ -39,7 +39,7 @@ class ClassInputDoc:
 
         assert issubclass(cls, constructable)
         param_types = get_type_hints(cls.__init__)
-        header, param_docs = get_parameters(cls.__init__.__doc__)
+        self.header, param_docs = get_parameters(cls.__init__.__doc__)
         signature = inspect.signature(cls.__init__)
 
         # Process only parameters which have a [YAML] in their docstring:
@@ -65,6 +65,8 @@ class ClassInputDoc:
                                 param_class = ClassInputDoc(cls_option,
                                                             constructable, app,
                                                             classdocs, outdir)
+                            # Adjust summary to end with colon:
+                            param_summary = param_summary.rstrip('.') + ':'
                         else:
                             typenames.append(yamltype(cls_option))
                     if not typenames:
@@ -78,17 +80,21 @@ class ClassInputDoc:
                                       typename=typename)
                     self.params.append(param)
 
+        # Write ReST file:
+        self.write_rest_file(os.path.join(outdir, self.path + '.rst'))
+
+    def write_rest_file(self, fname: str) -> None:
+        """Write ReST file containing input documentation of this class."""
         # Helper to write a title:
         def write_title(file, title: str, underline: str) -> None:
             file.write(f'{title}\n{underline * len(title)}\n\n')
 
-        # Write ReST file:
-        fname = os.path.join(outdir, self.path + '.rst')
         with open(fname, 'w') as fp:
             # Title:
-            write_title(fp, f'{cls.__qualname__} input documentation', '=')
+            write_title(fp, f'{self.cls.__qualname__} input documentation',
+                        '=')
             # Constructor header:
-            fp.write(header)
+            fp.write(self.header)
             fp.write(f'\n\nUsed to initialize class :class:`{self.path}`.\n\n')
             # Template:
             write_title(fp, 'YAML template:', '-')
@@ -110,13 +116,14 @@ class ClassInputDoc:
             write_title(fp, 'Parameters:', '-')
             for param in self.params:
                 write_title(fp, param.name, '+')
-                if param.default:
-                    fp.write(f'*Default:* {param.default}\n\n')
                 if param.classdoc is None:
-                    fp.write(f'*Type:* {param.typename}\n\n')
+                    fp.write(f'*Type:* {param.typename}')
                 else:
                     fp.write(f'*Type:* :doc:`{param.classdoc.cls.__qualname__}'
-                             f' <{param.classdoc.path}>`\n\n')
+                             f' <{param.classdoc.path}>`')
+                if param.default:
+                    fp.write(f', *Default:* {param.default}')
+                fp.write('\n\n')
                 fp.write(param.doc)
                 fp.write('\n\n')
 
@@ -138,6 +145,20 @@ class ClassInputDoc:
                 pad = '  '
                 for line in param.classdoc.get_yaml_template():
                     result.append(pad + line)  # indent component template
+        # Pad to align comments:
+        # --- determine printed start locations of each comment:
+        i_comment = []  # comment start in marked-up text
+        i_comment_printed = []  # comment start in printed text
+        for line in result:
+            i_comment.append(line.find('  :yamlcomment:'))
+            i_comment_printed.append(printed_length(line[:i_comment[-1]]))
+        # --- determine common location at which they should start:
+        comment_start = max(i_comment_printed)
+        # --- insert padding:
+        for i_line, line in enumerate(result):
+            padloc = i_comment[i_line]  # location to insert padding at
+            padlen = comment_start - i_comment_printed[i_line]  # pad length
+            result[i_line] = line[:padloc] + (' ' * padlen) + line[padloc:]
         return result
 
 
@@ -338,6 +359,25 @@ def yaml_remove_split(docstr: str) -> Tuple[str, str]:
         # Search for any other keys:
         i_start = docstr.find(key)
     return docstr, summary
+
+
+def printed_length(text: str) -> int:
+    """Get printed length of `text` accounting for yamltags."""
+    length = len(text)
+    for key in (':yamlparam:', ':yamlkey:', ':yamltype:', ':yamlcomment:'):
+        i_start = text.find(key)
+        while i_start >= 0:
+            i_key_stop = i_start + len(key) + 1  # end of :yaml*:`
+            i_stop = text.find('`', i_key_stop) + 1  # end of content after it
+            length -= (len(key) + 2)  # key and backticks not printed
+            if key == ':yamlparam:':
+                # Account for the docname portion of content not printed:
+                content = text[i_key_stop:(i_stop-1)]  # just the content
+                docname, paramname = content.split(':')
+                length -= (len(docname) + 1)  # docname and : not printed
+            # Search for more of the same key:
+            i_start = text.find(key, i_stop)
+    return length
 
 
 def yaml_role(name, rawtext, text, lineno, inliner, options={}, content=[]):
