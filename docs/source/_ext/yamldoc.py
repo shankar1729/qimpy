@@ -145,6 +145,9 @@ class ClassInputDoc:
                 pad = '  '
                 for line in param.classdoc.get_yaml_template():
                     result.append(pad + line)  # indent component template
+                if result[-1].strip():  # If last line not empty:
+                    result.append(pad)  # Add an empty line as separator
+
         # Pad to align comments:
         # --- determine printed start locations of each comment:
         i_comment = []  # comment start in marked-up text
