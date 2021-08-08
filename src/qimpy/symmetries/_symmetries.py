@@ -39,7 +39,7 @@ class Symmetries(qp.Constructable):
         Parameters
         ----------
         tolerance
-            Threshold for detecting symmetries. :yaml:`inputfile`
+            :yaml:`Threshold for detecting symmetries.`
         """
         super().__init__(co=co)
         rc = self.rc

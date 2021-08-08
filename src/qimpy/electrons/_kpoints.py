@@ -53,27 +53,24 @@ class Kmesh(Kpoints):
         lattice
             Lattice specification used for automatic size determination.
         offset
-            Offset k-point mesh by this amount in k-mesh coordinates.
+            :yaml:`Offset of k-point mesh in k-mesh coordinates.`
             (That is, by offset / size in fractional reciprocal coordinates.)
             For example, use [0.5, 0.5, 0.5] for the Monkhorst-Pack scheme.
             Default: [0., 0., 0.] selects Gamma-centered mesh.
-            :yaml:`inputfile`
         size
-            Number of k per dimension, or minimum supercell size.
+            :yaml:`Number of k per dimension, or minimum supercell size.`
             If given as a list of 3 integers, number of k-points along each
             reciprocal lattice direction. Instead, a single float specifies
             the minimum real-space size of the k-point sampled supercell
             i.e. pick number of k-points along dimension i = ceil(size / L_i),
             where L_i is the length of lattice vector i (in bohrs).
             Default: [1, 1, 1] selects a single k-point = offset.
-            :yaml:`inputfile`
         use_inversion
-            Whether to use inversion in k-space to reduce k-points.
+            :yaml:`Whether to use inversion in k-space to reduce k-points.`
             This corresponds to complex conjugation in real space, and only
             matters for systems without inversion symmetry in real space.
-            Default: True; you should need to only disable this when
-            interfacing with codes that do not support this symmetry
-            eg. BerkeleyGW. :yaml:`inputfile`
+            Default: True; should only need to disable this when interfacing
+            with codes that do not support this symmetry eg. BerkeleyGW.
         """
         rc = co.rc
         assert rc is not None
@@ -178,13 +175,13 @@ class Kpath(Kpoints):
             reciprocal fractional coordinates (input) to Cartesian
             for determining path lengths.
         dk
-            Maximum distance between adjacent points on k-path.
-            :yaml:`inputfile` (Units: :math:`a_0^{-1}`.)
+            :yaml:`Maximum distance between adjacent points on k-path.`
+            (Units: :math:`a_0^{-1}`.)
         points
-            List of special k-points along path. Each point should contain
-            three fractional coordinates (float) and optionally a string
-            label for this point for use in band structure plots.
-            :yaml:`inputfile`
+            :yaml:`List of special k-points [kx, ky, kz, label] along path.`
+            Each point should contain three fractional coordinates (float)
+            and optionally a string label for this point for use in
+            band structure plots.
         """
         rc = co.rc
         assert rc is not None

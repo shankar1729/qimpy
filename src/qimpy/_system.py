@@ -34,20 +34,20 @@ class System(qp.Constructable):
         Parameters
         ----------
         lattice
-            Lattice vectors / unit cell definition. :yaml:`inputfile`
+            :yaml:`Lattice vectors / unit cell definition.`
         ions
-            Ionic positions and pseudopotentials. :yaml:`inputfile`
+            :yaml:`Ionic positions and pseudopotentials.`
         symmetries
-            Point and space group symmetries. :yaml:`inputfile`
+            :yaml:`Point and space group symmetries.`
         electrons
-            Electronic sub-system. :yaml:`inputfile`
+            :yaml:`Electronic sub-system.`
         grid
-            Charge-density grid. :yaml:`inputfile`
+            :yaml:`Charge-density grid.`
         checkpoint
-            Checkpoint file to read at start-up. :yaml:`inputfile`
+            :yaml:`Checkpoint file to read at start-up.`
         checkpoint_out
-            Checkpoint file to write.
-            If unspecified, defaults to `checkpoint`. :yaml:`inputfile`
+            :yaml:`Checkpoint file to write.`
+            Defaults to `checkpoint` if unspecified.
         """
 
         # Set in and out checkpoints:

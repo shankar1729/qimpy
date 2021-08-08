@@ -44,22 +44,26 @@ class Ions(qp.Constructable):
 
         Parameters
         ----------
-        coordinates:
-            List of [symbol, x, y, z, params] for each ion in unit cell.
+        coordinates
+            :yaml:`List of [symbol, x, y, z, args] for each ion in unit cell.`
             Here, symbol is the chemical symbol of the element,
-            x, y and z are in the selected coordinate system,
-            and params is an optional dictionary of additional per-ion
-            parameters including initial magnetic moments, relaxation
-            constraints etc. TODO
-            Ions of the same type must be specified consecutively.
-            :yaml:`inputfile`
-        pseudopotentials:
-            Pseudopotential filenames or filename templates.
+            x, y and z are in the selected coordinate system.
+            Optional args is a dictionary of additional per-ion
+            parameters that may include:
+
+                * `M`: initial magnetic moment for the ion, which would be a
+                  single Mz or [Mx, My, Mz] depending on if the calculation
+                  is spinorial. Only specify in spin-polarized calculations.
+                * Relaxation constraints: TODO
+
+            Ions of the same type (symbol) must be specified consecutively.
+        pseudopotentials
+            :yaml:`Pseudopotential filenames or filename templates.`
             Templates for families of pseudopotentials are specified by
             including a $ID in the name which is replaced by the chemical
             symbol of the element. The list of specified file names and
             templates is processed in order, and the first match for
-            each element takes precedence. :yaml:`inputfile`
+            each element takes precedence.
         """
         super().__init__(co=co)
         rc = self.rc

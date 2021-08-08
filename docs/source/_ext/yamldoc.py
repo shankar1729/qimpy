@@ -322,42 +322,32 @@ def yamltype(cls: type) -> str:
 
 
 def yaml_remove_split(docstr: str) -> Tuple[str, str]:
-    """Remove :yaml: roles in the input doc version of docstring.
-    Additionally returns portion of string till first :yaml:,
-    which can be used as a summary."""
+    """Extract parameter summary within :yaml: tags in docstring,
+    and clean up the :yaml: tag for the full docstring.
+    Return cleaned up docstring, and summary version."""
     key = ':yaml:'
+    summary = ''
     i_start = docstr.find(key)
-    summary = docstr[:i_start]
     while i_start >= 0:
-        i_stop = docstr.find('`', (i_start + len(key) + 1)) + 1
+        i_key_stop = i_start + len(key) + 1  # end of :yaml:
+        i_stop = docstr.find('`', i_key_stop) + 1  # end of content after it
         fullkey = docstr[i_start:i_stop]  # includes `content` after key
-        docstr = docstr.replace(fullkey, '')
+        summary = docstr[i_key_stop:(i_stop-1)]  # just the content
+        docstr = docstr.replace(fullkey, summary)
         # Search for any other keys:
         i_start = docstr.find(key)
-
-    # Regularize white space in summary, and truncate it if too long:
-    summary = ' '.join(line.strip() for line in summary.split('\n'))
-    SUMMARY_MAX = 60
-    if len(summary) > SUMMARY_MAX:
-        # Try truncating after first sentence:
-        first_period = summary.find('.')
-        if first_period >= 0:
-            summary = summary[:(first_period+1)]
-    if len(summary) > SUMMARY_MAX:
-        # If still too long, limit by brute force at a word boundary:
-        stop_pos = summary[:SUMMARY_MAX].rfind(' ')
-        summary = summary[:stop_pos] + ' ...'  # indicate truncation
     return docstr, summary
 
 
 def yaml_role(name, rawtext, text, lineno, inliner, options={}, content=[]):
     """Link :yaml: in the python API docs to the input file docs."""
     env = inliner.document.settings.env
-    app = env.app
-    dest_doc = text
-    uri = app.builder.get_relative_uri(env.docname, dest_doc)
-    return [nodes.reference(rawtext, '[Input file]',
-                            refuri=uri, **options)], []
+    app: Sphinx = env.app
+    src_doc = env.docname
+    dest_doc = src_doc.replace('api/', 'yamldoc/')
+    uri = app.builder.get_relative_uri(src_doc, dest_doc)
+    return [nodes.reference(rawtext, '[Input file]', refuri=uri, **options),
+            nodes.Text(' ' + text)], []
 
 
 def yaml_param_role(name, rawtext, text, lineno, inliner,

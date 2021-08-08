@@ -75,15 +75,16 @@ class Basis(qp.Constructable):
             Default number of spinor components for wavefunctions in this
             basis. Also used only to check support for real_wavefunctions.
         ke_cutoff
-            Plane-wave kinetic-energy cutoff for wavefunctions in :math:`E_h`.
-            :yaml:`inputfile`
+            :yaml:`Wavefunction kinetic energy cutoff in Hartrees.`
         real_wavefunctions
-            If True, use wavefunctions that are real, instead of the
-            default complex wavefunctions. This is only supported for
-            non-spinorial, Gamma-point-only calculations. :yaml:`inputfile`
+            :yaml:`Whether to use real wavefunctions (instead of complex).`
+            This is only supported for non-spinorial, Gamma-point-only
+            calculations, where conjugate symmetry allows real wavefunctions.
         grid
-            Optionally override parameters of the grid (such as `shape` or
-            `ke_cutoff`) used for wavefunction operations. :yaml:`inputfile`
+            :yaml:`Override parameters of grid for wavefunction operations.`
+            Specify a dict with
+            (such as `shape` or
+            `ke_cutoff`)  :yaml:`inputfile`
         fft_block_size
             Number of wavefunction bands to FFT simultaneously.
             Higher numbers require more memory, but can achieve

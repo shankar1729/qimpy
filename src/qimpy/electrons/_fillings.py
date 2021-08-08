@@ -38,7 +38,7 @@ class Fillings(qp.Constructable):
     def __init__(self, *, co: qp.ConstructOptions,
                  ions: qp.ions.Ions, electrons: qp.electrons.Electrons,
                  charge: float = 0., smearing: str = 'gauss',
-                 sigma: Optional[float] = None,
+                 sigma: float = 0.002,
                  kT: Optional[float] = None,
                  mu: float = np.nan,
                  mu_constrain: bool = False,
@@ -52,61 +52,61 @@ class Fillings(qp.Constructable):
         Parameters
         ----------
         charge
-            Net charge of electrons + ions in e units, which determines
-            n_electrons = ions.Z_tot - charge.
+            :yaml:`Net charge of electrons + ions in e units.`
+            This determines n_electrons = ions.Z_tot - charge.
         smearing : {'gauss', 'fermi', 'cold', 'mp1', False}, default: 'gauss'
-            Smearing method for setting electron occupations, where 'gauss',
-            'fermi', 'cold', 'mp1' select Gaussian, Fermi-Dirac, Cold and
-            first order Methfessel-Paxton (MP1) smearing respectively.
+            :yaml:`Smearing method for setting electron occupations.`
+            Here 'gauss', 'fermi', 'cold', 'mp1' select Gaussian, Fermi-Dirac,
+            Cold and first order Methfessel-Paxton (MP1) smearing respectively.
             Use False (or None) to disable smearing and keep the electron
-            occupations fixed at their initial values. :yaml:`inputfile`
+            occupations fixed at their initial values.
         sigma
-            Width of the smearing function (in :math:`E_h`), corresponding
-            to the Gaussian width :math:`\sigma` in the Gaussian, Cold and
-            M-P schemes, and to :math:`2k_BT` in the Fermi-Dirac scheme.
-            Defaults to 0.002 if neither `sigma` or `kT` are specified.
-            :yaml:`inputfile`
+            :yaml:`Width of the smearing function in Hartrees.`
+            This sets Gaussian width :math:`\sigma` in the Gaussian, Cold
+            and M-P schemes, and :math:`2k_BT` in the Fermi-Dirac scheme.
+            Overridden if `kT` is specified.
         kT
-            :math:`k_BT` for Fermi-Dirac occupations, amounting to
+            :yaml:`Specify temperature instead of sigma for Fermi smearing.`
+            This directly sets :math:`k_BT` in Hartrees and corresponds to
             :math:`\sigma/2` for the other Gaussian-based smearing schemes.
-            Defaults to 0.001 if neither `sigma` or `kT` are specified.
-            Specify only one of sigma or kT. :yaml:`inputfile`
+            Overrides `sigma` if specified.
         mu
-            Electron chemical potential :math:`\mu`. This serves as an initial
-            guess (rarely needed) if `mu_constrain` is False, and otherwise,
-            it is the required target value to constrain :math:`\mu` to.
-            :yaml:`inputfile`
+            :yaml:`Electron chemical potential in Hartrees.`
+            This serves as an initial guess (rarely needed) if `mu_constrain`
+            is False, and otherwise, it is the required value to hold
+            :math:`\mu` fixed at.
         mu_constrain
-            Whether to hold chemical potential fixed to `mu` in
-            occupation updates: this only matters when `smearing` is not None.
-            :yaml:`inputfile`
+            :yaml:`Whether to hold chemical potential fixed to mu.`
+            If True, perform grand-canonical electronic DFT.
+            Note that this only takes effect when `smearing` is not None.
         B
-            External magnetic field.
+            :yaml:`External magnetic field (only for spin-polarized modes).`
             Must be scalar for non-spinorial and 3-vector for spinorial modes.
             If `M_constrain` is True, then this is only an initial guess as the
             magnetic field then becomes a Legendre multiplier to constrain `M`.
-            :yaml:`inputfile`
         M
-            Total magnetization (only for spin-polarized modes).
+            :yaml:`Total magnetization (only for spin-polarized modes).`
             Must be scalar for non-spinorial and 3-vector for spinorial modes.
             This magnetization is assigned to the initial occupations and it
             may change when smearing is present depending on `M_constrain`.
-            :yaml:`inputfile`
         M_constrain
-            Whether to hold magnetization fixed to `M` in occupation updates:
-            this only matters when `smearing` is not None. :yaml:`inputfile`
+            :yaml:`Whether to hold magnetization fixed to M.`
+            This only matters when `smearing` is not None.
         n_bands : {'atomic', 'x<scale>', int}, default: 'atomic'
-            Number of bands, set to the number of atomic orbitals, or
-            specified as a scale relative to the minimum number of bands
-            to accommodate electrons ('x1.5' implies 1.5 x n_bands_min).
-            Alternately, an integer explicitly sets the number of bands.
-            :yaml:`inputfile`
+            :yaml:`Specify number of bands or scheme to determine it.`
+
+            * atomic: set to the number of atomic orbitals.
+            * x<scale>: scale relative to the minimum number of bands
+              to accommodate electrons ('x1.5' implies 1.5 x n_bands_min).
+            * An integer explicitly sets the number of bands.
+
         n_bands_extra : {'x<scale>', int}, default: 'x0.1'
-            Number of extra bands retained by diagonalizers, necessary to
-            converge any degenerate subspaces straddling n_bands. This could
-            be specified as a multiple of n_bands e.g. 'x0.1' = 0.1 x n_bands,
-            or could be specified as an explicit number of extra bands.
-            :yaml:`inputfile`
+            :yaml:`Number of extra bands retained by diagonalizers.`
+            This is necessary to converge any degenerate subspaces straddling
+            n_bands. May be specified as:
+
+            * x<scale>: scale relative to n_bands
+            * An integer explicitly sets the number of extra bands
         """
         super().__init__(co=co)
         self.electrons = electrons
@@ -149,11 +149,7 @@ class Fillings(qp.Constructable):
             if self._smearing_func is None:
                 raise KeyError('smearing must be None/False or one of '
                                f'{_smearing_funcs.keys()}')
-            if sigma and kT:
-                raise ValueError('specify only one of sigma or kT')
-            self.sigma = float(sigma if sigma  # get from sigma
-                               else ((2*kT) if kT  # get from kT
-                                     else 0.002))  # default value
+            self.sigma = float((2*kT) if (kT is not None) else sigma)
             self.n_bands_min += 1  # need at least one extra empty band
         sigma_str = (f'{self.sigma:g} (equivalent kT: {0.5*self.sigma:g})'
                      if self.sigma else str(None))
