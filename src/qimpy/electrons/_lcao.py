@@ -15,14 +15,17 @@ class LCAO(Minimize[MatrixArray]):
                  energy_threshold: float = 1E-6,
                  gradient_threshold: float = 1E-8) -> None:
         """Set stopping criteria for initial subspace optimization.
+
         Parameters
         ----------
         energy_threshold
-            Convergence threshold on energy difference (in :math:`E_h`) between
-            consecutive iterations. :yaml:`inputfile`
+            :yaml:`Energy convergence threshold in Hartrees.`
+            Stop when energy difference between consecutive LCAO iterations
+            falls below this threshold.
         gradient_threshold
-            Convergence threshold on norm of energy gradient with respect to
-            subspace Hamiltonian (dimensionless). :yaml:`inputfile`
+            :yaml:`Subspace-gradient convergence threshold (dimensionless).`
+            Stop when gradient of energy with respect to subspace Hamiltonian
+            falls below this threshold.
         """
         super().__init__(co=co, comm=co.rc.comm_kb, name='LCAO', method='cg',
                          n_iterations=n_iterations,

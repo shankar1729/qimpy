@@ -25,14 +25,16 @@ class Davidson(qp.Constructable):
         Parameters
         ----------
         n_iterations
-            Number of diagonalization iterations in fixed-Hamiltonian
-            calculations. The self-consistent field method overrides this
-            when diagonalizing in an inner loop. :yaml:`inputfile`
+            :yaml:`Number of diagonalization iterations.`
+            This only affects fixed-Hamiltonian calculations because the
+            self-consistent field method overrides this when diagonalizing
+            in an inner loop.
         eig_threshold
-            Maximum change in any eigenvalue (in :math:`E_h`) from the previous
-            iteration to consider converged for fixed-Hamiltonian calculations.
-            The self-consistent field method overrides this when diagonalizing
-            in an inner loop. :yaml:`inputfile`
+            :yaml:`Convergence threshold on eigenvalues in Hartrees.`
+            Stop when the maximum change in any eigenvalue between iterations
+            falls below this threshold. This only affects fixed-Hamiltonian
+            calculations because the self-consistent field method overrides
+            this when diagonalizing in an inner loop.
         """
         super().__init__(co=co)
         self.electrons = electrons

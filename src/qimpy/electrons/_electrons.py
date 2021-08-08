@@ -95,6 +95,8 @@ class Electrons(qp.Constructable):
             which can be advantageous for large number of bands being computed
             in parallel over a large number of processes.
             Specify only one of davidson or chefsi.
+        scf
+            :yaml:`Self-consistent field (SCF) iteration parameters.`
         """
         super().__init__(co=co)
         rc = self.rc

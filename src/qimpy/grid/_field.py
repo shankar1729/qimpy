@@ -105,7 +105,7 @@ class Field:
         r"""Compute broadcasted inner product :math:`\int a^\dagger b`.
         This includes appropriate volume / mesh prefactors to convert it
         to an integral. Batch dimensions must be broadcastable together.
-        Note that `a ^ b` is exactly equivalent to `a.overlap(b)` for `Field`s.
+        Note that `a ^ b` is exactly equivalent to `a.dot(b)`.
         """
         if not isinstance(other, type(self)):
             return NotImplemented

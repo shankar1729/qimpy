@@ -52,7 +52,8 @@ class Basis(qp.Constructable):
                  symmetries: qp.symmetries.Symmetries,
                  kpoints: qp.electrons.Kpoints, n_spins: int, n_spinor: int,
                  ke_cutoff: float = 20., real_wavefunctions: bool = False,
-                 grid: Optional[dict] = None, fft_block_size: int = 0) -> None:
+                 grid: Optional[Union[qp.grid.Grid, dict]] = None,
+                 fft_block_size: int = 0) -> None:
         """Initialize plane-wave basis with `ke_cutoff`.
 
         Parameters
@@ -82,16 +83,12 @@ class Basis(qp.Constructable):
             calculations, where conjugate symmetry allows real wavefunctions.
         grid
             :yaml:`Override parameters of grid for wavefunction operations.`
-            Specify a dict with
-            (such as `shape` or
-            `ke_cutoff`)  :yaml:`inputfile`
         fft_block_size
-            Number of wavefunction bands to FFT simultaneously.
+            :yaml:`Number of wavefunction bands to FFT simultaneously.`
             Higher numbers require more memory, but can achieve
             better occupancy of GPUs or high-core-count CPUs.
             The default of 0 auto-selects the block size based on the number
             of bands and k-points being processed by each process.
-            :yaml:`inputfile`
         """
         super().__init__(co=co)
         rc = self.rc

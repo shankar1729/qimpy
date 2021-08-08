@@ -70,12 +70,13 @@ class Grid(qp.Constructable):
             `4 * ke_cutoff_wavefunction`, and has no effect if either
             `ke_cutoff` or `shape` is specified explicitly.
         ke_cutoff
-            Plane-wave kinetic-energy cutoff in :math:`E_h` for the grid
-            (i.e. the charge-density cutoff). This has no effect if `shape`
-            is specified explicitly. :yaml:`inputfile`
+            :yaml:`Kinetic-energy cutoff for grid in Hartrees.`
+            If unspecified, this is taken to be its minimum value:
+            4x the wavefunction kinetic energy cutoff.
+            This has no effect if `shape` is specified explicitly.
         shape
-            Explicit grid dimensions. Highest precedence, and if specified,
-            will supercede `ke_cutoff`. :yaml:`inputfile`
+            :yaml:`Explicit grid dimensions [Nx, Ny, Nz].`
+            Highest precedence, and if specified, will supercede `ke_cutoff`.
         """
         super().__init__(co=co)
         self.lattice = lattice

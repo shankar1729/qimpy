@@ -21,22 +21,24 @@ class CheFSI(Davidson):
         Parameters
         ----------
         n_iterations
-            Number of diagonalization iterations in fixed-Hamiltonian
-            calculations. The self-consistent field method overrides this
-            when diagonalizing in an inner loop. :yaml:`inputfile`
+            :yaml:`Number of diagonalization iterations.`
+            This only affects fixed-Hamiltonian calculations because the
+            self-consistent field method overrides this when diagonalizing
+            in an inner loop.
         eig_threshold
-            Maximum change in any eigenvalue (in :math:`E_h`) from the previous
-            iteration to consider converged for fixed-Hamiltonian calculations.
-            The self-consistent field method overrides this when diagonalizing
-            in an inner loop. :yaml:`inputfile`
+            :yaml:`Convergence threshold on eigenvalues in Hartrees.`
+            Stop when the maximum change in any eigenvalue between iterations
+            falls below this threshold. This only affects fixed-Hamiltonian
+            calculations because the self-consistent field method overrides
+            this when diagonalizing in an inner loop.
         filter_order
-            Order of the Chebyshev filter, which amounts to the number of
-            Hamiltonian evaluations per band per eigenvalue iteration.
-            :yaml:`inputfile`
+            :yaml:`Order of the Chebyshev filter.`
+            This amounts to the number of Hamiltonian evaluations per band
+            per eigenvalue iteration.
         init_threshold
-            Eigenvalue threshold for the initial Davidson steps used to ensure
-            a reasonable starting point for CheFSI (required for stability).
-            :yaml:`inputfile`
+            :yaml:`Eigenvalue threshold for initial Davidson steps.`
+            This controls the accuracy of a coarse Davidson diagonalization
+            that creates a reasonable starting point for CheFSI.
         """
         super().__init__(co=co, electrons=electrons, n_iterations=n_iterations,
                          eig_threshold=eig_threshold)

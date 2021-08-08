@@ -25,7 +25,7 @@ class XC(qp.Constructable):
         Parameters
         ----------
         functional
-            Name or list of names of an exchange-correlation functional.
+            :yaml:`Name or list of names of exchange-correlation functionals.`
             Each entry in the list must be one of the internal functionals:
 
             {INTERNAL_FUNCTIONAL_NAMES}
@@ -41,11 +41,11 @@ class XC(qp.Constructable):
             while 'gga-xc-pbe' will use 'gga_x_pbe' + 'gga_c_pbe' from Libxc.
 
             Finally, each functional name in the list can have an optional
-            "*num" suffix (no spaces) to scale the functional by num.
-            For example, the specification 'gga-pbe*0.5 lda-pz*0.5' may be used
-            to compute a 50-50 mix of two functionals. Warning: there is no
-            normalization or check to make the fractions of exchange or
-            correlation to add up to 1. :yaml:`inputfile`
+            "\\*num" suffix (no spaces) to scale the functional by num.
+            For example, the specification 'gga-pbe\\*0.5 lda-pz\\*0.5' may be
+            used to compute a 50-50 mix of two functionals. Warning: there is
+            no normalization or check to make the fractions of exchange or
+            correlation to add up to 1.
         """
         super().__init__(co=co)
         qp.log.info('\nInitializing XC:')
@@ -226,7 +226,8 @@ INTERNAL_FUNCTIONAL_NAMES = {'lda_pz', 'lda_pw', 'lda_pw_prec', 'lda_vwn',
 # Substitute internal functional names in XC docstring:
 if XC.__init__.__doc__:
     XC.__init__.__doc__ = XC.__init__.__doc__.replace(
-        '{INTERNAL_FUNCTIONAL_NAMES}', str(sorted(INTERNAL_FUNCTIONAL_NAMES)))
+        '{INTERNAL_FUNCTIONAL_NAMES}', '* ' +
+        '\n            * '.join(sorted(INTERNAL_FUNCTIONAL_NAMES)))
 
 
 def _get_functionals(name: str,

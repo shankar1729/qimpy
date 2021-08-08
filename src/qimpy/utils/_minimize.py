@@ -1,3 +1,4 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 from ._optimizable import Optimizable, ConvergenceCheck
@@ -6,17 +7,14 @@ from ._minimize_cg import _cg
 from ._minimize_line import LINE_MINIMIZE
 from abc import ABC, abstractmethod
 from collections import namedtuple
-from typing import TypeVar, Generic, Sequence, Dict, NamedTuple, Optional, \
-    TYPE_CHECKING
-if TYPE_CHECKING:
-    from .._energy import Energy
+from typing import TypeVar, Generic, Sequence, Dict, NamedTuple, Optional
 
 Vector = TypeVar('Vector', bound=Optimizable)
 
 
 class MinimizeState(Generic[Vector]):
     """Current energies and gradients of `Minimize` algorithm."""
-    energy: 'Energy'  #: Current energy (objective function)
+    energy: qp.Energy  #: Current energy (objective function)
     extra: Sequence[float]  #: Extra convergence quantities
     gradient: Vector  #: Gradient of energy w.r.t. parameters
     K_gradient: Vector  #: Preconditioned version of `gradient`
@@ -132,7 +130,7 @@ class Minimize(Generic[Vector], ABC, qp.Constructable):
         By default, there is no upper bound on step size."""
         return np.finfo(np.float64).max
 
-    def minimize(self) -> 'Energy':
+    def minimize(self) -> qp.Energy:
         """Minimize, and return optimized energy of system"""
         return _lbfgs(self) if (self.method == "l-bfgs") else _cg(self)
 

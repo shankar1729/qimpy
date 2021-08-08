@@ -33,42 +33,47 @@ class SCF(qp.utils.Pulay[qp.grid.FieldH]):
         Parameters
         ----------
         n_iterations
-            Number of self-consistent field iterations / cycles.
-            :yaml:`inputfile`
+            :yaml:`Number of self-consistent field iterations / cycles.`
         energy_threshold
-            Convergence threshold on energy difference (in :math:`E_h`) between
-            consecutive iterations. :yaml:`inputfile`
+            :yaml:`Energy convergence threshold in Hartrees.`
+            Stop when energy difference between consecutive iterations falls
+            below this threshold.
         residual_threshold
-            Convergence threshold on the norm of the residual i.e. difference
-            in mixed variable (density / potential) between consecutive
-            iterations. :yaml:`inputfile`
+            :yaml:`Residual-norm convergence threshold.`
+            Stop when the norm of the residual i.e. difference in mixed
+            variable (density / potential) between consecutive iterations
+            falls below this threshold.
         n_history
-            Number of previous residuals and variables to use in the Pulay
-            mixing algorithm. :yaml:`inputfile`
+            :yaml:`History size for Pulay mixing.`
+            This sets the number of previous residuals and variables to use
+            in the Pulay mixing algorithm. Larger history could improve
+            convergence, while requiring more memory.
         mix_fraction
-            Fraction of new variable (density / poitential) to mix into the
-            current variable. :yaml:`inputfile`
+            :yaml:`Fraction of new variable mixed into current variable.`
+            Lower values (< 0.5) can improve stability, while higher values
+            (0.5 - 1) attempt more aggressive convergence.
         mix_fraction_mag
-            Different `mix_fraction` for magnetization degrees of freedom.
-            :yaml:`inputfile`
+            :yaml:`Different mix_fraction for magnetization components.`
+            More aggressive fractions (> 1) are typically required to
+            converge the magnetization degrees of freedom, because they
+            tend to contribute less to the overall energy of the system
+            (compared to the overall electron density / potential).
         q_kerker
-            Characteristic wavevector for Kerker mixing. :yaml:`inputfile`
+            :yaml:`Characteristic wavevector for Kerker mixing.`
         q_metric
-            Characteristic wavevector controlling Pulay metric.
-            :yaml:`inputfile`
+            :yaml:`Characteristic wavevector controlling Pulay metric.`
         q_kappa
-            Long-range cutoff wavevector important for grand-canonical SCF.
+            :yaml:`Long-range cutoff wavevector for grand-canonical SCF.`
             If unspecified, set based on Debye screening length.
-            :yaml:`inputfile`
         n_eig_steps
-            Number of inner eigenvalue iterations for each SCF cycle.
-            :yaml:`inputfile`
+            :yaml:`Number of inner eigenvalue iterations for each SCF cycle.`
         eig_threshold
-            Convergence threshold on maximum eigenvalue change (in :math:`E_h`)
-            between SCF cycles. :yaml:`inputfile`
+            :yaml:`Convergence threshold on eigenvalues in Hartrees.`
+            Stop when the maximum change in any eigenvalue between SCF cycles
+            falls below this threshold.
         mix_density
-            Whether to mix density (if True) or potential (if False).
-            :yaml:`inputfile`
+            :yaml:`Whether to mix density or potential.`
+            Mix density if True, and potential if False.
         """
         self.mix_fraction_mag = mix_fraction_mag
         self.q_kerker = q_kerker
