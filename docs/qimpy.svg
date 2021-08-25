@@ -1,70 +1,348 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <!-- Created with Inkscape (http://www.inkscape.org/) -->
-<svg width="177.37" height="64.036" version="1.1" viewBox="0 0 46.928 16.943" xmlns="http://www.w3.org/2000/svg" xmlns:cc="http://creativecommons.org/ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:xlink="http://www.w3.org/1999/xlink">
- <metadata>
-  <rdf:RDF>
-   <cc:Work rdf:about="">
-    <dc:format>image/svg+xml</dc:format>
-    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
-   </cc:Work>
-  </rdf:RDF>
- </metadata>
- <path d="m32.387 6.5e-5v0.39683l-0.79375 0.7937 0.79375 9.5e-5v3.3072l-0.79375 0.79375 0.79375 9.5e-5v4.7626l-0.79375 0.79352 0.79375 9.5e-5v2.3937h1.0454v-2.3937h0.79373l-0.79373-0.79362v-1.9137c0.30832-0.0066 0.66692 0.38635 1.019 0.32825 0.33562-0.05537 0.49344-0.5109 0.81934-0.60833 0.34161-0.10213 0.75447 0.23166 1.0679 0.06164 0.28138-0.15265 0.23229-0.62674 0.47634-0.8339 0.28378-0.24088 0.82944-0.08677 1.0468-0.38898 0.20335-0.28278-0.08172-0.71561 0.03329-1.0444 0.10843-0.30996 0.59629-0.46118 0.58926-0.78948-0.0079-0.37054-0.59733-0.5064-0.7026-0.86176-0.09168-0.30946 0.28678-0.69637 0.10436-0.96263-0.23599-0.34444-0.89816-0.04617-1.21-0.32378-0.2243-0.19966-0.07055-0.68987-0.33208-0.83742-0.34491-0.19459-0.78349 0.27431-1.1717 0.19622-0.34685-0.06977-0.5457-0.52998-0.89762-0.56644-0.29795-0.03087-0.56046 0.31033-0.84216 0.31357v-0.63256h0.79371l-0.79371-0.7938v-0.39683zm2.6819 2.8455c0.28838 0.03943 0.58621-0.31211 0.85166-0.19272 0.24543 0.11039 0.17554 0.54366 0.38914 0.70736 0.21285 0.16313 0.62426-0.02604 0.78148 0.19122 0.14542 0.20096-0.1468 0.51028-0.05803 0.7419 0.10012 0.26126 0.60499 0.29896 0.60794 0.57872 0.0031 0.28994-0.52789 0.33709-0.61726 0.61294-0.08075 0.24924 0.27666 0.56061 0.127 0.77566-0.18713 0.26891-0.70429-0.01071-0.96468 0.1881-0.21746 0.16604-0.11696 0.61773-0.36378 0.7358-0.27925 0.13358-0.60379-0.26708-0.90642-0.20199-0.28344 0.06097-0.40794 0.48938-0.69608 0.52151-0.28583 0.03187-0.56023-0.35769-0.78751-0.35253v-1.8598h0.79379l-0.79379-0.79385v-1.7212c0.22326-0.0068 0.50732-0.38787 0.8035-0.3801 0.31533 0.0083 0.5205 0.40625 0.83304 0.44899z" fill="#606060"/>
- <path d="m12.925 14.241-2.7483-2.286c1.1684-1.2869 1.7441-2.8787 1.7441-4.826 0-3.8269-2.4045-6.4347-5.9605-6.4347s-5.9605 2.6077-5.9605 6.4685 2.4045 6.4685 5.9605 6.4685c1.2192 0 2.2352-0.27093 3.2343-0.8636l1.778 1.4732zm-4.2521-3.5221-1.9505 4e-6 1.2531 1.0499c-0.72813 0.33867-1.2869 0.47413-2.032 0.47413-2.6247 0-4.3688-2.032-4.3688-5.08s1.7611-5.08 4.3857-5.08c2.6247 0 4.3857 2.032 4.3857 5.0631 0 1.5917-0.42333 2.8279-1.3377 3.8608z" fill="#606060"/>
- <path d="m14.017 10.172c0.10368 1.1138-0.52556 2.5743 0.08082 2.9975 0.60639 0.4232 1.4677-1.778 1.3826-2.9644-0.08505-1.1864-1.1459-3.3275-1.7406-3.0562-0.59471 0.27126 0.17356 1.9093 0.27723 3.0231z" fill="#b20e0e"/>
- <path d="m15.003 3.2981c-0.41885-0.30322-1.5293 5e-3 -1.8529 0.45004-0.32352 0.44507-0.17022 1.8352 0.24863 2.1384 0.41885 0.30323 0.5318-0.91858 0.85532-1.3637 0.32352-0.44507 1.1678-0.92161 0.7489-1.2248z" fill="#3f32ee"/>
- <g fill="#606060">
-  <path d="m40.257 6.2251-1.2896 0.0031 0.31419 0.52917h1.2922zm5.3785 0-0.88407 1.492-1.1125 0.25419 0.70936 0.41694-1.4005 2.3602-5.16e-4 -1e-3 -0.14366 0.2434h-1.0064l0.31471 0.52917h0.37744l-1.4197 2.3847-1.0709 0.21342 0.69768 0.41259-1.4291 2.4122 1.3004-0.0067 1.0899-1.8371 0.66922 0.40476-0.29163-1.0415 3.2713-5.5045 0.66231 0.39757-0.25982-1.0821 1.2191-2.0451zm-6.1962 0.79685 0.31419 0.52917h1.2922l-0.31471-0.52917zm0.47129 0.79375 0.31471 0.52917h1.2927l-0.31471-0.52917zm0.4718 0.79375 0.31471 0.52917h1.2932l-0.31471-0.52917zm0.47181 0.79375 0.31419 0.52917h1.2942l-0.31471-0.52917zm0.4718 0.79375 0.31419 0.52917h1.2942l-0.31471-0.52917z"/>
-  <path d="m8.9408 7.1461c0-1.9134-1.2022-3.2174-2.9802-3.2174s-2.9802 1.3038-2.9802 3.2342 1.2022 3.2342 2.9802 3.2342c1.8347 0.0087 2.9833-1.3714 2.9802-3.2512zm-2.9886 2.8214c-1.4532 0-2.4196-1.0614-2.4491-2.8045-0.0292-1.7273 1.0359-2.8341 2.4575-2.8047 1.5159 0.03131 2.4574 1.1554 2.4574 2.7962 0.0042 1.7592-1.0034 2.7904-2.4658 2.8129z" fill-opacity=".25098" stroke-width=".5"/>
-  <path d="m7.1518 7.1561c0-0.76538-0.4809-1.2869-1.1921-1.2869s-1.1921 0.52154-1.1921 1.2937 0.4809 1.2937 1.1921 1.2937c0.73386 0.0035 1.1933-0.54857 1.1921-1.3005z" fill-opacity=".50196" stroke-width=".2"/>
- </g>
- <g transform="rotate(5.2949 234.33 9.8219)">
-  <g id="g4919" transform="matrix(.47809 0 0 .47809 7.9037 24.31)">
-   <circle cx="21.966" cy="16.448" r="1.8047" fill="#999" stroke="#ccc" stroke-linecap="round" stroke-linejoin="bevel" stroke-width=".26459"/>
-   <ellipse transform="rotate(-45)" cx="3.8557" cy="26.569" rx="1.6245" ry="1.1054" fill="#ccc"/>
-   <ellipse transform="rotate(-45)" cx="3.8531" cy="26.086" rx=".46403" ry=".31575" fill="#fff"/>
+
+<svg
+   width="177.37"
+   height="64.036"
+   version="1.1"
+   viewBox="0 0 46.928 16.943"
+   id="svg92"
+   sodipodi:docname="qimpy.svg"
+   inkscape:version="1.1 (1:1.1+202105261517+ce6663b3b7)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <defs
+     id="defs96" />
+  <sodipodi:namedview
+     id="namedview94"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:pageshadow="2"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     showgrid="false"
+     inkscape:zoom="5.7845858"
+     inkscape:cx="71.569515"
+     inkscape:cy="21.263407"
+     inkscape:window-width="1920"
+     inkscape:window-height="1013"
+     inkscape:window-x="0"
+     inkscape:window-y="30"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="g90" />
+  <metadata
+     id="metadata2">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:format>image/svg+xml</dc:format>
+        <dc:type
+           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
+      </cc:Work>
+    </rdf:RDF>
+  </metadata>
+  <path
+     d="m32.387 6.5e-5v0.39683l-0.79375 0.7937 0.79375 9.5e-5v3.3072l-0.79375 0.79375 0.79375 9.5e-5v4.7626l-0.79375 0.79352 0.79375 9.5e-5v2.3937h1.0454v-2.3937h0.79373l-0.79373-0.79362v-1.9137c0.30832-0.0066 0.66692 0.38635 1.019 0.32825 0.33562-0.05537 0.49344-0.5109 0.81934-0.60833 0.34161-0.10213 0.75447 0.23166 1.0679 0.06164 0.28138-0.15265 0.23229-0.62674 0.47634-0.8339 0.28378-0.24088 0.82944-0.08677 1.0468-0.38898 0.20335-0.28278-0.08172-0.71561 0.03329-1.0444 0.10843-0.30996 0.59629-0.46118 0.58926-0.78948-0.0079-0.37054-0.59733-0.5064-0.7026-0.86176-0.09168-0.30946 0.28678-0.69637 0.10436-0.96263-0.23599-0.34444-0.89816-0.04617-1.21-0.32378-0.2243-0.19966-0.07055-0.68987-0.33208-0.83742-0.34491-0.19459-0.78349 0.27431-1.1717 0.19622-0.34685-0.06977-0.5457-0.52998-0.89762-0.56644-0.29795-0.03087-0.56046 0.31033-0.84216 0.31357v-0.63256h0.79371l-0.79371-0.7938v-0.39683zm2.6819 2.8455c0.28838 0.03943 0.58621-0.31211 0.85166-0.19272 0.24543 0.11039 0.17554 0.54366 0.38914 0.70736 0.21285 0.16313 0.62426-0.02604 0.78148 0.19122 0.14542 0.20096-0.1468 0.51028-0.05803 0.7419 0.10012 0.26126 0.60499 0.29896 0.60794 0.57872 0.0031 0.28994-0.52789 0.33709-0.61726 0.61294-0.08075 0.24924 0.27666 0.56061 0.127 0.77566-0.18713 0.26891-0.70429-0.01071-0.96468 0.1881-0.21746 0.16604-0.11696 0.61773-0.36378 0.7358-0.27925 0.13358-0.60379-0.26708-0.90642-0.20199-0.28344 0.06097-0.40794 0.48938-0.69608 0.52151-0.28583 0.03187-0.56023-0.35769-0.78751-0.35253v-1.8598h0.79379l-0.79379-0.79385v-1.7212c0.22326-0.0068 0.50732-0.38787 0.8035-0.3801 0.31533 0.0083 0.5205 0.40625 0.83304 0.44899z"
+     fill="#606060"
+     id="path4" />
+  <path
+     d="m12.925 14.241-2.7483-2.286c1.1684-1.2869 1.7441-2.8787 1.7441-4.826 0-3.8269-2.4045-6.4347-5.9605-6.4347s-5.9605 2.6077-5.9605 6.4685 2.4045 6.4685 5.9605 6.4685c1.2192 0 2.2352-0.27093 3.2343-0.8636l1.778 1.4732zm-4.2521-3.5221-1.9505 4e-6 1.2531 1.0499c-0.72813 0.33867-1.2869 0.47413-2.032 0.47413-2.6247 0-4.3688-2.032-4.3688-5.08s1.7611-5.08 4.3857-5.08c2.6247 0 4.3857 2.032 4.3857 5.0631 0 1.5917-0.42333 2.8279-1.3377 3.8608z"
+     fill="#606060"
+     id="path6" />
+  <path
+     d="m14.017 10.172c0.10368 1.1138-0.52556 2.5743 0.08082 2.9975 0.60639 0.4232 1.4677-1.778 1.3826-2.9644-0.08505-1.1864-1.1459-3.3275-1.7406-3.0562-0.59471 0.27126 0.17356 1.9093 0.27723 3.0231z"
+     fill="#b20e0e"
+     id="path8" />
+  <path
+     d="m15.003 3.2981c-0.41885-0.30322-1.5293 5e-3 -1.8529 0.45004-0.32352 0.44507-0.17022 1.8352 0.24863 2.1384 0.41885 0.30323 0.5318-0.91858 0.85532-1.3637 0.32352-0.44507 1.1678-0.92161 0.7489-1.2248z"
+     fill="#3f32ee"
+     id="path10" />
+  <g
+     fill="#606060"
+     id="g18">
+    <path
+       d="m40.257 6.2251-1.2896 0.0031 0.31419 0.52917h1.2922zm5.3785 0-0.88407 1.492-1.1125 0.25419 0.70936 0.41694-1.4005 2.3602-5.16e-4 -1e-3 -0.14366 0.2434h-1.0064l0.31471 0.52917h0.37744l-1.4197 2.3847-1.0709 0.21342 0.69768 0.41259-1.4291 2.4122 1.3004-0.0067 1.0899-1.8371 0.66922 0.40476-0.29163-1.0415 3.2713-5.5045 0.66231 0.39757-0.25982-1.0821 1.2191-2.0451zm-6.1962 0.79685 0.31419 0.52917h1.2922l-0.31471-0.52917zm0.47129 0.79375 0.31471 0.52917h1.2927l-0.31471-0.52917zm0.4718 0.79375 0.31471 0.52917h1.2932l-0.31471-0.52917zm0.47181 0.79375 0.31419 0.52917h1.2942l-0.31471-0.52917zm0.4718 0.79375 0.31419 0.52917h1.2942l-0.31471-0.52917z"
+       id="path12" />
+    <path
+       d="m8.9408 7.1461c0-1.9134-1.2022-3.2174-2.9802-3.2174s-2.9802 1.3038-2.9802 3.2342 1.2022 3.2342 2.9802 3.2342c1.8347 0.0087 2.9833-1.3714 2.9802-3.2512zm-2.9886 2.8214c-1.4532 0-2.4196-1.0614-2.4491-2.8045-0.0292-1.7273 1.0359-2.8341 2.4575-2.8047 1.5159 0.03131 2.4574 1.1554 2.4574 2.7962 0.0042 1.7592-1.0034 2.7904-2.4658 2.8129z"
+       fill-opacity=".25098"
+       stroke-width=".5"
+       id="path14" />
+    <path
+       d="m7.1518 7.1561c0-0.76538-0.4809-1.2869-1.1921-1.2869s-1.1921 0.52154-1.1921 1.2937 0.4809 1.2937 1.1921 1.2937c0.73386 0.0035 1.1933-0.54857 1.1921-1.3005z"
+       fill-opacity=".50196"
+       stroke-width=".2"
+       id="path16" />
   </g>
-  <use transform="translate(.8255 -1.1498)" width="100%" height="100%" xlink:href="#use8669"/>
-  <use id="use5408" transform="translate(3.0038 -.59826)" width="100%" height="100%" xlink:href="#use5406"/>
-  <use id="use5406" transform="translate(5.0321 -.68438)" width="100%" height="100%" xlink:href="#use5402"/>
-  <use transform="translate(.66435 -.46722)" width="100%" height="100%" xlink:href="#use5410"/>
-  <g id="g7997" transform="translate(7.3501 13.657)">
-   <circle cx="21.966" cy="16.448" r="1.8047" fill="#333" stroke="#666" stroke-linecap="round" stroke-linejoin="bevel" stroke-width=".26459"/>
-   <ellipse transform="rotate(-45)" cx="3.8557" cy="26.569" rx="1.6245" ry="1.1054" fill="#666"/>
-   <ellipse transform="rotate(-45)" cx="3.9024" cy="26.436" rx="1.2374" ry=".84201" fill="#4d4d4d"/>
+  <g
+     transform="rotate(5.2949 234.33 9.8219)"
+     id="g90">
+    <g
+       id="g4919"
+       transform="matrix(.47809 0 0 .47809 7.9037 24.31)">
+      <circle
+         cx="21.966"
+         cy="16.448"
+         r="1.8047"
+         fill="#999"
+         stroke="#ccc"
+         stroke-linecap="round"
+         stroke-linejoin="bevel"
+         stroke-width=".26459"
+         id="circle20"
+         style="stroke-width:0.26453572;stroke-miterlimit:4;stroke-dasharray:none;stroke:none" />
+      <ellipse
+         transform="rotate(-45)"
+         cx="3.8886473"
+         cy="26.405457"
+         rx="1.2525702"
+         ry="0.85231829"
+         fill="#cccccc"
+         id="ellipse22"
+         style="stroke-width:0.77105" />
+      <ellipse
+         transform="rotate(-45)"
+         cx="3.8455076"
+         cy="26.107677"
+         rx="0.46403"
+         ry="0.31575"
+         fill="#ffffff"
+         id="ellipse24" />
+    </g>
+    <use
+       transform="translate(0.61129083,-1.2936596)"
+       width="100%"
+       height="100%"
+       xlink:href="#use8669"
+       id="use27"
+       x="0"
+       y="0" />
+    <use
+       id="use5408"
+       transform="translate(2.4669128,-0.87435942)"
+       width="100%"
+       height="100%"
+       xlink:href="#use5406"
+       x="0"
+       y="0" />
+    <use
+       id="use5406"
+       transform="translate(5.1335751,-0.75703454)"
+       width="100%"
+       height="100%"
+       xlink:href="#use5402"
+       x="0"
+       y="0" />
+    <use
+       transform="translate(0.66435,-0.46722)"
+       width="100%"
+       height="100%"
+       xlink:href="#use5410"
+       id="use31"
+       x="0"
+       y="0" />
+    <g
+       id="g7997"
+       transform="translate(7.3501 13.657)">
+      <circle
+         cx="21.966"
+         cy="16.448"
+         r="1.8047"
+         fill="#333"
+         stroke="#666"
+         stroke-linecap="round"
+         stroke-linejoin="bevel"
+         stroke-width=".26459"
+         id="circle33"
+         style="stroke-width:0.26458553;stroke-miterlimit:4;stroke-dasharray:none;stroke:none" />
+      <ellipse
+         transform="rotate(-45)"
+         cx="3.9287343"
+         cy="26.601707"
+         rx="1.3473929"
+         ry="0.91684091"
+         fill="#666"
+         id="ellipse35"
+         style="fill:#666666;fill-opacity:1;stroke-width:0.82942" />
+    </g>
+    <g
+       id="use7823"
+       transform="translate(-2.3618 14.602)">
+      <circle
+         cx="21.966"
+         cy="16.448"
+         r="1.8047"
+         fill="#333"
+         stroke="#666"
+         stroke-linecap="round"
+         stroke-linejoin="bevel"
+         stroke-width=".26459"
+         id="circle40"
+         style="stroke-width:0;stroke-miterlimit:4;stroke-dasharray:none;stroke:none;stroke-opacity:1" />
+      <ellipse
+         transform="rotate(-45)"
+         cx="3.9206903"
+         cy="26.554871"
+         rx="1.3473929"
+         ry="0.91684091"
+         fill="#666666"
+         id="ellipse42"
+         style="stroke-width:0.82942" />
+      <ellipse
+         transform="rotate(-45)"
+         cx="3.8845339"
+         cy="26.15377"
+         rx="0.46403"
+         ry="0.31575"
+         fill="#b2b2b2"
+         id="ellipse44" />
+    </g>
+    <use
+       transform="translate(-2.1260772,0.22118522)"
+       width="100%"
+       height="100%"
+       xlink:href="#use5416"
+       id="use47"
+       x="0"
+       y="0" />
+    <use
+       id="use5414"
+       transform="translate(-2.0627863,-0.29152639)"
+       width="100%"
+       height="100%"
+       xlink:href="#use5412"
+       x="0"
+       y="0" />
+    <use
+       transform="translate(-5.4304 -2.6189)"
+       width="100%"
+       height="100%"
+       xlink:href="#g7997"
+       id="use50" />
+    <use
+       transform="translate(-9.9919 -2.2059)"
+       width="100%"
+       height="100%"
+       xlink:href="#g7997"
+       id="use72" />
+    <g
+       transform="translate(-4.4577 9.7582)"
+       id="g80">
+      <circle
+         cx="21.966"
+         cy="16.448"
+         r="1.8047"
+         fill="#cb0101"
+         stroke="#f33"
+         stroke-linecap="round"
+         stroke-linejoin="bevel"
+         stroke-width=".26459"
+         id="circle74"
+         style="stroke-width:0;stroke-miterlimit:4;stroke-dasharray:none;stroke:none" />
+      <ellipse
+         transform="rotate(-45)"
+         cx="3.9127638"
+         cy="26.418859"
+         rx="1.3473929"
+         ry="0.91684085"
+         fill="#ff3333"
+         id="ellipse76"
+         style="stroke-width:0.82942" />
+      <ellipse
+         transform="rotate(-45)"
+         cx="3.8971076"
+         cy="26.040068"
+         rx="0.46403"
+         ry="0.31575"
+         fill="#ffffff"
+         id="ellipse78" />
+    </g>
+    <use
+       transform="translate(4.805 -.61781)"
+       width="100%"
+       height="100%"
+       xlink:href="#use7823"
+       id="use82" />
+    <use
+       transform="translate(2.1359249,0.53305454)"
+       width="100%"
+       height="100%"
+       xlink:href="#use5406"
+       id="use84"
+       x="0"
+       y="0" />
+    <use
+       transform="translate(3.1004 -.14827)"
+       width="100%"
+       height="100%"
+       xlink:href="#use5402"
+       id="use86" />
+    <use
+       id="use5402"
+       transform="translate(4.514 -.24045)"
+       width="100%"
+       height="100%"
+       xlink:href="#g4919" />
+    <use
+       id="use8669"
+       transform="translate(1.8564 .44807)"
+       width="100%"
+       height="100%"
+       xlink:href="#g4919" />
+    <use
+       x="0"
+       y="0"
+       xlink:href="#use7823"
+       id="use1083"
+       transform="translate(2.0924723,-5.2785285)"
+       width="100%"
+       height="100%" />
+    <use
+       id="use5416"
+       transform="translate(-2.9206428,0.21023519)"
+       width="100%"
+       height="100%"
+       xlink:href="#use5414"
+       x="0"
+       y="0" />
+    <use
+       x="0"
+       y="0"
+       xlink:href="#use1083"
+       id="use1215"
+       transform="translate(4.7117758,-0.25866198)"
+       width="100%"
+       height="100%" />
+    <use
+       id="use5412"
+       transform="translate(-1.7512937,-2.7237541)"
+       width="100%"
+       height="100%"
+       xlink:href="#use5410"
+       x="0"
+       y="0" />
+    <use
+       x="0"
+       y="0"
+       xlink:href="#use1215"
+       id="use869"
+       transform="translate(2.4708063,1.9036005)"
+       width="100%"
+       height="100%" />
+    <use
+       id="use5410"
+       transform="translate(-1.0496879,-3.202946)"
+       width="100%"
+       height="100%"
+       xlink:href="#use5408"
+       x="0"
+       y="0" />
   </g>
-  <g id="use7823" transform="translate(-2.3618 14.602)">
-   <circle cx="21.966" cy="16.448" r="1.8047" fill="#333" stroke="#666" stroke-linecap="round" stroke-linejoin="bevel" stroke-width=".26459"/>
-   <ellipse transform="rotate(-45)" cx="3.8557" cy="26.569" rx="1.6245" ry="1.1054" fill="#666"/>
-   <ellipse transform="rotate(-45)" cx="3.8531" cy="26.086" rx=".46403" ry=".31575" fill="#b2b2b2"/>
-  </g>
-  <use transform="translate(-2.1167 .52917)" width="100%" height="100%" xlink:href="#use5416"/>
-  <use id="use5414" transform="translate(-2.1167 .52917)" width="100%" height="100%" xlink:href="#use5412"/>
-  <use transform="translate(-5.4304 -2.6189)" width="100%" height="100%" xlink:href="#g7997"/>
-  <g transform="translate(-.26084 9.3402)">
-   <circle cx="21.966" cy="16.448" r="1.8047" fill="#333" stroke="#666" stroke-linecap="round" stroke-linejoin="bevel" stroke-width=".26459"/>
-   <ellipse transform="rotate(-45)" cx="3.8557" cy="26.569" rx="1.6245" ry="1.1054" fill="#666"/>
-   <ellipse transform="rotate(-45)" cx="3.8531" cy="26.086" rx=".46403" ry=".31575" fill="#b2b2b2"/>
-  </g>
-  <g id="use5310" transform="translate(4.4151 9.0174)">
-   <circle cx="21.966" cy="16.448" r="1.8047" fill="#333" stroke="#666" stroke-linecap="round" stroke-linejoin="bevel" stroke-width=".26459"/>
-   <ellipse transform="rotate(-45)" cx="3.8557" cy="26.569" rx="1.6245" ry="1.1054" fill="#666"/>
-   <ellipse transform="rotate(-45)" cx="3.8531" cy="26.086" rx=".46403" ry=".31575" fill="#b2b2b2"/>
-  </g>
-  <use transform="translate(2.5143 1.9891)" width="100%" height="100%" xlink:href="#use5310"/>
-  <use id="use5410" transform="translate(-1.4851 -3.5517)" width="100%" height="100%" xlink:href="#use5408"/>
-  <use id="use5412" transform="translate(-1.9815 -3.6422)" width="100%" height="100%" xlink:href="#use5410"/>
-  <use id="use5416" transform="translate(-2.6459)" width="100%" height="100%" xlink:href="#use5414"/>
-  <use transform="translate(-9.9919 -2.2059)" width="100%" height="100%" xlink:href="#g7997"/>
-  <g transform="translate(-4.4577 9.7582)">
-   <circle cx="21.966" cy="16.448" r="1.8047" fill="#cb0101" stroke="#f33" stroke-linecap="round" stroke-linejoin="bevel" stroke-width=".26459"/>
-   <ellipse transform="rotate(-45)" cx="3.8557" cy="26.569" rx="1.6245" ry="1.1054" fill="#f33"/>
-   <ellipse transform="rotate(-45)" cx="3.8531" cy="26.086" rx=".46403" ry=".31575" fill="#fff"/>
-  </g>
-  <use transform="translate(4.805 -.61781)" width="100%" height="100%" xlink:href="#use7823"/>
-  <use transform="translate(2.2374 .4604)" width="100%" height="100%" xlink:href="#use5406"/>
-  <use transform="translate(3.1004 -.14827)" width="100%" height="100%" xlink:href="#use5402"/>
-  <use id="use5402" transform="translate(4.514 -.24045)" width="100%" height="100%" xlink:href="#g4919"/>
-  <use id="use8669" transform="translate(1.8564 .44807)" width="100%" height="100%" xlink:href="#g4919"/>
- </g>
 </svg>
