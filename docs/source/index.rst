@@ -6,3 +6,4 @@ QimPy Documentation
 
     api
     inputfile
+    tutorials/index
