@@ -1,9 +1,8 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Callable, Optional, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ._wavefunction import Wavefunction
+from typing import Callable, Optional
 
 
 def _randn(x: torch.Tensor) -> torch.Tensor:
@@ -21,8 +20,8 @@ def _randn(x: torch.Tensor) -> torch.Tensor:
             * torch.exp((2j*np.pi) * u[1]))  # Phase
 
 
-def _randomize(self: 'Wavefunction', seed: int = 0, b_start: int = 0,
-               b_stop: Optional[int] = None) -> None:
+def _randomize(self: qp.electrons.Wavefunction, seed: int = 0,
+               b_start: int = 0, b_stop: Optional[int] = None) -> None:
     """Set wavefunction coefficients to bandwidth-limited random numbers.
     This is done reproducibly, regardless of MPI configuration of the run,
     by running a separate xor-shift random number generator with a different
@@ -109,11 +108,11 @@ def _randomize(self: 'Wavefunction', seed: int = 0, b_start: int = 0,
     watch.stop()
 
 
-_RandomizeSelected = Callable[['Wavefunction', torch.Tensor, torch.Tensor,
-                               torch.Tensor, int], None]
+_RandomizeSelected = Callable[['qp.electrons.Wavefunction', torch.Tensor,
+                               torch.Tensor, torch.Tensor, int], None]
 
 
-def _randomize_selected(self: 'Wavefunction', i_spin: torch.Tensor,
+def _randomize_selected(self: qp.electrons.Wavefunction, i_spin: torch.Tensor,
                         i_k: torch.Tensor, i_band: torch.Tensor,
                         seed: int) -> None:
     """Randomize wavefunction coefficients of selected bands.

@@ -1,15 +1,12 @@
 from __future__ import annotations
 import qimpy as qp
 import numpy as np
-from ._optimizable import Optimizable, ConvergenceCheck
 from ._minimize_lbfgs import _lbfgs
 from ._minimize_cg import _cg
-from ._minimize_line import LINE_MINIMIZE
+from ._minimize_line import LINE_MINIMIZE, Vector
 from abc import ABC, abstractmethod
 from collections import namedtuple
-from typing import TypeVar, Generic, Sequence, Dict, NamedTuple, Optional
-
-Vector = TypeVar('Vector', bound=Optimizable)
+from typing import Generic, Sequence, Dict, NamedTuple, Optional
 
 
 class MinimizeState(Generic[Vector]):

@@ -1,16 +1,15 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Tuple, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ..grid import Grid, FieldH
+from typing import Tuple
 
 
 class FieldSymmetrizer:
     """Space group symmetrization of reciprocal-space :class:`FieldH`'s."""
-    grid: 'Grid'
+    grid: qp.grid.Grid
 
-    def __init__(self, grid: 'Grid') -> None:
+    def __init__(self, grid: qp.grid.Grid) -> None:
         """Initialize symmetrization for fields on `grid`."""
         self.grid = grid
         rc = grid.rc
@@ -107,7 +106,7 @@ class FieldSymmetrizer:
         self.phase_conj[:, :, 1][is_conj] *= -1
         qp.log.info(f'Initialized field symmetrization in {len(index)} orbits')
 
-    def __call__(self, v: 'FieldH') -> None:
+    def __call__(self, v: qp.grid.FieldH) -> None:
         """Symmetrize field `v` in-place."""
         grid = self.grid
         watch = qp.utils.StopWatch('FieldH.symmetrize', grid.rc)

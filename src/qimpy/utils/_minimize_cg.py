@@ -1,25 +1,22 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
-from typing import Dict, Tuple, TYPE_CHECKING
-from ._minimize_line import LINE_MINIMIZE
-if TYPE_CHECKING:
-    from ._minimize import Minimize, MinimizeState, Vector
-    from . import ConvergenceCheck
-    from .. import Energy
+from typing import Dict, Tuple
+from ._minimize_line import LINE_MINIMIZE, Vector
 
 
-def _cg(self: 'Minimize[Vector]') -> 'Energy':
+def _cg(self: qp.utils.Minimize[Vector]) -> qp.Energy:
     """Conjugate gradients implementation for `Minimize.minimize`.
     Also supports steepest descents (Gradient method) as a special case."""
     assert self.method in {'cg', 'gradient'}
 
     # Initial energy and gradients:
-    state = qp.utils.MinimizeState['Vector']()
+    state = qp.utils.MinimizeState[Vector]()
     E = self._compute(state, energy_only=False)
     E_prev = 0.
     along_gradient = True  # Whether current search direction is along gradient
-    direction: 'Vector'  #: Search direction (initialized at 0th iteration)
-    g_prev: 'Vector'  #: Previous gradient (initialized at 0th iteration)
+    direction: Vector  #: Search direction (initialized at 0th iteration)
+    g_prev: Vector  #: Previous gradient (initialized at 0th iteration)
     g_prev_used = not ((self.method == 'gradient')
                        or (self.cg_type == 'fletcher-reeves')
                        )  # whether previous gradient used in direction update
@@ -100,9 +97,9 @@ def _cg(self: 'Minimize[Vector]') -> 'Energy':
     return state.energy
 
 
-def _initialize_convergence_checks(self: 'Minimize[Vector]',
-                                   state: 'MinimizeState[Vector]'
-                                   ) -> Dict[str, 'ConvergenceCheck']:
+def _initialize_convergence_checks(self: qp.utils.Minimize[Vector],
+                                   state: qp.utils.MinimizeState[Vector]
+                                   ) -> Dict[str, qp.utils.ConvergenceCheck]:
     """Initialize convergence checkers for energy and `extra_thresholds`."""
     Ename = state.energy.name
     checks = {'d' + Ename: qp.utils.ConvergenceCheck(self.energy_threshold)}
@@ -111,9 +108,9 @@ def _initialize_convergence_checks(self: 'Minimize[Vector]',
     return checks
 
 
-def _check_convergence(self: 'Minimize[Vector]',
-                       state: 'MinimizeState[Vector]', i_iter: int,
-                       checks: Dict[str, 'ConvergenceCheck'],
+def _check_convergence(self: qp.utils.Minimize[Vector],
+                       state: qp.utils.MinimizeState[Vector], i_iter: int,
+                       checks: Dict[str, qp.utils.ConvergenceCheck],
                        E: float, E_prev: float) -> Tuple[float, float, bool]:
     """Check and report convergence progress."""
     # Report convergence progress:

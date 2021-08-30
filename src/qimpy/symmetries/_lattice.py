@@ -1,7 +1,6 @@
+from __future__ import annotations
+import qimpy as qp
 import torch
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from ._symmetries import Symmetries
 
 
 def _get_lattice_point_group(Rbasis: torch.Tensor,
@@ -64,7 +63,7 @@ def _reduce_matrix33(M: torch.Tensor, tolerance: float) -> torch.Tensor:
             return T  # converged
 
 
-def _symmetrize_lattice(self: 'Symmetries',
+def _symmetrize_lattice(self: qp.symmetries.Symmetries,
                         Rbasis: torch.Tensor) -> torch.Tensor:
     """Symmetrize lattice vectors `Rbasis` (3 x 3)"""
     # Compute symmetrized metric:

@@ -1,12 +1,12 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Sequence, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ._symmetries import Symmetries
+from typing import Sequence
 
 
-def _check_grid_shape(self: 'Symmetries', shape: Sequence[int]) -> None:
+def _check_grid_shape(self: qp.symmetries.Symmetries,
+                      shape: Sequence[int]) -> None:
     """Check whether grid dimensions are compatible with symmetries.
 
     Raises
@@ -29,7 +29,7 @@ def _check_grid_shape(self: 'Symmetries', shape: Sequence[int]) -> None:
             f' of symmetries with indices (0-based): {i_sym.tolist()}')
 
 
-def _get_grid_shape(self: 'Symmetries',
+def _get_grid_shape(self: qp.symmetries.Symmetries,
                     shape_min: np.ndarray) -> np.ndarray:
     """Smallest symmetric, FFT-suitable shape >= shape_min."""
 

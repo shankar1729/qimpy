@@ -1,20 +1,19 @@
+from __future__ import annotations
 import h5py
 from mpi4py import MPI
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Sequence, Tuple, Any, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ._runconfig import RunConfig
+from typing import Sequence, Tuple, Any
 
 
 class Checkpoint(h5py.File):
     """Helper for checkpoint load/save from HDF5 files."""
     __slots__ = ('rc', 'writable')
-    rc: 'RunConfig'  #: Current run configuration
+    rc: qp.utils.RunConfig  #: Current run configuration
     writable: bool  #: Whether file has been opened for writing
 
-    def __init__(self, filename: str, *, rc: 'RunConfig',
+    def __init__(self, filename: str, *, rc: qp.utils.RunConfig,
                  mode: str = 'r') -> None:
         super().__init__(filename, mode, driver='mpio', comm=rc.comm)
         self.rc = rc

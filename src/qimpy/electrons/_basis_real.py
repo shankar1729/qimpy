@@ -1,9 +1,7 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from ._basis import Basis
 
 
 class BasisReal:
@@ -11,7 +9,7 @@ class BasisReal:
     __slots__ = ('basis', 'iz0', 'iz0_conj', 'iz0_conj_self',
                  'iz0_mine_local', 'iz0_mine_conj', 'nz0_prev',
                  'Gweight_mine')
-    basis: 'Basis'
+    basis: qp.electrons.Basis
     iz0: torch.Tensor  #: Index of Gz = 0 points
     iz0_conj: torch.Tensor  #: Hermitian conjugate points of `iz0`
     iz0_conj_self: torch.Tensor  #: Conjugate indices within Gz = 0 set
@@ -20,7 +18,7 @@ class BasisReal:
     nz0_prev: np.ndarray  #: Number of Gz = 0 entries before this process
     Gweight_mine: torch.Tensor  #: Weight of local plane waves
 
-    def __init__(self, basis: 'Basis'):
+    def __init__(self, basis: qp.electrons.Basis):
         """Initialize extra indexing required for real wavefunctions,
         if needed."""
         assert basis.real_wavefunctions and basis.kpoints.division.n_mine

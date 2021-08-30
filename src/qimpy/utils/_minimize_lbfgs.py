@@ -1,15 +1,10 @@
+from __future__ import annotations
 import qimpy as qp
 from collections import deque
 from dataclasses import dataclass
-from typing import TypeVar, Generic, Deque, TYPE_CHECKING
-from ._optimizable import Optimizable, ConvergenceCheck
-from ._minimize_line import LINE_MINIMIZE
+from typing import TypeVar, Generic, Deque
+from ._minimize_line import LINE_MINIMIZE, Vector
 from ._minimize_cg import _initialize_convergence_checks, _check_convergence
-if TYPE_CHECKING:
-    from ._minimize import Minimize
-    from .. import Energy
-
-Vector = TypeVar('Vector', bound=Optimizable)
 
 
 @dataclass
@@ -20,12 +15,12 @@ class _HistoryEntry(Generic[Vector]):
     rho: float  #: Inverse state-gradient overlap, 1/(s.y)
 
 
-def _lbfgs(self: 'Minimize[Vector]') -> 'Energy':
+def _lbfgs(self: qp.utils.Minimize[Vector]) -> qp.Energy:
     """L-BFGS implementation for `Minimize.minimize`"""
     assert self.method == 'l-bfgs'
 
     # Initial energy and gradients:
-    state = qp.utils.MinimizeState['Vector']()
+    state = qp.utils.MinimizeState[Vector]()
     E = self._compute(state, energy_only=False)
     E_prev = 0.
     line_minimize = LINE_MINIMIZE[self.line_minimize]

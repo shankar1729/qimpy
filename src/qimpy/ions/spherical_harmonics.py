@@ -1,12 +1,12 @@
 """Calculate spherical harmonics and their product expansions."""
+from __future__ import annotations
+import qimpy.ions._spherical_harmonics_data as shdata
+import torch
+from typing import List, Tuple, Dict, Optional
+
 # List exported symbols for doc generation
 __all__ = ['L_MAX', 'L_MAX_HLF', 'get_harmonics']
 
-import qimpy.ions._spherical_harmonics_data as shdata
-import torch
-from typing import List, Tuple, Dict, Optional, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ..utils import RunConfig
 
 # Versions of shdata converted to torch.Tensors on appropriate device
 _YLM_RECUR: List[torch.Tensor] = []

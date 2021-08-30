@@ -1,13 +1,11 @@
+from __future__ import annotations
+import qimpy as qp
 import torch
-from typing import Tuple, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ._symmetries import Symmetries
-    from ..lattice import Lattice
-    from ..ions import Ions
+from typing import Tuple
 
 
 def _get_space_group(lattice_sym: torch.Tensor,
-                     lattice: 'Lattice', ions: 'Ions',
+                     lattice: qp.lattice.Lattice, ions: qp.ions.Ions,
                      tolerance: float) -> Tuple[torch.Tensor, torch.Tensor,
                                                 torch.Tensor]:
     """Find space group given point group `lattice_sym` and `ions`. Accuracy
@@ -110,7 +108,7 @@ def _get_space_group(lattice_sym: torch.Tensor,
     return rot, trans, ion_map
 
 
-def _symmetrize_positions(self: 'Symmetries',
+def _symmetrize_positions(self: qp.symmetries.Symmetries,
                           positions: torch.Tensor) -> torch.Tensor:
     """Symmetrize ionic `positions` (n_ions x 3)"""
     pos_rot = positions @ self.rot.transpose(-2, -1) + self.trans[:, None]

@@ -1,12 +1,10 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from ._wavefunction import Wavefunction
 
 
-def _split_bands(self: 'Wavefunction') -> 'Wavefunction':
+def _split_bands(self: qp.electrons.Wavefunction) -> qp.electrons.Wavefunction:
     """Return wavefunction split by bands, bringing all basis coefficients of
     each band together on some process. Note that the result may be a view if
     there is only one process, or if the wavefunction is already split by bands
@@ -46,7 +44,7 @@ def _split_bands(self: 'Wavefunction') -> 'Wavefunction':
                                      band_division=band_division)
 
 
-def _split_basis(self: 'Wavefunction') -> 'Wavefunction':
+def _split_basis(self: qp.electrons.Wavefunction) -> qp.electrons.Wavefunction:
     """Return wavefunction split by basis, bringing all bands of each basis
     coefficient together on some process. Note that the result may be a view if
     there is only one process, or if the wavefunction is already split by basis

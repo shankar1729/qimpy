@@ -1,16 +1,13 @@
+from __future__ import annotations
 import xml.etree.ElementTree as ET
 import qimpy as qp
 import numpy as np
 import torch
 import re
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from ._pseudopotential import Pseudopotential
-    from ..utils import RunConfig
 
 
-def _read_upf(self: 'Pseudopotential', filename: str, rc: 'RunConfig'):
+def _read_upf(self: qp.ions.Pseudopotential, filename: str,
+              rc: qp.utils.RunConfig) -> None:
     """Read a UPF pseudopotential.
     Note that only norm-conserving UPF files are currently supported.
 

@@ -1,15 +1,10 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
 import pathlib
 import re
-from typing import Optional, Union, List, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ..utils import RunConfig
-    from ._pseudopotential import Pseudopotential
-    from .._system import System
-    from ..grid import Grid, FieldR, FieldH
-    from ..electrons import Wavefunction, Basis
+from typing import Optional, Union, List
 
 
 class Ions(qp.Constructable):
@@ -23,16 +18,17 @@ class Ions(qp.Constructable):
     n_ions_type: List[int]  #: number of ions of each type
     symbols: List[str]  #: symbol for each ion type
     slices: List[slice]  #: slice to get each ion type
-    pseudopotentials: List['Pseudopotential']  #: pseudopotential for each type
+    pseudopotentials: List[qp.ions.Pseudopotential] \
+        #: pseudopotential for each type
     positions: torch.Tensor  #: fractional positions of each ion (n_ions x 3)
     types: torch.Tensor  #: type of each ion (n_ions, int)
     M_initial: Optional[torch.Tensor]  #: initial magnetic moment for each ion
     Z: torch.Tensor  #: charge of each ion type (n_types, float)
     Z_tot: float  #: total ionic charge
-    rho: 'FieldH'  #: ionic charge density profile (uses coulomb.ion_width)
-    Vloc: 'FieldH'  #: local potential due to ions (including from rho)
-    n_core: 'FieldH'  #: partial core electronic density (for inclusion in XC)
-    beta: 'Wavefunction'  #: pseudopotential projectors
+    rho: qp.grid.FieldH  #: ionic charge density (uses coulomb.ion_width)
+    Vloc: qp.grid.FieldH  #: local potential due to ions (including from rho)
+    n_core: qp.grid.FieldH  #: partial core electronic density (for XC)
+    beta: qp.electrons.Wavefunction  #: pseudopotential projectors
     beta_version: int  #: version of `beta` to invalidate cached projections
     D_all: torch.Tensor  #: nonlocal pseudopotential matrix (all atoms)
 
@@ -210,7 +206,7 @@ class Ions(qp.Constructable):
                 f'- [{self.symbols[types[i_ion]]}, {position[0]:11.8f},'
                 f' {position[1]:11.8f}, {position[2]:11.8f}{attrib_str}]')
 
-    def update(self, system: 'System') -> None:
+    def update(self, system: qp.System) -> None:
         """Update ionic potentials, projectors and energy components.
         The grids used for the potentials are derived from system,
         and the energy components are stored within system.E.
@@ -267,8 +263,8 @@ class Ions(qp.Constructable):
         """
         return qp.utils.cis((-2*np.pi) * (iG @ self.positions[atom_slice].T))
 
-    def _get_projectors(self, basis: 'Basis',
-                        get_psi: bool = False) -> 'Wavefunction':
+    def _get_projectors(self, basis: qp.electrons.Basis,
+                        get_psi: bool = False) -> qp.electrons.Wavefunction:
         """Get projectors corresponding to specified `basis`.
         If get_psi is True, get atomic orbitals instead. This mode is only for
         internal use by :meth:`get_atomic_orbitals`, which does additional
@@ -314,7 +310,8 @@ class Ions(qp.Constructable):
         proj[basis.pad_index_mine] = 0.  # project out padded entries
         return qp.electrons.Wavefunction(basis, coeff=proj)
 
-    def get_atomic_orbitals(self, basis: 'Basis') -> 'Wavefunction':
+    def get_atomic_orbitals(self, basis: qp.electrons.Basis
+                            ) -> qp.electrons.Wavefunction:
         """Get atomic orbitals (across all species) for specified `basis`."""
         psi = self._get_projectors(basis, get_psi=True)
         n_spinor = basis.n_spinor
@@ -395,8 +392,8 @@ class Ions(qp.Constructable):
                 self.D_all[slice_cur, slice_cur] = D_nlms
                 i_proj_start = i_proj_stop
 
-    def get_atomic_density(self, grid: 'Grid',
-                           M_tot: torch.Tensor) -> 'FieldH':
+    def get_atomic_density(self, grid: qp.grid.Grid,
+                           M_tot: torch.Tensor) -> qp.grid.FieldH:
         """Get atomic reference density (for LCAO) on `grid`.
         The magnetization mode and overall magnitude is set by `M_tot`."""
         from .quintic_spline import Interpolator

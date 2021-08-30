@@ -1,12 +1,9 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
 from ._read_upf import _read_upf
-from typing import Optional, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ._radial_function import RadialFunction
-    from ._pseudo_quantum_numbers import PseudoQuantumNumbers
-    from ..utils import RunConfig
+from typing import Optional
 
 
 class Pseudopotential:
@@ -17,7 +14,7 @@ class Pseudopotential:
                  'r', 'dr', 'rho_atom', 'n_core', 'Vloc', 'ion_width',
                  'beta', 'psi', 'is_relativistic', 'j_beta', 'j_psi',
                  'eig_psi', 'D', 'Gmax', 'pqn_beta', 'pqn_psi')
-    rc: 'RunConfig'
+    rc: qp.utils.RunConfig
     element: str  #: Chemical symbol of element
     atomic_number: int  #: Atomic number of element
     is_paw: bool  #: Whether this is a PAW pseudopotential
@@ -25,12 +22,12 @@ class Pseudopotential:
     l_max: int  #: Maximum angular momentum quantum number
     r: torch.Tensor  #: Radial grid
     dr: torch.Tensor  #: Radial grid spacings / integration weights
-    rho_atom: 'RadialFunction'  #: Atomic reference electron density
-    n_core: 'RadialFunction'  #: Partial core density
-    Vloc: 'RadialFunction'  #: Local potential (short-ranged part)
+    rho_atom: qp.ions.RadialFunction  #: Atomic reference electron density
+    n_core: qp.ions.RadialFunction  #: Partial core density
+    Vloc: qp.ions.RadialFunction  #: Local potential (short-ranged part)
     ion_width: float  #: Gaussian width to extract long-ranged part of Vloc
-    beta: 'RadialFunction'  #: Nonlocal projectors
-    psi: 'RadialFunction'  #: Atomic orbitals
+    beta: qp.ions.RadialFunction  #: Nonlocal projectors
+    psi: qp.ions.RadialFunction  #: Atomic orbitals
     is_relativistic: bool  #: Whether this is a relativistic pseudopotential
     j_beta: Optional[torch.Tensor]  #: l+s of projectors (if relativistic)
     j_psi: Optional[torch.Tensor]  #: l+s of atomic orbitals (if relativistic)
@@ -38,13 +35,13 @@ class Pseudopotential:
     D: torch.Tensor  #: Descreened nonlocal pseudopotential matrix
 
     Gmax: float  #: Current reciprocal space extent of radial functions
-    pqn_beta: 'PseudoQuantumNumbers'  #: quantum numbers for projectors
-    pqn_psi: 'PseudoQuantumNumbers'  #: quantum numbers for orbitals
+    pqn_beta: qp.ions.PseudoQuantumNumbers  #: quantum numbers for projectors
+    pqn_psi: qp.ions.PseudoQuantumNumbers  #: quantum numbers for orbitals
 
     # Methods defined out of class:
     read_upf = _read_upf
 
-    def __init__(self, filename: str, rc: 'RunConfig') -> None:
+    def __init__(self, filename: str, rc: qp.utils.RunConfig) -> None:
         """Read pseudopotential from file.
 
         Parameters

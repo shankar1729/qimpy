@@ -1,13 +1,11 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from ._electrons import Electrons
-    from ._wavefunction import Wavefunction
 
 
-def _hamiltonian(self: 'Electrons', C: 'Wavefunction') -> 'Wavefunction':
+def _hamiltonian(self: qp.electrons.Electrons, C: qp.electrons.Wavefunction
+                 ) -> qp.electrons.Wavefunction:
     """Apply electronic Hamiltonian on wavefunction `C`"""
     basis = C.basis
     ions = basis.ions

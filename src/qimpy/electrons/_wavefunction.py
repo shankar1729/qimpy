@@ -1,3 +1,4 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
@@ -8,16 +9,13 @@ from ._wavefunction_ops import _norm, _band_norm, _band_ke, _band_spin, \
     _dot, _dot_O, _overlap, _matmul, _orthonormalize, \
     _mul, _imul, _add, _iadd, _sub, _isub, \
     _getitem, _setitem, _cat, _constrain
-from typing import Callable, Optional, Union, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ..utils import TaskDivision, Checkpoint
-    from ._basis import Basis
+from typing import Callable, Optional, Union
 
 
 class Wavefunction:
     """Electronic wavefunctions including coefficients and projections"""
     __slots__ = ('basis', 'coeff', 'band_division', '_proj', '_proj_version')
-    basis: 'Basis'  #: Corresponding basis
+    basis: qp.electrons.Basis  #: Corresponding basis
 
     #: Wavefunction coefficients (n_spins x nk x n_bands x n_spinor x n_basis)
     coeff: torch.Tensor
@@ -31,10 +29,11 @@ class Wavefunction:
 
     #: If present, wavefunctions are split along bands instead of
     #: along the 'home position' of split along basis.
-    band_division: Optional['TaskDivision']
+    band_division: Optional[qp.utils.TaskDivision]
 
-    def __init__(self, basis: 'Basis', *, coeff: Optional[torch.Tensor] = None,
-                 band_division: Optional['TaskDivision'] = None,
+    def __init__(self, basis: qp.electrons.Basis, *,
+                 coeff: Optional[torch.Tensor] = None,
+                 band_division: Optional[qp.utils.TaskDivision] = None,
                  n_bands: int = 0, n_spins: int = 0, n_spinor: int = 0
                  ) -> None:
         """Initialize wavefunctions of specified size or with given
@@ -113,7 +112,7 @@ class Wavefunction:
         """Check whether cached projections are still valid."""
         return self._proj_version == self.basis.ions.beta_version
 
-    def zeros_like(self, n_bands: int = 0) -> 'Wavefunction':
+    def zeros_like(self, n_bands: int = 0) -> qp.electrons.Wavefunction:
         """Create a zero Wavefunction similar to the present one.
         Optionally override the number of bands with `n_bands`."""
         n_bands = (n_bands if n_bands else self.coeff.shape[2])
@@ -121,7 +120,7 @@ class Wavefunction:
                             n_bands=n_bands, n_spins=self.coeff.shape[0],
                             n_spinor=self.coeff.shape[3])
 
-    def clone(self) -> 'Wavefunction':
+    def clone(self) -> qp.electrons.Wavefunction:
         """Create an independent copy (not a view / reference)."""
         result = Wavefunction(self.basis, coeff=self.coeff.clone().detach(),
                               band_division=self.band_division)
@@ -135,7 +134,7 @@ class Wavefunction:
         """Get number of bands in wavefunction"""
         return self.coeff.shape[2]
 
-    def read(self, checkpoint: 'Checkpoint', path: str) -> int:
+    def read(self, checkpoint: qp.utils.Checkpoint, path: str) -> int:
         """Read wavefunctions from `path` in `checkpoint`.
         Return number of bands read."""
         dset = checkpoint[path]
@@ -156,7 +155,7 @@ class Wavefunction:
         self._proj_invalidate()
         return n_bands_in
 
-    def write(self, checkpoint: 'Checkpoint', path: str) -> None:
+    def write(self, checkpoint: qp.utils.Checkpoint, path: str) -> None:
         """Write wavefunctions to `path` in `checkpoint`."""
         basis = self.basis
         k_division = basis.kpoints.division
@@ -174,8 +173,8 @@ class Wavefunction:
         checkpoint.write_slice_complex(dset, offset,
                                        self.coeff[..., :basis_n_mine])
 
-    def randomize(self: 'Wavefunction', seed: int = 0, b_start: int = 0,
-                  b_stop: Optional[int] = None) -> None:
+    def randomize(self: qp.electrons.Wavefunction, seed: int = 0,
+                  b_start: int = 0, b_stop: Optional[int] = None) -> None:
         _randomize(self, seed, b_start, b_stop)
 
     # Function types for checking imported methods:

@@ -1,23 +1,21 @@
 """Internal interface for XC functionals."""
-# List exported symbols for doc generation
-__all__ = ['Functional', 'LIBXC_AVAILABLE', 'get_libxc_functional_names',
-           'FunctionalsLibxc']
-
+from __future__ import annotations
 from abc import abstractmethod, ABC
 import qimpy as qp
 import numpy as np
 import torch
+from functools import lru_cache
+from typing import List, Set, Dict
+
+# List exported symbols for doc generation
+__all__ = ['Functional', 'LIBXC_AVAILABLE', 'get_libxc_functional_names',
+           'FunctionalsLibxc']
 
 try:
     import pylibxc
     LIBXC_AVAILABLE: bool = True  #: Whether Libxc is available.
 except ImportError:
     LIBXC_AVAILABLE = False
-
-from functools import lru_cache
-from typing import List, Set, Dict, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ...utils import RunConfig
 
 
 class Functional(ABC):
@@ -193,10 +191,10 @@ class _FunctionalLibxc:
 class FunctionalsLibxc(Functional):
     """Evaluate one or more functionals from Libxc together."""
     __slots__ = ('rc', '_functionals')
-    rc: 'RunConfig'
+    rc: qp.utils.RunConfig
     _functionals: List[_FunctionalLibxc]  #: Individual Libxc functionals
 
-    def __init__(self, rc: 'RunConfig', spin_polarized: bool,
+    def __init__(self, rc: qp.utils.RunConfig, spin_polarized: bool,
                  libxc_names: Dict[str, float]) -> None:
         """Initialize from Libxc names with scale factors for each."""
         assert LIBXC_AVAILABLE

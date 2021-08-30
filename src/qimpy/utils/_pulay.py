@@ -1,12 +1,11 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 from ._optimizable import Optimizable, ConvergenceCheck
 from collections import deque
 from abc import ABC, abstractmethod
-from typing import TypeVar, Generic, Sequence, Dict, Deque, Optional, \
-    TYPE_CHECKING
-if TYPE_CHECKING:
-    from .._energy import Energy
+from typing import TypeVar, Generic, Sequence, Dict, Deque, Optional
+
 
 Variable = TypeVar('Variable', bound=Optimizable)
 
@@ -75,7 +74,7 @@ class Pulay(Generic[Variable], ABC, qp.Constructable):
 
     @property  # type: ignore
     @abstractmethod
-    def energy(self) -> 'Energy':
+    def energy(self) -> qp.Energy:
         """Current energy components of the system (read-only)."""
 
     @property  # type: ignore

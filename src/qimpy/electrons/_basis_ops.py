@@ -1,14 +1,11 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from ._basis import Basis
-    from ._wavefunction import Wavefunction
-    from ..grid import FieldR, FieldH
 
 
-def _apply_ke(self: 'Basis', C: 'Wavefunction') -> 'Wavefunction':
+def _apply_ke(self: qp.electrons.Basis, C: qp.electrons.Wavefunction
+              ) -> qp.electrons.Wavefunction:
     'Apply kinetic energy (KE) operator to wavefunction `C`'
     watch = qp.utils.StopWatch('Basis.apply_ke', self.rc)
     basis_slice = (slice(None) if C.band_division else self.mine)
@@ -18,8 +15,9 @@ def _apply_ke(self: 'Basis', C: 'Wavefunction') -> 'Wavefunction':
                                      band_division=C.band_division)
 
 
-def _apply_potential(self: 'Basis', V: 'FieldH',
-                     C: 'Wavefunction') -> 'Wavefunction':
+def _apply_potential(self: qp.electrons.Basis, V: qp.grid.FieldH,
+                     C: qp.electrons.Wavefunction
+                     ) -> qp.electrons.Wavefunction:
     'Apply potential `V` to wavefunction `C`'
     Vdata_in = (~(V.to(self.grid))).data  # change to real space on basis grid
     n_densities = Vdata_in.shape[0]
@@ -88,8 +86,8 @@ def _apply_potential(self: 'Basis', V: 'FieldH',
     return (VC.split_basis() if need_move else VC)
 
 
-def _collect_density(self: 'Basis', C: 'Wavefunction', f: torch.Tensor,
-                     need_Mvec: bool) -> 'FieldR':
+def _collect_density(self: qp.electrons.Basis, C: qp.electrons.Wavefunction,
+                     f: torch.Tensor, need_Mvec: bool) -> qp.grid.FieldR:
     r"""Collect density contributions given wavefunction `C` and occupations
     `f`. The result is in real-space on `basis.grid`.
     If the wavefunction has two spin channels, the two components of
