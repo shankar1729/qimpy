@@ -1,15 +1,11 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from qimpy.utils import BufferView
-from typing import Optional, TypeVar, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ..utils import TaskDivision, RunConfig
-    from ._grid import Grid
-    from ._field import Field, FieldR, FieldC, FieldH, FieldG
+from typing import Optional, TypeVar
 
 
-def scatter(v: torch.Tensor, split_out: 'TaskDivision',
+def scatter(v: torch.Tensor, split_out: qp.utils.TaskDivision,
             dim: int) -> torch.Tensor:
     """Return the contents of v, changed from not-split (i.e. fully available
      on all processes) to split based on split_out along dimension dim."""
@@ -18,8 +14,8 @@ def scatter(v: torch.Tensor, split_out: 'TaskDivision',
              + (slice(split_out.i_start, split_out.i_stop),))]
 
 
-def gather(v: torch.Tensor, split_in: 'TaskDivision', comm: qp.MPI.Comm,
-           rc: 'RunConfig', dim: int) -> torch.Tensor:
+def gather(v: torch.Tensor, split_in: qp.utils.TaskDivision, comm: qp.MPI.Comm,
+           rc: qp.utils.RunConfig, dim: int) -> torch.Tensor:
     """Return the contents of v, changed from split based on split_in on
      communicator comm and dimension dim, to not-split i.e. fully available
      on all processes."""
@@ -32,15 +28,17 @@ def gather(v: torch.Tensor, split_in: 'TaskDivision', comm: qp.MPI.Comm,
                           dtype=v.dtype, device=v.device)
     recv_prev = split_in.n_prev * prod_rest
     comm.Allgatherv(
-        (BufferView(sendbuf), split_in.n_mine * prod_rest, 0, mpi_type),
-        (BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1], mpi_type))
+        (qp.utils.BufferView(sendbuf), split_in.n_mine * prod_rest, 0,
+         mpi_type),
+        (qp.utils.BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1],
+         mpi_type))
     # Restore dimension order of output (if necessary):
     return (recvbuf.swapaxes(0, dim) if dim else recvbuf)
 
 
-def redistribute(v: torch.Tensor, split_in: 'TaskDivision',
-                 split_out: 'TaskDivision', comm: qp.MPI.Comm,
-                 rc: 'RunConfig', dim: int) -> torch.Tensor:
+def redistribute(v: torch.Tensor, split_in: qp.utils.TaskDivision,
+                 split_out: qp.utils.TaskDivision, comm: qp.MPI.Comm,
+                 rc: qp.utils.RunConfig, dim: int) -> torch.Tensor:
     """Return the contents of v, changed from split based on split_in to split
     based on split_out, on the same communicator comm and dimension dim."""
     # Bring split dimension to outermost (if necessary):
@@ -57,16 +55,20 @@ def redistribute(v: torch.Tensor, split_in: 'TaskDivision',
     recvbuf = torch.empty((split_out.n_mine,) + sendbuf.shape[1:],
                           dtype=v.dtype, device=v.device)
     comm.Alltoallv(
-        (BufferView(sendbuf), np.diff(send_prev), send_prev[:-1], mpi_type),
-        (BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1], mpi_type))
+        (qp.utils.BufferView(sendbuf), np.diff(send_prev), send_prev[:-1],
+         mpi_type),
+        (qp.utils.BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1],
+         mpi_type))
     # Restore dimension order of output (if necessary):
     return (recvbuf.swapaxes(0, dim) if dim else recvbuf)
 
 
 def fix_split(v: torch.Tensor,
-              split_in: 'TaskDivision', comm_in: Optional[qp.MPI.Comm],
-              split_out: 'TaskDivision', comm_out: Optional[qp.MPI.Comm],
-              rc: 'RunConfig', dim: int) -> torch.Tensor:
+              split_in: qp.utils.TaskDivision,
+              comm_in: Optional[qp.MPI.Comm],
+              split_out: qp.utils.TaskDivision,
+              comm_out: Optional[qp.MPI.Comm],
+              rc: qp.utils.RunConfig, dim: int) -> torch.Tensor:
     """Fix how v is split along dimension dim, from split_in on comm_in
     at input to split_out on comm_out at output. One or more communicators
     could be None, corresponding to no split in the data at input and/or
@@ -85,11 +87,11 @@ def fix_split(v: torch.Tensor,
             return redistribute(v, split_in, split_out, comm_in, rc, dim)
 
 
-FieldTypeReal = TypeVar('FieldTypeReal', 'FieldR', 'FieldC')
-FieldTypeRecip = TypeVar('FieldTypeRecip', 'FieldH', 'FieldG')
+FieldTypeReal = TypeVar('FieldTypeReal', 'qp.grid.FieldR', 'qp.grid.FieldC')
+FieldTypeRecip = TypeVar('FieldTypeRecip', 'qp.grid.FieldH', 'qp.grid.FieldG')
 
 
-def _change_real(v: FieldTypeReal, grid_out: 'Grid') -> FieldTypeReal:
+def _change_real(v: FieldTypeReal, grid_out: qp.grid.Grid) -> FieldTypeReal:
     """Switch real-space field to grid_out"""
     grid_in = v.grid
     assert grid_in.shape == grid_out.shape
@@ -98,7 +100,7 @@ def _change_real(v: FieldTypeReal, grid_out: 'Grid') -> FieldTypeReal:
     return v.__class__(grid_out, data=data_out)
 
 
-def _change_recip(v: FieldTypeRecip, grid_out: 'Grid') -> FieldTypeRecip:
+def _change_recip(v: FieldTypeRecip, grid_out: qp.grid.Grid) -> FieldTypeRecip:
     """Switch reciprocal-space field to grid_out"""
     grid_in = v.grid
     is_half = (v.__class__ is qp.grid.FieldH)
@@ -182,13 +184,15 @@ def _change_recip(v: FieldTypeRecip, grid_out: 'Grid') -> FieldTypeRecip:
                         if whose_pos != split_in.i_proc:
                             assert (grid_in.comm is not None)
                             neg_slice = neg_slice.contiguous()
-                            grid_in.comm.Send(BufferView(neg_slice), whose_pos)
+                            grid_in.comm.Send(qp.utils.BufferView(neg_slice),
+                                              whose_pos)
                     elif (whose_pos == split_in.i_proc):
                         neg_slice = torch.zeros(data.shape[:-1],
                                                 dtype=data.dtype,
                                                 device=data.device)
                         assert (grid_in.comm is not None)
-                        grid_in.comm.Recv(BufferView(neg_slice), whose_neg)
+                        grid_in.comm.Recv(qp.utils.BufferView(neg_slice),
+                                          whose_neg)
                     # Negative Nyquist slice is now on proc with positive one
                 neg_start += 1  # can only have + Nyquist freq in output
             sel = torch.where(torch.logical_or(i_mine <= S_hlf,
@@ -262,7 +266,7 @@ if __name__ == "__main__":
         grid_s = make_grid(shape, None)  # sequential
         return grid_p, grid_s
 
-    def norm_str(v: 'Field') -> str:
+    def norm_str(v: qp.grid.Field) -> str:
         """Report norm of field averaged over batch dimensions"""
         return f'{v.norm().mean().item():.3e}'
     qp.log.info('\n--- Tests with same shape ---')
@@ -311,7 +315,7 @@ if __name__ == "__main__":
         grid1 = make_grid((36, 40, 48), None)
         grid2 = make_grid((40, 48, 64), None)
 
-        def get_test_field(grid: 'Grid'):
+        def get_test_field(grid: qp.grid.Grid):
             """A highly oscillatory and non-trivial function to test resampling
             """
             x = grid.get_mesh('R') / torch.tensor(grid.shape,

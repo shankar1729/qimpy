@@ -1,19 +1,17 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
 from qimpy.utils import TaskDivision, BufferView
-from typing import Tuple, Sequence, Callable, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ._grid import Grid
-    from ..utils import RunConfig
+from typing import Tuple, Sequence, Callable
 
 
 IndicesType = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
-MethodFFT = Callable[['Grid', torch.Tensor], torch.Tensor]
+MethodFFT = Callable[['qp.grid.Grid', torch.Tensor], torch.Tensor]
 FunctionFFT = Callable[[torch.Tensor], torch.Tensor]
 
 
-def _init_grid_fft(self: 'Grid') -> None:
+def _init_grid_fft(self: qp.grid.Grid) -> None:
     """Initialize local or parallel FFTs for class Grid."""
     # Half-reciprocal space global dimensions (for rfft/irfft):
     self.shapeH = (self.shape[0], self.shape[1], 1+self.shape[2]//2)
@@ -112,7 +110,7 @@ def _init_grid_fft(self: 'Grid') -> None:
 
 
 def parallel_transform(
-        rc: 'RunConfig', comm: qp.MPI.Comm, v: torch.Tensor,
+        rc: qp.utils.RunConfig, comm: qp.MPI.Comm, v: torch.Tensor,
         shape_in: Tuple[int, ...], shape_out: Tuple[int, ...],
         fft_before: FunctionFFT, fft_after: FunctionFFT,
         in_prev: np.ndarray, out_prev: np.ndarray,
@@ -180,7 +178,7 @@ def parallel_transform(
     return fft_after(v_tilde)  # Transform 1 or 2 dims here
 
 
-def _fft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
+def _fft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
     """Forward Fast Fourier Transform.
     This method dispatches to complex-to-complex or real-to-complex
     transforms depending on whether the input `v` is complex or real.
@@ -229,7 +227,7 @@ def _fft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
             *self._indices_rfft).swapaxes(-1, -3)
 
 
-def _ifft(self: 'Grid', v: torch.Tensor) -> torch.Tensor:
+def _ifft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
     """Inverse Fast Fourier Transform.
     This method dispatches to complex-to-complex or complex-to-real
     transforms depending on whether the last three dimensions of `v`

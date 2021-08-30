@@ -1,24 +1,22 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Tuple, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ._grid import Grid
-    from ._field import FieldH
+from typing import Tuple
 
 
 class Coulomb:
     """Coulomb interactions between fields and point charges.
     TODO: support non-periodic geometries (truncation)."""
     __slots__ = ('grid', 'ion_width', 'sigma', 'iR', 'iG', '_kernel')
-    grid: 'Grid'  #: Grid associated with fields for coulomb interaction
+    grid: qp.grid.Grid  #: Grid associated with fields for coulomb interaction
     ion_width: float  #: Ion-charge gaussian width for embedding and solvation
     sigma: float  #: Ewald range-separation parameter
     iR: torch.Tensor  #: Ewald real-space mesh points
     iG: torch.Tensor  #: Ewald reciprocal-space mesh points
     _kernel: torch.Tensor  #: Cached coulomb kernel
 
-    def __init__(self, grid: 'Grid', n_ions: int) -> None:
+    def __init__(self, grid: qp.grid.Grid, n_ions: int) -> None:
         """Initialize coulomb interactions.
 
         Parameters
@@ -84,8 +82,8 @@ class Coulomb:
         Gsq = ((iG @ grid.lattice.Gbasis.T)**2).sum(dim=-1)
         self._kernel = torch.where(Gsq == 0., 0., (4*np.pi)/Gsq)
 
-    def __call__(self, rho: 'FieldH',
-                 correct_G0_width: bool = False) -> 'FieldH':
+    def __call__(self, rho: qp.grid.FieldH,
+                 correct_G0_width: bool = False) -> qp.grid.FieldH:
         """Apply coulomb operator on charge density `rho`.
         If correct_G0_width = True, rho is a point charge distribution
         widened by `ion_width` and needs a corresponding G=0 correction.

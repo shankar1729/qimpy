@@ -1,12 +1,11 @@
+from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
 from abc import abstractmethod
 from numbers import Number
 from ._change import _change_real, _change_recip
-from typing import TypeVar, Any, Tuple, Optional, Sequence, TYPE_CHECKING
-if TYPE_CHECKING:
-    from ._grid import Grid
+from typing import TypeVar, Any, Tuple, Optional, Sequence
 
 
 FieldType = TypeVar('FieldType', bound='Field')  #: Type for field ops.
@@ -20,7 +19,7 @@ class Field:
     space."""
 
     __slots__ = ('grid', 'data')
-    grid: 'Grid'  #: Associated grid, which determines dimensions of the field
+    grid: qp.grid.Grid  #: Associated grid that determines dimensions of field
     data: torch.Tensor  #: Underlying data, with last three dimensions on grid
 
     @abstractmethod
@@ -31,7 +30,7 @@ class Field:
     def shape_grid(self) -> Tuple[int, ...]:
         """Expected grid shape (last 3 data dimension) for the Field type"""
 
-    def __init__(self, grid: 'Grid', *,
+    def __init__(self, grid: qp.grid.Grid, *,
                  shape_batch: Sequence[int] = tuple(),
                  data: Optional[torch.Tensor] = None) -> None:
         """Initialize to zeros or specified `data`.
@@ -229,11 +228,11 @@ class FieldR(Field):
     def shape_grid(self) -> Tuple[int, ...]:
         return self.grid.shapeR_mine
 
-    def __invert__(self) -> 'FieldH':
+    def __invert__(self) -> FieldH:
         """Fourier transform (enables the ~ operator)"""
         return FieldH(self.grid, data=self.grid.fft(self.data))
 
-    def to(self, grid: 'Grid') -> 'FieldR':
+    def to(self, grid: qp.grid.Grid) -> FieldR:
         """Switch field to another `grid` with same `shape`.
         The new grid can only differ in the MPI split."""
         if grid is self.grid:
@@ -249,11 +248,11 @@ class FieldC(Field):
     def shape_grid(self) -> Tuple[int, ...]:
         return self.grid.shapeR_mine
 
-    def __invert__(self) -> 'FieldG':
+    def __invert__(self) -> FieldG:
         """Fourier transform (enables the ~ operator)"""
         return FieldG(self.grid, data=self.grid.fft(self.data))
 
-    def to(self, grid: 'Grid') -> 'FieldC':
+    def to(self, grid: qp.grid.Grid) -> FieldC:
         """Switch field to another `grid` with same `shape`.
         The new grid can only differ in the MPI split."""
         if grid is self.grid:
@@ -271,11 +270,11 @@ class FieldH(Field):
     def shape_grid(self) -> Tuple[int, ...]:
         return self.grid.shapeH_mine
 
-    def __invert__(self) -> 'FieldR':
+    def __invert__(self) -> FieldR:
         """Fourier transform (enables the ~ operator)"""
         return FieldR(self.grid, data=self.grid.ifft(self.data))
 
-    def to(self, grid: 'Grid') -> 'FieldH':
+    def to(self, grid: qp.grid.Grid) -> FieldH:
         """Switch field to another `grid` with possibly different `shape`.
         This routine will perform Fourier resampling and MPI rearrangements,
         as necessary."""
@@ -296,11 +295,11 @@ class FieldG(Field):
     def shape_grid(self) -> Tuple[int, ...]:
         return self.grid.shapeG_mine
 
-    def __invert__(self) -> 'FieldC':
+    def __invert__(self) -> FieldC:
         """Fourier transform (enables the ~ operator)"""
         return FieldC(self.grid, data=self.grid.ifft(self.data))
 
-    def to(self, grid: 'Grid') -> 'FieldG':
+    def to(self, grid: qp.grid.Grid) -> FieldG:
         """Switch field to another `grid` with possibly different `shape`.
         This routine will perform Fourier resampling and MPI rearrangements,
         as necessary."""
