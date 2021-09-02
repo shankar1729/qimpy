@@ -15,6 +15,8 @@ electrons:
   k-mesh:
     offset: [0.5, 0.5, 0.5] #Monkhorst-Pack
     size: [8, 8, 8]
+  basis:
+    ke-cutoff: ${Ecut}  # set from environment
 
 grid:
   ke-cutoff: 100
