@@ -81,14 +81,15 @@ class CheFSI(Davidson):
             self._i_iter = 0
             self._report(inner_loop=inner_loop)
 
+        KEmax = el.basis.ke_cutoff  # upper bound on KE
+        PEmax = qp.utils.globalreduce.max((~el.V_ks_t).data, self.rc.comm_kb)
         n_eigs_done = 0
 
         # Subspace iteration loop:
         for self._i_iter in range(self._i_iter+1, n_iterations+1):
 
             # Filter parameters:
-            b_up = (el.basis.ke_cutoff  # upper bound on KE
-                    + el.V_ks.data.max())  # upper bound on PE
+            b_up = KEmax + PEmax  # Upper end of filter suppression
             b_lo = el.eig.max(dim=2)[0]  # Lower end of filter suppression
             a_lo = el.eig.min(dim=2)[0]  # Point that sets filter scaling
 

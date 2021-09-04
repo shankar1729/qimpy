@@ -11,7 +11,8 @@ class Electrons(qp.Constructable):
     __slots__ = ('kpoints', 'spin_polarized', 'spinorial', 'n_spins',
                  'n_spinor', 'w_spin', 'fillings',
                  'basis', 'xc', 'diagonalize', 'scf', 'C', '_n_bands_done',
-                 'lcao', 'eig', 'deig_max', 'n', 'tau', 'V_ks', 'V_tau')
+                 'lcao', 'eig', 'deig_max',
+                 'n_t', 'tau_t', 'V_ks_t', 'V_tau_t')
     kpoints: qp.electrons.Kpoints  #: Set of kpoints (mesh or path)
     spin_polarized: bool  #: Whether calculation is spin-polarized
     spinorial: bool  #: Whether calculation is relativistic / spinorial
@@ -28,11 +29,11 @@ class Electrons(qp.Constructable):
     lcao: Optional[qp.electrons.LCAO]  #: If present, use LCAO initialization
     eig: torch.Tensor  #: Electronic orbital eigenvalues
     deig_max: float  #: Estimate of accuracy of current `eig`
-    n: qp.grid.FieldH  \
+    n_t: qp.grid.FieldH  \
         #: Electron density (and magnetization, if `spin_polarized`)
-    tau: qp.grid.FieldH  #: KE density (only for meta-GGAs)
-    V_ks: qp.grid.FieldH  #: Kohn-Sham potential (local part)
-    V_tau: qp.grid.FieldH  #: KE potential
+    tau_t: qp.grid.FieldH  #: KE density (only for meta-GGAs)
+    V_ks_t: qp.grid.FieldH  #: Kohn-Sham potential (local part)
+    V_tau_t: qp.grid.FieldH  #: KE potential
 
     hamiltonian = _hamiltonian
 
@@ -227,25 +228,25 @@ class Electrons(qp.Constructable):
         f = self.fillings.f
         C = self.C[:, :, :self.fillings.n_bands]  # ignore extra bands in n
         need_Mvec = (self.spinorial and self.spin_polarized)
-        self.n = (~(self.basis.collect_density(C, f, need_Mvec
-                                               ))).to(system.grid)
+        self.n_t = (~(self.basis.collect_density(C, f, need_Mvec
+                                                 ))).to(system.grid)
         # TODO: ultrasoft augmentation
-        self.n.symmetrize()
-        self.tau = qp.grid.FieldH(system.grid, shape_batch=(0,))
+        self.n_t.symmetrize()
+        self.tau_t = qp.grid.FieldH(system.grid, shape_batch=(0,))
         # TODO: actually compute KE density if required
 
     def update_potential(self, system: qp.System) -> None:
         """Update density-dependent energy terms and electron potential."""
         # Exchange-correlation contributions:
-        system.energy['Exc'], self.V_ks, self.V_tau = \
-            self.xc(self.n + system.ions.n_core, self.tau)
+        system.energy['Exc'], self.V_ks_t, self.V_tau_t = \
+            self.xc(self.n_t + system.ions.n_core_t, self.tau_t)
         # Hartree and local contributions:
-        rho = self.n[0]  # total charge density
-        VH = system.coulomb(rho)  # Hartree potential
-        self.V_ks[0] += system.ions.Vloc + VH
-        system.energy['Ehartree'] = 0.5 * (rho ^ VH).item()
-        system.energy['Eloc'] = (rho ^ system.ions.Vloc).item()
-        self.V_ks.symmetrize()
+        rho_t = self.n_t[0]  # total charge density
+        VH_t = system.coulomb(rho_t)  # Hartree potential
+        self.V_ks_t[0] += system.ions.Vloc_t + VH_t
+        system.energy['Ehartree'] = 0.5 * (rho_t ^ VH_t).item()
+        system.energy['Eloc'] = (rho_t ^ system.ions.Vloc_t).item()
+        self.V_ks_t.symmetrize()
 
     def update(self, system: qp.System) -> None:
         """Update electronic system to current wavefunctions and eigenvalues.

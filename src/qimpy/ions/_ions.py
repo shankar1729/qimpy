@@ -11,7 +11,7 @@ class Ions(qp.Constructable):
     """Ionic system: ionic geometry and pseudopotentials. """
     __slots__ = ('n_ions', 'n_types', 'symbols', 'n_ions_type', 'slices',
                  'pseudopotentials', 'positions', 'types', 'M_initial',
-                 'Z', 'Z_tot', 'rho', 'Vloc', 'n_core',
+                 'Z', 'Z_tot', 'rho_t', 'Vloc_t', 'n_core_t',
                  'beta', 'beta_version', 'D_all')
     n_ions: int  #: number of ions
     n_types: int  #: number of distinct ion types
@@ -25,9 +25,9 @@ class Ions(qp.Constructable):
     M_initial: Optional[torch.Tensor]  #: initial magnetic moment for each ion
     Z: torch.Tensor  #: charge of each ion type (n_types, float)
     Z_tot: float  #: total ionic charge
-    rho: qp.grid.FieldH  #: ionic charge density (uses coulomb.ion_width)
-    Vloc: qp.grid.FieldH  #: local potential due to ions (including from rho)
-    n_core: qp.grid.FieldH  #: partial core electronic density (for XC)
+    rho_t: qp.grid.FieldH  #: ionic charge density (uses coulomb.ion_width)
+    Vloc_t: qp.grid.FieldH  #: local potential due to ions (including from rho)
+    n_core_t: qp.grid.FieldH  #: partial core electronic density (for XC)
     beta: qp.electrons.Wavefunction  #: pseudopotential projectors
     beta_version: int  #: version of `beta` to invalidate cached projections
     D_all: torch.Tensor  #: nonlocal pseudopotential matrix (all atoms)
@@ -213,10 +213,10 @@ class Ions(qp.Constructable):
         """
         grid = system.grid
         n_densities = system.electrons.n_densities
-        self.rho = qp.grid.FieldH(grid)  # initialize zero ionic charge
-        self.Vloc = qp.grid.FieldH(grid)  # initizliae zero local potential
-        self.n_core = qp.grid.FieldH(grid,  # initialize zero core density
-                                     shape_batch=(n_densities,))
+        self.rho_t = qp.grid.FieldH(grid)  # initialize zero ionic charge
+        self.Vloc_t = qp.grid.FieldH(grid)  # initizliae zero local potential
+        self.n_core_t = qp.grid.FieldH(grid,  # initialize zero core density
+                                       shape_batch=(n_densities,))
         if not self.n_ions:
             return  # no contributions below if no ions!
         system.energy['Eewald'] = system.coulomb.ewald(self.positions,
@@ -242,13 +242,13 @@ class Ions(qp.Constructable):
             Vloc_coeff.append(ps.Vloc.f_t_coeff)
             n_core_coeff.append(ps.n_core.f_t_coeff)
         # --- interpolate to G and collect with structure factors
-        self.Vloc.data = (SF * Ginterp(torch.hstack(Vloc_coeff))).sum(dim=0)
-        self.n_core.data[0] = (SF * Ginterp(torch.hstack(n_core_coeff))
-                               ).sum(dim=0)
-        self.rho.data = ((-self.Z.view(-1, 1, 1, 1) * SF).sum(dim=0)
-                         * torch.exp((-0.5*(ion_width**2)) * Gsq))
+        self.Vloc_t.data = (SF * Ginterp(torch.hstack(Vloc_coeff))).sum(dim=0)
+        self.n_core_t.data[0] = (SF * Ginterp(torch.hstack(n_core_coeff))
+                                 ).sum(dim=0)
+        self.rho_t.data = ((-self.Z.view(-1, 1, 1, 1) * SF).sum(dim=0)
+                           * torch.exp((-0.5*(ion_width**2)) * Gsq))
         # --- include long-range electrostatic part of Vloc:
-        self.Vloc += system.coulomb(self.rho, correct_G0_width=True)
+        self.Vloc_t += system.coulomb(self.rho_t, correct_G0_width=True)
 
         # Update pseudopotential matrix and projectors:
         self._collect_ps_matrix(system.electrons.n_spinor)

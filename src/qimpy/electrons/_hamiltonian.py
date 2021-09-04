@@ -10,7 +10,7 @@ def _hamiltonian(self: qp.electrons.Electrons, C: qp.electrons.Wavefunction
     basis = C.basis
     ions = basis.ions
     HC = basis.apply_ke(C)
-    HC += basis.apply_potential(self.V_ks, C)
+    HC += basis.apply_potential(self.V_ks_t, C)
     # Nonlocal ps:
     beta_C = C.proj
     HC += ions.beta @ (ions.D_all @ beta_C)
