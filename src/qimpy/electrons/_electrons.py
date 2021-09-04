@@ -273,6 +273,8 @@ class Electrons(qp.Constructable):
     def _save_checkpoint(self, checkpoint: qp.utils.Checkpoint) -> List[str]:
         n_bands = self.fillings.n_bands
         self.C[:, :, :n_bands].write(checkpoint, self.path + 'C')
+        (~self.n_t).write(checkpoint, self.path + 'n')
+        (~self.V_ks_t).write(checkpoint, self.path + 'V_ks')
         self.fillings.write_band_scalars(checkpoint, self.path + 'eig',
                                          self.eig)
-        return ['C', 'eig']
+        return ['C', 'n', 'V_ks', 'eig']

@@ -242,14 +242,15 @@ class Field:
         """Write field to `path` in `checkpoint`."""
         shape_batch = self.data.shape[:-3]
         dtype: torch.dtype = self.data.dtype
+        dtype_np = self.grid.rc.np_type[dtype]
         shape = shape_batch + self.shape_grid()  # global dimensions
         offset = (0,) * len(shape_batch) + self.offset_grid_mine()
         if dtype.is_complex:
             dset = checkpoint.create_dataset_complex(path, shape=shape,
-                                                     dtype=dtype)
+                                                     dtype=dtype_np)
             checkpoint.write_slice_complex(dset, offset, self.data)
         else:
-            dset = checkpoint.create_dataset(path, shape=shape, dtype=dtype)
+            dset = checkpoint.create_dataset(path, shape=shape, dtype=dtype_np)
             checkpoint.write_slice(dset, offset, self.data)
 
 
