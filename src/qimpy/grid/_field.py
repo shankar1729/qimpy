@@ -24,11 +24,19 @@ class Field:
 
     @abstractmethod
     def dtype(self) -> torch.dtype:
-        """Expected data type for the Field type"""
+        """Data type for the Field type"""
 
     @abstractmethod
     def shape_grid(self) -> Tuple[int, ...]:
-        """Expected grid shape (last 3 data dimension) for the Field type"""
+        """Global grid shape for the Field type"""
+
+    @abstractmethod
+    def shape_grid_mine(self) -> Tuple[int, ...]:
+        """Local grid shape (last 3 data dimensions) for the Field type"""
+
+    @abstractmethod
+    def offset_grid_mine(self) -> Tuple[int, ...]:
+        """Offset of local grid dimensions into global grid for Field type"""
 
     def __init__(self, grid: qp.grid.Grid, *,
                  shape_batch: Sequence[int] = tuple(),
@@ -46,15 +54,15 @@ class Field:
             Initial data if provided; initialize to zero otherwise
         """
         self.grid = grid
-        shape_grid = self.shape_grid()
+        shape_grid_mine = self.shape_grid_mine()
         dtype = self.dtype()
         if data is None:
             # Initialize to zero:
-            self.data = torch.zeros(tuple(shape_batch) + shape_grid,
+            self.data = torch.zeros(tuple(shape_batch) + shape_grid_mine,
                                     dtype=dtype, device=grid.rc.device)
         else:
             # Initialize to provided data:
-            assert data.shape[-3:] == shape_grid
+            assert data.shape[-3:] == shape_grid_mine
             assert data.dtype == dtype
             self.data = data
 
@@ -219,6 +227,31 @@ class Field:
         """Create zero Field with same grid and batch dimensions."""
         return self.__class__(self.grid, shape_batch=self.data.shape[:-3])
 
+    def read(self, checkpoint: qp.utils.Checkpoint, path: str) -> None:
+        """Read field from `path` in `checkpoint`."""
+        dset = checkpoint[path]
+        shape_batch = self.data.shape[:-3]
+        assert dset.shape == (shape_batch + self.shape_grid())
+        offset = (0,) * len(shape_batch) + self.offset_grid_mine()
+        size = shape_batch + self.shape_grid_mine()
+        self.data = (checkpoint.read_slice_complex(dset, offset, size)
+                     if self.dtype().is_complex
+                     else checkpoint.read_slice(dset, offset, size))
+
+    def write(self, checkpoint: qp.utils.Checkpoint, path: str) -> None:
+        """Write field to `path` in `checkpoint`."""
+        shape_batch = self.data.shape[:-3]
+        dtype: torch.dtype = self.data.dtype
+        shape = shape_batch + self.shape_grid()  # global dimensions
+        offset = (0,) * len(shape_batch) + self.offset_grid_mine()
+        if dtype.is_complex:
+            dset = checkpoint.create_dataset_complex(path, shape=shape,
+                                                     dtype=dtype)
+            checkpoint.write_slice_complex(dset, offset, self.data)
+        else:
+            dset = checkpoint.create_dataset(path, shape=shape, dtype=dtype)
+            checkpoint.write_slice(dset, offset, self.data)
+
 
 class FieldR(Field):
     """Real fields in real space."""
@@ -226,7 +259,13 @@ class FieldR(Field):
         return torch.double
 
     def shape_grid(self) -> Tuple[int, ...]:
+        return self.grid.shape
+
+    def shape_grid_mine(self) -> Tuple[int, ...]:
         return self.grid.shapeR_mine
+
+    def offset_grid_mine(self) -> Tuple[int, ...]:
+        return self.grid.split0.i_start, 0, 0
 
     def __invert__(self) -> FieldH:
         """Fourier transform (enables the ~ operator)"""
@@ -246,7 +285,13 @@ class FieldC(Field):
         return torch.cdouble
 
     def shape_grid(self) -> Tuple[int, ...]:
+        return self.grid.shape
+
+    def shape_grid_mine(self) -> Tuple[int, ...]:
         return self.grid.shapeR_mine
+
+    def offset_grid_mine(self) -> Tuple[int, ...]:
+        return self.grid.split0.i_start, 0, 0
 
     def __invert__(self) -> FieldG:
         """Fourier transform (enables the ~ operator)"""
@@ -268,7 +313,13 @@ class FieldH(Field):
         return torch.cdouble
 
     def shape_grid(self) -> Tuple[int, ...]:
+        return self.grid.shapeH
+
+    def shape_grid_mine(self) -> Tuple[int, ...]:
         return self.grid.shapeH_mine
+
+    def offset_grid_mine(self) -> Tuple[int, ...]:
+        return 0, 0, self.grid.split2H.i_start
 
     def __invert__(self) -> FieldR:
         """Fourier transform (enables the ~ operator)"""
@@ -293,7 +344,13 @@ class FieldG(Field):
         return torch.cdouble
 
     def shape_grid(self) -> Tuple[int, ...]:
+        return self.grid.shape
+
+    def shape_grid_mine(self) -> Tuple[int, ...]:
         return self.grid.shapeG_mine
+
+    def offset_grid_mine(self) -> Tuple[int, ...]:
+        return 0, 0, self.grid.split2.i_start
 
     def __invert__(self) -> FieldC:
         """Fourier transform (enables the ~ operator)"""

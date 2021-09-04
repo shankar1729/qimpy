@@ -159,7 +159,7 @@ class Wavefunction:
         """Write wavefunctions to `path` in `checkpoint`."""
         basis = self.basis
         k_division = basis.kpoints.division
-        # Create datashep with overall shape:
+        # Create dataset with overall shape:
         n_spins, _, n_bands, n_spinor, _ = self.coeff.shape
         shape = (n_spins, k_division.n_tot, n_bands, n_spinor, basis.n_max)
         dset = checkpoint.create_dataset_complex(path, shape=shape,
