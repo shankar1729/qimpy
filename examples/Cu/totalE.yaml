@@ -5,7 +5,7 @@ lattice:
   
 ions:
   pseudopotentials:
-    - ../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
+    - ../../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
   coordinates:
     - [Cu, 0., 0., 0.]
 
@@ -20,4 +20,4 @@ electrons:
     functional: gga-xc-pbe
 
 checkpoint: null  # disable reading checkpoint
-checkpoint-out: Cu.h5  # but still create it
+checkpoint-out: totalE.h5  # but still create it

@@ -5,7 +5,7 @@ lattice:
 
 ions:
   pseudopotentials:
-    - ../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf  # has nonlocal s projectors
+    - ../../../../../Pseudopotentials/DOJO/FR/$ID.upf
   coordinates:
     - [H, 0., 0., 0.]
 
@@ -13,8 +13,8 @@ electrons:
   xc:
     functional: gga-xc-pbe
   spin-polarized: yes
+  spinorial: yes
   fillings:
-    M: 1
+    M: [0, 0.8, -0.6]
 
-checkpoint: null  # disable reading checkpoint
-checkpoint-out: Hatom.h5  # but still create it
+checkpoint: null

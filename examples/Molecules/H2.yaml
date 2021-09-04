@@ -4,8 +4,8 @@ lattice:
 
 ions:
   pseudopotentials:
-    #- ../../../../Pseudopotentials/PSlib/H.pbe-n-nc.UPF  # purely local
-    - ../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf  # has nonlocal s projectors
+    #- ../../../../../Pseudopotentials/PSlib/H.pbe-n-nc.UPF  # purely local
+    - ../../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf  # has nonlocal s projectors
   coordinates:
     - [H, 0., 0., -0.035]
     - [H, 0., 0., +0.035]
