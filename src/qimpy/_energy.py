@@ -21,6 +21,8 @@ class Energy(dict):
     @property
     def name(self) -> str:
         """Appropriate name of (free) energy based on components."""
+        if 'Eband' in self:
+            return 'Eband'  # Band structure energy
         if '-muN' in self:
             return 'G'  # Grand free energy
         if '-TS' in self:

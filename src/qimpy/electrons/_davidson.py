@@ -58,7 +58,7 @@ class Davidson(qp.Constructable):
         line_prefix = ('  ' if inner_loop else '') + self._line_prefix
         line = f'{line_prefix}: {self._i_iter}'
         if not inner_loop:
-            line += f'  Eband: {self._get_Eband():+.11f}'
+            line += f'  Eband: {self.get_Eband():+.11f}'
         if self.electrons.deig_max != np.inf:
             line += f'  deig_max: {self.electrons.deig_max:.2e}'
         if n_eigs_done:
@@ -100,7 +100,7 @@ class Davidson(qp.Constructable):
         C.randomize_selected(i_spin, i_k, i_band, i_iter)  # seeded by i_iter
         norm[i_spin, i_k, i_band] = 1.
 
-    def _get_Eband(self) -> float:
+    def get_Eband(self) -> float:
         """Compute the sum over band eigenvalues, averaged over k"""
         electrons = self.electrons
         n_bands = electrons.fillings.n_bands

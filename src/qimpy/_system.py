@@ -96,6 +96,9 @@ class System(qp.Constructable):
             self.electrons.initialize_wavefunctions(self)  # LCAO / randomize
             self.electrons.diagonalize()
             self.electrons.fillings.update(self.energy)
+            # Replace energy with Eband:
+            self.energy.clear()
+            self.energy['Eband'] = self.electrons.diagonalize.get_Eband()
         else:
             self.electrons.initialize_wavefunctions(self)  # LCAO / randomize
             self.electrons.scf.update(self)
