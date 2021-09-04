@@ -35,16 +35,17 @@ class LCAO(Minimize[MatrixArray]):
     def update(self, system: qp.System) -> None:
         """Set wavefunctions to optimum subspace of atomic orbitals."""
         el = system.electrons
-        # Initialize based on reference atomic density:
-        el.n_t = system.ions.get_atomic_density(system.grid, el.fillings.M)
-        el.tau_t = qp.grid.FieldH(system.grid, shape_batch=(0,))  # TODO
-        el.update_potential(system)
+        # Initialize based on reference atomic density (or fixed-H density):
+        if not el.fixed_H:
+            el.n_t = system.ions.get_atomic_density(system.grid, el.fillings.M)
+            el.tau_t = qp.grid.FieldH(system.grid, shape_batch=(0,))  # TODO
+            el.update_potential(system)
         C_OC = el.C.dot_O(el.C)
         C_HC = el.C ^ el.hamiltonian(el.C)
         el.eig, V = qp.utils.eighg(C_HC, C_OC)
         el.C = el.C @ V  # Set to eigenvectors
-        if el.fillings.smearing is None:
-            return  # also quit here in fixed Hamiltonian case later
+        if (el.fillings.smearing is None) or el.fixed_H:
+            return
 
         # Subspace optimization:
         el.deig_max = np.inf  # allow fillings to use these eigenvalues

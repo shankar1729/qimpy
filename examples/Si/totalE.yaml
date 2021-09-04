@@ -20,4 +20,4 @@ grid:
   ke-cutoff: 100
 
 checkpoint: null  # disable reading checkpoint
-checkpoint-out: Si.h5  # but still create it
+checkpoint-out: totalE.h5  # but still create it

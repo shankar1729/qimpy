@@ -219,35 +219,35 @@ class Kpath(Kpoints):
         # Initialize base class:
         super().__init__(k=k, wk=wk, co=co)
 
-    def plot(self, E, filename):
-        """Save band structure plot to filename given energies E"""
+    def plot(self, eig: torch.Tensor, filename: str) -> None:
+        """Save band structure plot to `filename` given energies `eig``"""
         if self.rc.i_proc_b:
             return  # only head of each basis group needed below
         # Get the energies to head process:
-        n_spins = E.shape[0]
-        n_bands = E.shape[2]
-        mpi_type = self.rc.mpi_type[E.dtype]
+        n_spins = eig.shape[0]
+        n_bands = eig.shape[2]
+        mpi_type = self.rc.mpi_type[eig.dtype]
         if self.rc.i_proc_k:
-            E_send = np.array(E.to(self.rc.cpu))
-            self.rc.comm_k.Send([E_send, mpi_type], 0)
+            eig_send = np.array(eig.to(self.rc.cpu))
+            self.rc.comm_k.Send([eig_send, mpi_type], 0)
             return  # only overall head needs to plot
         else:
-            E_all = np.zeros((n_spins, self.n_tot, n_bands))
-            E_all[:, :self.n_mine] = E.to(self.rc.cpu)  # local piece
+            eig_all = np.zeros((n_spins, self.division.n_tot, n_bands))
+            eig_all[:, :self.division.n_mine] = eig.to(self.rc.cpu)
             for i_proc in range(1, self.rc.n_procs_k):
-                i_start = self.n_prev[i_proc]
-                i_stop = self.n_prev[i_proc+1]
-                self.rc.comm_k.Recv(E_all[:, i_start:i_stop], i_proc)
+                i_start = self.division.n_prev[i_proc]
+                i_stop = self.division.n_prev[i_proc+1]
+                self.rc.comm_k.Recv(eig_all[:, i_start:i_stop], i_proc)
         # Plot
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         for i_spin in range(n_spins):
-            plt.plot(self.k_length, E_all[i_spin], color='kr'[i_spin])
+            plt.plot(self.k_length, eig_all[i_spin], color='kr'[i_spin])
         tick_pos = [self.k_length[i] for i in self.labels.keys()]
         plt.xticks(tick_pos, self.labels.values())
         plt.ylabel(r'$E$ [$E_h$]')
-        plt.ylim(None, E_all[..., -1].min())
+        plt.ylim(None, eig_all[..., -1].min())
         plt.xlim(0, self.k_length[-1])
         for pos in tick_pos[1:-1]:
             plt.axvline(pos, color='k', ls='dotted', lw=1)

@@ -91,10 +91,15 @@ class System(qp.Constructable):
 
     def run(self) -> None:
         """Run any actions specified in the input."""
-        # TODO: systematize selection of what actions to perform
-        self.electrons.initialize_wavefunctions(self)  # LCAO / randomize
-        self.electrons.scf.update(self)
-        self.electrons.scf.optimize()
+        if self.electrons.fixed_H:
+            self.electrons.initialize_fixed_hamiltonian(self)
+            self.electrons.initialize_wavefunctions(self)  # LCAO / randomize
+            self.electrons.diagonalize()
+            self.electrons.fillings.update(self.energy)
+        else:
+            self.electrons.initialize_wavefunctions(self)  # LCAO / randomize
+            self.electrons.scf.update(self)
+            self.electrons.scf.optimize()
         self.electrons.output()
         qp.log.info(f'\nEnergy components:\n{repr(self.energy)}')
 

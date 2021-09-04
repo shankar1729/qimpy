@@ -11,7 +11,7 @@ class Electrons(qp.Constructable):
     __slots__ = ('kpoints', 'spin_polarized', 'spinorial', 'n_spins',
                  'n_spinor', 'w_spin', 'fillings',
                  'basis', 'xc', 'diagonalize', 'scf', 'C', '_n_bands_done',
-                 'lcao', 'eig', 'deig_max',
+                 'fixed_H', 'lcao', 'eig', 'deig_max',
                  'n_t', 'tau_t', 'V_ks_t', 'V_tau_t')
     kpoints: qp.electrons.Kpoints  #: Set of kpoints (mesh or path)
     spin_polarized: bool  #: Whether calculation is spin-polarized
@@ -26,6 +26,7 @@ class Electrons(qp.Constructable):
     scf: qp.electrons.SCF  #: Self-consistent field method
     C: qp.electrons.Wavefunction  #: Electronic wavefunctions
     _n_bands_done: int  #: Number of bands in C that have been initialized
+    fixed_H: str  #: If given, fix Hamiltonian to checkpoint file of this name
     lcao: Optional[qp.electrons.LCAO]  #: If present, use LCAO initialization
     eig: torch.Tensor  #: Electronic orbital eigenvalues
     deig_max: float  #: Estimate of accuracy of current `eig`
@@ -46,6 +47,7 @@ class Electrons(qp.Constructable):
                  fillings: Optional[Union[dict, qp.electrons.Fillings]] = None,
                  basis: Optional[Union[dict, qp.electrons.Basis]] = None,
                  xc: Optional[Union[dict, qp.electrons.xc.XC]] = None,
+                 fixed_H: str = '',
                  lcao: Optional[Union[dict, bool, qp.electrons.LCAO]] = None,
                  davidson: Optional[Union[dict, qp.electrons.Davidson]] = None,
                  chefsi:  Optional[Union[dict, qp.electrons.CheFSI]] = None,
@@ -82,6 +84,11 @@ class Electrons(qp.Constructable):
             :yaml:`Wavefunction basis set (plane waves).`
         xc
             :yaml:`Exchange-correlation functional.`
+        fixed_H
+            :yaml:`Fix Hamiltonian from checkpoint file of this name.`
+            This is useful for band structure calculations along high-symmetry
+            k-point paths, or for converging large numners of empty states.
+            Default: don't fix Hamiltonian i.e. self-consistent calculation.
         lcao
             :yaml:`Linear combination of atomic orbitals parameters.`
             Set to False to disable and to start with bandwidth-limited
@@ -160,6 +167,7 @@ class Electrons(qp.Constructable):
                                                self.path + 'eig', self.eig
                                                ) == self.fillings.n_bands:
                 self.deig_max = np.inf  # not fully wrong, but accuracy unknown
+        self.fixed_H = str(fixed_H)
 
         # Initialize LCAO subspace initializer:
         if isinstance(lcao, bool):
@@ -221,6 +229,20 @@ class Electrons(qp.Constructable):
     def n_densities(self) -> int:
         """Number of electron density / magnetization components in `n`."""
         return (4 if self.spinorial else 2) if self.spin_polarized else 1
+
+    def initialize_fixed_hamiltonian(self, system: qp.System) -> None:
+        """Load density/potential from checkpoint for fixed-H calculation"""
+        assert self.fixed_H
+        checkpoint_H = qp.utils.Checkpoint(self.fixed_H, rc=self.rc)
+        # Read n and V_ks in real space from checkpoint:
+        n_densities = self.n_densities
+        n = qp.grid.FieldR(system.grid, shape_batch=(n_densities,))
+        V_ks = qp.grid.FieldR(system.grid, shape_batch=(n_densities,))
+        n.read(checkpoint_H, 'electrons/n')
+        V_ks.read(checkpoint_H, 'electrons/V_ks')
+        # Store in reciprocal space:
+        self.n_t = ~n
+        self.V_ks_t = ~V_ks
 
     def update_density(self, system: qp.System) -> None:
         """Update electron density from wavefunctions and fillings.
