@@ -286,6 +286,22 @@ class Electrons(qp.Constructable):
             ((beta_C.conj() * (system.ions.D_all @ beta_C)).sum(dim=-2)
              * self.basis.w_sk * f).real, self.rc.comm_k)
 
+    def run(self, system: qp.System) -> None:
+        """Run any actions specified in the input."""
+        if self.fixed_H:
+            self.initialize_fixed_hamiltonian(system)
+            self.initialize_wavefunctions(system)  # LCAO / randomize
+            self.diagonalize()
+            self.fillings.update(system.energy)
+            # Replace energy with Eband:
+            system.energy.clear()
+            system.energy['Eband'] = self.diagonalize.get_Eband()
+        else:
+            self.initialize_wavefunctions(system)  # LCAO / randomize
+            self.scf.update(system)
+            self.scf.optimize()
+        self.output()
+
     def output(self) -> None:
         """Save any configured outputs (TODO: systematize this)"""
         if isinstance(self.kpoints, qp.electrons.Kpath):

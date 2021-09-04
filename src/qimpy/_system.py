@@ -91,21 +91,8 @@ class System(qp.Constructable):
 
     def run(self) -> None:
         """Run any actions specified in the input."""
-        if self.electrons.fixed_H:
-            self.electrons.initialize_fixed_hamiltonian(self)
-            self.electrons.initialize_wavefunctions(self)  # LCAO / randomize
-            self.electrons.diagonalize()
-            self.electrons.fillings.update(self.energy)
-            # Replace energy with Eband:
-            self.energy.clear()
-            self.energy['Eband'] = self.electrons.diagonalize.get_Eband()
-        else:
-            self.electrons.initialize_wavefunctions(self)  # LCAO / randomize
-            self.electrons.scf.update(self)
-            self.electrons.scf.optimize()
-        self.electrons.output()
+        self.electrons.run(self)
         qp.log.info(f'\nEnergy components:\n{repr(self.energy)}')
-
         qp.log.info('')
         if self.checkpoint_out:
             self.save_checkpoint(qp.utils.Checkpoint(self.checkpoint_out,
