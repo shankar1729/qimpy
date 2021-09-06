@@ -305,8 +305,7 @@ class Electrons(qp.Constructable):
     def output(self) -> None:
         """Save any configured outputs (TODO: systematize this)"""
         if isinstance(self.kpoints, qp.electrons.Kpath):
-            self.kpoints.plot(self.eig[..., :self.fillings.n_bands],
-                              'bandstruct.pdf')
+            self.kpoints.plot(self, 'bandstruct.pdf')
 
     def _save_checkpoint(self, checkpoint: qp.utils.Checkpoint) -> List[str]:
         n_bands = self.fillings.n_bands

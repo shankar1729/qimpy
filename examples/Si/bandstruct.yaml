@@ -17,7 +17,7 @@ electrons:
     n-bands: 10
     n-bands-extra: 5
   k-path:
-    dk: 0.01
+    dk: 0.05
     points:
     - [0.000, 0.000, 0.000, $\Gamma$]
     - [0.000, 0.500, 0.500, X]

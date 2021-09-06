@@ -10,6 +10,8 @@ ions:
     - [Cu, 0., 0., 0.]
 
 electrons:
+  basis:
+    ke-cutoff: 30
   fillings:
     smearing: Gauss
     sigma: 0.02

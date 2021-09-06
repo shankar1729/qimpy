@@ -11,13 +11,15 @@ ions:
 
 electrons:
   fixed-H: totalE.h5
+  basis:
+    ke-cutoff: 30
   fillings:
     n-bands: 15
     n-bands-extra: 5
     smearing: Gauss
     sigma: 0.02
   k-path:
-    dk: 0.01
+    dk: 0.02
     points:
     - [0.000, 0.000, 0.000, $\Gamma$]
     - [0.000, 0.500, 0.500, X]
