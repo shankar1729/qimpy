@@ -243,6 +243,11 @@ class Electrons(qp.Constructable):
         # Store in reciprocal space:
         self.n_t = ~n
         self.V_ks_t = ~V_ks
+        qp.log.info('  Read n and V_ks.')
+        # Use mu from checkpoint for fillings:
+        self.fillings.mu = checkpoint_H['electrons/fillings'].attrs['mu']
+        self.fillings.mu_constrain = True  # make sure it's not updated
+        qp.log.info(f'  Set mu: {self.fillings.mu}  constrained: True')
 
     def update_density(self, system: qp.System) -> None:
         """Update electron density from wavefunctions and fillings.

@@ -329,6 +329,7 @@ class Fillings(qp.Constructable):
             return NM_err[i_free], NM_err_mu_B[i_free][:, i_free]
 
         if len(i_free) == 0:
+            sigma_cur = self.sigma
             compute_NM(np.array([]))  # both mu and B are fixed
         elif not self.M_constrain:
             # Only mu is free: use a stable bracketing algorithm
@@ -391,7 +392,8 @@ class Fillings(qp.Constructable):
 
     def _save_checkpoint(self, checkpoint: qp.utils.Checkpoint) -> List[str]:
         self.write_band_scalars(checkpoint, self.path + 'f', self.f)
-        return ['f']
+        checkpoint[self.path].attrs['mu'] = self.mu
+        return ['f', 'mu']
 
     def write_band_scalars(self, checkpoint: qp.utils.Checkpoint, path: str,
                            v: torch.Tensor) -> None:
