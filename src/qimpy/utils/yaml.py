@@ -14,3 +14,8 @@ def load(filename: str) -> dict:
             yaml.safe_load(  # yaml parse to dict
                 os.path.expandvars(f.read())))  # environment substitution
     return result
+
+
+def dump(d: dict) -> str:
+    """Convert nested dictionary to YAML-format string."""
+    return yaml.dump(d, default_flow_style=None)

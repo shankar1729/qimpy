@@ -149,6 +149,8 @@ if __name__ == "__main__":
     # --- Set default checkpoint file (if not specified in input):
     input_dict.setdefault('checkpoint',
                           os.path.splitext(args.input_file)[0] + '.h5')
+    # --- Include processed input in log:
+    qp.log.info(f'\n# Processed input:\n{qp.utils.yaml.dump(input_dict)}')
 
     # Initialize system with input parameters:
     system = qp.System(rc=rc, **input_dict)
