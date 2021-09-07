@@ -5,7 +5,7 @@ electrons:
   fillings:
     n-bands: 15
     n-bands-extra: 5
-  k-mesh: null
+  k-mesh: null  # disable k-mesh included from totalE.yaml
   k-path:
     dk: 0.02
     points:
@@ -16,4 +16,4 @@ electrons:
     - [0.000, 0.000, 0.000, $\Gamma$]
     - [0.375, 0.750, 0.375, K]
 
-checkpoint-out: null
+checkpoint-out: null  # disable totalE.h5 output included from totalE.yaml
