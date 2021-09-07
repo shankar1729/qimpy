@@ -13,6 +13,7 @@ def load(filename: str) -> dict:
         result = qp.utils.dict.key_cleanup(
             yaml.safe_load(  # yaml parse to dict
                 os.path.expandvars(f.read())))  # environment substitution
+    result = qp.utils.dict.unflatten(qp.utils.dict.flatten(result))  # HACK
     return result
 
 
