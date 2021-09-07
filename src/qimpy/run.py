@@ -145,7 +145,7 @@ if __name__ == "__main__":
     rc = qp.utils.RunConfig(cores=args.cores, process_grid=args.process_grid)
 
     # Load input parameters from YAML file:
-    input_dict = qp.utils.yaml.load(args.input_file)
+    input_dict = qp.utils.dict.key_cleanup(qp.utils.yaml.load(args.input_file))
     # --- Set default checkpoint file (if not specified in input):
     input_dict.setdefault('checkpoint',
                           os.path.splitext(args.input_file)[0] + '.h5')
