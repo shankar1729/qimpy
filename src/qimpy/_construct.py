@@ -79,7 +79,7 @@ class Constructable:
         co = ConstructOptions(parent=self, attr_name=attr_name, rc=self.rc,
                               checkpoint_in=self.checkpoint_in)
         if isinstance(params, dict):
-            result = cls(**kwargs, **dict_input_cleanup(params), co=co)
+            result = cls(**kwargs, **qp.utils.dict.key_cleanup(params), co=co)
         elif params is None:
             result = cls(**kwargs, co=co)
         elif isinstance(params, cls):
@@ -99,12 +99,3 @@ class Constructable:
         # Add as an attribute and child in heirarchy:
         setattr(self, attr_name, result)
         self.children.append(result)
-
-
-def dict_input_cleanup(params: dict) -> dict:
-    """Clean-up dict for use in constructors.
-    This is required eg. for dicts from YAML to make sure keys are compatible
-    with passing as keyword-only arguments to constructors. Most importantly,
-    replace hyphens (which look nicer) in all keys to underscores internally,
-    so that they become valid identifiers within the code"""
-    return dict((k.replace('-', '_'), v) for k, v in params.items())

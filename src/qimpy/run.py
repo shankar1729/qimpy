@@ -44,7 +44,6 @@ instaling from pip/conda."""
 import qimpy as qp
 import argparse
 import logging
-import yaml
 import sys
 import os
 
@@ -146,12 +145,8 @@ if __name__ == "__main__":
     rc = qp.utils.RunConfig(cores=args.cores, process_grid=args.process_grid)
 
     # Load input parameters from YAML file:
-    with open(args.input_file) as f:
-        input_dict: dict = qp.dict_input_cleanup(
-            yaml.safe_load(  # yaml parse to dict
-                os.path.expandvars(f.read())))  # environment substitution
-
-    # Set default checkpoint file (if not specified in input):
+    input_dict = qp.utils.yaml.load(args.input_file)
+    # --- Set default checkpoint file (if not specified in input):
     input_dict.setdefault('checkpoint',
                           os.path.splitext(args.input_file)[0] + '.h5')
 

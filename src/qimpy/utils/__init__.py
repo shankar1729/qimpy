@@ -3,7 +3,7 @@
 __all__ = [
     'prime_factorization', 'fft_suitable', 'ceildiv', 'cis', 'dagger',
     'abs_squared', 'accum_norm_', 'accum_prod_',
-    'ortho_matrix', 'eighg', 'globalreduce',
+    'ortho_matrix', 'eighg', 'dict', 'globalreduce', 'yaml',
     'log_config', 'RunConfig', 'StopWatch',
     'Optimizable', 'ConvergenceCheck', 'MatrixArray',
     'Pulay', 'Minimize', 'MinimizeState',
@@ -11,7 +11,7 @@ __all__ = [
 
 from ._math import prime_factorization, fft_suitable, ceildiv, \
     cis, dagger, abs_squared, accum_norm_, accum_prod_, ortho_matrix, eighg
-from . import globalreduce
+from . import dict, globalreduce, yaml
 from ._log import log_config
 from ._runconfig import RunConfig
 from ._stopwatch import StopWatch

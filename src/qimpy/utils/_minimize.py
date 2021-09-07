@@ -70,10 +70,10 @@ class Minimize(Generic[Vector], ABC, qp.Constructable):
         self.n_iterations = n_iterations
         self.energy_threshold = energy_threshold
         self.extra_thresholds = extra_thresholds
-        self.step_size = Minimize.StepSize(**qp.dict_input_cleanup(
+        self.step_size = Minimize.StepSize(**qp.utils.dict.key_cleanup(
             {} if (step_size is None) else step_size))
         self.n_history = n_history
-        self.wolfe = Minimize.Wolfe(**qp.dict_input_cleanup(
+        self.wolfe = Minimize.Wolfe(**qp.utils.dict.key_cleanup(
             {} if (wolfe is None) else wolfe))
 
         # Validate direction update options:
