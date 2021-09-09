@@ -15,6 +15,7 @@ electrons:
   k-mesh:
     offset: [0.5, 0.5, 0.5] #Monkhorst-Pack
     size: [8, 8, 8]
+  save-wavefunction: no  #keeps checkpoint small
 
 grid:
   ke-cutoff: 100

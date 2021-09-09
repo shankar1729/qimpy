@@ -11,7 +11,7 @@ class Electrons(qp.Constructable):
     __slots__ = ('kpoints', 'spin_polarized', 'spinorial', 'n_spins',
                  'n_spinor', 'w_spin', 'fillings',
                  'basis', 'xc', 'diagonalize', 'scf', 'C', '_n_bands_done',
-                 'fixed_H', 'lcao', 'eig', 'deig_max',
+                 'fixed_H', 'save_wavefunction', 'lcao', 'eig', 'deig_max',
                  'n_t', 'tau_t', 'V_ks_t', 'V_tau_t')
     kpoints: qp.electrons.Kpoints  #: Set of kpoints (mesh or path)
     spin_polarized: bool  #: Whether calculation is spin-polarized
@@ -27,6 +27,7 @@ class Electrons(qp.Constructable):
     C: qp.electrons.Wavefunction  #: Electronic wavefunctions
     _n_bands_done: int  #: Number of bands in C that have been initialized
     fixed_H: str  #: If given, fix Hamiltonian to checkpoint file of this name
+    save_wavefunction: bool  #: Whether to save wavefunction in checkpoint
     lcao: Optional[qp.electrons.LCAO]  #: If present, use LCAO initialization
     eig: torch.Tensor  #: Electronic orbital eigenvalues
     deig_max: float  #: Estimate of accuracy of current `eig`
@@ -47,7 +48,7 @@ class Electrons(qp.Constructable):
                  fillings: Optional[Union[dict, qp.electrons.Fillings]] = None,
                  basis: Optional[Union[dict, qp.electrons.Basis]] = None,
                  xc: Optional[Union[dict, qp.electrons.xc.XC]] = None,
-                 fixed_H: str = '',
+                 fixed_H: str = '', save_wavefunction: bool = True,
                  lcao: Optional[Union[dict, bool, qp.electrons.LCAO]] = None,
                  davidson: Optional[Union[dict, qp.electrons.Davidson]] = None,
                  chefsi:  Optional[Union[dict, qp.electrons.CheFSI]] = None,
@@ -89,6 +90,14 @@ class Electrons(qp.Constructable):
             This is useful for band structure calculations along high-symmetry
             k-point paths, or for converging large numners of empty states.
             Default: don't fix Hamiltonian i.e. self-consistent calculation.
+        save_wavefunction
+            :yaml:`Whether to save wavefunction in checkpoint.`
+            Saving the wavefunction is useful for full post-processing
+            capability directly from the checkpoint, at the expense of much
+            larger checkpoint file. If False, calculations can still use
+            the converged density / potential to resume calculations,
+            but require an initial non-self-consistent calculation.
+            Default: True.
         lcao
             :yaml:`Linear combination of atomic orbitals parameters.`
             Set to False to disable and to start with bandwidth-limited
@@ -168,6 +177,7 @@ class Electrons(qp.Constructable):
                                                ) == self.fillings.n_bands:
                 self.deig_max = np.inf  # not fully wrong, but accuracy unknown
         self.fixed_H = str(fixed_H)
+        self.save_wavefunction = bool(save_wavefunction)
 
         # Initialize LCAO subspace initializer:
         if isinstance(lcao, bool):
@@ -313,10 +323,13 @@ class Electrons(qp.Constructable):
             self.kpoints.plot(self, 'bandstruct.pdf')
 
     def _save_checkpoint(self, checkpoint: qp.utils.Checkpoint) -> List[str]:
-        n_bands = self.fillings.n_bands
-        self.C[:, :, :n_bands].write(checkpoint, self.path + 'C')
         (~self.n_t).write(checkpoint, self.path + 'n')
         (~self.V_ks_t).write(checkpoint, self.path + 'V_ks')
         self.fillings.write_band_scalars(checkpoint, self.path + 'eig',
                                          self.eig)
-        return ['C', 'n', 'V_ks', 'eig']
+        saved_list = ['n', 'V_ks', 'eig']
+        if self.save_wavefunction:
+            n_bands = self.fillings.n_bands
+            self.C[:, :, :n_bands].write(checkpoint, self.path + 'C')
+            saved_list.append('C')
+        return saved_list

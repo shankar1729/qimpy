@@ -20,6 +20,7 @@ electrons:
     size: [8, 8, 8]
   xc: 
     functional: gga-xc-pbe
+  save-wavefunction: no  #keeps checkpoint small
 
 checkpoint: null  # disable reading checkpoint
 checkpoint-out: totalE.h5  # but still create it
