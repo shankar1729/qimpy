@@ -10,7 +10,7 @@ from typing import TypeVar, Generic, Sequence, Dict, Deque, Optional
 Variable = TypeVar('Variable', bound=Optimizable)
 
 
-class Pulay(Generic[Variable], ABC, qp.Constructable):
+class Pulay(Generic[Variable], ABC, qp.TreeNode):
     """Abstract base class implementing the Pulay mixing algorithm.
     The mixed `Variable` must support vector-space operators as specified
     by the `Optimizable` abstract base class.
@@ -36,13 +36,13 @@ class Pulay(Generic[Variable], ABC, qp.Constructable):
     #: to the extra values output by :meth:`cycle`.
     extra_thresholds: Dict[str, float]
 
-    def __init__(self, *, co: qp.ConstructOptions,
+    def __init__(self, *, tno: qp.TreeNodeOptions,
                  comm: qp.MPI.Comm, name: str,
                  n_iterations: int, energy_threshold: float,
                  residual_threshold: float, extra_thresholds: Dict[str, float],
                  n_history: int, mix_fraction: float) -> None:
         """Initialize Pulay algorithm parameters."""
-        super().__init__(co=co)
+        super().__init__(tno=tno)
         self.comm = comm
         self.name = name
         self.n_iterations = n_iterations

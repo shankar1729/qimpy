@@ -5,7 +5,7 @@ from ._lattice_systems import get_Rbasis
 from typing import Optional, Union, Sequence
 
 
-class Lattice(qp.Constructable):
+class Lattice(qp.TreeNode):
     """Real and reciprocal space lattice vectors"""
 
     __slots__ = ('Rbasis', 'Gbasis', 'volume')
@@ -13,7 +13,7 @@ class Lattice(qp.Constructable):
     Gbasis: torch.Tensor  #: Reciprocal-space lattice vectors (in columns)
     volume: float  #: Unit cell volume
 
-    def __init__(self, *, co: qp.ConstructOptions,
+    def __init__(self, *, tno: qp.TreeNodeOptions,
                  system: Optional[str] = None,
                  modification: Optional[str] = None,
                  a: Optional[float] = None,
@@ -79,7 +79,7 @@ class Lattice(qp.Constructable):
             that uniformly scales all lattice vectors or separate factor
             :math:`[s_1, s_2, s_3]` for each lattice vector. boo
         """
-        super().__init__(co=co)
+        super().__init__(tno=tno)
         qp.log.info('\n--- Initializing Lattice ---')
 
         # Get unscaled lattice vectors:

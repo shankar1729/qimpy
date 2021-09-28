@@ -5,7 +5,7 @@ import torch
 from typing import Optional, Tuple
 
 
-class Davidson(qp.Constructable):
+class Davidson(qp.TreeNode):
     """Davidson diagonalization of Hamiltonian in `electrons`."""
     __slots__ = ('electrons', 'n_iterations', 'eig_threshold',
                  '_line_prefix', '_norm_cut', '_i_iter', '_HC')
@@ -17,7 +17,7 @@ class Davidson(qp.Constructable):
     _i_iter: int
     _HC: qp.electrons.Wavefunction  #: Used for coordination with sub-classes
 
-    def __init__(self, *, co: qp.ConstructOptions,
+    def __init__(self, *, tno: qp.TreeNodeOptions,
                  electrons: qp.electrons.Electrons, n_iterations: int = 100,
                  eig_threshold: float = 1E-8) -> None:
         """Initialize diagonalizer with stopping criteria.
@@ -36,7 +36,7 @@ class Davidson(qp.Constructable):
             calculations because the self-consistent field method overrides
             this when diagonalizing in an inner loop.
         """
-        super().__init__(co=co)
+        super().__init__(tno=tno)
         self.electrons = electrons
         self.n_iterations = n_iterations
         self.eig_threshold = eig_threshold

@@ -21,7 +21,7 @@ class MinimizeState(Generic[Vector]):
         self.extra = []
 
 
-class Minimize(Generic[Vector], ABC, qp.Constructable):
+class Minimize(Generic[Vector], ABC, qp.TreeNode):
     """Abstract base class implementing large-scale minimization algorithms.
     The `Vector` that is minimized over must support vector-space operators
     as specified by the `Optimizable` abstract base class."""
@@ -57,14 +57,14 @@ class Minimize(Generic[Vector], ABC, qp.Constructable):
     #: These must correspond (in order) to the outputs of :meth:`compute`.
     extra_thresholds: Dict[str, float]
 
-    def __init__(self, *, co: qp.ConstructOptions,
+    def __init__(self, *, tno: qp.TreeNodeOptions,
                  comm: qp.MPI.Comm, name: str, n_iterations: int,
                  energy_threshold: float, extra_thresholds: Dict[str, float],
                  method: str, cg_type: str = 'polak-ribiere',
                  line_minimize: str = 'auto', step_size: Optional[dict] = None,
                  n_history: int = 15, wolfe: Optional[dict] = None) -> None:
         """Initialize minimization algorithm parameters."""
-        super().__init__(co=co)
+        super().__init__(tno=tno)
         self.comm = comm
         self.name = name
         self.n_iterations = n_iterations

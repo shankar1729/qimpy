@@ -7,7 +7,7 @@ import os
 from typing import Tuple
 
 
-def load(filename: str, already_included: Tuple[str] = tuple()) -> dict:
+def load(filename: str, already_included: tuple = tuple()) -> dict:
     """Load input from `filename` in YAML format to a nested dict.
     Handles environment substitution and processes `include` keys.
     Keep track of `already_included` filenames to prevent cyclic includes,
@@ -22,7 +22,7 @@ def dump(d: dict) -> str:
     return yaml.dump(d, default_flow_style=None)
 
 
-def _process_includes(d: dict, already_included: Tuple[str]) -> dict:
+def _process_includes(d: dict, already_included: tuple) -> dict:
     """Recursively process `include` directives in nested dictionary."""
     # Process any includes in inner dictionaries recursively:
     for key, value in d.items():

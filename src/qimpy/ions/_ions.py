@@ -7,7 +7,7 @@ import re
 from typing import Optional, Union, List
 
 
-class Ions(qp.Constructable):
+class Ions(qp.TreeNode):
     """Ionic system: ionic geometry and pseudopotentials. """
     __slots__ = ('n_ions', 'n_types', 'symbols', 'n_ions_type', 'slices',
                  'pseudopotentials', 'positions', 'types', 'M_initial',
@@ -32,7 +32,7 @@ class Ions(qp.Constructable):
     beta_version: int  #: version of `beta` to invalidate cached projections
     D_all: torch.Tensor  #: nonlocal pseudopotential matrix (all atoms)
 
-    def __init__(self, *, co: qp.ConstructOptions,
+    def __init__(self, *, tno: qp.TreeNodeOptions,
                  coordinates: Optional[List] = None,
                  pseudopotentials: Optional[Union[str, List[str]]] = None
                  ) -> None:
@@ -61,7 +61,7 @@ class Ions(qp.Constructable):
             templates is processed in order, and the first match for
             each element takes precedence.
         """
-        super().__init__(co=co)
+        super().__init__(tno=tno)
         rc = self.rc
         qp.log.info('\n--- Initializing Ions ---')
 

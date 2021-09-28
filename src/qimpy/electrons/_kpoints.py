@@ -5,7 +5,7 @@ import torch
 from typing import Union, Sequence, Tuple
 
 
-class Kpoints(qp.Constructable):
+class Kpoints(qp.TreeNode):
     """Set of k-points in Brillouin zone.
     The underlying :class:`TaskDivision` splits k-points over `rc.comm_k`."""
     __slots__ = ('k', 'wk', 'division')
@@ -13,12 +13,12 @@ class Kpoints(qp.Constructable):
     wk: torch.Tensor  #: Integration weights for each k (adds to 1)
     division: qp.utils.TaskDivision  #: Division of k-points across `rc.comm_k`
 
-    def __init__(self, *, co: qp.ConstructOptions,
+    def __init__(self, *, tno: qp.TreeNodeOptions,
                  k: torch.Tensor, wk: torch.Tensor) -> None:
         """Initialize from list of k-points and weights. Typically, this should
          be used only by derived classes :class:`Kmesh` or :class:`Kpath`.
         """
-        super().__init__(co=co)
+        super().__init__(tno=tno)
         self.k = k
         self.wk = wk
         assert(abs(wk.sum() - 1.) < 1e-14)
@@ -39,7 +39,7 @@ class Kmesh(Kpoints):
     i_sym: torch.Tensor  #: Symmetry index that maps mesh points to reduced set
     invert: torch.Tensor  #: Inversion factor (1, -1) in reduction of each k
 
-    def __init__(self, *, co: qp.ConstructOptions,
+    def __init__(self, *, tno: qp.TreeNodeOptions,
                  symmetries: qp.symmetries.Symmetries,
                  lattice: qp.lattice.Lattice,
                  offset: Union[Sequence[float], np.ndarray] = (0., 0., 0.),
@@ -73,7 +73,7 @@ class Kmesh(Kpoints):
             Default: True; should only need to disable this when interfacing
             with codes that do not support this symmetry eg. BerkeleyGW.
         """
-        rc = co.rc
+        rc = tno.rc
         assert rc is not None
 
         # Select size from real-space dimension if needed:
@@ -158,14 +158,14 @@ class Kmesh(Kpoints):
             qp.log.info('Note: used k-inversion (conjugation) symmetry')
 
         # Initialize base class:
-        super().__init__(k=k, wk=wk, co=co)
+        super().__init__(k=k, wk=wk, tno=tno)
 
 
 class Kpath(Kpoints):
     """Path of k-points traversing Brillouin zone.
     Typically used only for band structure calculations."""
 
-    def __init__(self, *, co: qp.ConstructOptions, lattice: qp.lattice.Lattice,
+    def __init__(self, *, tno: qp.TreeNodeOptions, lattice: qp.lattice.Lattice,
                  dk: float, points: list) -> None:
         """Initialize k-path with spacing `dk` connecting `points`.
 
@@ -184,7 +184,7 @@ class Kpath(Kpoints):
             and optionally a string label for this point for use in
             band structure plots.
         """
-        rc = co.rc
+        rc = tno.rc
         assert rc is not None
 
         # Check types, sizes and separate labels from points:
@@ -218,7 +218,7 @@ class Kpath(Kpoints):
                     f' length {distance_tot:g}')
 
         # Initialize base class:
-        super().__init__(k=k, wk=wk, co=co)
+        super().__init__(k=k, wk=wk, tno=tno)
 
     def plot(self, electrons: qp.electrons.Electrons, filename: str) -> None:
         """Save band structure plot for `electrons` to `filename`."""

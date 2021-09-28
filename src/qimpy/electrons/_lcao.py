@@ -11,7 +11,7 @@ class LCAO(Minimize[MatrixArray]):
     system: qp.System
     _rot_prev: torch.Tensor  #: accumulated rotations of subspace
 
-    def __init__(self, *, co: qp.ConstructOptions, n_iterations: int = 30,
+    def __init__(self, *, tno: qp.TreeNodeOptions, n_iterations: int = 30,
                  energy_threshold: float = 1E-6,
                  gradient_threshold: float = 1E-8) -> None:
         """Set stopping criteria for initial subspace optimization.
@@ -27,8 +27,8 @@ class LCAO(Minimize[MatrixArray]):
             Stop when gradient of energy with respect to subspace Hamiltonian
             falls below this threshold.
         """
-        super().__init__(co=co, comm=co.rc.comm_kb, name='LCAO', method='cg',
-                         n_iterations=n_iterations,
+        super().__init__(tno=tno, comm=tno.rc.comm_kb, name='LCAO',
+                         method='cg', n_iterations=n_iterations,
                          extra_thresholds={'|grad|': gradient_threshold},
                          energy_threshold=energy_threshold)
 

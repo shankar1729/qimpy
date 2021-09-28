@@ -4,47 +4,47 @@ from typing import Optional, List, Union, TypeVar, Type, NamedTuple, final
 
 
 ClassType = TypeVar('ClassType')
-ConstructableType = TypeVar('ConstructableType', bound='Constructable')
-ConstructableType2 = TypeVar('ConstructableType2', bound='Constructable')
+TreeNodeType = TypeVar('TreeNodeType', bound='TreeNode')
+TreeNodeType2 = TypeVar('TreeNodeType2', bound='TreeNode')
 
 
-class ConstructOptions(NamedTuple):
-    """Options passed through `__init__` of all Constructable objects."""
+class TreeNodeOptions(NamedTuple):
+    """Options passed through `__init__` of all TreeNode objects."""
     rc: qp.utils.RunConfig  #: Current run configuration
-    parent: Optional[qp.Constructable] = None  #: Parent in heirarchy
+    parent: Optional[qp.TreeNode] = None  #: Parent in hierarchy
     attr_name: str = ''  #: Attribute name of object within parent
     checkpoint_in: Optional[qp.utils.Checkpoint] = None \
         #: If present, load data from this checkpoint file during construction
 
 
-class Constructable:
+class TreeNode:
     """Base class of dict-constructable and serializable objects
-    in QimPy heirarchy."""
+    in QimPy hierarchy."""
     __slots__ = ('parent', 'children', 'path', 'rc', 'checkpoint_in')
-    parent: Optional[qp.Constructable]  #: Parent object in heirarchy (if any)
-    children: List[qp.Constructable]  #: Child objects in heirarchy
-    path: str  #: Object's absolute path in heirarchy (includes trailing /)
+    parent: Optional[qp.TreeNode]  #: Parent object in hierarchy (if any)
+    children: List[qp.TreeNode]  #: Child objects in hierarchy
+    path: str  #: Object's absolute path in hierarchy (includes trailing /)
     rc: qp.utils.RunConfig  #: Current run configuration
     checkpoint_in: Optional[qp.utils.Checkpoint] \
         #: If present, load data from this checkpoint file during construction
 
-    def __init__(self, co: ConstructOptions, **kwargs):
-        self.rc = co.rc
-        self.parent = co.parent
+    def __init__(self, tno: TreeNodeOptions, **kwargs):
+        self.rc = tno.rc
+        self.parent = tno.parent
         self.children = []
-        self.path = ('/' if (co.parent is None)
-                     else (co.parent.path + co.attr_name + '/'))
-        self.checkpoint_in = co.checkpoint_in
+        self.path = ('/' if (tno.parent is None)
+                     else (tno.parent.path + tno.attr_name + '/'))
+        self.checkpoint_in = tno.checkpoint_in
 
     @final
     def save_checkpoint(self, checkpoint: qp.utils.Checkpoint) -> None:
-        """Save `self` and all children in heirarchy to `checkpoint`.
+        """Save `self` and all children in hierarchy to `checkpoint`.
         Override `_save_checkpoint` to implement the save functionality."""
         # Save quantities in self:
         saved = self._save_checkpoint(checkpoint)
         if saved:
             qp.log.info(f'  {self.path} <- {", ".join(saved)}')
-        # Recur down the heirarchy:
+        # Recur down the hierarchy:
         for child in self.children:
             child.save_checkpoint(checkpoint)
 
@@ -59,8 +59,8 @@ class Constructable:
         return ((self.checkpoint_in is not None)
                 and ((self.path + object_name) in self.checkpoint_in))
 
-    def construct(self, attr_name: str, cls: Type[ConstructableType],
-                  params: Union[ConstructableType, dict, None],
+    def add_child(self, attr_name: str, cls: Type[TreeNodeType],
+                  params: Union[TreeNodeType, dict, None],
                   attr_version_name: str = '', **kwargs) -> None:
         """Construct child object `self`.`attr_name` of type `cls`.
         Specifically, construct object from `params` and `kwargs`
@@ -76,15 +76,16 @@ class Constructable:
         """
 
         # Try all the valid possibilities:
-        co = ConstructOptions(parent=self, attr_name=attr_name, rc=self.rc,
+        tno = TreeNodeOptions(parent=self, attr_name=attr_name, rc=self.rc,
                               checkpoint_in=self.checkpoint_in)
         if isinstance(params, dict):
-            result = cls(**kwargs, **qp.utils.dict.key_cleanup(params), co=co)
+            result = cls(**kwargs, **qp.utils.dict.key_cleanup(params),
+                         tno=tno)
         elif params is None:
-            result = cls(**kwargs, co=co)
+            result = cls(**kwargs, tno=tno)
         elif isinstance(params, cls):
             result = params
-            Constructable.__init__(result, co=co)
+            TreeNode.__init__(result, tno=tno)
         else:
             # Report error with canonicalized class name:
             module = cls.__module__
@@ -96,6 +97,6 @@ class Constructable:
             a_name = (attr_version_name if attr_version_name else attr_name)
             raise TypeError(f'{a_name} must be dict or {class_name}')
 
-        # Add as an attribute and child in heirarchy:
+        # Add as an attribute and child in hierarchy:
         setattr(self, attr_name, result)
         self.children.append(result)

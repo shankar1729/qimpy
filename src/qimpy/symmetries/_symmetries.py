@@ -8,7 +8,7 @@ from ._grid import _check_grid_shape, _get_grid_shape
 from typing import List, Dict
 
 
-class Symmetries(qp.Constructable):
+class Symmetries(qp.TreeNode):
     """Space group symmetries.
     Detects space group from lattice and ions, and provides methods to
     symmetrize properties such as positions, forces and densities."""
@@ -30,7 +30,7 @@ class Symmetries(qp.Constructable):
     check_grid_shape = _check_grid_shape
     get_grid_shape = _get_grid_shape
 
-    def __init__(self, *, co: qp.ConstructOptions,
+    def __init__(self, *, tno: qp.TreeNodeOptions,
                  lattice: qp.lattice.Lattice, ions: qp.ions.Ions,
                  axes: Dict[str, np.ndarray] = {},
                  tolerance: float = 1e-6) -> None:
@@ -41,7 +41,7 @@ class Symmetries(qp.Constructable):
         tolerance
             :yaml:`Threshold for detecting symmetries.`
         """
-        super().__init__(co=co)
+        super().__init__(tno=tno)
         rc = self.rc
         self.lattice = lattice
         self.ions = ions

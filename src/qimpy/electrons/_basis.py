@@ -7,7 +7,7 @@ from ._basis_real import BasisReal
 from typing import Optional, Tuple, Union
 
 
-class Basis(qp.Constructable):
+class Basis(qp.TreeNode):
     """Plane-wave basis for electronic wavefunctions. The underlying
      :class:`qimpy.utils.TaskDivision` splits plane waves over `rc.comm_b`"""
     __slots__ = ('lattice', 'ions', 'kpoints', 'n_spins', 'n_spinor',
@@ -47,7 +47,7 @@ class Basis(qp.Constructable):
     apply_potential = _apply_potential
     collect_density = _collect_density
 
-    def __init__(self, *, co: qp.ConstructOptions,
+    def __init__(self, *, tno: qp.TreeNodeOptions,
                  lattice: qp.lattice.Lattice, ions: qp.ions.Ions,
                  symmetries: qp.symmetries.Symmetries,
                  kpoints: qp.electrons.Kpoints, n_spins: int, n_spinor: int,
@@ -90,7 +90,7 @@ class Basis(qp.Constructable):
             The default of 0 auto-selects the block size based on the number
             of bands and k-points being processed by each process.
         """
-        super().__init__(co=co)
+        super().__init__(tno=tno)
         rc = self.rc
         self.lattice = lattice
         self.ions = ions
@@ -119,7 +119,7 @@ class Basis(qp.Constructable):
         # Initialize grid to match cutoff:
         self.ke_cutoff = float(ke_cutoff)
         qp.log.info('\nInitializing wavefunction grid:')
-        self.construct('grid', qp.grid.Grid, grid, lattice=lattice,
+        self.add_child('grid', qp.grid.Grid, grid, lattice=lattice,
                        symmetries=symmetries, comm=None,  # Never parallel
                        ke_cutoff_wavefunction=self.ke_cutoff)
 

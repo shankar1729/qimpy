@@ -5,7 +5,7 @@ import torch
 from typing import Union, Optional, Dict, List, Any
 
 
-class System(qp.Constructable):
+class System(qp.TreeNode):
     """Overall system to calculate within QimPy"""
     __slots__ = ('lattice', 'ions', 'symmetries', 'electrons',
                  'grid', 'coulomb', 'energy', 'checkpoint_out')
@@ -67,18 +67,18 @@ class System(qp.Constructable):
         _add_axis(axes, 'magnetic field',  electrons, ['fillings', 'B'])
         # TODO: similarly account for applied electric fields
 
-        super().__init__(qp.ConstructOptions(rc=rc,
-                                             checkpoint_in=checkpoint_in))
-        self.construct('lattice', qp.lattice.Lattice, lattice)
-        self.construct('ions', qp.ions.Ions, ions)
-        self.construct('symmetries', qp.symmetries.Symmetries, symmetries,
+        super().__init__(qp.TreeNodeOptions(rc=rc,
+                                            checkpoint_in=checkpoint_in))
+        self.add_child('lattice', qp.lattice.Lattice, lattice)
+        self.add_child('ions', qp.ions.Ions, ions)
+        self.add_child('symmetries', qp.symmetries.Symmetries, symmetries,
                        lattice=self.lattice, ions=self.ions, axes=axes)
-        self.construct('electrons', qp.electrons.Electrons, electrons,
+        self.add_child('electrons', qp.electrons.Electrons, electrons,
                        lattice=self.lattice, ions=self.ions,
                        symmetries=self.symmetries)
 
         qp.log.info('\n--- Initializing Charge-Density Grid ---')
-        self.construct('grid', qp.grid.Grid, grid, lattice=self.lattice,
+        self.add_child('grid', qp.grid.Grid, grid, lattice=self.lattice,
                        symmetries=self.symmetries, comm=rc.comm_kb,  # Parallel
                        ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff)
         self.coulomb = qp.grid.Coulomb(self.grid, self.ions.n_ions)

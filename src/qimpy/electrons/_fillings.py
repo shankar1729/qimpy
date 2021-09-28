@@ -13,7 +13,7 @@ SmearingFunc = Callable[[torch.Tensor, Union[float, torch.Tensor], float],
                         SmearingResults]
 
 
-class Fillings(qp.Constructable):
+class Fillings(qp.TreeNode):
     """Electron occupation factors (smearing)"""
     __slots__ = ('electrons', 'n_electrons',
                  'n_bands_min', 'n_bands', 'n_bands_extra',
@@ -35,7 +35,7 @@ class Fillings(qp.Constructable):
     f_eig: torch.Tensor  #: Derivative of `f` with electronic eigenvalues
     _smearing_func: Optional[SmearingFunc]  #: Smearing function calculator
 
-    def __init__(self, *, co: qp.ConstructOptions,
+    def __init__(self, *, tno: qp.TreeNodeOptions,
                  ions: qp.ions.Ions, electrons: qp.electrons.Electrons,
                  charge: float = 0., smearing: str = 'gauss',
                  sigma: float = 0.002,
@@ -108,7 +108,7 @@ class Fillings(qp.Constructable):
             * x<scale>: scale relative to n_bands
             * An integer explicitly sets the number of extra bands
         """
-        super().__init__(co=co)
+        super().__init__(tno=tno)
         self.electrons = electrons
 
         # Magnetic field and magnetization mode:

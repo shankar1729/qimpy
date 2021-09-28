@@ -61,7 +61,8 @@ class FieldSymmetrizer:
             # Identify what grid data to send from this process and to whom:
             mine_src = torch.where(whose_src == grid.i_proc)
             dest_n_prev = torch.from_numpy(div_dest.n_prev).to(grid.rc.device)
-            send_prev = torch.searchsorted(mine_src[0], dest_n_prev)
+            send_prev = torch.searchsorted(mine_src[0].contiguous(),
+                                           dest_n_prev)
             iH_local = iH[index[mine_src]] % shapeR  # wrap to positive
             iH_local[..., 2] -= div_src.i_start  # now local H-space index
             strideH_local = torch.tensor(

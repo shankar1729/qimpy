@@ -210,6 +210,7 @@ def _matmul(self: qp.electrons.Wavefunction,
     result = qp.electrons.Wavefunction(self.basis, coeff=C_out,
                                        band_division=self.band_division)
     if self._proj_is_valid() and (n_spinor_in == n_spinor_out):
+        assert self._proj is not None
         result._proj = self._proj @ mat
     watch.stop()
     return result

@@ -206,6 +206,7 @@ def _fft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
             return v
         if self.n_procs == 1:
             return torch.fft.fftn(v, s=self.shape, norm='forward')
+        assert self.comm is not None
         return parallel_transform(
             self.rc, self.comm, v,
             self.shapeR_mine, self.shapeG_mine[::-1],
@@ -220,6 +221,7 @@ def _fft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
         if self.n_procs == 1:
             return torch.fft.rfftn(v, s=self.shape, norm='forward')
         assert v.dtype.is_floating_point
+        assert self.comm is not None
         return parallel_transform(
             self.rc, self.comm, v,
             self.shapeR_mine, self.shapeH_mine[::-1],
@@ -262,6 +264,7 @@ def _ifft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
             return v
         if self.n_procs == 1:
             return torch.fft.ifftn(v, s=self.shape, norm='forward')
+        assert self.comm is not None
         return parallel_transform(
             self.rc, self.comm, v.swapaxes(-1, -3),
             self.shapeG_mine[::-1], self.shapeR_mine,
@@ -276,6 +279,7 @@ def _ifft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
         if self.n_procs == 1:
             return torch.fft.irfftn(v, s=self.shape, norm='forward')
         assert v.dtype.is_complex
+        assert self.comm is not None
         shapeR_mine_complex = (self.split0.n_mine,
                                self.shape[1], self.shapeH[2])
         return parallel_transform(
@@ -343,17 +347,17 @@ if __name__ == "__main__":
     n_batch = tuple(int(arg) for arg in sys.argv[1:-3])
 
     # Prerequisites for creating grid:
-    co = qp.ConstructOptions(rc=rc)
+    tno = qp.TreeNodeOptions(rc=rc)
     lattice = qp.lattice.Lattice(
-        co=co, system='triclinic', a=2.1, b=2.2, c=2.3,
+        tno=tno, system='triclinic', a=2.1, b=2.2, c=2.3,
         alpha=75, beta=80, gamma=85)  # pick one with no symmetries
-    ions = qp.ions.Ions(co=co, pseudopotentials=[], coordinates=[])
-    symmetries = qp.symmetries.Symmetries(co=co, lattice=lattice, ions=ions)
+    ions = qp.ions.Ions(tno=tno, pseudopotentials=[], coordinates=[])
+    symmetries = qp.symmetries.Symmetries(tno=tno, lattice=lattice, ions=ions)
 
     # Create grids with and without parallelization:
-    grid_par = qp.grid.Grid(co=co, lattice=lattice, symmetries=symmetries,
+    grid_par = qp.grid.Grid(tno=tno, lattice=lattice, symmetries=symmetries,
                             shape=shape, comm=rc.comm)  # parallel version
-    grid_seq = qp.grid.Grid(co=co, lattice=lattice, symmetries=symmetries,
+    grid_seq = qp.grid.Grid(tno=tno, lattice=lattice, symmetries=symmetries,
                             shape=shape, comm=None)  # sequential version
 
     def test(name, dtype_in, seq_func, par_func,

@@ -6,7 +6,7 @@ from ._hamiltonian import _hamiltonian
 from typing import Union, Optional, List, cast
 
 
-class Electrons(qp.Constructable):
+class Electrons(qp.TreeNode):
     """Electronic subsystem"""
     __slots__ = ('kpoints', 'spin_polarized', 'spinorial', 'n_spins',
                  'n_spinor', 'w_spin', 'fillings',
@@ -39,7 +39,7 @@ class Electrons(qp.Constructable):
 
     hamiltonian = _hamiltonian
 
-    def __init__(self, *, co: qp.ConstructOptions,
+    def __init__(self, *, tno: qp.TreeNodeOptions,
                  lattice: qp.lattice.Lattice, ions: qp.ions.Ions,
                  symmetries: qp.symmetries.Symmetries,
                  k_mesh: Optional[Union[dict, qp.electrons.Kmesh]] = None,
@@ -115,7 +115,7 @@ class Electrons(qp.Constructable):
         scf
             :yaml:`Self-consistent field (SCF) iteration parameters.`
         """
-        super().__init__(co=co)
+        super().__init__(tno=tno)
         rc = self.rc
         qp.log.info('\n--- Initializing Electrons ---')
 
@@ -127,11 +127,11 @@ class Electrons(qp.Constructable):
         if n_options > 1:
             raise ValueError('Cannot use both k-mesh and k-path')
         if k_mesh is not None:
-            self.construct('kpoints', qp.electrons.Kmesh, k_mesh,
+            self.add_child('kpoints', qp.electrons.Kmesh, k_mesh,
                            attr_version_name='k-mesh',
                            symmetries=symmetries, lattice=lattice)
         if k_path is not None:
-            self.construct('kpoints', qp.electrons.Kpath, k_path,
+            self.add_child('kpoints', qp.electrons.Kpath, k_path,
                            attr_version_name='k-path', lattice=lattice)
 
         # Initialize spin:
@@ -145,16 +145,16 @@ class Electrons(qp.Constructable):
                     f'  w_spin: {self.w_spin}')
 
         # Initialize fillings:
-        self.construct('fillings', qp.electrons.Fillings, fillings,
+        self.add_child('fillings', qp.electrons.Fillings, fillings,
                        ions=ions, electrons=self)
 
         # Initialize wave-function basis:
-        self.construct('basis', qp.electrons.Basis, basis, lattice=lattice,
+        self.add_child('basis', qp.electrons.Basis, basis, lattice=lattice,
                        ions=ions, symmetries=symmetries, kpoints=self.kpoints,
                        n_spins=self.n_spins, n_spinor=self.n_spinor)
 
         # Initialize exchange-correlation functional:
-        self.construct('xc', qp.electrons.xc.XC, xc,
+        self.add_child('xc', qp.electrons.xc.XC, xc,
                        spin_polarized=spin_polarized)
 
         # Initial wavefunctions and eigenvalues:
@@ -185,7 +185,7 @@ class Electrons(qp.Constructable):
                 raise ValueError("lcao must be False or LCAO parameters")
             self.lcao = None
         else:
-            self.construct('lcao', qp.electrons.LCAO, lcao)
+            self.add_child('lcao', qp.electrons.LCAO, lcao)
 
         # Initialize diagonalizer:
         n_options = np.count_nonzero([(d is not None)
@@ -195,15 +195,15 @@ class Electrons(qp.Constructable):
         if n_options > 1:
             raise ValueError('Cannot use both davidson and chefsi')
         if davidson is not None:
-            self.construct('diagonalize', qp.electrons.Davidson, davidson,
+            self.add_child('diagonalize', qp.electrons.Davidson, davidson,
                            attr_version_name='davidson', electrons=self)
         if chefsi is not None:
-            self.construct('diagonalize', qp.electrons.CheFSI, chefsi,
+            self.add_child('diagonalize', qp.electrons.CheFSI, chefsi,
                            attr_version_name='chefsi', electrons=self)
         qp.log.info('\nDiagonalization: ' + repr(self.diagonalize))
 
         # Initialize SCF:
-        self.construct('scf', qp.electrons.SCF, scf, comm=rc.comm_kb)
+        self.add_child('scf', qp.electrons.SCF, scf, comm=rc.comm_kb)
 
     def initialize_wavefunctions(self, system: qp.System) -> None:
         """Initialize wavefunctions to LCAO / random (if not from checkpoint).

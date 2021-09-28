@@ -10,7 +10,7 @@ from typing import Tuple, List, Dict, Optional, Union
 N_CUT = 1e-16  # Regularization threshold for densities
 
 
-class XC(qp.Constructable):
+class XC(qp.TreeNode):
     """Exchange-correlation functional."""
     __slots__ = ('_functionals', 'need_sigma', 'need_lap', 'need_tau')
     _functionals: List[Functional]  #: list of functionals that add up to XC
@@ -18,7 +18,7 @@ class XC(qp.Constructable):
     need_lap: bool  #: whether overall functional needs laplacian
     need_tau: bool  #: whether overall functional needs KE density
 
-    def __init__(self, *, co: qp.ConstructOptions, spin_polarized: bool,
+    def __init__(self, *, tno: qp.TreeNodeOptions, spin_polarized: bool,
                  functional: Union[str, List[str]] = 'gga-pbe'):
         """Initialize exchange-correlation functional.
 
@@ -47,7 +47,7 @@ class XC(qp.Constructable):
             no normalization or check to make the fractions of exchange or
             correlation to add up to 1.
         """
-        super().__init__(co=co)
+        super().__init__(tno=tno)
         qp.log.info('\nInitializing XC:')
         if isinstance(functional, str):
             functional = functional.split(' ')

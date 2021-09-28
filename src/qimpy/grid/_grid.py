@@ -5,7 +5,7 @@ from ._fft import _init_grid_fft, _fft, _ifft, IndicesType, MethodFFT
 from typing import Optional, Sequence, Tuple, Dict
 
 
-class Grid(qp.Constructable):
+class Grid(qp.TreeNode):
     """Real and reciprocal space grids for a unit cell.
     The grid could either be local or distributed over an MPI communicator,
     and this class provides FFT routines to switch fields on these grids,
@@ -44,7 +44,7 @@ class Grid(qp.Constructable):
     fft: MethodFFT = _fft
     ifft: MethodFFT = _ifft
 
-    def __init__(self, *, co: qp.ConstructOptions,
+    def __init__(self, *, tno: qp.TreeNodeOptions,
                  lattice: qp.lattice.Lattice,
                  symmetries: qp.symmetries.Symmetries,
                  comm: Optional[qp.MPI.Comm],
@@ -78,7 +78,7 @@ class Grid(qp.Constructable):
             :yaml:`Explicit grid dimensions [Nx, Ny, Nz].`
             Highest precedence, and if specified, will supercede `ke_cutoff`.
         """
-        super().__init__(co=co)
+        super().__init__(tno=tno)
         self.lattice = lattice
         self.symmetries = symmetries
         self._field_symmetrizer = None

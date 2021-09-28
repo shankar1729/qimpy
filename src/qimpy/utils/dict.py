@@ -30,7 +30,7 @@ def flatten(d: dict, _key_prefix: tuple = tuple()) -> dict:
 def unflatten(d: dict) -> dict:
     """Unpack tuple keys in `d` to a nested dictionary.
     (Inverse of :func:`flatten`.)"""
-    result = {}
+    result: dict = {}
     for key_tuple, value in d.items():
         assert isinstance(key_tuple, tuple)
         target = result  # where to add value

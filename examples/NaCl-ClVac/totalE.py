@@ -5,12 +5,12 @@ import qimpy as qp
 qp.utils.log_config()  # default set up to log from MPI head alone
 qp.log.info('Using QimPy '+qp.__version__)
 rc = qp.utils.RunConfig()
-co = qp.ConstructOptions(rc=rc)
+co = qp.TreeNodeOptions(rc=rc)
 
 # Create lattice object explicitly (eg. shared between two systems)
 n_sup = 2  # number of unit cells in each dimension
 lattice = qp.lattice.Lattice(
-    co=co, modification='face-centered', system='cubic',
+    tno=tno, modification='face-centered', system='cubic',
     a=10.74,  # bohrs, for unit cell
     scale=n_sup)  # scaled for supercell
 
