@@ -224,12 +224,12 @@ def create_yamldoc_rst_files(app: Sphinx) -> None:
     if not os.path.isdir(yamldoc_dir):
         os.mkdir(yamldoc_dir)
 
-    # Document all constructable classes recursively:
-    constructable = get_class_from_path('qimpy.TreeNode')
+    # Document all classes in the QimPy object tree recursively:
+    TreeNode = get_class_from_path('qimpy.TreeNode')
     classdocs: Dict[str, ClassInputDoc] = {}
     for classname in yamldoc_classnames:
         cls = get_class_from_path(classname)
-        ClassInputDoc(cls, constructable, app, classdocs, yamldoc_dir)
+        ClassInputDoc(cls, TreeNode, app, classdocs, yamldoc_dir)
     env.yamldoc_classdocs = classdocs  # save for use in the directive
 
 
