@@ -22,7 +22,7 @@ def _get_space_group(lattice_sym: torch.Tensor,
          maps to after each symmetry operation."""
 
     # Special case of no ions:
-    device = lattice.rc.device
+    device = ions.rc.device
     n_ions = ions.n_ions
     if not n_ions:
         # space group = point group:

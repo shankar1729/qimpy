@@ -347,17 +347,16 @@ if __name__ == "__main__":
     n_batch = tuple(int(arg) for arg in sys.argv[1:-3])
 
     # Prerequisites for creating grid:
-    tno = qp.TreeNodeOptions(rc=rc)
     lattice = qp.lattice.Lattice(
-        tno=tno, system='triclinic', a=2.1, b=2.2, c=2.3,
+        rc=rc, system='triclinic', a=2.1, b=2.2, c=2.3,
         alpha=75, beta=80, gamma=85)  # pick one with no symmetries
-    ions = qp.ions.Ions(tno=tno, pseudopotentials=[], coordinates=[])
-    symmetries = qp.symmetries.Symmetries(tno=tno, lattice=lattice, ions=ions)
+    ions = qp.ions.Ions(rc=rc, pseudopotentials=[], coordinates=[])
+    symmetries = qp.symmetries.Symmetries(rc=rc, lattice=lattice, ions=ions)
 
     # Create grids with and without parallelization:
-    grid_par = qp.grid.Grid(tno=tno, lattice=lattice, symmetries=symmetries,
+    grid_par = qp.grid.Grid(rc=rc, lattice=lattice, symmetries=symmetries,
                             shape=shape, comm=rc.comm)  # parallel version
-    grid_seq = qp.grid.Grid(tno=tno, lattice=lattice, symmetries=symmetries,
+    grid_seq = qp.grid.Grid(rc=rc, lattice=lattice, symmetries=symmetries,
                             shape=shape, comm=None)  # sequential version
 
     def test(name, dtype_in, seq_func, par_func,

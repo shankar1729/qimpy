@@ -8,26 +8,29 @@ from typing import Union, Sequence, Tuple
 class Kpoints(qp.TreeNode):
     """Set of k-points in Brillouin zone.
     The underlying :class:`TaskDivision` splits k-points over `rc.comm_k`."""
-    __slots__ = ('k', 'wk', 'division')
+    __slots__ = ('rc', 'k', 'wk', 'division')
+    rc: qp.utils.RunConfig
     k: torch.Tensor  #: Array of k-points (N x 3)
     wk: torch.Tensor  #: Integration weights for each k (adds to 1)
     division: qp.utils.TaskDivision  #: Division of k-points across `rc.comm_k`
 
-    def __init__(self, *, tno: qp.TreeNodeOptions,
-                 k: torch.Tensor, wk: torch.Tensor) -> None:
+    def __init__(self, *, rc: qp.utils.RunConfig,
+                 k: torch.Tensor, wk: torch.Tensor,
+                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath()) -> None:
         """Initialize from list of k-points and weights. Typically, this should
          be used only by derived classes :class:`Kmesh` or :class:`Kpath`.
         """
-        super().__init__(tno=tno)
+        super().__init__()
+        self.rc = rc
         self.k = k
         self.wk = wk
         assert(abs(wk.sum() - 1.) < 1e-14)
 
         # Initialize process grid dimension (if -1) and split k-points:
-        self.rc.provide_n_tasks(1, k.shape[0])
+        rc.provide_n_tasks(1, k.shape[0])
         self.division = qp.utils.TaskDivision(n_tot=k.shape[0],
-                                              n_procs=self.rc.n_procs_k,
-                                              i_proc=self.rc.i_proc_k,
+                                              n_procs=rc.n_procs_k,
+                                              i_proc=rc.i_proc_k,
                                               name='k-point')
 
 
@@ -39,9 +42,10 @@ class Kmesh(Kpoints):
     i_sym: torch.Tensor  #: Symmetry index that maps mesh points to reduced set
     invert: torch.Tensor  #: Inversion factor (1, -1) in reduction of each k
 
-    def __init__(self, *, tno: qp.TreeNodeOptions,
+    def __init__(self, *, rc: qp.utils.RunConfig,
                  symmetries: qp.symmetries.Symmetries,
                  lattice: qp.lattice.Lattice,
+                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
                  offset: Union[Sequence[float], np.ndarray] = (0., 0., 0.),
                  size: Union[float, Sequence[int], np.ndarray] = (1, 1, 1),
                  use_inversion: bool = True) -> None:
@@ -73,8 +77,6 @@ class Kmesh(Kpoints):
             Default: True; should only need to disable this when interfacing
             with codes that do not support this symmetry eg. BerkeleyGW.
         """
-        rc = tno.rc
-        assert rc is not None
 
         # Select size from real-space dimension if needed:
         if isinstance(size, float) or isinstance(size, int):
@@ -158,15 +160,16 @@ class Kmesh(Kpoints):
             qp.log.info('Note: used k-inversion (conjugation) symmetry')
 
         # Initialize base class:
-        super().__init__(k=k, wk=wk, tno=tno)
+        super().__init__(rc=rc, k=k, wk=wk, checkpoint_in=checkpoint_in)
 
 
 class Kpath(Kpoints):
     """Path of k-points traversing Brillouin zone.
     Typically used only for band structure calculations."""
 
-    def __init__(self, *, tno: qp.TreeNodeOptions, lattice: qp.lattice.Lattice,
-                 dk: float, points: list) -> None:
+    def __init__(self, *, rc: qp.utils.RunConfig, lattice: qp.lattice.Lattice,
+                 dk: float, points: list,
+                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath()) -> None:
         """Initialize k-path with spacing `dk` connecting `points`.
 
         Parameters
@@ -184,8 +187,6 @@ class Kpath(Kpoints):
             and optionally a string label for this point for use in
             band structure plots.
         """
-        rc = tno.rc
-        assert rc is not None
 
         # Check types, sizes and separate labels from points:
         dk = float(dk)
@@ -218,7 +219,7 @@ class Kpath(Kpoints):
                     f' length {distance_tot:g}')
 
         # Initialize base class:
-        super().__init__(k=k, wk=wk, tno=tno)
+        super().__init__(rc=rc, k=k, wk=wk, checkpoint_in=checkpoint_in)
 
     def plot(self, electrons: qp.electrons.Electrons, filename: str) -> None:
         """Save band structure plot for `electrons` to `filename`."""

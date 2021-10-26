@@ -13,7 +13,8 @@ class Lattice(qp.TreeNode):
     Gbasis: torch.Tensor  #: Reciprocal-space lattice vectors (in columns)
     volume: float  #: Unit cell volume
 
-    def __init__(self, *, tno: qp.TreeNodeOptions,
+    def __init__(self, *, rc: qp.utils.RunConfig,
+                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
                  system: Optional[str] = None,
                  modification: Optional[str] = None,
                  a: Optional[float] = None,
@@ -79,7 +80,7 @@ class Lattice(qp.TreeNode):
             that uniformly scales all lattice vectors or separate factor
             :math:`[s_1, s_2, s_3]` for each lattice vector. boo
         """
-        super().__init__(tno=tno)
+        super().__init__()
         qp.log.info('\n--- Initializing Lattice ---')
 
         # Get unscaled lattice vectors:
@@ -105,13 +106,13 @@ class Lattice(qp.TreeNode):
             assert(len(scale_vector) in (1, 3))
             self.Rbasis = scale_vector[None, :] * self.Rbasis
         qp.log.info('Rbasis (real-space basis in columns):\n'
-                    + self.rc.fmt(self.Rbasis))
-        self.Rbasis = self.Rbasis.to(self.rc.device)
+                    + rc.fmt(self.Rbasis))
+        self.Rbasis = self.Rbasis.to(rc.device)
 
         # Compute reciprocal lattice vectors:
         self.Gbasis = (2*np.pi) * torch.linalg.inv(self.Rbasis.T)
         qp.log.info('Gbasis (reciprocal-space basis in columns):\n'
-                    + self.rc.fmt(self.Gbasis))
+                    + rc.fmt(self.Gbasis))
 
         # Compute unit cell volume:
         self.volume = abs(torch.linalg.det(self.Rbasis).item())

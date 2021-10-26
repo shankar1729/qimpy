@@ -10,11 +10,12 @@ from typing import Optional, Tuple, Union
 class Basis(qp.TreeNode):
     """Plane-wave basis for electronic wavefunctions. The underlying
      :class:`qimpy.utils.TaskDivision` splits plane waves over `rc.comm_b`"""
-    __slots__ = ('lattice', 'ions', 'kpoints', 'n_spins', 'n_spinor',
+    __slots__ = ('rc', 'lattice', 'ions', 'kpoints', 'n_spins', 'n_spinor',
                  'k', 'wk', 'w_sk', 'real_wavefunctions', 'ke_cutoff', 'grid',
                  'iG', 'n', 'n_min', 'n_max', 'n_avg', 'n_tot', 'n_ideal',
                  'fft_index', 'fft_block_size', 'pad_index', 'pad_index_mine',
                  'division', 'mine', 'real')
+    rc: qp.utils.RunConfig
     lattice: qp.lattice.Lattice  #: Lattice vectors of unit cell
     ions: qp.ions.Ions  #: Ionic system: implicit in basis for ultrasoft / PAW
     kpoints: qp.electrons.Kpoints  #: Corresponding k-point set
@@ -47,10 +48,10 @@ class Basis(qp.TreeNode):
     apply_potential = _apply_potential
     collect_density = _collect_density
 
-    def __init__(self, *, tno: qp.TreeNodeOptions,
-                 lattice: qp.lattice.Lattice, ions: qp.ions.Ions,
-                 symmetries: qp.symmetries.Symmetries,
+    def __init__(self, *, rc: qp.utils.RunConfig, lattice: qp.lattice.Lattice,
+                 ions: qp.ions.Ions, symmetries: qp.symmetries.Symmetries,
                  kpoints: qp.electrons.Kpoints, n_spins: int, n_spinor: int,
+                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
                  ke_cutoff: float = 20., real_wavefunctions: bool = False,
                  grid: Optional[Union[qp.grid.Grid, dict]] = None,
                  fft_block_size: int = 0) -> None:
@@ -90,8 +91,8 @@ class Basis(qp.TreeNode):
             The default of 0 auto-selects the block size based on the number
             of bands and k-points being processed by each process.
         """
-        super().__init__(tno=tno)
-        rc = self.rc
+        super().__init__()
+        self.rc = rc
         self.lattice = lattice
         self.ions = ions
         self.kpoints = kpoints
@@ -119,8 +120,9 @@ class Basis(qp.TreeNode):
         # Initialize grid to match cutoff:
         self.ke_cutoff = float(ke_cutoff)
         qp.log.info('\nInitializing wavefunction grid:')
-        self.add_child('grid', qp.grid.Grid, grid, lattice=lattice,
-                       symmetries=symmetries, comm=None,  # Never parallel
+        self.add_child('grid', qp.grid.Grid, grid, checkpoint_in, rc=rc,
+                       lattice=lattice, symmetries=symmetries,
+                       comm=None,  # Never parallel
                        ke_cutoff_wavefunction=self.ke_cutoff)
 
         # Initialize basis:

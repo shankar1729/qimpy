@@ -1,6 +1,6 @@
 from __future__ import annotations
 import qimpy as qp
-from typing import Optional, List, Union, TypeVar, Type, NamedTuple, final
+from typing import Optional, List, Union, TypeVar, Type, final
 
 
 ClassType = TypeVar('ClassType')
@@ -8,63 +8,45 @@ TreeNodeType = TypeVar('TreeNodeType', bound='TreeNode')
 TreeNodeType2 = TypeVar('TreeNodeType2', bound='TreeNode')
 
 
-class TreeNodeOptions(NamedTuple):
-    """Options passed through `__init__` of all TreeNode objects."""
-    rc: qp.utils.RunConfig  #: Current run configuration
-    parent: Optional[qp.TreeNode] = None  #: Parent in hierarchy
-    attr_name: str = ''  #: Attribute name of object within parent
-    checkpoint_in: Optional[qp.utils.Checkpoint] = None \
-        #: If present, load data from this checkpoint file during construction
-
-
 class TreeNode:
-    """Base class of dict-constructable and serializable objects
-    in QimPy hierarchy."""
-    __slots__ = ('parent', 'children', 'path', 'rc', 'checkpoint_in')
-    parent: Optional[qp.TreeNode]  #: Parent object in hierarchy (if any)
-    children: List[qp.TreeNode]  #: Child objects in hierarchy
-    path: str  #: Object's absolute path in hierarchy (includes trailing /)
-    rc: qp.utils.RunConfig  #: Current run configuration
-    checkpoint_in: Optional[qp.utils.Checkpoint] \
-        #: If present, load data from this checkpoint file during construction
+    """Base class of objects in tree for construction and checkpointing.
+    Provides functionality to set-up tree heirarchy based on input dicts,
+    such as from YAML files, and to output to checkpoints such as in HDF5
+    files preserving the same tree structure."""
+    __slots__ = ('child_names',)
+    child_names: List[str]  #: Names of attributes with child objects.
 
-    def __init__(self, tno: TreeNodeOptions, **kwargs):
-        self.rc = tno.rc
-        self.parent = tno.parent
-        self.children = []
-        self.path = ('/' if (tno.parent is None)
-                     else (tno.parent.path + tno.attr_name + '/'))
-        self.checkpoint_in = tno.checkpoint_in
+    def __init__(self, **kwargs):
+        self.child_names = []
 
     @final
-    def save_checkpoint(self, checkpoint: qp.utils.Checkpoint) -> None:
-        """Save `self` and all children in hierarchy to `checkpoint`.
+    def save_checkpoint(self, cp_path: qp.utils.CpPath) -> None:
+        """Save `self` and all children in hierarchy to `cp_path`.
         Override `_save_checkpoint` to implement the save functionality."""
-        # Save quantities in self:
-        saved = self._save_checkpoint(checkpoint)
-        if saved:
-            qp.log.info(f'  {self.path} <- {", ".join(saved)}')
-        # Recur down the hierarchy:
-        for child in self.children:
-            child.save_checkpoint(checkpoint)
+        if cp_path.checkpoint is not None:
+            # Save quantities in self:
+            saved = self._save_checkpoint(cp_path)
+            if saved:
+                qp.log.info(f'  {cp_path.path} <- {", ".join(saved)}')
+            # Recur down the hierarchy:
+            for child_name in self.child_names:
+                getattr(self, child_name
+                        ).save_checkpoint(cp_path.relative(child_name))
 
-    def _save_checkpoint(self, checkpoint: qp.utils.Checkpoint) -> List[str]:
-        """Override to save required quantities to `self.path`
-        within `checkpoint`. Return names of objects saved (for logging)."""
+    def _save_checkpoint(self, cp_path: qp.utils.CpPath) -> List[str]:
+        """Override to save required quantities to `cp_path`.
+        Return names of objects saved (for logging)."""
         return []
-
-    def _checkpoint_has(self, object_name: str) -> bool:
-        """Return whether input checkpoint exists and contains `object_name`
-        at `self.path`"""
-        return ((self.checkpoint_in is not None)
-                and ((self.path + object_name) in self.checkpoint_in))
 
     def add_child(self, attr_name: str, cls: Type[TreeNodeType],
                   params: Union[TreeNodeType, dict, None],
+                  checkpoint_in: qp.utils.CpPath,
                   attr_version_name: str = '', **kwargs) -> None:
         """Construct child object `self`.`attr_name` of type `cls`.
         Specifically, construct object from `params` and `kwargs`
         if `params` is a dict, and just from `kwargs` if `params` is None.
+        During construction, object and its children will load data from
+        `checkpoint_in`, if it contains a loaded checkpoint file.
         Any '-' in the keys of `params` are replaced with '_' for convenience.
         Otherwise check that `params` is already of type `cls`, and if not,
         raise an error clearly stating the types `attr_name` can be.
@@ -74,18 +56,15 @@ class TreeNode:
         initialized by several versions eg. `kpoints` in :class:`Electrons`
         could be `k-mesh` (:class:`Kmesh`) or `k-path` (:class:`Kmesh`).
         """
+        if params is None:
+            params = {}  # Logic below can focus on dict vs cls now.
 
         # Try all the valid possibilities:
-        tno = TreeNodeOptions(parent=self, attr_name=attr_name, rc=self.rc,
-                              checkpoint_in=self.checkpoint_in)
         if isinstance(params, dict):
             result = cls(**kwargs, **qp.utils.dict.key_cleanup(params),
-                         tno=tno)
-        elif params is None:
-            result = cls(**kwargs, tno=tno)
+                         checkpoint_in=checkpoint_in.relative(attr_name))
         elif isinstance(params, cls):
             result = params
-            TreeNode.__init__(result, tno=tno)
         else:
             # Report error with canonicalized class name:
             module = cls.__module__
@@ -99,4 +78,4 @@ class TreeNode:
 
         # Add as an attribute and child in hierarchy:
         setattr(self, attr_name, result)
-        self.children.append(result)
+        self.child_names.append(attr_name)

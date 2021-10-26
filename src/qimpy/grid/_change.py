@@ -226,12 +226,11 @@ if __name__ == "__main__":
     qp.log.info('*'*15 + ' QimPy ' + qp.__version__ + ' ' + '*'*15)
     rc = qp.utils.RunConfig()
     # Prepare a grid for testing:
-    tno = qp.TreeNodeOptions(rc=rc)
     lattice = qp.lattice.Lattice(
-        tno=tno, system='triclinic', a=2.1, b=2.2, c=2.3,
+        rc=rc, system='triclinic', a=2.1, b=2.2, c=2.3,
         alpha=75, beta=80, gamma=85)  # pick one with no symmetries
-    ions = qp.ions.Ions(tno=tno, pseudopotentials=[], coordinates=[])
-    symmetries = qp.symmetries.Symmetries(tno=tno, lattice=lattice, ions=ions)
+    ions = qp.ions.Ions(rc=rc, pseudopotentials=[], coordinates=[])
+    symmetries = qp.symmetries.Symmetries(rc=rc, lattice=lattice, ions=ions)
 
     # MPI-reproducible grid for testing:
     def get_ref_field(cls, grid):

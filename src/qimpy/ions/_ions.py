@@ -9,10 +9,11 @@ from typing import Optional, Union, List
 
 class Ions(qp.TreeNode):
     """Ionic system: ionic geometry and pseudopotentials. """
-    __slots__ = ('n_ions', 'n_types', 'symbols', 'n_ions_type', 'slices',
+    __slots__ = ('rc', 'n_ions', 'n_types', 'symbols', 'n_ions_type', 'slices',
                  'pseudopotentials', 'positions', 'types', 'M_initial',
                  'Z', 'Z_tot', 'rho_t', 'Vloc_t', 'n_core_t',
                  'beta', 'beta_version', 'D_all')
+    rc: qp.utils.RunConfig  #: current run configuration
     n_ions: int  #: number of ions
     n_types: int  #: number of distinct ion types
     n_ions_type: List[int]  #: number of ions of each type
@@ -32,7 +33,8 @@ class Ions(qp.TreeNode):
     beta_version: int  #: version of `beta` to invalidate cached projections
     D_all: torch.Tensor  #: nonlocal pseudopotential matrix (all atoms)
 
-    def __init__(self, *, tno: qp.TreeNodeOptions,
+    def __init__(self, *, rc: qp.utils.RunConfig,
+                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
                  coordinates: Optional[List] = None,
                  pseudopotentials: Optional[Union[str, List[str]]] = None
                  ) -> None:
@@ -61,8 +63,8 @@ class Ions(qp.TreeNode):
             templates is processed in order, and the first match for
             each element takes precedence.
         """
-        super().__init__(tno=tno)
-        rc = self.rc
+        super().__init__()
+        self.rc = rc
         qp.log.info('\n--- Initializing Ions ---')
 
         # Read ionic coordinates:

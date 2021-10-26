@@ -15,9 +15,10 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
     The mixed `Variable` must support vector-space operators as specified
     by the `Optimizable` abstract base class.
     """
-    __slots__ = ('comm', 'name', 'n_iterations', 'energy_threshold',
+    __slots__ = ('rc', 'comm', 'name', 'n_iterations', 'energy_threshold',
                  'residual_threshold', 'extra_thresholds', 'n_history',
                  'mix_fraction', '_variables', '_residuals', '_overlaps')
+    rc: qp.utils.RunConfig
     comm: qp.MPI.Comm  #: Communicator over which algorithm operates in unison
     name: str  #: Name of algorithm instance used in reporting eg. 'SCF'.
     n_iterations: int  #: Maximum number of iterations
@@ -36,13 +37,14 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
     #: to the extra values output by :meth:`cycle`.
     extra_thresholds: Dict[str, float]
 
-    def __init__(self, *, tno: qp.TreeNodeOptions,
-                 comm: qp.MPI.Comm, name: str,
+    def __init__(self, *, rc: qp.utils.RunConfig,
+                 checkpoint_in: qp.utils.CpPath, comm: qp.MPI.Comm, name: str,
                  n_iterations: int, energy_threshold: float,
                  residual_threshold: float, extra_thresholds: Dict[str, float],
                  n_history: int, mix_fraction: float) -> None:
         """Initialize Pulay algorithm parameters."""
-        super().__init__(tno=tno)
+        super().__init__()
+        self.rc = rc
         self.comm = comm
         self.name = name
         self.n_iterations = n_iterations

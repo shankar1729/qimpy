@@ -15,10 +15,11 @@ SmearingFunc = Callable[[torch.Tensor, Union[float, torch.Tensor], float],
 
 class Fillings(qp.TreeNode):
     """Electron occupation factors (smearing)"""
-    __slots__ = ('electrons', 'n_electrons',
+    __slots__ = ('rc', 'electrons', 'n_electrons',
                  'n_bands_min', 'n_bands', 'n_bands_extra',
                  'smearing', 'sigma', 'mu_constrain', 'M_constrain',
                  'mu', 'B', 'M', 'f', 'f_eig', '_smearing_func')
+    rc: qp.utils.RunConfig
     electrons: qp.electrons.Electrons
     n_electrons: float  #: Number of electrons
     n_bands_min: int  #: Minimum number of bands to accomodate `n_electrons`
@@ -35,8 +36,9 @@ class Fillings(qp.TreeNode):
     f_eig: torch.Tensor  #: Derivative of `f` with electronic eigenvalues
     _smearing_func: Optional[SmearingFunc]  #: Smearing function calculator
 
-    def __init__(self, *, tno: qp.TreeNodeOptions,
+    def __init__(self, *, rc: qp.utils.RunConfig,
                  ions: qp.ions.Ions, electrons: qp.electrons.Electrons,
+                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
                  charge: float = 0., smearing: str = 'gauss',
                  sigma: float = 0.002,
                  kT: Optional[float] = None,
@@ -108,7 +110,8 @@ class Fillings(qp.TreeNode):
             * x<scale>: scale relative to n_bands
             * An integer explicitly sets the number of extra bands
         """
-        super().__init__(tno=tno)
+        super().__init__()
+        self.rc = rc
         self.electrons = electrons
 
         # Magnetic field and magnetization mode:
@@ -168,7 +171,7 @@ class Fillings(qp.TreeNode):
                         f'  B: {self.rc.fmt(self.B)}')
 
         self._initialize_n_bands(ions, n_bands, n_bands_extra)
-        self._initialize_f()
+        self._initialize_f(checkpoint_in)
 
     def _initialize_n_bands(self, ions: qp.ions.Ions,
                             n_bands: Optional[Union[int, str]] = None,
@@ -219,17 +222,15 @@ class Fillings(qp.TreeNode):
             f'n_bands: {self.n_bands} ({n_bands_method})'
             f'  n_bands_extra: {self.n_bands_extra} ({n_bands_extra_method})')
 
-    def _initialize_f(self) -> None:
+    def _initialize_f(self, checkpoint_in: qp.utils.CpPath) -> None:
         """Create or load initial fillings."""
         el = self.electrons
         k_division = el.kpoints.division
         self.f = torch.zeros((el.n_spins, k_division.n_mine, self.n_bands),
                              device=self.rc.device)
-        if self._checkpoint_has('f'):
+        if cp_f := checkpoint_in.member('f'):
             qp.log.info("Loading fillings f")
-            self.read_band_scalars(cast(qp.utils.Checkpoint,
-                                        self.checkpoint_in),
-                                   self.path + 'f', self.f)
+            self.read_band_scalars(cp_f, self.f)
         else:
             # Compute fillings
             qp.log.info("Constructing fillings f to occupy lowest bands")
@@ -390,15 +391,17 @@ class Fillings(qp.TreeNode):
         qp.log.info(f'  FillingsUpdate:  mu: {self.mu:.9f}'
                     f'  n_electrons: {n_electrons:.6f}{M_str}')
 
-    def _save_checkpoint(self, checkpoint: qp.utils.Checkpoint) -> List[str]:
-        self.write_band_scalars(checkpoint, self.path + 'f', self.f)
-        checkpoint[self.path].attrs['mu'] = self.mu
+    def _save_checkpoint(self, cp_path: qp.utils.CpPath) -> List[str]:
+        self.write_band_scalars(cp_path.relative('f'), self.f)
+        cp_path.attrs['mu'] = self.mu
         return ['f', 'mu']
 
-    def write_band_scalars(self, checkpoint: qp.utils.Checkpoint, path: str,
+    def write_band_scalars(self, cp_path: qp.utils.CpPath,
                            v: torch.Tensor) -> None:
-        """Write `v` containing one scalar per band to `path` in `checkpoint`.
+        """Write `v` containing one scalar per band to `cp_path`.
         This is useful for writing fillings, eigenvalues etc."""
+        checkpoint, path = cp_path
+        assert checkpoint is not None
         el = self.electrons
         k_division = el.kpoints.division
         shape = (el.n_spins, k_division.n_tot, self.n_bands)
@@ -408,11 +411,13 @@ class Fillings(qp.TreeNode):
         if self.rc.i_proc_b == 0:
             checkpoint.write_slice(dset, offset, v[:, :, :self.n_bands])
 
-    def read_band_scalars(self, checkpoint: qp.utils.Checkpoint, path: str,
+    def read_band_scalars(self, cp_path: qp.utils.CpPath,
                           v: torch.Tensor) -> int:
-        """Read one scalar per band from `path` in `checkpoint` into `v`.
+        """Read one scalar per band from `cp_path` into `v`.
         Returns number of bands read, which may be <= `self.n_bands`.
         This is useful for reading fillings, eigenvalues etc."""
+        checkpoint, path = cp_path
+        assert checkpoint is not None
         el = self.electrons
         k_division = el.kpoints.division
         dset = checkpoint[path]

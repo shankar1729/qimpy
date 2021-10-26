@@ -12,13 +12,15 @@ N_CUT = 1e-16  # Regularization threshold for densities
 
 class XC(qp.TreeNode):
     """Exchange-correlation functional."""
-    __slots__ = ('_functionals', 'need_sigma', 'need_lap', 'need_tau')
+    __slots__ = ('rc', '_functionals', 'need_sigma', 'need_lap', 'need_tau')
+    rc: qp.utils.RunConfig
     _functionals: List[Functional]  #: list of functionals that add up to XC
     need_sigma: bool  #: whether overall functional needs gradient
     need_lap: bool  #: whether overall functional needs laplacian
     need_tau: bool  #: whether overall functional needs KE density
 
-    def __init__(self, *, tno: qp.TreeNodeOptions, spin_polarized: bool,
+    def __init__(self, *, rc: qp.utils.RunConfig, spin_polarized: bool,
+                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
                  functional: Union[str, List[str]] = 'gga-pbe'):
         """Initialize exchange-correlation functional.
 
@@ -47,7 +49,8 @@ class XC(qp.TreeNode):
             no normalization or check to make the fractions of exchange or
             correlation to add up to 1.
         """
-        super().__init__(tno=tno)
+        super().__init__()
+        self.rc = rc
         qp.log.info('\nInitializing XC:')
         if isinstance(functional, str):
             functional = functional.split(' ')

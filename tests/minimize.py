@@ -12,18 +12,19 @@ class TestFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
     M: Sequence[torch.Tensor]  #: Matrices defining even terms in energy
     K: torch.Tensor
 
-    def __init__(self, tno: qp.TreeNodeOptions, n_dim):
-        super().__init__(tno=tno, comm=tno.rc.comm,
+    def __init__(self, rc: qp.utils.RunConfig, n_dim,
+                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath()):
+        super().__init__(rc=rc, comm=rc.comm, checkpoint_in=checkpoint_in,
                          name='TestMinimize', n_iterations=100,
                          energy_threshold=1e-8,
                          extra_thresholds={'|grad|': 1e-8},
                          method='l-bfgs')
-        lattice = qp.lattice.Lattice(tno=tno, system='Orthorhombic',
+        lattice = qp.lattice.Lattice(rc=rc, system='Orthorhombic',
                                      a=1., b=1., c=10.)
-        ions = qp.ions.Ions(tno=tno, pseudopotentials=[], coordinates=[])
-        symmetries = qp.symmetries.Symmetries(tno=tno, lattice=lattice,
+        ions = qp.ions.Ions(rc=rc, pseudopotentials=[], coordinates=[])
+        symmetries = qp.symmetries.Symmetries(rc=rc, lattice=lattice,
                                               ions=ions)
-        grid = qp.grid.Grid(tno=tno, lattice=lattice, symmetries=symmetries,
+        grid = qp.grid.Grid(rc=rc, lattice=lattice, symmetries=symmetries,
                             shape=(1, 1, n_dim), comm=self.rc.comm)
         self.grid = grid
         x0 = torch.arange(n_dim, dtype=torch.float64, device=self.rc.device)
@@ -67,8 +68,7 @@ if __name__ == '__main__':
     def main():
         qp.utils.log_config()
         rc = qp.utils.RunConfig()
-        co = qp.TreeNodeOptions(rc=rc)
-        tf = TestFunction(tno=tno, n_dim=100)
+        tf = TestFunction(rc=rc, n_dim=100)
         tf.finite_difference_test(tf.random_direction())
         tf.minimize()
 

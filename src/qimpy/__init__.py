@@ -1,12 +1,12 @@
 """QimPy: Quantum-Integrated Multi-PhYsics"""
 # List exported symbols for doc generation
 __all__ = [
-    'MPI', 'System', 'TreeNode', 'TreeNodeOptions', 'Energy',
+    'MPI', 'System', 'TreeNode', 'Energy',
     'utils', 'ions', 'lattice', 'symmetries', 'grid', 'electrons', 'log']
 
 # Module import definition
 from mpi4py import MPI
-from ._tree import TreeNode, TreeNodeOptions
+from ._tree import TreeNode
 from ._energy import Energy
 from . import utils
 from . import ions

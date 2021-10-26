@@ -134,9 +134,10 @@ class Wavefunction:
         """Get number of bands in wavefunction"""
         return self.coeff.shape[2]
 
-    def read(self, checkpoint: qp.utils.Checkpoint, path: str) -> int:
-        """Read wavefunctions from `path` in `checkpoint`.
-        Return number of bands read."""
+    def read(self, cp_path: qp.utils.CpPath) -> int:
+        """Read wavefunctions from `cp_path`. Return number of bands read."""
+        checkpoint, path = cp_path
+        assert checkpoint is not None
         dset = checkpoint[path]
         n_bands_in = min(dset.shape[2], self.n_bands())
         basis = self.basis
@@ -155,8 +156,10 @@ class Wavefunction:
         self._proj_invalidate()
         return n_bands_in
 
-    def write(self, checkpoint: qp.utils.Checkpoint, path: str) -> None:
-        """Write wavefunctions to `path` in `checkpoint`."""
+    def write(self, cp_path: qp.utils.CpPath) -> None:
+        """Write wavefunctions to `cp_path`."""
+        checkpoint, path = cp_path
+        assert checkpoint is not None
         basis = self.basis
         k_division = basis.kpoints.division
         # Create dataset with overall shape:

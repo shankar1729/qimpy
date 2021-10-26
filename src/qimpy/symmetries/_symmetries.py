@@ -13,8 +13,9 @@ class Symmetries(qp.TreeNode):
     Detects space group from lattice and ions, and provides methods to
     symmetrize properties such as positions, forces and densities."""
 
-    __slots__ = ('lattice', 'ions', 'tolerance', 'n_sym',
+    __slots__ = ('rc', 'lattice', 'ions', 'tolerance', 'n_sym',
                  'rot', 'trans', 'ion_map', 'i_id', 'i_inv')
+    rc: qp.utils.RunConfig  #: Current run configuration
     lattice: qp.lattice.Lattice  #: Corresponding lattice vectors
     ions: qp.ions.Ions  #: Corresponding ionic geometry
     tolerance: float  #: Relative error threshold in detecting symmetries
@@ -30,7 +31,8 @@ class Symmetries(qp.TreeNode):
     check_grid_shape = _check_grid_shape
     get_grid_shape = _get_grid_shape
 
-    def __init__(self, *, tno: qp.TreeNodeOptions,
+    def __init__(self, *, rc: qp.utils.RunConfig,
+                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
                  lattice: qp.lattice.Lattice, ions: qp.ions.Ions,
                  axes: Dict[str, np.ndarray] = {},
                  tolerance: float = 1e-6) -> None:
@@ -41,8 +43,8 @@ class Symmetries(qp.TreeNode):
         tolerance
             :yaml:`Threshold for detecting symmetries.`
         """
-        super().__init__(tno=tno)
-        rc = self.rc
+        super().__init__()
+        self.rc = rc
         self.lattice = lattice
         self.ions = ions
         self.tolerance = tolerance

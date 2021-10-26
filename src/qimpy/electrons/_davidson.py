@@ -7,8 +7,9 @@ from typing import Optional, Tuple
 
 class Davidson(qp.TreeNode):
     """Davidson diagonalization of Hamiltonian in `electrons`."""
-    __slots__ = ('electrons', 'n_iterations', 'eig_threshold',
+    __slots__ = ('rc', 'electrons', 'n_iterations', 'eig_threshold',
                  '_line_prefix', '_norm_cut', '_i_iter', '_HC')
+    rc: qp.utils.RunConfig
     electrons: qp.electrons.Electrons  #: Electronic system to diagonalize
     n_iterations: int  #: Number of diagonalization iterations
     eig_threshold: float  #: Eigenvalue convergence threshold (in :math:`E_h`)
@@ -17,9 +18,10 @@ class Davidson(qp.TreeNode):
     _i_iter: int
     _HC: qp.electrons.Wavefunction  #: Used for coordination with sub-classes
 
-    def __init__(self, *, tno: qp.TreeNodeOptions,
-                 electrons: qp.electrons.Electrons, n_iterations: int = 100,
-                 eig_threshold: float = 1E-8) -> None:
+    def __init__(self, *, rc: qp.utils.RunConfig,
+                 electrons: qp.electrons.Electrons,
+                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+                 n_iterations: int = 100, eig_threshold: float = 1E-8) -> None:
         """Initialize diagonalizer with stopping criteria.
 
         Parameters
@@ -36,7 +38,8 @@ class Davidson(qp.TreeNode):
             calculations because the self-consistent field method overrides
             this when diagonalizing in an inner loop.
         """
-        super().__init__(tno=tno)
+        super().__init__()
+        self.rc = rc
         self.electrons = electrons
         self.n_iterations = n_iterations
         self.eig_threshold = eig_threshold

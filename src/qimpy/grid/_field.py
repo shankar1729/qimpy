@@ -227,8 +227,10 @@ class Field:
         """Create zero Field with same grid and batch dimensions."""
         return self.__class__(self.grid, shape_batch=self.data.shape[:-3])
 
-    def read(self, checkpoint: qp.utils.Checkpoint, path: str) -> None:
-        """Read field from `path` in `checkpoint`."""
+    def read(self, cp_path: qp.utils.CpPath) -> None:
+        """Read field from `cp_path`."""
+        checkpoint, path = cp_path
+        assert checkpoint is not None
         dset = checkpoint[path]
         shape_batch = self.data.shape[:-3]
         assert dset.shape == (shape_batch + self.shape_grid())
@@ -238,8 +240,10 @@ class Field:
                      if self.dtype().is_complex
                      else checkpoint.read_slice(dset, offset, size))
 
-    def write(self, checkpoint: qp.utils.Checkpoint, path: str) -> None:
-        """Write field to `path` in `checkpoint`."""
+    def write(self, cp_path: qp.utils.CpPath) -> None:
+        """Write field to `cp_path`."""
+        checkpoint, path = cp_path
+        assert checkpoint is not None
         shape_batch = self.data.shape[:-3]
         dtype: torch.dtype = self.data.dtype
         dtype_np = self.grid.rc.np_type[dtype]

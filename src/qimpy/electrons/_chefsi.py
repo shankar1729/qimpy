@@ -12,10 +12,11 @@ class CheFSI(Davidson):
     filter_order: int  #: Order of Chebyshev filter
     init_threshold: float  #: Threshold for Davidson initialization
 
-    def __init__(self, *, tno: qp.TreeNodeOptions,
-                 electrons: qp.electrons.Electrons, n_iterations: int = 100,
-                 eig_threshold: float = 1E-8, filter_order: int = 10,
-                 init_threshold: float = 1E-1) -> None:
+    def __init__(self, *, rc: qp.utils.RunConfig,
+                 electrons: qp.electrons.Electrons,
+                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+                 n_iterations: int = 100, eig_threshold: float = 1E-8,
+                 filter_order: int = 10, init_threshold: float = 1E-1) -> None:
         """Initialize with stopping criteria and filter order.
 
         Parameters
@@ -40,7 +41,8 @@ class CheFSI(Davidson):
             This controls the accuracy of a coarse Davidson diagonalization
             that creates a reasonable starting point for CheFSI.
         """
-        super().__init__(tno=tno, electrons=electrons,
+        super().__init__(rc=rc, electrons=electrons,
+                         checkpoint_in=checkpoint_in,
                          n_iterations=n_iterations,
                          eig_threshold=eig_threshold)
         self.filter_order = filter_order

@@ -4,7 +4,7 @@ from mpi4py import MPI
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Sequence, Tuple, Any
+from typing import Sequence, Tuple, Any, Optional, NamedTuple
 
 
 class Checkpoint(h5py.File):
@@ -74,3 +74,38 @@ class Checkpoint(h5py.File):
         to a complex tensor on output."""
         return torch.view_as_complex(self.read_slice(dset, offset + (0,),
                                                      size + (2,)))
+
+
+class CpPath(NamedTuple):
+    """Combination of optional checkpoint and path within it.
+    Useful as construction parameter for objects, to load data from
+    checkpoint when available."""
+    checkpoint: Optional[Checkpoint] = None  #: Checkpoint, if available.
+    path: str = ''  #: Path within checkpoint
+
+    def relative(self, relative_path: str) -> CpPath:
+        """Create `CpPath` with path relative to current one.
+        Specifically, `relative_path` is the path of the result relative
+        to `self.path`.
+        """
+        return CpPath(checkpoint=self.checkpoint,
+                      path='/'.join((self.path, relative_path)))
+
+    def member(self, name: str) -> CpPath:
+        """Member `name` at `path` within `checkpoint`, if present.
+        Otherwise, return an empty `CpPath`.
+        """
+        path = '/'.join((self.path, name))
+        return (CpPath(checkpoint=self.checkpoint, path=path)
+                if ((self.checkpoint is not None)
+                    and (path in self.checkpoint))
+                else CpPath())
+
+    def __bool__(self):
+        return (self.checkpoint is not None)
+
+    @property
+    def attrs(self):
+        """Access attributes at `path` within `checkpoint`."""
+        assert self.checkpoint is not None
+        return self.checkpoint[self.path].attrs

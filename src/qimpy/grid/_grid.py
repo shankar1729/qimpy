@@ -11,12 +11,13 @@ class Grid(qp.TreeNode):
     and this class provides FFT routines to switch fields on these grids,
     and routines to convert fields between grids.
     """
-    __slots__ = [
-        'lattice', 'symmetries', '_field_symmetrizer',
+    __slots__ = (
+        'rc', 'lattice', 'symmetries', '_field_symmetrizer',
         'comm', 'n_procs', 'i_proc', 'is_split', 'ke_cutoff',
         'dV', 'shape', 'shapeH', 'shapeR_mine', 'shapeG_mine', 'shapeH_mine',
         'split0', 'split2', 'split2H', '_mesh1D', '_mesh1D_mine',
-        '_indices_fft', '_indices_ifft', '_indices_rfft', '_indices_irfft']
+        '_indices_fft', '_indices_ifft', '_indices_rfft', '_indices_irfft')
+    rc: qp.utils.RunConfig
     lattice: qp.lattice.Lattice
     symmetries: qp.symmetries.Symmetries
     _field_symmetrizer: Optional[qp.symmetries.FieldSymmetrizer]
@@ -44,10 +45,11 @@ class Grid(qp.TreeNode):
     fft: MethodFFT = _fft
     ifft: MethodFFT = _ifft
 
-    def __init__(self, *, tno: qp.TreeNodeOptions,
+    def __init__(self, *, rc: qp.utils.RunConfig,
                  lattice: qp.lattice.Lattice,
                  symmetries: qp.symmetries.Symmetries,
                  comm: Optional[qp.MPI.Comm],
+                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
                  ke_cutoff_wavefunction: Optional[float] = None,
                  ke_cutoff: Optional[float] = None,
                  shape: Optional[Sequence[int]] = None) -> None:
@@ -78,7 +80,8 @@ class Grid(qp.TreeNode):
             :yaml:`Explicit grid dimensions [Nx, Ny, Nz].`
             Highest precedence, and if specified, will supercede `ke_cutoff`.
         """
-        super().__init__(tno=tno)
+        super().__init__()
+        self.rc = rc
         self.lattice = lattice
         self.symmetries = symmetries
         self._field_symmetrizer = None

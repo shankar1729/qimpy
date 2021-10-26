@@ -21,7 +21,8 @@ class SCF(qp.utils.Pulay[qp.grid.FieldH]):
     K_kerker: torch.Tensor  #: Kernel for Kerker mixing (preconditioner)
     K_metric: torch.Tensor  #: Kernel for metric used in Pulay overlaps
 
-    def __init__(self, *, tno: qp.TreeNodeOptions, comm: qp.MPI.Comm,
+    def __init__(self, *, rc: qp.utils.RunConfig, comm: qp.MPI.Comm,
+                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
                  n_iterations: int = 50, energy_threshold: float = 1e-8,
                  residual_threshold: float = 1e-7, n_history: int = 10,
                  mix_fraction: float = 0.5, mix_fraction_mag: float = 1.5,
@@ -82,7 +83,8 @@ class SCF(qp.utils.Pulay[qp.grid.FieldH]):
         self.n_eig_steps = n_eig_steps
         self.eig_threshold = float(eig_threshold)
         self.mix_density = mix_density
-        super().__init__(tno=tno, comm=comm, name='SCF',
+        super().__init__(rc=rc, comm=comm, name='SCF',
+                         checkpoint_in=checkpoint_in,
                          n_iterations=n_iterations,
                          energy_threshold=float(energy_threshold),
                          residual_threshold=float(residual_threshold),

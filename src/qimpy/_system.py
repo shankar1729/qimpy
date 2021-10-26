@@ -7,8 +7,10 @@ from typing import Union, Optional, Dict, List, Any
 
 class System(qp.TreeNode):
     """Overall system to calculate within QimPy"""
-    __slots__ = ('lattice', 'ions', 'symmetries', 'electrons',
-                 'grid', 'coulomb', 'energy', 'checkpoint_out')
+    __slots__ = ('rc', 'lattice', 'ions', 'symmetries', 'electrons',
+                 'grid', 'coulomb', 'energy',
+                 'checkpoint_in', 'checkpoint_out')
+    rc: qp.utils.RunConfig  #: Current run configuration
     lattice: qp.lattice.Lattice  #: Lattice vectors / unit cell definition
     ions: qp.ions.Ions  #: Ionic positions and pseudopotentials
     symmetries: qp.symmetries.Symmetries  #: Point and space group symmetries
@@ -16,6 +18,7 @@ class System(qp.TreeNode):
     grid: qp.grid.Grid  #: Charge-density grid
     coulomb: qp.grid.Coulomb  #: Coulomb interactions on charge-density grid
     energy: qp.Energy  #: Energy components
+    checkpoint_in: qp.utils.CpPath  #: Input checkpoint
     checkpoint_out: Optional[str]  #: Filename for output checkpoint
 
     def __init__(self, *, rc: qp.utils.RunConfig,
@@ -49,15 +52,16 @@ class System(qp.TreeNode):
             :yaml:`Checkpoint file to write.`
             Defaults to `checkpoint` if unspecified.
         """
-
+        super().__init__()
+        self.rc = rc
         # Set in and out checkpoints:
         try:
-            checkpoint_in = (None if (checkpoint is None)
-                             else qp.utils.Checkpoint(checkpoint,
-                                                      rc=rc, mode='r'))
+            checkpoint_in = qp.utils.CpPath(checkpoint=(
+                None if (checkpoint is None)
+                else qp.utils.Checkpoint(checkpoint, rc=rc, mode='r')))
         except OSError:  # Raised by h5py when file not readable
             qp.log.info(f"Cannot load checkpoint file '{checkpoint}'")
-            checkpoint_in = None
+            checkpoint_in = qp.utils.CpPath()
         self.checkpoint_out = (checkpoint if checkpoint_out is None
                                else checkpoint_out)
 
@@ -67,19 +71,20 @@ class System(qp.TreeNode):
         _add_axis(axes, 'magnetic field',  electrons, ['fillings', 'B'])
         # TODO: similarly account for applied electric fields
 
-        super().__init__(qp.TreeNodeOptions(rc=rc,
-                                            checkpoint_in=checkpoint_in))
-        self.add_child('lattice', qp.lattice.Lattice, lattice)
-        self.add_child('ions', qp.ions.Ions, ions)
+        self.add_child('lattice', qp.lattice.Lattice, lattice,
+                       checkpoint_in, rc=rc)
+        self.add_child('ions', qp.ions.Ions, ions, checkpoint_in, rc=rc)
         self.add_child('symmetries', qp.symmetries.Symmetries, symmetries,
-                       lattice=self.lattice, ions=self.ions, axes=axes)
+                       checkpoint_in, rc=rc, lattice=self.lattice,
+                       ions=self.ions, axes=axes)
         self.add_child('electrons', qp.electrons.Electrons, electrons,
-                       lattice=self.lattice, ions=self.ions,
-                       symmetries=self.symmetries)
+                       checkpoint_in, rc=rc, lattice=self.lattice,
+                       ions=self.ions, symmetries=self.symmetries)
 
         qp.log.info('\n--- Initializing Charge-Density Grid ---')
-        self.add_child('grid', qp.grid.Grid, grid, lattice=self.lattice,
-                       symmetries=self.symmetries, comm=rc.comm_kb,  # Parallel
+        self.add_child('grid', qp.grid.Grid, grid, checkpoint_in, rc=rc,
+                       lattice=self.lattice, symmetries=self.symmetries,
+                       comm=rc.comm_kb,  # Parallel
                        ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff)
         self.coulomb = qp.grid.Coulomb(self.grid, self.ions.n_ions)
 
@@ -95,8 +100,9 @@ class System(qp.TreeNode):
         qp.log.info(f'\nEnergy components:\n{repr(self.energy)}')
         qp.log.info('')
         if self.checkpoint_out:
-            self.save_checkpoint(qp.utils.Checkpoint(self.checkpoint_out,
-                                                     rc=self.rc, mode='w'))
+            self.save_checkpoint(qp.utils.CpPath(
+                checkpoint=qp.utils.Checkpoint(self.checkpoint_out,
+                                               rc=self.rc, mode='w')))
 
 
 def _add_axis(axes: Dict[str, np.ndarray], name: str,
