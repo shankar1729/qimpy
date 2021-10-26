@@ -3,7 +3,6 @@ import xml.etree.ElementTree as ET
 import qimpy as qp
 import numpy as np
 import torch
-import re
 
 
 def _read_upf(self: qp.ions.Pseudopotential, filename: str,

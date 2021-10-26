@@ -4,7 +4,6 @@ __all__ = ['load', 'dump']
 import qimpy as qp
 import yaml
 import os
-from typing import Tuple
 
 
 def load(filename: str, already_included: tuple = tuple()) -> dict:

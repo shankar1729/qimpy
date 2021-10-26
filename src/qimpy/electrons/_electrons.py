@@ -3,7 +3,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from ._hamiltonian import _hamiltonian
-from typing import Union, Optional, List, cast
+from typing import Union, Optional, List
 
 
 class Electrons(qp.TreeNode):

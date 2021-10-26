@@ -3,7 +3,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from ._davidson import Davidson
-from typing import Optional, Tuple
+from typing import Optional
 
 
 class CheFSI(Davidson):

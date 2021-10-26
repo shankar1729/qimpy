@@ -1,6 +1,5 @@
 from __future__ import annotations
 import qimpy as qp
-import numpy as np
 import torch
 from ._wavefunction_init import _randomize, \
     _randomize_selected, _RandomizeSelected

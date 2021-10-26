@@ -1,5 +1,4 @@
-import torch
-from typing import List, Tuple, Dict, Union
+from typing import List, Tuple, Dict
 
 L_MAX: int = 6  # Maximum l for harmonics
 L_MAX_HLF: int = 3  # Maximum l for products

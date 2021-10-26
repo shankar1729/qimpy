@@ -1,6 +1,6 @@
 from __future__ import annotations
 import qimpy as qp
-from typing import Optional, List, Union, TypeVar, Type, final
+from typing import List, Union, TypeVar, Type, final
 
 
 ClassType = TypeVar('ClassType')

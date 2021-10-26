@@ -4,7 +4,7 @@ import numpy as np
 from ._optimizable import Optimizable, ConvergenceCheck
 from collections import deque
 from abc import ABC, abstractmethod
-from typing import TypeVar, Generic, Sequence, Dict, Deque, Optional
+from typing import TypeVar, Generic, Sequence, Dict, Deque
 
 
 Variable = TypeVar('Variable', bound=Optimizable)

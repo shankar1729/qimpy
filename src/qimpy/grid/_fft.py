@@ -3,7 +3,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from qimpy.utils import TaskDivision, BufferView
-from typing import Tuple, Sequence, Callable
+from typing import Tuple, Callable
 
 
 IndicesType = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]

@@ -1,7 +1,7 @@
 """Grids, fields and their operations"""
 # List exported symbols for doc generation
 __all__ = [
-    'Grid', 'Field', 'FieldR', 'FieldC', 'FieldH', 'FieldG', 'Coulomb'
+    'Grid', 'Field', 'FieldR', 'FieldC', 'FieldH', 'FieldG', 'Coulomb',
     'N_SIGMAS_PER_WIDTH']
 
 from ._grid import Grid

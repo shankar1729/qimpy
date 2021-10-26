@@ -2,7 +2,7 @@
 from __future__ import annotations
 import qimpy.ions._spherical_harmonics_data as shdata
 import torch
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict
 
 # List exported symbols for doc generation
 __all__ = ['L_MAX', 'L_MAX_HLF', 'get_harmonics']
@@ -140,8 +140,7 @@ if __name__ == "__main__":
         harmonics up to order l_max_hlf. Print results formatted as Python
         code that can be pasted into _spherical_harmonics_data.py."""
         l_max = 2 * l_max_hlf
-        qp.log.info('import torch\n'
-                    'from typing import List, Tuple, Dict, Union\n\n'
+        qp.log.info('from typing import List, Tuple, Dict\n\n'
                     f'L_MAX: int = {l_max}  # Maximum l for harmonics\n'
                     f'L_MAX_HLF: int = {l_max_hlf}  # Maximum l for products')
         # Calculate solid harmonics on a mesh covering unit cube:

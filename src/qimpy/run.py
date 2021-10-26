@@ -43,7 +43,6 @@ instaling from pip/conda."""
 
 import qimpy as qp
 import argparse
-import logging
 import sys
 import os
 

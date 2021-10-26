@@ -1,10 +1,9 @@
 from __future__ import annotations
 import h5py
-from mpi4py import MPI
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Sequence, Tuple, Any, Optional, NamedTuple
+from typing import Tuple, Any, Optional, NamedTuple
 
 
 class Checkpoint(h5py.File):

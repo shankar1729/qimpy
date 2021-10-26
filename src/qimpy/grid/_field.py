@@ -1,6 +1,5 @@
 from __future__ import annotations
 import qimpy as qp
-import numpy as np
 import torch
 from abc import abstractmethod
 from numbers import Number

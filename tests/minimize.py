@@ -1,5 +1,4 @@
 import qimpy as qp
-import numpy as np
 import torch
 from typing import Sequence
 

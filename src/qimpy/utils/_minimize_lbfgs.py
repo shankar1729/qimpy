@@ -2,7 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 from collections import deque
 from dataclasses import dataclass
-from typing import TypeVar, Generic, Deque
+from typing import Generic, Deque
 from ._minimize_line import LINE_MINIMIZE, Vector
 from ._minimize_cg import _initialize_convergence_checks, _check_convergence
 

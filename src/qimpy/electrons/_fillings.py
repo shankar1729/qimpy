@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import collections
 from scipy import optimize
-from typing import Optional, Dict, Union, Callable, List, Sequence, cast
+from typing import Optional, Dict, Union, Callable, List, Sequence
 
 
 SmearingResults = collections.namedtuple('SmearingResults',

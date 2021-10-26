@@ -5,7 +5,6 @@ from ._minimize_lbfgs import _lbfgs
 from ._minimize_cg import _cg
 from ._minimize_line import LINE_MINIMIZE, Vector
 from abc import ABC, abstractmethod
-from collections import namedtuple
 from typing import Generic, Sequence, Dict, NamedTuple, Optional
 
 

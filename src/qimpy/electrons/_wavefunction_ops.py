@@ -2,8 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Callable, Union, Optional, Any
-from typing_extensions import Protocol
+from typing import Union, Any
 
 
 def _norm(self: qp.electrons.Wavefunction) -> float:
