@@ -9,11 +9,11 @@ is a Python package for Quantum-Integrated Multi-PhYsics.
 
 All Python code must be PEP-8 compliant.
 The repository provides a .editorconfig with indentation and line-length rules,
-and a pre-commit hook within .githooks to run pycodestyle.
-Please install this pre-commit hook by creating a link to it within .git/hooks,
-and make sure you have pycodestyle installed.
+and a pre-commit configuration to run flake8.
+Please install this pre-commit hook by running `pre-commit install`
+within the working directory.
 
 Function/method signatures and class attributes must use type hints.
-Document class attributes using doct comments on the type hints when possible.
+Document class attributes using doc comments on the type hints when possible.
 
 For all log messages, use f-strings as far as possible for maximum readability.

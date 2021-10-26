@@ -17,6 +17,7 @@ def _cg(self: qp.utils.Minimize[Vector]) -> qp.Energy:
     along_gradient = True  # Whether current search direction is along gradient
     direction: Vector  #: Search direction (initialized at 0th iteration)
     g_prev: Vector  #: Previous gradient (initialized at 0th iteration)
+    g_prev_Kg_prev: float  #: Preconditioned norm of g_prev
     g_prev_used = not ((self.method == 'gradient')
                        or (self.cg_type == 'fletcher-reeves')
                        )  # whether previous gradient used in direction update
@@ -64,7 +65,7 @@ def _cg(self: qp.utils.Minimize[Vector]) -> qp.Energy:
         along_gradient = False
         direction = self.constrain((beta * direction - state.K_gradient)
                                    if beta else ((-1.) * state.K_gradient))
-        g_prev_Kg_prev: float = g_Kg
+        g_prev_Kg_prev = g_Kg
         if g_prev_used:
             g_prev = state.gradient  # for next direction update
 

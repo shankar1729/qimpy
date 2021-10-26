@@ -257,7 +257,7 @@ if __name__ == "__main__":
 
     # Make parallel and sequential grids of given shape:
     def make_grid(shape, comm):
-        return qp.grid.Grid(tno=tno, lattice=lattice, symmetries=symmetries,
+        return qp.grid.Grid(rc=rc, lattice=lattice, symmetries=symmetries,
                             shape=shape, comm=comm)
 
     def make_grids(shape):
