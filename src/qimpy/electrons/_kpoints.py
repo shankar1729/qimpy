@@ -107,7 +107,8 @@ class Kmesh(Kpoints):
         # Create full mesh:
         grids1d = [(offset[i] + torch.arange(size[i], device=rc.device))
                    / size[i] for i in range(3)]
-        mesh = torch.stack(torch.meshgrid(*tuple(grids1d))).view(3, -1).T
+        mesh = torch.stack(torch.meshgrid(*tuple(grids1d),
+                                          indexing='ij')).view(3, -1).T
         mesh -= torch.floor(0.5 + mesh)  # wrap to [-0.5,0.5)
 
         # Compute mapping of arbitrary k-points to mesh:

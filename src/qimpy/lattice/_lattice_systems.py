@@ -89,7 +89,7 @@ def get_Rbasis(system: str, modification: Optional[str],
     v1 = np.array((cos_gamma, sin_gamma, 0))
     v2 = np.array((cos_beta, (cos_alpha-cos_beta*cos_gamma)/sin_gamma, 0))
     v2[2] = np.sqrt(1 - (v2**2).sum())
-    Rbasis = torch.tensor([a * v0, b * v1, c * v2]).T
+    Rbasis = torch.tensor(np.array([a * v0, b * v1, c * v2]).T)
 
     # Apply modifications if any:
     if modification is None:

@@ -14,7 +14,7 @@ def _get_lattice_point_group(Rbasis: torch.Tensor,
 
     # Construct all possible matrices with entries from (-1, 0, 1):
     entries = torch.tensor([-1, 0, 1], device=T.device, dtype=torch.double)
-    matrices = torch.stack(torch.meshgrid([entries]*9))
+    matrices = torch.stack(torch.meshgrid([entries]*9, indexing='ij'))
     matrices = matrices.reshape((9, -1)).T.reshape((-1, 3, 3))
 
     # Find matrices that preserve reduced metric:

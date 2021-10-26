@@ -56,14 +56,15 @@ class Coulomb:
             Ncut = 1 + torch.ceil(Rcut * RlengthInv).to(torch.int)
             iRgrids = [torch.arange(-N, N+1, device=rc.device,
                                     dtype=torch.double) for N in Ncut]
-            iR = torch.stack(torch.meshgrid(*tuple(iRgrids))).flatten(1).T
+            iR = torch.stack(torch.meshgrid(*tuple(iRgrids),
+                                            indexing='ij')).flatten(1).T
             if exclude_zero:
                 iR = iR[torch.where(iR.abs().sum(dim=-1))[0]]
             # Add margin mesh:
             marginGrid = torch.tensor([-1, +1] if include_margin else [0],
                                       device=rc.device)
-            iMargin = torch.stack(torch.meshgrid(marginGrid, marginGrid,
-                                                 marginGrid)).flatten(1).T
+            iMargin = torch.stack(torch.meshgrid([marginGrid]*3,
+                                                 indexing='ij')).flatten(1).T
             iRmargin = iR[None, ...] + iMargin[:, None, :]
             # Select points within Rcut (including margin):
             RmagMin = (iRmargin @ Rbasis.T).norm(dim=-1).min(dim=0)[0]

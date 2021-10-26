@@ -161,7 +161,8 @@ class Grid(qp.TreeNode):
             if mine is True (and with shape, instead if mine is False).
         """
         mesh1D = (self._mesh1D_mine[space] if mine else self._mesh1D[space])
-        return torch.stack(torch.meshgrid(*mesh1D)).permute(1, 2, 3, 0)
+        return torch.stack(torch.meshgrid(*mesh1D,
+                                          indexing='ij')).permute(1, 2, 3, 0)
 
     def get_gradient_operator(self, space: str) -> torch.Tensor:
         """Get gradient operator in reciprocal space.
