@@ -94,7 +94,7 @@ class Lattice(qp.TreeNode):
                     if value is None:
                         raise KeyError(key + ' must be specified')
                     try:
-                        v = np.array(value, dtype=float).reshape(3)
+                        np.array(value, dtype=float).reshape(3)
                     except ValueError:
                         raise ValueError(key + ' must contain 3 numbers')
             check_vectors(vector1=vector1, vector2=vector2, vector3=vector3)

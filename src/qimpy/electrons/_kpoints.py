@@ -131,10 +131,8 @@ class Kmesh(Kpoints):
         # Check whether to add explicit inversion:
         if use_inversion and not symmetries.i_inv:
             rot = torch.cat((symmetries.rot, -symmetries.rot))
-            n_inv = 2
         else:
             rot = symmetries.rot
-            n_inv = 1
 
         # Transform every k-point under every symmetry:
         # --- k-points transform by rot.T, so no transpose on right-multiply
@@ -261,11 +259,11 @@ class Kpath(Kpoints):
         yformatter = ticker.ScalarFormatter(useOffset=False)
         ax_heights = [3] + [1]*(len(band_ranges) - 1)
         if split_axis:
-            fig, axes = plt.subplots(len(band_ranges), 1, sharex=True,
-                                     gridspec_kw={'height_ratios': ax_heights})
+            _, axes = plt.subplots(len(band_ranges), 1, sharex=True,
+                                   gridspec_kw={'height_ratios': ax_heights})
             plt.subplots_adjust(hspace=0.03)
         else:
-            fig = plt.figure()
+            plt.figure()
             axes = [plt.gca()]
         tick_pos = [self.k_length[i] for i in self.labels.keys()]
         for i_ax, band_range in enumerate(band_ranges[::-1]):

@@ -122,7 +122,7 @@ if __name__ == "__main__":
     def main():
         import matplotlib.pyplot as plt
         qp.utils.log_config()
-        rc = qp.utils.RunConfig()
+        qp.utils.RunConfig()
 
         # Plot a single blip function for testing:
         plt.figure()

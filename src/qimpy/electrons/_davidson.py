@@ -99,7 +99,6 @@ class Davidson(qp.TreeNode):
         if not len(i_spin):
             return  # no regularization needed
         # Randomize select and update the norm (just an estimate):
-        basis = self.electrons.basis
         C.randomize_selected(i_spin, i_k, i_band, i_iter)  # seeded by i_iter
         norm[i_spin, i_k, i_band] = 1.
 
