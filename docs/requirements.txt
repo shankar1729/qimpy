@@ -1,3 +1,0 @@
-torch
-scipy
-Sphinx~=4.1

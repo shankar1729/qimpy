@@ -1,14 +1,13 @@
-# Required
+# Configuration for website and doc generation on RTD
 version: 2
 
 build:
   image: latest
 
-# Python version and build requirements
+conda:
+  environment: environment.yml
+
 python:
-  version: 3.8
-  system_packages: true
   install:
-    - requirements: docs/requirements.txt
     - method: setuptools
       path: .

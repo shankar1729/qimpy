@@ -1,0 +1,13 @@
+name: qimpy
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.8
+  - pyyaml
+  - pytorch
+  - psutil
+  - numpy
+  - h5py
+  - mpi4py
+  - scipy

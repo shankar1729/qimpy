@@ -53,9 +53,6 @@ autodoc_typehints = "description"
 # Order entries by type:
 autodoc_member_order = 'groupwise'
 
-# Options needed for building on readthedocs:
-autodoc_mock_imports = ["mpi4py", "h5py", "pylibxc"]
-
 # Suppress unnecessary paths in class / function names:
 add_module_names = False
 python_use_unqualified_type_names = True
