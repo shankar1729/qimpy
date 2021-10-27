@@ -1,9 +1,15 @@
 """Ionic sub-system"""
 # List exported symbols for doc generation
 __all__ = [
-    'Ions', 'Pseudopotential', 'PseudoQuantumNumbers', 'symbols',
-    'spherical_harmonics', 'spherical_bessel', 'quintic_spline',
-    'RadialFunction']
+    "Ions",
+    "Pseudopotential",
+    "PseudoQuantumNumbers",
+    "symbols",
+    "spherical_harmonics",
+    "spherical_bessel",
+    "quintic_spline",
+    "RadialFunction",
+]
 
 from ._ions import Ions
 from ._pseudopotential import Pseudopotential

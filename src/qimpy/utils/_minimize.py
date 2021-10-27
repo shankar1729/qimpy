@@ -10,6 +10,7 @@ from typing import Generic, Sequence, Dict, NamedTuple, Optional
 
 class MinimizeState(Generic[Vector]):
     """Current energies and gradients of `Minimize` algorithm."""
+
     energy: qp.Energy  #: Current energy (objective function)
     extra: Sequence[float]  #: Extra convergence quantities
     gradient: Vector  #: Gradient of energy w.r.t. parameters
@@ -27,15 +28,17 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
 
     class StepSize(NamedTuple):
         """Parameters for controlling line-minimize step size."""
-        initial: float = 1.  #: Initial step size
+
+        initial: float = 1.0  #: Initial step size
         minimum: float = 1e-10  #: Smallest step size at which to give up
         should_update: bool = True  #: Whether to update test step size
         reduce_factor: float = 0.1  #: Reduction factor when a step fails
-        grow_factor: float = 3.  #: Maximum step size growth at one time
+        grow_factor: float = 3.0  #: Maximum step size growth at one time
         n_adjust: int = 10  #: Number of step changes in one line minimize
 
     class Wolfe(NamedTuple):
         """Wolfe line minimize stopping conditions."""
+
         energy: float = 1e-4  #: Dimensionless minimum energy reduction in step
         gradient: float = 0.9  #: Required reduction of projected gradient
 
@@ -57,13 +60,23 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
     #: These must correspond (in order) to the outputs of :meth:`compute`.
     extra_thresholds: Dict[str, float]
 
-    def __init__(self, *, rc: qp.utils.RunConfig,
-                 checkpoint_in: qp.utils.CpPath,
-                 comm: qp.MPI.Comm, name: str, n_iterations: int,
-                 energy_threshold: float, extra_thresholds: Dict[str, float],
-                 method: str, cg_type: str = 'polak-ribiere',
-                 line_minimize: str = 'auto', step_size: Optional[dict] = None,
-                 n_history: int = 15, wolfe: Optional[dict] = None) -> None:
+    def __init__(
+        self,
+        *,
+        rc: qp.utils.RunConfig,
+        checkpoint_in: qp.utils.CpPath,
+        comm: qp.MPI.Comm,
+        name: str,
+        n_iterations: int,
+        energy_threshold: float,
+        extra_thresholds: Dict[str, float],
+        method: str,
+        cg_type: str = "polak-ribiere",
+        line_minimize: str = "auto",
+        step_size: Optional[dict] = None,
+        n_history: int = 15,
+        wolfe: Optional[dict] = None,
+    ) -> None:
         """Initialize minimization algorithm parameters."""
         super().__init__()
         self.rc = rc
@@ -72,33 +85,38 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         self.n_iterations = n_iterations
         self.energy_threshold = energy_threshold
         self.extra_thresholds = extra_thresholds
-        self.step_size = Minimize.StepSize(**qp.utils.dict.key_cleanup(
-            {} if (step_size is None) else step_size))
+        self.step_size = Minimize.StepSize(
+            **qp.utils.dict.key_cleanup({} if (step_size is None) else step_size)
+        )
         self.n_history = n_history
-        self.wolfe = Minimize.Wolfe(**qp.utils.dict.key_cleanup(
-            {} if (wolfe is None) else wolfe))
+        self.wolfe = Minimize.Wolfe(
+            **qp.utils.dict.key_cleanup({} if (wolfe is None) else wolfe)
+        )
 
         # Validate direction update options:
-        preferred_lm = {'cg': 'quadratic',  # prefered line minimize for each
-                        'l-bfgs': 'wolfe',
-                        'gradient': 'constant'}
+        preferred_lm = {
+            "cg": "quadratic",  # prefered line minimize for each
+            "l-bfgs": "wolfe",
+            "gradient": "constant",
+        }
         method_options = preferred_lm.keys()
         self.method = method.lower()
         if self.method not in method_options:
-            raise KeyError(f'method must be one of {method_options}')
+            raise KeyError(f"method must be one of {method_options}")
 
         # Validate CG type:
-        cg_options = {'polak-ribiere', 'fletcher-reeves', 'hestenes-stiefel'}
+        cg_options = {"polak-ribiere", "fletcher-reeves", "hestenes-stiefel"}
         self.cg_type = cg_type.lower()
         if self.cg_type not in cg_options:
-            raise KeyError(f'cg_type must be one of {cg_options}')
+            raise KeyError(f"cg_type must be one of {cg_options}")
 
         # Validate line minimize options:
         self.line_minimize = line_minimize.lower()
         if self.line_minimize not in LINE_MINIMIZE:
-            if self.line_minimize != 'auto':
-                raise KeyError('line_minimize must be "auto" or one of'
-                               f' {LINE_MINIMIZE.keys()}')
+            if self.line_minimize != "auto":
+                raise KeyError(
+                    'line_minimize must be "auto" or one of' f" {LINE_MINIMIZE.keys()}"
+                )
             self.line_minimize = preferred_lm[self.method]
 
     @abstractmethod
@@ -121,7 +139,7 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
 
     def constrain(self, v: Vector) -> Vector:
         """Override to impose any constraints, restricting to allowed subspace.
-        The input may be modified in-place and returned for efficiency. """
+        The input may be modified in-place and returned for efficiency."""
         return v
 
     def safe_step_size(self, direction: Vector) -> float:
@@ -133,9 +151,9 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         """Minimize, and return optimized energy of system"""
         return _lbfgs(self) if (self.method == "l-bfgs") else _cg(self)
 
-    def finite_difference_test(self, direction: Vector,
-                               step_sizes: Optional[Sequence[float]] = None
-                               ) -> None:
+    def finite_difference_test(
+        self, direction: Vector, step_sizes: Optional[Sequence[float]] = None
+    ) -> None:
         """Check gradient implementation by taking steps along `direction`.
         This will print ratio of actual energy differences along steps of
         various sizes in `step_sizes` and the expected energy difference
@@ -147,20 +165,23 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         if step_sizes is None:
             step_sizes = np.logspace(-9, 1, 11).tolist()
         # Initial state with gradient:
-        state = qp.utils.MinimizeState['Vector']()
+        state = qp.utils.MinimizeState["Vector"]()
         E0 = self._compute(state, energy_only=False)
-        dE_step = self._sync(state.gradient.overlap(direction)
-                             )  # directional derivative along step direction
+        dE_step = self._sync(
+            state.gradient.overlap(direction)
+        )  # directional derivative along step direction
         # Finite difference derivatives:
-        step_size_prev = 0.  # cumulative progress along step:
+        step_size_prev = 0.0  # cumulative progress along step:
         for step_size in sorted(step_sizes):
             self.step(direction, step_size - step_size_prev)
             step_size_prev = step_size
             deltaE = self._compute(state, energy_only=True) - E0
             dE_expected = dE_step * step_size
-            qp.log.info(f'{self.name}: step size: {step_size:.3e}'
-                        f'  d{state.energy.name}'
-                        f' ratio: {deltaE/dE_expected:.11f}')
+            qp.log.info(
+                f"{self.name}: step size: {step_size:.3e}"
+                f"  d{state.energy.name}"
+                f" ratio: {deltaE/dE_expected:.11f}"
+            )
         qp.log.info(f'{self.name}: {"-"*48}')
         # Restore original position:
         self.step(direction, -step_size_prev)
@@ -169,12 +190,11 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         """Ensure `v` is consistent on `comm`."""
         return self.comm.bcast(v)
 
-    def _compute(self, state: MinimizeState[Vector],
-                 energy_only: bool) -> float:
+    def _compute(self, state: MinimizeState[Vector], energy_only: bool) -> float:
         """Internal helper to prepare `state`, call `compute`
         and return `_sync`'d energy."""
         MinimizeState.__init__(state)  # prevent use of old results
-        for attr_name in ('gradient', 'K_gradient'):
+        for attr_name in ("gradient", "K_gradient"):
             if hasattr(state, attr_name):
                 delattr(state, attr_name)
         self.compute(state, energy_only)

@@ -7,7 +7,7 @@ from ._change import _change_real, _change_recip
 from typing import TypeVar, Any, Tuple, Optional, Sequence
 
 
-FieldType = TypeVar('FieldType', bound='Field')  #: Type for field ops.
+FieldType = TypeVar("FieldType", bound="Field")  #: Type for field ops.
 
 
 class Field:
@@ -17,7 +17,7 @@ class Field:
     full-reciprocal (:class:`FieldG`) or half-reciprocal (:class:`FieldH`)
     space."""
 
-    __slots__ = ('grid', 'data')
+    __slots__ = ("grid", "data")
     grid: qp.grid.Grid  #: Associated grid that determines dimensions of field
     data: torch.Tensor  #: Underlying data, with last three dimensions on grid
 
@@ -37,9 +37,13 @@ class Field:
     def offset_grid_mine(self) -> Tuple[int, ...]:
         """Offset of local grid dimensions into global grid for Field type"""
 
-    def __init__(self, grid: qp.grid.Grid, *,
-                 shape_batch: Sequence[int] = tuple(),
-                 data: Optional[torch.Tensor] = None) -> None:
+    def __init__(
+        self,
+        grid: qp.grid.Grid,
+        *,
+        shape_batch: Sequence[int] = tuple(),
+        data: Optional[torch.Tensor] = None
+    ) -> None:
         """Initialize to zeros or specified `data`.
 
         Parameters
@@ -57,8 +61,9 @@ class Field:
         dtype = self.dtype()
         if data is None:
             # Initialize to zero:
-            self.data = torch.zeros(tuple(shape_batch) + shape_grid_mine,
-                                    dtype=dtype, device=grid.rc.device)
+            self.data = torch.zeros(
+                tuple(shape_batch) + shape_grid_mine, dtype=dtype, device=grid.rc.device
+            )
         else:
             # Initialize to provided data:
             assert data.shape[-3:] == shape_grid_mine
@@ -129,14 +134,17 @@ class Field:
         else:
             result = (data1 * data2).sum(dim=(-3, -2, -1))
         # Volume factor:
-        result *= (self.grid.lattice.volume  # recip. space integration weight
-                   if isinstance(self, (FieldG, FieldH))
-                   else self.grid.dV)  # real space integration weight
+        result *= (
+            self.grid.lattice.volume  # recip. space integration weight
+            if isinstance(self, (FieldG, FieldH))
+            else self.grid.dV
+        )  # real space integration weight
         # Collect over MPI if needed:
         if self.grid.comm is not None:
             result = result.contiguous()
-            self.grid.comm.Allreduce(qp.MPI.IN_PLACE,
-                                     qp.utils.BufferView(result), qp.MPI.SUM)
+            self.grid.comm.Allreduce(
+                qp.MPI.IN_PLACE, qp.utils.BufferView(result), qp.MPI.SUM
+            )
         return result
 
     __xor__ = dot
@@ -148,15 +156,13 @@ class Field:
         over `Field`s eg. with the `Pulay` or `Minimizer` algorithm templates.
         """
         result = self.dot(other).sum()
-        return float(result.real.item() if result.is_complex()
-                     else result.item())
+        return float(result.real.item() if result.is_complex() else result.item())
 
     def norm(self) -> torch.Tensor:
         r"""Norm of a field, defined by :math:`\sqrt{\int |a|^2}`.
         Returns a real tensor with shape equal to batch dimensions."""
         norm_sq = self ^ self
-        return (norm_sq.real.sqrt() if norm_sq.is_complex()
-                else norm_sq.sqrt())
+        return norm_sq.real.sqrt() if norm_sq.is_complex() else norm_sq.sqrt()
 
     def get_origin_index(self):
         """Return index into local data of the spatial index = 0 component(s),
@@ -165,8 +171,9 @@ class Field:
         if the origin component is not local to this process.
         The `o` property provides convenient access to data at this index.
         """
-        return ((slice(None),) * (len(self.data.shape)-3)  # batch dimensions
-                + (((), (), ()) if self.grid.i_proc else (0, 0, 0)))
+        return (slice(None),) * (len(self.data.shape) - 3) + (  # batch dimensions
+            ((), (), ()) if self.grid.i_proc else (0, 0, 0)
+        )
 
     @property
     def o(self) -> torch.Tensor:
@@ -191,14 +198,14 @@ class Field:
         field_type = type(self)
         if field_type in {FieldR, FieldC}:  # apply in reciprocal space
             return ~((~self).gradient(dim=dim))  # type: ignore
-        op = self.grid.get_gradient_operator('H' if (field_type == FieldH)
-                                             else 'G')
+        op = self.grid.get_gradient_operator("H" if (field_type == FieldH) else "G")
         shape_in = self.data.shape
         n_batch_dims = len(shape_in) - 3
         shape_data = shape_in[:dim] + (1,) + shape_in[dim:]
-        shape_op = (1,)*dim + (3,) + (1,)*(n_batch_dims-dim) + op.shape[1:]
-        return self.__class__(self.grid, data=(op.view(shape_op)
-                                               * self.data.view(shape_data)))
+        shape_op = (1,) * dim + (3,) + (1,) * (n_batch_dims - dim) + op.shape[1:]
+        return self.__class__(
+            self.grid, data=(op.view(shape_op) * self.data.view(shape_data))
+        )
 
     def divergence(self: FieldType, dim: int = 0) -> FieldType:
         """Divergence of field. A dimension of length 3 at `dim`, by default
@@ -206,20 +213,20 @@ class Field:
         field_type = type(self)
         if field_type in {FieldR, FieldC}:  # apply in reciprocal space
             return ~((~self).divergence(dim=dim))  # type: ignore
-        op = self.grid.get_gradient_operator('H' if (field_type == FieldH)
-                                             else 'G')
+        op = self.grid.get_gradient_operator("H" if (field_type == FieldH) else "G")
         n_batch_dims = len(self.data.shape) - 4  # other than contracted one
-        shape_op = (1,)*dim + (3,) + (1,)*(n_batch_dims-dim) + op.shape[1:]
-        return self.__class__(self.grid, data=(op.view(shape_op)
-                                               * self.data).sum(dim=dim))
+        shape_op = (1,) * dim + (3,) + (1,) * (n_batch_dims - dim) + op.shape[1:]
+        return self.__class__(
+            self.grid, data=(op.view(shape_op) * self.data).sum(dim=dim)
+        )
 
     def laplacian(self: FieldType) -> FieldType:
         """Laplacian of field."""
         field_type = type(self)
         if field_type in {FieldR, FieldC}:  # apply in reciprocal space
             return ~((~self).laplacian())  # type: ignore
-        iG = self.grid.get_mesh('H' if (field_type == FieldH) else 'G')
-        op = -((iG.to(torch.double) @ self.grid.lattice.Gbasis)**2).sum(dim=-1)
+        iG = self.grid.get_mesh("H" if (field_type == FieldH) else "G")
+        op = -((iG.to(torch.double) @ self.grid.lattice.Gbasis) ** 2).sum(dim=-1)
         return self.__class__(self.grid, data=(op * self.data))
 
     def zeros_like(self: FieldType) -> FieldType:
@@ -235,9 +242,11 @@ class Field:
         assert dset.shape == (shape_batch + self.shape_grid())
         offset = (0,) * len(shape_batch) + self.offset_grid_mine()
         size = shape_batch + self.shape_grid_mine()
-        self.data = (checkpoint.read_slice_complex(dset, offset, size)
-                     if self.dtype().is_complex
-                     else checkpoint.read_slice(dset, offset, size))
+        self.data = (
+            checkpoint.read_slice_complex(dset, offset, size)
+            if self.dtype().is_complex
+            else checkpoint.read_slice(dset, offset, size)
+        )
 
     def write(self, cp_path: qp.utils.CpPath) -> None:
         """Write field to `cp_path`."""
@@ -249,8 +258,7 @@ class Field:
         shape = shape_batch + self.shape_grid()  # global dimensions
         offset = (0,) * len(shape_batch) + self.offset_grid_mine()
         if dtype.is_complex:
-            dset = checkpoint.create_dataset_complex(path, shape=shape,
-                                                     dtype=dtype_np)
+            dset = checkpoint.create_dataset_complex(path, shape=shape, dtype=dtype_np)
             checkpoint.write_slice_complex(dset, offset, self.data)
         else:
             dset = checkpoint.create_dataset(path, shape=shape, dtype=dtype_np)
@@ -259,6 +267,7 @@ class Field:
 
 class FieldR(Field):
     """Real fields in real space."""
+
     def dtype(self) -> torch.dtype:
         return torch.double
 
@@ -285,6 +294,7 @@ class FieldR(Field):
 
 class FieldC(Field):
     """Complex fields in real space."""
+
     def dtype(self) -> torch.dtype:
         return torch.cdouble
 
@@ -313,6 +323,7 @@ class FieldH(Field):
     """Real fields in (half) reciprocal space. Note that the underlying
     data is complex in reciprocal space, but reduced to one half of
     reciprocal space using Hermitian symmetry."""
+
     def dtype(self) -> torch.dtype:
         return torch.cdouble
 
@@ -344,6 +355,7 @@ class FieldH(Field):
 
 class FieldG(Field):
     """Complex fields in (full) reciprocal space."""
+
     def dtype(self) -> torch.dtype:
         return torch.cdouble
 

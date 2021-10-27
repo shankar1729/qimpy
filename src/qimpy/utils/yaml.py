@@ -1,5 +1,5 @@
 """YAML wrappers handling includes and environment substitution."""
-__all__ = ['load', 'dump']
+__all__ = ["load", "dump"]
 
 import qimpy as qp
 import yaml
@@ -28,16 +28,18 @@ def _process_includes(d: dict, already_included: tuple) -> dict:
         if isinstance(value, dict):
             d[key] = _process_includes(value, already_included)
     # Process include at current level:
-    include_names = d.pop('include', [])
+    include_names = d.pop("include", [])
     if include_names:
         if isinstance(include_names, str):
             include_names = [include_names]  # convert single str to List[str]
         d_list = []
         for include_name in include_names:
             if include_name in already_included:
-                raise RecursionError('Cyclic include '
-                                     f'{" > ".join(already_included)}'
-                                     f' > {include_name}')
+                raise RecursionError(
+                    "Cyclic include "
+                    f'{" > ".join(already_included)}'
+                    f" > {include_name}"
+                )
             d_list.append(load(include_name, already_included))
         d_list.append(d)  # current dict is last (highest priority)
         d = qp.utils.dict.merge(d_list)

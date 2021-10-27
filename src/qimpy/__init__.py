@@ -1,8 +1,18 @@
 """QimPy: Quantum-Integrated Multi-PhYsics"""
 # List exported symbols for doc generation
 __all__ = [
-    'MPI', 'System', 'TreeNode', 'Energy',
-    'utils', 'ions', 'lattice', 'symmetries', 'grid', 'electrons', 'log']
+    "MPI",
+    "System",
+    "TreeNode",
+    "Energy",
+    "utils",
+    "ions",
+    "lattice",
+    "symmetries",
+    "grid",
+    "electrons",
+    "log",
+]
 
 # Module import definition
 from mpi4py import MPI
@@ -19,9 +29,10 @@ import logging
 
 # Automatic versioning added by versioneer
 from ._version import get_versions
-__version__: str = get_versions()['version']
+
+__version__: str = get_versions()["version"]
 del get_versions
 
 # Module-level attributes
-log: logging.Logger = logging.getLogger('qimpy')
-'Log for the qimpy module, configurable using :func:`qimpy.utils.log_config`'
+log: logging.Logger = logging.getLogger("qimpy")
+"Log for the qimpy module, configurable using :func:`qimpy.utils.log_config`"

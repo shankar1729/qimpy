@@ -7,15 +7,20 @@ from ..utils import Minimize, MinimizeState, MatrixArray
 
 class LCAO(Minimize[MatrixArray]):
     """Optimize electronic state in atomic-orbital subspace."""
-    __slots__ = ('system', '_rot_prev')
+
+    __slots__ = ("system", "_rot_prev")
     system: qp.System
     _rot_prev: torch.Tensor  #: accumulated rotations of subspace
 
-    def __init__(self, *, rc: qp.utils.RunConfig,
-                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
-                 n_iterations: int = 30,
-                 energy_threshold: float = 1E-6,
-                 gradient_threshold: float = 1E-8) -> None:
+    def __init__(
+        self,
+        *,
+        rc: qp.utils.RunConfig,
+        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        n_iterations: int = 30,
+        energy_threshold: float = 1e-6,
+        gradient_threshold: float = 1e-8
+    ) -> None:
         """Set stopping criteria for initial subspace optimization.
 
         Parameters
@@ -29,11 +34,16 @@ class LCAO(Minimize[MatrixArray]):
             Stop when gradient of energy with respect to subspace Hamiltonian
             falls below this threshold.
         """
-        super().__init__(rc=rc, comm=rc.comm_kb, name='LCAO',
-                         checkpoint_in=checkpoint_in,
-                         method='cg', n_iterations=n_iterations,
-                         extra_thresholds={'|grad|': gradient_threshold},
-                         energy_threshold=energy_threshold)
+        super().__init__(
+            rc=rc,
+            comm=rc.comm_kb,
+            name="LCAO",
+            checkpoint_in=checkpoint_in,
+            method="cg",
+            n_iterations=n_iterations,
+            extra_thresholds={"|grad|": gradient_threshold},
+            energy_threshold=energy_threshold,
+        )
 
     def update(self, system: qp.System) -> None:
         """Set wavefunctions to optimum subspace of atomic orbitals."""
@@ -53,23 +63,23 @@ class LCAO(Minimize[MatrixArray]):
         # Subspace optimization:
         el.deig_max = np.inf  # allow fillings to use these eigenvalues
         self.system = system
-        self._rot_prev = torch.eye(V.shape[-1], dtype=V.dtype,
-                                   device=V.device)[None, None]
+        self._rot_prev = torch.eye(V.shape[-1], dtype=V.dtype, device=V.device)[
+            None, None
+        ]
         self.minimize()
 
     def step(self, direction: MatrixArray, step_size: float) -> None:
         el = self.system.electrons
         # Move auxiliary Hamiltonian accounting for accumulated rotations:
-        H_aux = (el.eig.diag_embed()  # current Hamiltonian
-                 + step_size * (qp.utils.dagger(self._rot_prev)
-                                @ (direction.M @ self._rot_prev)))
+        H_aux = el.eig.diag_embed() + step_size * (  # current Hamiltonian
+            qp.utils.dagger(self._rot_prev) @ (direction.M @ self._rot_prev)
+        )
         # Update rotations to re-diagonalize auxiliary Hamiltonian
         el.eig, V = torch.linalg.eigh(H_aux)
         self._rot_prev = self._rot_prev @ V
         el.C = el.C @ V
 
-    def compute(self, state: MinimizeState[MatrixArray],
-                energy_only: bool) -> None:
+    def compute(self, state: MinimizeState[MatrixArray], energy_only: bool) -> None:
         system = self.system
         el = system.electrons
         # Compute energy and subspace Hamiltonian:
@@ -84,24 +94,27 @@ class LCAO(Minimize[MatrixArray]):
         wf_eig = el.basis.w_sk * el.fillings.f_eig
         E_mu_num = (wf_eig * dH_sub_diag).sum(dim=(1, 2))
         E_mu_den = wf_eig.sum(dim=(1, 2))  # TODO: make this more general:
-        self.rc.comm_k.Allreduce(qp.MPI.IN_PLACE,
-                                 qp.utils.BufferView(E_mu_num), qp.MPI.SUM)
-        self.rc.comm_k.Allreduce(qp.MPI.IN_PLACE,
-                                 qp.utils.BufferView(E_mu_den), qp.MPI.SUM)
+        self.rc.comm_k.Allreduce(
+            qp.MPI.IN_PLACE, qp.utils.BufferView(E_mu_num), qp.MPI.SUM
+        )
+        self.rc.comm_k.Allreduce(
+            qp.MPI.IN_PLACE, qp.utils.BufferView(E_mu_den), qp.MPI.SUM
+        )
         E_mu_den.clamp_(max=-1e-20)  # avoid 0/0 in large-gap corner cases
         if (el.n_spins == 1) or el.fillings.M_constrain:
             E_mu = E_mu_num / E_mu_den  # N of each spin channel constrained
         else:
             E_mu = E_mu_num.sum() / E_mu_den.sum()  # only total N constrained
         E_mu = E_mu.view(-1, 1, 1, 1)
-        E_f = dH_sub - (torch.eye(el.fillings.n_bands, device=self.rc.device
-                                  )[None, None] * E_mu)
+        E_f = dH_sub - (
+            torch.eye(el.fillings.n_bands, device=self.rc.device)[None, None] * E_mu
+        )
         # Compute auxiliary hamiltonian gradient:
         delta_f = el.fillings.f[..., None] - el.fillings.f[:, :, None, :]
         delta_eig = el.eig[..., None] - el.eig[:, :, None, :]
-        f_eig_mat = torch.where(delta_eig.abs() < 1e-6,
-                                el.fillings.f_eig.diag_embed(),
-                                delta_f / delta_eig)
+        f_eig_mat = torch.where(
+            delta_eig.abs() < 1e-6, el.fillings.f_eig.diag_embed(), delta_f / delta_eig
+        )
         E_H_aux = el.basis.w_sk[..., None] * (E_f * f_eig_mat)
         K_E_H_aux = -E_f  # drop f' and weights in preconditioned gradient
         # Transform back to original rotation (which CG remains in):

@@ -9,12 +9,36 @@ from typing import Optional, Tuple, Union
 
 class Basis(qp.TreeNode):
     """Plane-wave basis for electronic wavefunctions. The underlying
-     :class:`qimpy.utils.TaskDivision` splits plane waves over `rc.comm_b`"""
-    __slots__ = ('rc', 'lattice', 'ions', 'kpoints', 'n_spins', 'n_spinor',
-                 'k', 'wk', 'w_sk', 'real_wavefunctions', 'ke_cutoff', 'grid',
-                 'iG', 'n', 'n_min', 'n_max', 'n_avg', 'n_tot', 'n_ideal',
-                 'fft_index', 'fft_block_size', 'pad_index', 'pad_index_mine',
-                 'division', 'mine', 'real')
+    :class:`qimpy.utils.TaskDivision` splits plane waves over `rc.comm_b`"""
+
+    __slots__ = (
+        "rc",
+        "lattice",
+        "ions",
+        "kpoints",
+        "n_spins",
+        "n_spinor",
+        "k",
+        "wk",
+        "w_sk",
+        "real_wavefunctions",
+        "ke_cutoff",
+        "grid",
+        "iG",
+        "n",
+        "n_min",
+        "n_max",
+        "n_avg",
+        "n_tot",
+        "n_ideal",
+        "fft_index",
+        "fft_block_size",
+        "pad_index",
+        "pad_index_mine",
+        "division",
+        "mine",
+        "real",
+    )
     rc: qp.utils.RunConfig
     lattice: qp.lattice.Lattice  #: Lattice vectors of unit cell
     ions: qp.ions.Ions  #: Ionic system: implicit in basis for ultrasoft / PAW
@@ -36,8 +60,9 @@ class Basis(qp.TreeNode):
     n_ideal: float  #: Ideal `n_avg` based on `ke_cutoff` G-sphere volume
     fft_index: torch.Tensor  #: Index of each plane wave in reciprocal grid
     fft_block_size: int  #: Number of bands to FFT together
-    PadIndex = Tuple[slice, torch.Tensor, slice, slice, torch.Tensor] \
-        #: Indexing datatype for `pad_index` and `pad_index_mine`
+    PadIndex = Tuple[
+        slice, torch.Tensor, slice, slice, torch.Tensor
+    ]  #: Indexing datatype for `pad_index` and `pad_index_mine`
     pad_index: PadIndex  #: Which basis entries are padding (beyond `n`)
     pad_index_mine: PadIndex  #: Subset of `pad_index` on this process
     division: qp.utils.TaskDivision  #: Division of basis across `rc.comm_b`
@@ -48,13 +73,22 @@ class Basis(qp.TreeNode):
     apply_potential = _apply_potential
     collect_density = _collect_density
 
-    def __init__(self, *, rc: qp.utils.RunConfig, lattice: qp.lattice.Lattice,
-                 ions: qp.ions.Ions, symmetries: qp.symmetries.Symmetries,
-                 kpoints: qp.electrons.Kpoints, n_spins: int, n_spinor: int,
-                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
-                 ke_cutoff: float = 20., real_wavefunctions: bool = False,
-                 grid: Optional[Union[qp.grid.Grid, dict]] = None,
-                 fft_block_size: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        rc: qp.utils.RunConfig,
+        lattice: qp.lattice.Lattice,
+        ions: qp.ions.Ions,
+        symmetries: qp.symmetries.Symmetries,
+        kpoints: qp.electrons.Kpoints,
+        n_spins: int,
+        n_spinor: int,
+        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        ke_cutoff: float = 20.0,
+        real_wavefunctions: bool = False,
+        grid: Optional[Union[qp.grid.Grid, dict]] = None,
+        fft_block_size: int = 0,
+    ) -> None:
         """Initialize plane-wave basis with `ke_cutoff`.
 
         Parameters
@@ -111,56 +145,89 @@ class Basis(qp.TreeNode):
         self.real_wavefunctions = real_wavefunctions
         if self.real_wavefunctions:
             if n_spinor == 2:
-                raise ValueError('real-wavefunctions not compatible'
-                                 ' with spinorial calculations')
+                raise ValueError(
+                    "real-wavefunctions not compatible" " with spinorial calculations"
+                )
             if kpoints.k.norm().item():  # i.e. not all k = 0 (Gamma)
-                raise ValueError('real-wavefunctions only compatible with'
-                                 ' Gamma-point-only calculations')
+                raise ValueError(
+                    "real-wavefunctions only compatible with"
+                    " Gamma-point-only calculations"
+                )
 
         # Initialize grid to match cutoff:
         self.ke_cutoff = float(ke_cutoff)
-        qp.log.info('\nInitializing wavefunction grid:')
-        self.add_child('grid', qp.grid.Grid, grid, checkpoint_in, rc=rc,
-                       lattice=lattice, symmetries=symmetries,
-                       comm=None,  # Never parallel
-                       ke_cutoff_wavefunction=self.ke_cutoff)
+        qp.log.info("\nInitializing wavefunction grid:")
+        self.add_child(
+            "grid",
+            qp.grid.Grid,
+            grid,
+            checkpoint_in,
+            rc=rc,
+            lattice=lattice,
+            symmetries=symmetries,
+            comm=None,  # Never parallel
+            ke_cutoff_wavefunction=self.ke_cutoff,
+        )
 
         # Initialize basis:
-        self.iG = self.grid.get_mesh('H' if self.real_wavefunctions
-                                     else 'G').view(-1, 3)
-        within_cutoff = (self.get_ke() < ke_cutoff)  # mask of which iG to keep
+        self.iG = self.grid.get_mesh("H" if self.real_wavefunctions else "G").view(
+            -1, 3
+        )
+        within_cutoff = self.get_ke() < ke_cutoff  # mask of which iG to keep
         # --- determine statistics of basis count across all k:
         self.n = within_cutoff.count_nonzero(dim=1)
         self.n_min = qp.utils.globalreduce.min(self.n, rc.comm_k)
         self.n_max = qp.utils.globalreduce.max(self.n, rc.comm_k)
         self.n_tot = qp.utils.ceildiv(self.n_max, rc.n_procs_b) * rc.n_procs_b
         self.n_avg = qp.utils.globalreduce.sum(self.n * self.wk, rc.comm_k)
-        self.n_ideal = ((2.*ke_cutoff)**1.5) * lattice.volume / (6 * np.pi**2)
-        qp.log.info(f'n_basis:  min: {self.n_min}  max: {self.n_max}'
-                    f'  avg: {self.n_avg:.3f}  ideal: {self.n_ideal:.3f}')
+        self.n_ideal = ((2.0 * ke_cutoff) ** 1.5) * lattice.volume / (6 * np.pi ** 2)
+        qp.log.info(
+            f"n_basis:  min: {self.n_min}  max: {self.n_max}"
+            f"  avg: {self.n_avg:.3f}  ideal: {self.n_ideal:.3f}"
+        )
         # --- create indices from basis set to FFT grid:
         n_fft = self.iG.shape[0]  # number of points on FFT grid
-        assert(self.n_tot <= n_fft)  # make sure padding doesn't exceed grid
+        assert self.n_tot <= n_fft  # make sure padding doesn't exceed grid
         fft_range = torch.arange(n_fft, device=self.rc.device)
-        self.fft_index = (torch.where(within_cutoff, 0, n_fft)
-                          + fft_range[None, :]).argsort(  # ke<cutoff to front
-                              dim=1)[:, :self.n_tot]  # same count all k
+        self.fft_index = (
+            torch.where(within_cutoff, 0, n_fft) + fft_range[None, :]
+        ).argsort(  # ke<cutoff to front
+            dim=1
+        )[
+            :, : self.n_tot
+        ]  # same count all k
         self.iG = self.iG[self.fft_index]  # basis plane waves for each k
-        pad_index = torch.where(fft_range[None, :self.n_tot]
-                                >= self.n[:, None])  # padded entries
-        self.pad_index = (slice(None), pad_index[0], slice(None), slice(None),
-                          pad_index[1])  # add spin, band and spinor dims
+        pad_index = torch.where(
+            fft_range[None, : self.n_tot] >= self.n[:, None]
+        )  # padded entries
+        self.pad_index = (
+            slice(None),
+            pad_index[0],
+            slice(None),
+            slice(None),
+            pad_index[1],
+        )  # add spin, band and spinor dims
 
         # Divide basis on comm_b:
-        div = qp.utils.TaskDivision(n_tot=self.n_tot, n_procs=rc.n_procs_b,
-                                    i_proc=rc.i_proc_b, name='padded basis')
+        div = qp.utils.TaskDivision(
+            n_tot=self.n_tot,
+            n_procs=rc.n_procs_b,
+            i_proc=rc.i_proc_b,
+            name="padded basis",
+        )
         self.division = div
         self.mine = slice(div.i_start, div.i_stop)
         # --- initialize local pad index separately (not trivially sliceable):
-        pad_index = torch.where(fft_range[None, div.i_start:div.i_stop]
-                                >= self.n[:, None])  # local padded entries
-        self.pad_index_mine = (slice(None), pad_index[0], slice(None),
-                               slice(None), pad_index[1])  # add other dims
+        pad_index = torch.where(
+            fft_range[None, div.i_start : div.i_stop] >= self.n[:, None]
+        )  # local padded entries
+        self.pad_index_mine = (
+            slice(None),
+            pad_index[0],
+            slice(None),
+            slice(None),
+            pad_index[1],
+        )  # add other dims
 
         if self.real_wavefunctions and kpoints.division.n_mine:
             self.real = BasisReal(self)
@@ -178,8 +245,10 @@ class Basis(qp.TreeNode):
         torch.Tensor
             KE for each plane-wave, dimensions: `nk_mine` x len(`basis_slice`)
         """
-        return 0.5 * (((self.iG[:, basis_slice] + self.k[:, None, :])
-                       @ self.lattice.Gbasis.T) ** 2).sum(dim=-1)
+        return 0.5 * (
+            ((self.iG[:, basis_slice] + self.k[:, None, :]) @ self.lattice.Gbasis.T)
+            ** 2
+        ).sum(dim=-1)
 
     def get_fft_block_size(self, n_batch: int, n_bands: int) -> int:
         """Number of FFTs to perform together. Equals `fft_block_size`, if
@@ -192,7 +261,6 @@ class Basis(qp.TreeNode):
                 return 1  # Irrelevant since no FFTs to perform anyway
             # TODO: better heuristics on how much data to FFT at once:
             min_data = 16_000_000 if self.rc.use_cuda else 100_000
-            min_block = qp.utils.ceildiv(min_data,
-                                         n_batch * np.prod(self.grid.shape))
+            min_block = qp.utils.ceildiv(min_data, n_batch * np.prod(self.grid.shape))
             max_block = qp.utils.ceildiv(n_bands, 16)  # based on memory limit
             return min(min_block, max_block)

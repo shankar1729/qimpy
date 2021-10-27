@@ -38,9 +38,13 @@ class RunConfig:
     device: torch.device  #: Preferred torch device for calculation (CPU / GPU)
     use_cuda: bool  #: Whether `device` is a CUDA GPU
 
-    def __init__(self, *, comm: Optional[qp.MPI.Comm] = None,
-                 cores: Optional[int] = None,
-                 process_grid: Tuple[int, int, int] = (-1, -1, -1)):
+    def __init__(
+        self,
+        *,
+        comm: Optional[qp.MPI.Comm] = None,
+        cores: Optional[int] = None,
+        process_grid: Tuple[int, int, int] = (-1, -1, -1),
+    ):
         """Initialize hardware resources, process grid and communicators.
 
         Parameters
@@ -71,20 +75,20 @@ class RunConfig:
 
         # Set and report start time:
         self.t_start: float = time.time()  #: start time used by :meth:`clock`
-        qp.log.info('Start time: ' + time.ctime(self.t_start))
+        qp.log.info("Start time: " + time.ctime(self.t_start))
 
         # MPI initialization:
-        self.comm = (qp.MPI.COMM_WORLD if (comm is None) else comm)
+        self.comm = qp.MPI.COMM_WORLD if (comm is None) else comm
         self.i_proc = self.comm.Get_rank()
         self.n_procs = self.comm.Get_size()
-        self.is_head = (self.i_proc == 0)
+        self.is_head = self.i_proc == 0
         self.mpi_type: dict = {
             torch.int32: qp.MPI.INT,
             torch.int64: qp.MPI.LONG,
             torch.float32: qp.MPI.FLOAT,
             torch.float64: qp.MPI.DOUBLE,
             torch.complex64: qp.MPI.COMPLEX,
-            torch.complex128: qp.MPI.DOUBLE_COMPLEX
+            torch.complex128: qp.MPI.DOUBLE_COMPLEX,
         }  #: Mapping from torch dtypes to MPI datatypes
         self.np_type: dict = {
             torch.bool: np.bool8,
@@ -97,7 +101,7 @@ class RunConfig:
             torch.float32: np.float32,
             torch.float64: np.float64,
             torch.complex64: np.complex64,
-            torch.complex128: np.complex128
+            torch.complex128: np.complex128,
         }  #: Mapping from torch dtypes to numpy datatypes
 
         # Select GPU before initializing torch:
@@ -106,35 +110,36 @@ class RunConfig:
         )  #: Communicator for processes on same shared-memory node
         i_proc_node = self.comm_node.Get_rank()
         n_procs_node = self.comm_node.Get_size()
-        cuda_dev_str = os.environ.get('CUDA_VISIBLE_DEVICES')
+        cuda_dev_str = os.environ.get("CUDA_VISIBLE_DEVICES")
         if cuda_dev_str:
             # Select one GPU and make sure it's only one visible to torch:
-            cuda_devs = [int(s) for s in cuda_dev_str.split(',')]
+            cuda_devs = [int(s) for s in cuda_dev_str.split(",")]
             cuda_dev_selected = cuda_devs[i_proc_node % len(cuda_devs)]
-            os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_dev_selected)
-            n_gpus = min(1., len(cuda_devs) / n_procs_node)
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(cuda_dev_selected)
+            n_gpus = min(1.0, len(cuda_devs) / n_procs_node)
         else:
             # Disable GPUs unless explicitly requested:
-            os.environ['CUDA_VISIBLE_DEVICES'] = ''
-            n_gpus = 0.
+            os.environ["CUDA_VISIBLE_DEVICES"] = ""
+            n_gpus = 0.0
 
         # Initialize torch:
-        self.cpu = torch.device('cpu')
+        self.cpu = torch.device("cpu")
         if torch.cuda.is_available():
-            self.device = torch.device('cuda:0')
+            self.device = torch.device("cuda:0")
             self.use_cuda = True
             torch.cuda.device(self.device)
         else:
             self.device = self.cpu
             self.use_cuda = False
-            n_gpus = 0.
+            n_gpus = 0.0
         torch.set_default_tensor_type(torch.DoubleTensor)
 
         # Threads:
-        slurm_threads = os.environ.get('SLURM_CPUS_PER_TASK')
+        slurm_threads = os.environ.get("SLURM_CPUS_PER_TASK")
         if slurm_threads:
-            self.n_threads: int = int(slurm_threads)  \
-                #: number of threads to use on each process
+            self.n_threads: int = int(
+                slurm_threads
+            )  #: number of threads to use on each process
         elif cores is None:
             # Divide up threads available on node:
             n_cores = cpu_count(logical=False)
@@ -143,19 +148,21 @@ class RunConfig:
             self.n_threads = core_stop - core_start
         else:
             self.n_threads = cores
-        assert(self.n_threads >= 1)
+        assert self.n_threads >= 1
         torch.set_num_threads(self.n_threads)
         self.no_grad = torch.no_grad()
 
         # Report total resources:
-        run_totals = np.array([self.n_threads,  n_gpus])
+        run_totals = np.array([self.n_threads, n_gpus])
         self.comm.Allreduce(qp.MPI.IN_PLACE, run_totals, op=qp.MPI.SUM)
-        qp.log.info(f'Run totals: {self.n_procs:g} processes, '
-                    f'{int(run_totals[0])} threads, {int(run_totals[1])} GPUs')
+        qp.log.info(
+            f"Run totals: {self.n_procs:g} processes, "
+            f"{int(run_totals[0])} threads, {int(run_totals[1])} GPUs"
+        )
 
         # Process grid:
         self.process_grid = np.array(process_grid, dtype=int)
-        assert(self.process_grid.shape == (3,))
+        assert self.process_grid.shape == (3,)
         self._setup_process_grid()
 
     def _setup_process_grid(self):
@@ -165,36 +172,40 @@ class RunConfig:
         prod_known = self.process_grid[self.process_grid != -1].prod()
         if self.n_procs % prod_known:
             raise ValueError(
-                f'Cannot distribute {self.n_procs} processes to'
-                f' {self.process_grid[0]} x {self.process_grid[1]}'
-                f' x {self.process_grid[2]} grid')
+                f"Cannot distribute {self.n_procs} processes to"
+                f" {self.process_grid[0]} x {self.process_grid[1]}"
+                f" x {self.process_grid[2]} grid"
+            )
         # Compute a single unknown dimension if present:
         n_unknown = np.count_nonzero(self.process_grid == -1)
         if n_unknown == 1:
-            self.process_grid[self.process_grid == -1] = (self.n_procs
-                                                          // prod_known)
+            self.process_grid[self.process_grid == -1] = self.n_procs // prod_known
             n_unknown = 0
         # Report grid as it is now:
-        qp.log.info(f'Process grid: {self.process_grid[0]} replicas'
-                    f' x {self.process_grid[1]} k-points'
-                    f' x {self.process_grid[2]} bands/basis'
-                    + (' (-1\'s determined later)' if n_unknown else ''))
+        qp.log.info(
+            f"Process grid: {self.process_grid[0]} replicas"
+            f" x {self.process_grid[1]} k-points"
+            f" x {self.process_grid[2]} bands/basis"
+            + (" (-1's determined later)" if n_unknown else "")
+        )
         # Initialize grid communicators whose dimensions are known:
-        if self.process_grid[0] != -1 and (not hasattr(self, 'comm_r')):
+        if self.process_grid[0] != -1 and (not hasattr(self, "comm_r")):
             # split top-level communicator between replicas:
             # --- only needs outermost (replica) dimension to be known
             prod_inner = self.n_procs // self.process_grid[0]
             self.comm_r, self.comm_kb = comm_split_grid(
-                self.comm, self.process_grid[0], prod_inner)
+                self.comm, self.process_grid[0], prod_inner
+            )
             self.n_procs_r = self.comm_r.Get_size()
             self.i_proc_r = self.comm_r.Get_rank()
             self.n_procs_kb = self.comm_kb.Get_size()
             self.i_proc_kb = self.comm_kb.Get_rank()
-        if n_unknown == 0 and (not hasattr(self, 'comm_k')):
+        if n_unknown == 0 and (not hasattr(self, "comm_k")):
             # split intra-replica (kb) communicator to k and b:
             # --- needs all dimensions to be known
             self.comm_k, self.comm_b = comm_split_grid(
-                self.comm_kb, self.process_grid[1], self.process_grid[2])
+                self.comm_kb, self.process_grid[1], self.process_grid[2]
+            )
             self.n_procs_k = self.comm_k.Get_size()
             self.i_proc_k = self.comm_k.Get_rank()
             self.n_procs_b = self.comm_b.Get_size()
@@ -215,12 +226,13 @@ class RunConfig:
             Number of tasks available to split on this dimension of the
             process grid, used for setting or checking dimension of process
             grid for reasonable load balancing."""
+
         def get_imbalance():
-            """Compute cpu time% wasted in splitting n_tasks over n_procs_dim
-            """
+            """Compute cpu time% wasted in splitting n_tasks over n_procs_dim"""
             n_tasks_each = qp.utils.ceildiv(n_tasks, n_procs_dim)
-            return 100.*(1. - n_tasks / (n_tasks_each * n_procs_dim))
-        imbalance_threshold = 20.  # max cpu time% waste to tolerate
+            return 100.0 * (1.0 - n_tasks / (n_tasks_each * n_procs_dim))
+
+        imbalance_threshold = 20.0  # max cpu time% waste to tolerate
         if self.process_grid[dim] == -1:
             # Dimension undetermined: set it based on n_tasks
             prod_known = self.process_grid[self.process_grid != -1].prod()
@@ -234,7 +246,7 @@ class RunConfig:
                     imbalance = get_imbalance()
                     if imbalance <= imbalance_threshold:
                         break
-            assert(imbalance <= imbalance_threshold)
+            assert imbalance <= imbalance_threshold
             # Set selected number of processes:
             self.process_grid[dim] = n_procs_dim
             self._setup_process_grid()
@@ -247,40 +259,41 @@ class RunConfig:
         """Report end time and duration."""
         t_stop = time.time()
         duration = datetime.timedelta(seconds=(t_stop - self.t_start))
-        qp.log.info(f'\nEnd time: {time.ctime(t_stop)} (Duration: {duration})')
+        qp.log.info(f"\nEnd time: {time.ctime(t_stop)} (Duration: {duration})")
 
     def fmt(self, tensor: torch.Tensor, **kwargs) -> str:
         """Standardized conversion of torch tensors for logging.
         Keyword arguments are forwarded to numpy.array2string."""
         # Set some defaults in formatter:
-        kwargs.setdefault('precision', 8)
-        kwargs.setdefault('suppress_small', True)
-        kwargs.setdefault('separator', ', ')
+        kwargs.setdefault("precision", 8)
+        kwargs.setdefault("suppress_small", True)
+        kwargs.setdefault("separator", ", ")
         return np.array2string(tensor.to(self.cpu).numpy(), **kwargs)
 
 
-def comm_split_grid(comm: qp.MPI.Comm, n_procs_o: int,
-                    n_procs_i: int) -> Tuple[qp.MPI.Comm, qp.MPI.Comm]:
+def comm_split_grid(
+    comm: qp.MPI.Comm, n_procs_o: int, n_procs_i: int
+) -> Tuple[qp.MPI.Comm, qp.MPI.Comm]:
     """Split a communicator comm into an n_procs_o x n_procs_i grid,
     returning comm_o (with strided process ranks in comm) and
     comm_i (with contiguous process ranks in comm)."""
     # Check inputs:
     n_procs = comm.Get_size()
     i_proc = comm.Get_rank()
-    assert(n_procs_o * n_procs_i == n_procs)
+    assert n_procs_o * n_procs_i == n_procs
     # Determine size/ranks of o(uter) and i(nner) dimensions of process grid:
     i_proc_o = i_proc // n_procs_i
     i_proc_i = i_proc % n_procs_i
     # Initialize sub-groups:
     group = comm.Get_group()
     group_o = group.Incl(range(i_proc_i, n_procs, n_procs_i))
-    group_i = group.Incl(range(i_proc_o*n_procs_i, (i_proc_o+1)*n_procs_i))
+    group_i = group.Incl(range(i_proc_o * n_procs_i, (i_proc_o + 1) * n_procs_i))
     # Initialize sub-communicators from groups:
     comm_o = comm.Create_group(group_o)
     comm_i = comm.Create_group(group_i)
     # Check communicator rank assignments and return:
-    assert(comm_o.Get_size() == n_procs_o)
-    assert(comm_i.Get_size() == n_procs_i)
-    assert(comm_o.Get_rank() == i_proc_o)
-    assert(comm_i.Get_rank() == i_proc_i)
+    assert comm_o.Get_size() == n_procs_o
+    assert comm_i.Get_size() == n_procs_i
+    assert comm_o.Get_rank() == i_proc_o
+    assert comm_i.Get_rank() == i_proc_i
     return comm_o, comm_i

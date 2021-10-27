@@ -1,19 +1,36 @@
 from __future__ import annotations
 import qimpy as qp
 import torch
-from ._wavefunction_init import _randomize, \
-    _randomize_selected, _RandomizeSelected
+from ._wavefunction_init import _randomize, _randomize_selected, _RandomizeSelected
 from ._wavefunction_split import _split_bands, _split_basis
-from ._wavefunction_ops import _norm, _band_norm, _band_ke, _band_spin, \
-    _dot, _dot_O, _overlap, _matmul, _orthonormalize, \
-    _mul, _imul, _add, _iadd, _sub, _isub, \
-    _getitem, _setitem, _cat, _constrain
+from ._wavefunction_ops import (
+    _norm,
+    _band_norm,
+    _band_ke,
+    _band_spin,
+    _dot,
+    _dot_O,
+    _overlap,
+    _matmul,
+    _orthonormalize,
+    _mul,
+    _imul,
+    _add,
+    _iadd,
+    _sub,
+    _isub,
+    _getitem,
+    _setitem,
+    _cat,
+    _constrain,
+)
 from typing import Callable, Optional, Union
 
 
 class Wavefunction:
     """Electronic wavefunctions including coefficients and projections"""
-    __slots__ = ('basis', 'coeff', 'band_division', '_proj', '_proj_version')
+
+    __slots__ = ("basis", "coeff", "band_division", "_proj", "_proj_version")
     basis: qp.electrons.Basis  #: Corresponding basis
 
     #: Wavefunction coefficients (n_spins x nk x n_bands x n_spinor x n_basis)
@@ -30,11 +47,16 @@ class Wavefunction:
     #: along the 'home position' of split along basis.
     band_division: Optional[qp.utils.TaskDivision]
 
-    def __init__(self, basis: qp.electrons.Basis, *,
-                 coeff: Optional[torch.Tensor] = None,
-                 band_division: Optional[qp.utils.TaskDivision] = None,
-                 n_bands: int = 0, n_spins: int = 0, n_spinor: int = 0
-                 ) -> None:
+    def __init__(
+        self,
+        basis: qp.electrons.Basis,
+        *,
+        coeff: Optional[torch.Tensor] = None,
+        band_division: Optional[qp.utils.TaskDivision] = None,
+        n_bands: int = 0,
+        n_spins: int = 0,
+        n_spinor: int = 0
+    ) -> None:
         """Initialize wavefunctions of specified size or with given
         coefficients.
 
@@ -69,21 +91,24 @@ class Wavefunction:
         self._proj_invalidate()
         if coeff is None:
             # Initialize zero coefficients:
-            assert(n_bands or band_division)
+            assert n_bands or band_division
             basis = self.basis
             nk_mine = basis.kpoints.division.n_mine
-            n_bands = (n_bands if (band_division is None)
-                       else band_division.n_mine)
-            n_spins = (n_spins if n_spins else basis.n_spins)
-            n_spinor = (n_spinor if n_spinor else basis.n_spinor)
-            n_basis = (basis.n_tot if band_division else basis.division.n_each)
+            n_bands = n_bands if (band_division is None) else band_division.n_mine
+            n_spins = n_spins if n_spins else basis.n_spins
+            n_spinor = n_spinor if n_spinor else basis.n_spinor
+            n_basis = basis.n_tot if band_division else basis.division.n_each
             self.coeff = torch.zeros(
                 (n_spins, nk_mine, n_bands, n_spinor, n_basis),
-                dtype=torch.cdouble, device=basis.rc.device)
+                dtype=torch.cdouble,
+                device=basis.rc.device,
+            )
             # Projections of zero wavefunctions are always zero:
             self._proj = torch.zeros(
                 (n_spins, nk_mine, basis.ions.n_projectors, n_bands),
-                dtype=torch.cdouble, device=basis.rc.device)
+                dtype=torch.cdouble,
+                device=basis.rc.device,
+            )
             self._proj_version = basis.ions.beta_version
         else:
             # Set provided coefficients:
@@ -114,15 +139,22 @@ class Wavefunction:
     def zeros_like(self, n_bands: int = 0) -> qp.electrons.Wavefunction:
         """Create a zero Wavefunction similar to the present one.
         Optionally override the number of bands with `n_bands`."""
-        n_bands = (n_bands if n_bands else self.coeff.shape[2])
-        return Wavefunction(self.basis, band_division=self.band_division,
-                            n_bands=n_bands, n_spins=self.coeff.shape[0],
-                            n_spinor=self.coeff.shape[3])
+        n_bands = n_bands if n_bands else self.coeff.shape[2]
+        return Wavefunction(
+            self.basis,
+            band_division=self.band_division,
+            n_bands=n_bands,
+            n_spins=self.coeff.shape[0],
+            n_spinor=self.coeff.shape[3],
+        )
 
     def clone(self) -> qp.electrons.Wavefunction:
         """Create an independent copy (not a view / reference)."""
-        result = Wavefunction(self.basis, coeff=self.coeff.clone().detach(),
-                              band_division=self.band_division)
+        result = Wavefunction(
+            self.basis,
+            coeff=self.coeff.clone().detach(),
+            band_division=self.band_division,
+        )
         if self._proj_is_valid():
             assert self._proj is not None
             result._proj = self._proj.clone().detach()
@@ -143,15 +175,17 @@ class Wavefunction:
         # Slice to be read on this process:
         if basis.n_max <= basis.division.i_start:
             return n_bands_in  # Only padded elements here; nothing to read
-        basis_n_mine = (min(basis.n_max, basis.division.i_stop)
-                        - basis.division.i_start)  # size without padding
+        basis_n_mine = (
+            min(basis.n_max, basis.division.i_stop) - basis.division.i_start
+        )  # size without padding
         # Read:
         k_division = basis.kpoints.division
         n_spins, nk_mine, _, n_spinor, _ = self.coeff.shape
         offset = (0, k_division.i_start, 0, 0, basis.division.i_start)
         size = (n_spins, nk_mine, n_bands_in, n_spinor, basis_n_mine)
-        self.coeff[:, :, :n_bands_in, :, :basis_n_mine] = \
-            checkpoint.read_slice_complex(dset, offset, size)
+        self.coeff[:, :, :n_bands_in, :, :basis_n_mine] = checkpoint.read_slice_complex(
+            dset, offset, size
+        )
         self._proj_invalidate()
         return n_bands_in
 
@@ -164,29 +198,33 @@ class Wavefunction:
         # Create dataset with overall shape:
         n_spins, _, n_bands, n_spinor, _ = self.coeff.shape
         shape = (n_spins, k_division.n_tot, n_bands, n_spinor, basis.n_max)
-        dset = checkpoint.create_dataset_complex(path, shape=shape,
-                                                 dtype=self.coeff.dtype)
+        dset = checkpoint.create_dataset_complex(
+            path, shape=shape, dtype=self.coeff.dtype
+        )
         # Slice to be written from this process:
         if basis.n_max <= basis.division.i_start:
             return  # Only padded elements on this process (not written)
-        basis_n_mine = (min(basis.n_max, basis.division.i_stop)
-                        - basis.division.i_start)  # size without padding
+        basis_n_mine = (
+            min(basis.n_max, basis.division.i_stop) - basis.division.i_start
+        )  # size without padding
         offset = (0, k_division.i_start, 0, 0, basis.division.i_start)
-        checkpoint.write_slice_complex(dset, offset,
-                                       self.coeff[..., :basis_n_mine])
+        checkpoint.write_slice_complex(dset, offset, self.coeff[..., :basis_n_mine])
 
-    def randomize(self: qp.electrons.Wavefunction, seed: int = 0,
-                  b_start: int = 0, b_stop: Optional[int] = None) -> None:
+    def randomize(
+        self: qp.electrons.Wavefunction,
+        seed: int = 0,
+        b_start: int = 0,
+        b_stop: Optional[int] = None,
+    ) -> None:
         _randomize(self, seed, b_start, b_stop)
 
     # Function types for checking imported methods:
-    UnaryOp = Callable[['Wavefunction'], 'Wavefunction']
-    UnaryOpT = Callable[['Wavefunction'], torch.Tensor]
-    UnaryOpS = Callable[['Wavefunction'], float]
-    BinaryOp = Callable[['Wavefunction', 'Wavefunction'], 'Wavefunction']
-    BinaryOpT = Callable[['Wavefunction', 'Wavefunction'], torch.Tensor]
-    ScaleOp = Callable[['Wavefunction', Union[float, torch.Tensor]],
-                       'Wavefunction']
+    UnaryOp = Callable[["Wavefunction"], "Wavefunction"]
+    UnaryOpT = Callable[["Wavefunction"], torch.Tensor]
+    UnaryOpS = Callable[["Wavefunction"], float]
+    BinaryOp = Callable[["Wavefunction", "Wavefunction"], "Wavefunction"]
+    BinaryOpT = Callable[["Wavefunction", "Wavefunction"], torch.Tensor]
+    ScaleOp = Callable[["Wavefunction", Union[float, torch.Tensor]], "Wavefunction"]
 
     randomize.__doc__ = _randomize.__doc__  # randomize stub'd above
     randomize_selected: _RandomizeSelected = _randomize_selected

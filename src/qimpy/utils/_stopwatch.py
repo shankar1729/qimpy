@@ -13,7 +13,7 @@ class StopWatch:
     end of that block. The class collects together statistics of
     execution time by name, which can be logged using print_stats()."""
 
-    __slots__ = ['name', 'use_cuda', 't_start']
+    __slots__ = ["name", "use_cuda", "t_start"]
     name: str  #: name of code block
     use_cuda: bool  #: whether profiling is for a GPU device
     t_start: Union[float, torch.cuda.Event]  #: start time of current event
@@ -22,8 +22,7 @@ class StopWatch:
     _stats: ClassVar[Dict[str, List[float]]] = {}
 
     #: CUDA events for asynchronous timing on GPUs
-    _cuda_events: ClassVar[List[Tuple[str, torch.cuda.Event,
-                                      torch.cuda.Event]]] = []
+    _cuda_events: ClassVar[List[Tuple[str, torch.cuda.Event, torch.cuda.Event]]] = []
 
     def __init__(self, name: str, rc: RunConfig):
         """Start profiling a block of code named `name`."""
@@ -64,22 +63,25 @@ class StopWatch:
         if cls._cuda_events:
             torch.cuda.synchronize()
             for name, t_start, t_stop in cls._cuda_events:
-                cls._add_stat(name, t_start.elapsed_time(t_stop)*1e-3)
+                cls._add_stat(name, t_start.elapsed_time(t_stop) * 1e-3)
             cls._cuda_events = []
 
     @classmethod
     def print_stats(cls):
         """Print statistics of all timings measured using class StopWatch."""
         cls._process_cuda_events()
-        qp.log.info('')
-        t_total = 0.
+        qp.log.info("")
+        t_total = 0.0
         n_calls_total = 0
         for name, times in sorted(cls._stats.items()):
             t = np.array(times)
             t_total += t.sum()
             n_calls_total += len(t)
             qp.log.info(
-                f'StopWatch: {name:30s}  {t.mean():10.6f} +/- {t.std():10.6f}'
-                f' s, {len(t):4d} calls, {t.sum():10.6f} s total')
-        qp.log.info(f'StopWatch: {"Total":30s}    {"-"*25} {n_calls_total:5d}'
-                    f' calls, {t_total:10.6f} s total')
+                f"StopWatch: {name:30s}  {t.mean():10.6f} +/- {t.std():10.6f}"
+                f" s, {len(t):4d} calls, {t.sum():10.6f} s total"
+            )
+        qp.log.info(
+            f'StopWatch: {"Total":30s}    {"-"*25} {n_calls_total:5d}'
+            f" calls, {t_total:10.6f} s total"
+        )

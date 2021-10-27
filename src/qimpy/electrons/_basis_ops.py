@@ -4,62 +4,70 @@ import numpy as np
 import torch
 
 
-def _apply_ke(self: qp.electrons.Basis, C: qp.electrons.Wavefunction
-              ) -> qp.electrons.Wavefunction:
-    'Apply kinetic energy (KE) operator to wavefunction `C`'
-    watch = qp.utils.StopWatch('Basis.apply_ke', self.rc)
-    basis_slice = (slice(None) if C.band_division else self.mine)
+def _apply_ke(
+    self: qp.electrons.Basis, C: qp.electrons.Wavefunction
+) -> qp.electrons.Wavefunction:
+    "Apply kinetic energy (KE) operator to wavefunction `C`"
+    watch = qp.utils.StopWatch("Basis.apply_ke", self.rc)
+    basis_slice = slice(None) if C.band_division else self.mine
     coeff = C.coeff * self.get_ke(basis_slice)[None, :, None, None, :]
     watch.stop()
-    return qp.electrons.Wavefunction(self, coeff=coeff,
-                                     band_division=C.band_division)
+    return qp.electrons.Wavefunction(self, coeff=coeff, band_division=C.band_division)
 
 
-def _apply_potential(self: qp.electrons.Basis, V: qp.grid.FieldH,
-                     C: qp.electrons.Wavefunction
-                     ) -> qp.electrons.Wavefunction:
-    'Apply potential `V` to wavefunction `C`'
+def _apply_potential(
+    self: qp.electrons.Basis, V: qp.grid.FieldH, C: qp.electrons.Wavefunction
+) -> qp.electrons.Wavefunction:
+    "Apply potential `V` to wavefunction `C`"
     Vdata_in = (~(V.to(self.grid))).data  # change to real space on basis grid
     n_densities = Vdata_in.shape[0]
-    spin_dm_mode = (n_densities == 4)  # spin density-matrix mode
+    spin_dm_mode = n_densities == 4  # spin density-matrix mode
     if spin_dm_mode:
         assert C.coeff.shape[-2] == 2  # must be spinorial
-        Vdata = torch.empty((2, 2) + Vdata_in.shape[1:], dtype=C.coeff.dtype,
-                            device=self.rc.device)
-        Vdata[0, 0] = (Vdata_in[0] + Vdata_in[3])
-        Vdata[1, 1] = (Vdata_in[0] - Vdata_in[3])
-        Vdata[1, 0] = Vdata_in[1] + 1j*Vdata_in[2]
+        Vdata = torch.empty(
+            (2, 2) + Vdata_in.shape[1:], dtype=C.coeff.dtype, device=self.rc.device
+        )
+        Vdata[0, 0] = Vdata_in[0] + Vdata_in[3]
+        Vdata[1, 1] = Vdata_in[0] - Vdata_in[3]
+        Vdata[1, 0] = Vdata_in[1] + 1j * Vdata_in[2]
         Vdata[0, 1] = Vdata[1, 0].conj()
     elif n_densities == 2:
-        Vdata = torch.empty((2, 1, 1, 1) + Vdata_in.shape[1:],
-                            dtype=Vdata_in.dtype, device=self.rc.device)
-        Vdata[0, 0, 0, 0] = (Vdata_in[0] + Vdata_in[1])
-        Vdata[1, 0, 0, 0] = (Vdata_in[0] - Vdata_in[1])
+        Vdata = torch.empty(
+            (2, 1, 1, 1) + Vdata_in.shape[1:],
+            dtype=Vdata_in.dtype,
+            device=self.rc.device,
+        )
+        Vdata[0, 0, 0, 0] = Vdata_in[0] + Vdata_in[1]
+        Vdata[1, 0, 0, 0] = Vdata_in[0] - Vdata_in[1]
     else:  # n_densities == 1:
         Vdata = Vdata_in[:, None, None, None]  # broadcast for spin
 
     # Move wavefunctions to band-split, basis-together position:
     need_move = (self.rc.n_procs_b > 1) and (C.band_division is None)
-    VC = (C.split_bands() if need_move  # C with all G-vectors local
-          else C.clone())  # copy, since V applied in place below
+    VC = (
+        C.split_bands() if need_move else C.clone()  # C with all G-vectors local
+    )  # copy, since V applied in place below
     coeff = VC.coeff
 
     # Determine FFT type and dimensions:
-    watch = qp.utils.StopWatch('Basis.apply_potential', self.rc)
-    shapeG = (self.grid.shapeH if self.real_wavefunctions else self.grid.shape)
+    watch = qp.utils.StopWatch("Basis.apply_potential", self.rc)
+    shapeG = self.grid.shapeH if self.real_wavefunctions else self.grid.shape
     fft_nG = int(np.prod(shapeG))  # total reciprocal space points in FFT grid
     n_spins, nk, n_bands_mine, n_spinor = coeff.shape[:-1]
     ik = torch.arange(nk, device=coeff.device)[:, None]
     index = (slice(None), ik, slice(None), slice(None), self.fft_index)
 
     # Apply potential with blocked FFTs:
-    fft_block_size = self.get_fft_block_size(n_spins*nk, n_bands_mine)
+    fft_block_size = self.get_fft_block_size(n_spins * nk, n_bands_mine)
     n_blocks = qp.utils.ceildiv(n_bands_mine, fft_block_size)
     b_start = 0
     b_stop = fft_block_size
     b_size = fft_block_size
-    Cb = torch.zeros((n_spins, nk, fft_block_size, n_spinor, fft_nG),
-                     dtype=coeff.dtype, device=coeff.device)  # FFT buffer
+    Cb = torch.zeros(
+        (n_spins, nk, fft_block_size, n_spinor, fft_nG),
+        dtype=coeff.dtype,
+        device=coeff.device,
+    )  # FFT buffer
 
     for iBlock in range(n_blocks):
         if b_stop > n_bands_mine:
@@ -70,7 +78,7 @@ def _apply_potential(self: qp.electrons.Basis, V: qp.grid.FieldH,
         Cb[index] = coeff[:, :, b_start:b_stop].permute(1, 4, 0, 2, 3)
         VCb = self.grid.ifft(Cb.view((n_spins, nk, b_size, n_spinor) + shapeG))
         if spin_dm_mode:
-            VCb = torch.einsum('uvxyz, skbvxyz -> skbuxyz', Vdata, VCb)
+            VCb = torch.einsum("uvxyz, skbvxyz -> skbuxyz", Vdata, VCb)
         else:
             VCb *= Vdata
         VCb = self.grid.fft(VCb).flatten(-3)
@@ -83,11 +91,15 @@ def _apply_potential(self: qp.electrons.Basis, V: qp.grid.FieldH,
     watch.stop()
 
     # Restore V*C to the same configuration (basis or band-split) as C:
-    return (VC.split_basis() if need_move else VC)
+    return VC.split_basis() if need_move else VC
 
 
-def _collect_density(self: qp.electrons.Basis, C: qp.electrons.Wavefunction,
-                     f: torch.Tensor, need_Mvec: bool) -> qp.grid.FieldR:
+def _collect_density(
+    self: qp.electrons.Basis,
+    C: qp.electrons.Wavefunction,
+    f: torch.Tensor,
+    need_Mvec: bool,
+) -> qp.grid.FieldR:
     r"""Collect density contributions given wavefunction `C` and occupations
     `f`. The result is in real-space on `basis.grid`.
     If the wavefunction has two spin channels, the two components of
@@ -99,18 +111,18 @@ def _collect_density(self: qp.electrons.Basis, C: qp.electrons.Wavefunction,
     while (Mx +/- i My)/2 yield the :math:`\rho_{\uparrow\downarrow}` and
     :math:`\rho_{\downarrow\uparrow}` components of the spin density matrix.
     """
-    assert(f.shape == C.coeff.shape[:3])
+    assert f.shape == C.coeff.shape[:3]
     C = C.split_bands()  # bring all G-vectors of each band together
     coeff = C.coeff
     if need_Mvec:
         assert coeff.shape[-2] == 2  # must be spinorial
     if C.band_division is not None:
-        f = f[:, :, C.band_division.i_start:C.band_division.i_stop]
+        f = f[:, :, C.band_division.i_start : C.band_division.i_stop]
     prefac = f * (self.w_sk / self.lattice.volume)
 
     # Determine FFT type and dimensions:
-    watch = qp.utils.StopWatch('Basis.collect_density', self.rc)
-    shapeG = (self.grid.shapeH if self.real_wavefunctions else self.grid.shape)
+    watch = qp.utils.StopWatch("Basis.collect_density", self.rc)
+    shapeG = self.grid.shapeH if self.real_wavefunctions else self.grid.shape
     fft_nG = int(np.prod(shapeG))  # total reciprocal space points in FFT grid
     n_spins, nk, n_bands_mine, n_spinor = coeff.shape[:-1]
     ik = torch.arange(nk, device=coeff.device)[:, None]
@@ -122,18 +134,23 @@ def _collect_density(self: qp.electrons.Basis, C: qp.electrons.Wavefunction,
             prefac = prefac.tile((1, 1, 1, n_spinor))
 
     # Collect density with blocked FFTs:
-    fft_block_size = self.get_fft_block_size(n_spins*nk, n_bands_mine)
+    fft_block_size = self.get_fft_block_size(n_spins * nk, n_bands_mine)
     n_blocks = qp.utils.ceildiv(n_bands_mine, fft_block_size)
     b_start = 0
     b_stop = fft_block_size
     b_size = fft_block_size
-    Cb = torch.zeros((n_spins, nk, fft_block_size, n_spinor, fft_nG),
-                     dtype=coeff.dtype, device=coeff.device)  # FFT buffer
-    rho_diag = torch.zeros((2 if need_Mvec else n_spins,)
-                           + self.grid.shapeR_mine, device=coeff.device)
+    Cb = torch.zeros(
+        (n_spins, nk, fft_block_size, n_spinor, fft_nG),
+        dtype=coeff.dtype,
+        device=coeff.device,
+    )  # FFT buffer
+    rho_diag = torch.zeros(
+        (2 if need_Mvec else n_spins,) + self.grid.shapeR_mine, device=coeff.device
+    )
     if need_Mvec:
-        rho_dn_up = torch.zeros(self.grid.shapeR_mine, dtype=coeff.dtype,
-                                device=coeff.device)
+        rho_dn_up = torch.zeros(
+            self.grid.shapeR_mine, dtype=coeff.dtype, device=coeff.device
+        )
     for iBlock in range(n_blocks):
         if b_stop > n_bands_mine:
             b_stop = n_bands_mine
@@ -145,9 +162,13 @@ def _collect_density(self: qp.electrons.Basis, C: qp.electrons.Wavefunction,
         prefac_cur = prefac[:, :, b_start:b_stop]
         if need_Mvec:
             qp.utils.accum_norm_(prefac_cur, ICb, out=rho_diag, start_dim=0)
-            qp.utils.accum_prod_(prefac_cur,
-                                 ICb[:, :, :, 1], ICb[:, :, :, 0].conj(),
-                                 out=rho_dn_up, start_dim=0)
+            qp.utils.accum_prod_(
+                prefac_cur,
+                ICb[:, :, :, 1],
+                ICb[:, :, :, 0].conj(),
+                out=rho_dn_up,
+                start_dim=0,
+            )
         else:
             qp.utils.accum_norm_(prefac_cur, ICb, out=rho_diag, start_dim=1)
         # Advance to next block of data:
@@ -155,19 +176,19 @@ def _collect_density(self: qp.electrons.Basis, C: qp.electrons.Wavefunction,
         b_stop += b_size
 
     # Convert density matrix components to dneisty, magnetization:
-    n_densities = (4 if need_Mvec else n_spins)
+    n_densities = 4 if need_Mvec else n_spins
     density = qp.grid.FieldR(self.grid, shape_batch=(n_densities,))
     density.data[0] = rho_diag.sum(dim=0)  # n_tot
     if n_densities >= 2:
         density.data[-1] = rho_diag[0] - rho_diag[1]  # Mz
     if need_Mvec:
-        density.data[1] = 2. * rho_dn_up.real  # Mx
-        density.data[2] = 2. * rho_dn_up.imag  # My
+        density.data[1] = 2.0 * rho_dn_up.real  # Mx
+        density.data[2] = 2.0 * rho_dn_up.imag  # My
 
     # Collect over MPI:
     if self.rc.n_procs_kb > 1:
-        self.rc.comm_kb.Allreduce(qp.MPI.IN_PLACE,
-                                  qp.utils.BufferView(density.data),
-                                  qp.MPI.SUM)
+        self.rc.comm_kb.Allreduce(
+            qp.MPI.IN_PLACE, qp.utils.BufferView(density.data), qp.MPI.SUM
+        )
     watch.stop()
     return density

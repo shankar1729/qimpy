@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from typing import TypeVar, Generic, Sequence, Dict, Deque
 
 
-Variable = TypeVar('Variable', bound=Optimizable)
+Variable = TypeVar("Variable", bound=Optimizable)
 
 
 class Pulay(Generic[Variable], ABC, qp.TreeNode):
@@ -15,9 +15,21 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
     The mixed `Variable` must support vector-space operators as specified
     by the `Optimizable` abstract base class.
     """
-    __slots__ = ('rc', 'comm', 'name', 'n_iterations', 'energy_threshold',
-                 'residual_threshold', 'extra_thresholds', 'n_history',
-                 'mix_fraction', '_variables', '_residuals', '_overlaps')
+
+    __slots__ = (
+        "rc",
+        "comm",
+        "name",
+        "n_iterations",
+        "energy_threshold",
+        "residual_threshold",
+        "extra_thresholds",
+        "n_history",
+        "mix_fraction",
+        "_variables",
+        "_residuals",
+        "_overlaps",
+    )
     rc: qp.utils.RunConfig
     comm: qp.MPI.Comm  #: Communicator over which algorithm operates in unison
     name: str  #: Name of algorithm instance used in reporting eg. 'SCF'.
@@ -37,11 +49,20 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
     #: to the extra values output by :meth:`cycle`.
     extra_thresholds: Dict[str, float]
 
-    def __init__(self, *, rc: qp.utils.RunConfig,
-                 checkpoint_in: qp.utils.CpPath, comm: qp.MPI.Comm, name: str,
-                 n_iterations: int, energy_threshold: float,
-                 residual_threshold: float, extra_thresholds: Dict[str, float],
-                 n_history: int, mix_fraction: float) -> None:
+    def __init__(
+        self,
+        *,
+        rc: qp.utils.RunConfig,
+        checkpoint_in: qp.utils.CpPath,
+        comm: qp.MPI.Comm,
+        name: str,
+        n_iterations: int,
+        energy_threshold: float,
+        residual_threshold: float,
+        extra_thresholds: Dict[str, float],
+        n_history: int,
+        mix_fraction: float,
+    ) -> None:
         """Initialize Pulay algorithm parameters."""
         super().__init__()
         self.rc = rc
@@ -86,7 +107,8 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
 
     @variable.setter  # type: ignore
     @abstractmethod
-    def variable(self, v: Variable) -> None: ...
+    def variable(self, v: Variable) -> None:
+        ...
 
     @property
     def residual(self) -> Variable:
@@ -110,13 +132,15 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
         # Initial energy and difference:
         energy = self.energy
         E = self._sync(float(energy))
-        Eprev = 0.
+        Eprev = 0.0
         dE = E - Eprev
 
         # Initialize convergence checks:
         Ename = energy.name
-        checks = {'d' + Ename: ConvergenceCheck(self.energy_threshold),
-                  '|residual|': ConvergenceCheck(self.residual_threshold)}
+        checks = {
+            "d" + Ename: ConvergenceCheck(self.energy_threshold),
+            "|residual|": ConvergenceCheck(self.residual_threshold),
+        }
         for extra_name, extra_threshold in self.extra_thresholds.items():
             checks[extra_name] = ConvergenceCheck(extra_threshold)
 
@@ -137,49 +161,59 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
             self._residuals.append(residual)
 
             # Check and report convergence:
-            line = f'{self.name}: {i_iter}  {Ename}: {E:+.11f}  '
+            line = f"{self.name}: {i_iter}  {Ename}: {E:+.11f}  "
             values = [dE, res_norm] + [self._sync(v) for v in extra_values]
             converged = []
             for i_check, (check_name, check) in enumerate(checks.items()):
                 value = values[i_check]
-                value_str = (f'{value:.3e}' if (check_name[0] == '|')
-                             else f'{value:+.3e}')
-                line += f'  {check_name:s}: {value_str}'
+                value_str = (
+                    f"{value:.3e}" if (check_name[0] == "|") else f"{value:+.3e}"
+                )
+                line += f"  {check_name:s}: {value_str}"
                 if check.check(value):
                     converged.append(check_name)
-            line += f'  t[s]: {self.rc.clock():.2f}'
+            line += f"  t[s]: {self.rc.clock():.2f}"
             qp.log.info(line)
             # --- optional reporting:
             self.report(i_iter)
             # --- stopping criteria:
             if converged:
-                qp.log.info(f'{self.name}: Converged on '
-                            f'{", ".join(converged)} criteria.')
+                qp.log.info(
+                    f"{self.name}: Converged on " f'{", ".join(converged)} criteria.'
+                )
                 break
             if not np.isfinite(E):
-                qp.log.info(f'{self.name}: Stopping due to non-finite energy.')
+                qp.log.info(f"{self.name}: Stopping due to non-finite energy.")
                 break
 
             # Pulay mixing / DIIS step:
             # --- update the overlap matrix
             Mresidual = self.metric(residual)
-            new_overlaps = np.array([r.overlap(Mresidual)
-                                     for r in self._residuals])
+            new_overlaps = np.array([r.overlap(Mresidual) for r in self._residuals])
             N = len(new_overlaps)
-            self._overlaps = np.vstack((
-                np.hstack((self._overlaps[-(N-1):, -(N-1):],
-                           new_overlaps[:-1, None])),
-                new_overlaps[None, :]))
+            self._overlaps = np.vstack(
+                (
+                    np.hstack(
+                        (
+                            self._overlaps[-(N - 1) :, -(N - 1) :],
+                            new_overlaps[:-1, None],
+                        )
+                    ),
+                    new_overlaps[None, :],
+                )
+            )
             # --- invert overlap matrix to minimize residual
-            overlapC = np.ones((N+1, N+1))  # extra row/col for norm constraint
+            overlapC = np.ones((N + 1, N + 1))  # extra row/col for norm constraint
             overlapC[:-1, :-1] = self._overlaps
-            overlapC[-1, -1] = 0.
+            overlapC[-1, -1] = 0.0
             alpha = np.linalg.inv(overlapC)[N, :-1]  # optimum coefficients
             # --- update variable
-            v = 0. * residual
+            v = 0.0 * residual
             for i_hist, alpha_i in enumerate(alpha):
-                v += alpha_i * (self._variables[i_hist] + self.mix_fraction
-                                * self.precondition(self._residuals[i_hist]))
+                v += alpha_i * (
+                    self._variables[i_hist]
+                    + self.mix_fraction * self.precondition(self._residuals[i_hist])
+                )
             self.variable = v  # type: ignore
 
     def _sync(self, v: float) -> float:

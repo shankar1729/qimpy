@@ -11,12 +11,33 @@ class Grid(qp.TreeNode):
     and this class provides FFT routines to switch fields on these grids,
     and routines to convert fields between grids.
     """
+
     __slots__ = (
-        'rc', 'lattice', 'symmetries', '_field_symmetrizer',
-        'comm', 'n_procs', 'i_proc', 'is_split', 'ke_cutoff',
-        'dV', 'shape', 'shapeH', 'shapeR_mine', 'shapeG_mine', 'shapeH_mine',
-        'split0', 'split2', 'split2H', '_mesh1D', '_mesh1D_mine',
-        '_indices_fft', '_indices_ifft', '_indices_rfft', '_indices_irfft')
+        "rc",
+        "lattice",
+        "symmetries",
+        "_field_symmetrizer",
+        "comm",
+        "n_procs",
+        "i_proc",
+        "is_split",
+        "ke_cutoff",
+        "dV",
+        "shape",
+        "shapeH",
+        "shapeR_mine",
+        "shapeG_mine",
+        "shapeH_mine",
+        "split0",
+        "split2",
+        "split2H",
+        "_mesh1D",
+        "_mesh1D_mine",
+        "_indices_fft",
+        "_indices_ifft",
+        "_indices_rfft",
+        "_indices_irfft",
+    )
     rc: qp.utils.RunConfig
     lattice: qp.lattice.Lattice
     symmetries: qp.symmetries.Symmetries
@@ -45,14 +66,18 @@ class Grid(qp.TreeNode):
     fft: MethodFFT = _fft
     ifft: MethodFFT = _ifft
 
-    def __init__(self, *, rc: qp.utils.RunConfig,
-                 lattice: qp.lattice.Lattice,
-                 symmetries: qp.symmetries.Symmetries,
-                 comm: Optional[qp.MPI.Comm],
-                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
-                 ke_cutoff_wavefunction: Optional[float] = None,
-                 ke_cutoff: Optional[float] = None,
-                 shape: Optional[Sequence[int]] = None) -> None:
+    def __init__(
+        self,
+        *,
+        rc: qp.utils.RunConfig,
+        lattice: qp.lattice.Lattice,
+        symmetries: qp.symmetries.Symmetries,
+        comm: Optional[qp.MPI.Comm],
+        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        ke_cutoff_wavefunction: Optional[float] = None,
+        ke_cutoff: Optional[float] = None,
+        shape: Optional[Sequence[int]] = None,
+    ) -> None:
         """Create local or distributed grid for `lattice`.
 
         Parameters
@@ -88,54 +113,59 @@ class Grid(qp.TreeNode):
 
         # MPI settings (identify local or split):
         self.comm = comm
-        self.n_procs, self.i_proc = ((1, 0) if (comm is None)
-                                     else (comm.Get_size(), comm.Get_rank()))
-        self.is_split = (self.n_procs == 1)
+        self.n_procs, self.i_proc = (
+            (1, 0) if (comm is None) else (comm.Get_size(), comm.Get_rank())
+        )
+        self.is_split = self.n_procs == 1
 
         # Select the relevant ke-cutoff:
-        self.ke_cutoff = (ke_cutoff if ke_cutoff else 0.)
+        self.ke_cutoff = ke_cutoff if ke_cutoff else 0.0
         if ke_cutoff_wavefunction:
             if not ke_cutoff:  # note that ke_cutoff takes precedence
-                self.ke_cutoff = 4*ke_cutoff_wavefunction
+                self.ke_cutoff = 4 * ke_cutoff_wavefunction
             # Make sure cutoff is sufficient to resolve wavefunctions:
             if self.ke_cutoff < ke_cutoff_wavefunction:
                 raise ValueError(
-                    f'ke_cutoff (={self.ke_cutoff:g}) must be >= '
-                    f'ke_cutoff_wavefunction (={ke_cutoff_wavefunction:g})')
-            elif self.ke_cutoff < 4*ke_cutoff_wavefunction:
+                    f"ke_cutoff (={self.ke_cutoff:g}) must be >= "
+                    f"ke_cutoff_wavefunction (={ke_cutoff_wavefunction:g})"
+                )
+            elif self.ke_cutoff < 4 * ke_cutoff_wavefunction:
                 qp.log.info(
-                    f'Note: ke_cutoff (={self.ke_cutoff:g}) < 4'
-                    f'*ke_cutoff_wavefunction (={4*ke_cutoff_wavefunction:g})'
-                    ' truncates high wave vectors in density calculation')
+                    f"Note: ke_cutoff (={self.ke_cutoff:g}) < 4"
+                    f"*ke_cutoff_wavefunction (={4*ke_cutoff_wavefunction:g})"
+                    " truncates high wave vectors in density calculation"
+                )
 
         # Compute minimum grid dimensions for cutoff:
         shape_min = None
         if self.ke_cutoff:
-            Gmax = np.sqrt(2.*self.ke_cutoff)  # G-sphere radius at cutoff
+            Gmax = np.sqrt(2.0 * self.ke_cutoff)  # G-sphere radius at cutoff
             # This sphere should be within shape_min/2 in each direction x
             # corresponding spacing between reciprocal lattice planes (2pi/R).
             # Therefore shape_min >= 2 * Gmax / (2pi/R)
             shape_min = (lattice.Rbasis.norm(dim=0) * (Gmax / np.pi)).tolist()
-            qp.log.info(f'minimum shape for ke-cutoff: ({shape_min[0]:.2f},'
-                        f' {shape_min[1]:.2f}, {shape_min[2]:.2f})')
+            qp.log.info(
+                f"minimum shape for ke-cutoff: ({shape_min[0]:.2f},"
+                f" {shape_min[1]:.2f}, {shape_min[2]:.2f})"
+            )
             # Align to multiple of 4 for FFT efficiency:
             shape_min = 4 * np.ceil(np.array(shape_min) / 4).astype(int)
-            qp.log.info(f'minimum multiple-of-4 shape: {tuple(shape_min)}')
+            qp.log.info(f"minimum multiple-of-4 shape: {tuple(shape_min)}")
 
         if shape:
             self.shape = tuple(shape)
             # Check symmetries and cutoff of specified shape:
             symmetries.check_grid_shape(self.shape)
-            if ((shape_min is not None)
-                    and np.any(np.array(self.shape) < shape_min)):
-                raise ValueError(
-                    f'Specified shape {self.shape} < minimum shape')
+            if (shape_min is not None) and np.any(np.array(self.shape) < shape_min):
+                raise ValueError(f"Specified shape {self.shape} < minimum shape")
         else:
             if shape_min is None:
-                raise KeyError('At least one of ke-cutoff-wavefunction, '
-                               'ke-cutoff or shape must be specified')
+                raise KeyError(
+                    "At least one of ke-cutoff-wavefunction, "
+                    "ke-cutoff or shape must be specified"
+                )
             self.shape = tuple(symmetries.get_grid_shape(shape_min))
-        qp.log.info(f'selected shape: {self.shape}')
+        qp.log.info(f"selected shape: {self.shape}")
         self.dV = self.lattice.volume / float(np.prod(self.shape))
         _init_grid_fft(self)
 
@@ -160,9 +190,8 @@ class Grid(qp.TreeNode):
             shape_mine is the relevant local dimensions of requested space
             if mine is True (and with shape, instead if mine is False).
         """
-        mesh1D = (self._mesh1D_mine[space] if mine else self._mesh1D[space])
-        return torch.stack(torch.meshgrid(*mesh1D,
-                                          indexing='ij')).permute(1, 2, 3, 0)
+        mesh1D = self._mesh1D_mine[space] if mine else self._mesh1D[space]
+        return torch.stack(torch.meshgrid(*mesh1D, indexing="ij")).permute(1, 2, 3, 0)
 
     def get_gradient_operator(self, space: str) -> torch.Tensor:
         """Get gradient operator in reciprocal space.
@@ -185,12 +214,12 @@ class Grid(qp.TreeNode):
 
     def get_Gmax(self) -> float:
         """Get maximum wave-vector magnitude of the FFT grid."""
-        iG_box = torch.tensor(np.array([
-                [+1, +1, +1],
-                [+1, +1, -1],
-                [+1, -1, +1],
-                [+1, -1, -1]]) * (np.array(self.shape) // 2)[None, :],
-            device=self.rc.device, dtype=torch.double)
+        iG_box = torch.tensor(
+            np.array([[+1, +1, +1], [+1, +1, -1], [+1, -1, +1], [+1, -1, -1]])
+            * (np.array(self.shape) // 2)[None, :],
+            device=self.rc.device,
+            dtype=torch.double,
+        )
         return (iG_box @ self.lattice.Gbasis.T).norm(dim=1).max().item()
 
     @property

@@ -13,8 +13,18 @@ class Symmetries(qp.TreeNode):
     Detects space group from lattice and ions, and provides methods to
     symmetrize properties such as positions, forces and densities."""
 
-    __slots__ = ('rc', 'lattice', 'ions', 'tolerance', 'n_sym',
-                 'rot', 'trans', 'ion_map', 'i_id', 'i_inv')
+    __slots__ = (
+        "rc",
+        "lattice",
+        "ions",
+        "tolerance",
+        "n_sym",
+        "rot",
+        "trans",
+        "ion_map",
+        "i_id",
+        "i_inv",
+    )
     rc: qp.utils.RunConfig  #: Current run configuration
     lattice: qp.lattice.Lattice  #: Corresponding lattice vectors
     ions: qp.ions.Ions  #: Corresponding ionic geometry
@@ -31,11 +41,16 @@ class Symmetries(qp.TreeNode):
     check_grid_shape = _check_grid_shape
     get_grid_shape = _get_grid_shape
 
-    def __init__(self, *, rc: qp.utils.RunConfig,
-                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
-                 lattice: qp.lattice.Lattice, ions: qp.ions.Ions,
-                 axes: Dict[str, np.ndarray] = {},
-                 tolerance: float = 1e-6) -> None:
+    def __init__(
+        self,
+        *,
+        rc: qp.utils.RunConfig,
+        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        lattice: qp.lattice.Lattice,
+        ions: qp.ions.Ions,
+        axes: Dict[str, np.ndarray] = {},
+        tolerance: float = 1e-6,
+    ) -> None:
         """Determine space group from `lattice` and `ions`.
 
         Parameters
@@ -48,56 +63,60 @@ class Symmetries(qp.TreeNode):
         self.lattice = lattice
         self.ions = ions
         self.tolerance = tolerance
-        qp.log.info('\n--- Initializing Symmetries ---')
+        qp.log.info("\n--- Initializing Symmetries ---")
 
         # Lattice point group:
         lattice_sym = _get_lattice_point_group(lattice.Rbasis, tolerance)
-        qp.log.info(f'Found {lattice_sym.shape[0]} point-group symmetries'
-                    ' of the Bravais lattice')
+        qp.log.info(
+            f"Found {lattice_sym.shape[0]} point-group symmetries"
+            " of the Bravais lattice"
+        )
 
         # Reduce symmetries by any global axes:
-        sym_axis = ((lattice.Rbasis @ lattice_sym)
-                    @ torch.linalg.inv(lattice.Rbasis))  # Cartesian axes
+        sym_axis = (lattice.Rbasis @ lattice_sym) @ torch.linalg.inv(
+            lattice.Rbasis
+        )  # Cartesian axes
         for axis_name, axis_np in axes.items():
             axis = torch.from_numpy(axis_np).to(rc.device)
-            sel = torch.where((sym_axis @ axis - axis).norm(dim=-1)
-                              < tolerance)[0]
+            sel = torch.where((sym_axis @ axis - axis).norm(dim=-1) < tolerance)[0]
             lattice_sym = lattice_sym[sel]
             sym_axis = sym_axis[sel]
-            qp.log.info(f'Reduced to {len(sel)} point-group symmetries'
-                        f' with {axis_name}')
+            qp.log.info(
+                f"Reduced to {len(sel)} point-group symmetries" f" with {axis_name}"
+            )
 
         # Space group:
         self.rot, self.trans, self.ion_map = _get_space_group(
-            lattice_sym, lattice, ions, tolerance)
+            lattice_sym, lattice, ions, tolerance
+        )
         self.n_sym = self.rot.shape[0]
-        qp.log.info(f'Found {self.n_sym} space-group symmetries with basis:')
+        qp.log.info(f"Found {self.n_sym} space-group symmetries with basis:")
         for i_sym in range(self.n_sym):
-            sym_str = '- ['
+            sym_str = "- ["
             for row in range(3):
-                sym_str += rc.fmt(self.rot[i_sym, row].to(torch.int)) + ', '
-            qp.log.info(sym_str + rc.fmt(self.trans[i_sym]) + ']')
-        qp.log.debug('Ion map:\n' + rc.fmt(self.ion_map))
+                sym_str += rc.fmt(self.rot[i_sym, row].to(torch.int)) + ", "
+            qp.log.info(sym_str + rc.fmt(self.trans[i_sym]) + "]")
+        qp.log.debug("Ion map:\n" + rc.fmt(self.ion_map))
 
         # Enforce symmetries exactly on lattice:
-        qp.log.info('Enforcing symmetries:')
+        qp.log.info("Enforcing symmetries:")
         lattice.update(self.symmetrize_lattice(lattice.Rbasis))
 
         # Enforce symmetries exactly on ions:
         if ions.n_ions:
             positions_sym = self.symmetrize_positions(ions.positions)
-            rms = ((positions_sym - ions.positions)**2).mean().sqrt()
+            rms = ((positions_sym - ions.positions) ** 2).mean().sqrt()
             ions.positions = positions_sym
-            qp.log.info(f'RMS change in fractional positions of ions: {rms:e}')
+            qp.log.info(f"RMS change in fractional positions of ions: {rms:e}")
 
         # Identify location of special entries:
         # --- identity
         id = torch.eye(3, device=rc.device)  # identity matrix
-        id_diff = (((self.rot - id)**2).sum(dim=(1, 2))
-                   + (self.trans**2).sum(dim=1))
+        id_diff = ((self.rot - id) ** 2).sum(dim=(1, 2)) + (self.trans ** 2).sum(dim=1)
         self.i_id = int(id_diff.argmin().item())
-        if id_diff[self.i_id] > tolerance**2:
-            raise ValueError('Identity operation not found in space group.')
+        if id_diff[self.i_id] > tolerance ** 2:
+            raise ValueError("Identity operation not found in space group.")
         # ---  inversion (if present: list of indices, else [])
-        self.i_inv = torch.where(((self.rot + id)**2).sum(dim=(1, 2))
-                                 < tolerance**2)[0].tolist()
+        self.i_inv = torch.where(
+            ((self.rot + id) ** 2).sum(dim=(1, 2)) < tolerance ** 2
+        )[0].tolist()

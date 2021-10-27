@@ -8,19 +8,35 @@ from typing import Optional, Union, List
 
 
 class Ions(qp.TreeNode):
-    """Ionic system: ionic geometry and pseudopotentials. """
-    __slots__ = ('rc', 'n_ions', 'n_types', 'symbols', 'n_ions_type', 'slices',
-                 'pseudopotentials', 'positions', 'types', 'M_initial',
-                 'Z', 'Z_tot', 'rho_t', 'Vloc_t', 'n_core_t',
-                 'beta', 'beta_version', 'D_all')
+    """Ionic system: ionic geometry and pseudopotentials."""
+
+    __slots__ = (
+        "rc",
+        "n_ions",
+        "n_types",
+        "symbols",
+        "n_ions_type",
+        "slices",
+        "pseudopotentials",
+        "positions",
+        "types",
+        "M_initial",
+        "Z",
+        "Z_tot",
+        "rho_t",
+        "Vloc_t",
+        "n_core_t",
+        "beta",
+        "beta_version",
+        "D_all",
+    )
     rc: qp.utils.RunConfig  #: current run configuration
     n_ions: int  #: number of ions
     n_types: int  #: number of distinct ion types
     n_ions_type: List[int]  #: number of ions of each type
     symbols: List[str]  #: symbol for each ion type
     slices: List[slice]  #: slice to get each ion type
-    pseudopotentials: List[qp.ions.Pseudopotential] \
-        #: pseudopotential for each type
+    pseudopotentials: List[qp.ions.Pseudopotential]  #: pseudopotential for each type
     positions: torch.Tensor  #: fractional positions of each ion (n_ions x 3)
     types: torch.Tensor  #: type of each ion (n_ions, int)
     M_initial: Optional[torch.Tensor]  #: initial magnetic moment for each ion
@@ -33,11 +49,14 @@ class Ions(qp.TreeNode):
     beta_version: int  #: version of `beta` to invalidate cached projections
     D_all: torch.Tensor  #: nonlocal pseudopotential matrix (all atoms)
 
-    def __init__(self, *, rc: qp.utils.RunConfig,
-                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
-                 coordinates: Optional[List] = None,
-                 pseudopotentials: Optional[Union[str, List[str]]] = None
-                 ) -> None:
+    def __init__(
+        self,
+        *,
+        rc: qp.utils.RunConfig,
+        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        coordinates: Optional[List] = None,
+        pseudopotentials: Optional[Union[str, List[str]]] = None,
+    ) -> None:
         """Initialize geometry and pseudopotentials.
 
         Parameters
@@ -65,7 +84,7 @@ class Ions(qp.TreeNode):
         """
         super().__init__()
         self.rc = rc
-        qp.log.info('\n--- Initializing Ions ---')
+        qp.log.info("\n--- Initializing Ions ---")
 
         # Read ionic coordinates:
         if coordinates is None:
@@ -77,7 +96,7 @@ class Ions(qp.TreeNode):
         self.n_ions_type = []  # numebr of ions of each type
         self.slices = []  # slice to get each ion type
         positions = []  # position of each ion
-        types = []      # type of each ion (index into symbols)
+        types = []  # type of each ion (index into symbols)
         M_initial = []  # initial magnetic moments
         type_start = 0
         for coord in coordinates:
@@ -87,9 +106,9 @@ class Ions(qp.TreeNode):
             elif len(coord) == 5:
                 attrib = coord[4]
                 if not isinstance(attrib, dict):
-                    raise ValueError('ion attributes must be a dict')
+                    raise ValueError("ion attributes must be a dict")
             else:
-                raise ValueError('each ion must be 4 entries + optional dict')
+                raise ValueError("each ion must be 4 entries + optional dict")
             # Add new symbol or append to existing:
             symbol = str(coord[0])
             if (not self.symbols) or (symbol != self.symbols[-1]):
@@ -100,9 +119,9 @@ class Ions(qp.TreeNode):
                     self.n_ions_type.append(self.n_ions - type_start)
                     type_start = self.n_ions
             # Add type and position of current ion:
-            types.append(self.n_types-1)
+            types.append(self.n_types - 1)
             positions.append([float(x) for x in coord[1:4]])
-            M_initial.append(attrib.get('M', None))
+            M_initial.append(attrib.get("M", None))
             self.n_ions += 1
         if type_start != self.n_ions:
             self.slices.append(slice(type_start, self.n_ions))  # for last type
@@ -110,24 +129,26 @@ class Ions(qp.TreeNode):
 
         # Check order:
         if len(set(self.symbols)) < self.n_types:
-            raise ValueError(
-                'coordinates must group ions of same type together')
+            raise ValueError("coordinates must group ions of same type together")
 
         # Convert to tensors before storing in class object:
         self.positions = torch.tensor(positions, device=rc.device)
         self.types = torch.tensor(types, device=rc.device, dtype=torch.long)
         # --- Fill in missing magnetizations (if any specified):
-        M_lengths = set([(len(M) if isinstance(M, list) else 1)
-                         for M in M_initial if M])
+        M_lengths = set(
+            [(len(M) if isinstance(M, list) else 1) for M in M_initial if M]
+        )
         if len(M_lengths) > 1:
-            raise ValueError('All M must be same type: 3-vector or scalar')
+            raise ValueError("All M must be same type: 3-vector or scalar")
         elif len(M_lengths) == 1:
             M_length = next(iter(M_lengths))
-            assert((M_length == 1) or (M_length == 3))
-            M_default = ([0., 0., 0.] if (M_length == 3) else 0.)
+            assert (M_length == 1) or (M_length == 3)
+            M_default = [0.0, 0.0, 0.0] if (M_length == 3) else 0.0
             self.M_initial = torch.tensor(
                 [(M if M else M_default) for M in M_initial],
-                device=rc.device, dtype=torch.double)
+                device=rc.device,
+                dtype=torch.double,
+            )
         else:
             self.M_initial = None
         self.report()
@@ -140,23 +161,20 @@ class Ions(qp.TreeNode):
             pseudopotentials = [pseudopotentials]
         for i_type, symbol in enumerate(self.symbols):
             fname = None  # full filename for this ion type
-            symbol_variants = [
-                symbol.lower(),
-                symbol.upper(),
-                symbol.capitalize()]
+            symbol_variants = [symbol.lower(), symbol.upper(), symbol.capitalize()]
             # Check each filename provided in order:
             for ps_name in pseudopotentials:
-                if ps_name.count('$ID'):
+                if ps_name.count("$ID"):
                     # wildcard syntax
                     for symbol_variant in symbol_variants:
-                        fname_test = ps_name.replace('$ID', symbol_variant)
+                        fname_test = ps_name.replace("$ID", symbol_variant)
                         if pathlib.Path(fname_test).exists():
                             fname = fname_test  # found
                             break
                 else:
                     # specific filename
                     basename = pathlib.PurePath(ps_name).stem
-                    ps_symbol = re.split(r'[_\-\.]+', basename)[0]
+                    ps_symbol = re.split(r"[_\-\.]+", basename)[0]
                     if ps_symbol in symbol_variants:
                         fname = ps_name
                         if not pathlib.Path(fname).exists():
@@ -166,17 +184,15 @@ class Ions(qp.TreeNode):
                     break
             # Read pseudopotential file:
             if fname:
-                self.pseudopotentials.append(
-                    qp.ions.Pseudopotential(fname, rc))
+                self.pseudopotentials.append(qp.ions.Pseudopotential(fname, rc))
             else:
-                raise ValueError(f'no pseudopotential found for {symbol}')
+                raise ValueError(f"no pseudopotential found for {symbol}")
         self.beta_version = 0
 
         # Calculate total ionic charge (needed for number of electrons):
-        self.Z = torch.tensor([ps.Z for ps in self.pseudopotentials],
-                              device=rc.device)
+        self.Z = torch.tensor([ps.Z for ps in self.pseudopotentials], device=rc.device)
         self.Z_tot = self.Z[self.types].sum().item()
-        qp.log.info(f'\nTotal ion charge, Z_tot: {self.Z_tot:g}')
+        qp.log.info(f"\nTotal ion charge, Z_tot: {self.Z_tot:g}")
 
         # Initialize / check replica process grid dimension:
         n_replicas = 1  # this will eventually change for NEB / phonon DFPT
@@ -184,29 +200,30 @@ class Ions(qp.TreeNode):
 
     def report(self) -> None:
         """Report ionic positions and attributes"""
-        qp.log.info(f'{self.n_ions} total ions of {self.n_types} types;'
-                    ' positions:')
+        qp.log.info(f"{self.n_ions} total ions of {self.n_types} types;" " positions:")
         # Fetch to CPU for reporting:
         positions = self.positions.to(self.rc.cpu).numpy()
         types = self.types.to(self.rc.cpu).numpy()
-        M_initial = (None
-                     if (self.M_initial is None)
-                     else self.M_initial.to(self.rc.cpu).numpy())
+        M_initial = (
+            None if (self.M_initial is None) else self.M_initial.to(self.rc.cpu).numpy()
+        )
         for i_ion, position in enumerate(positions):
             # Generate attribute string:
-            attrib_str = ''
+            attrib_str = ""
             attribs = {}
             if M_initial is not None:
                 M_i = M_initial[i_ion]
                 if np.linalg.norm(M_i):
-                    attribs['M'] = M_i
+                    attribs["M"] = M_i
             if attribs:
-                attrib_str = ', ' + str(attribs).replace("'", '').replace(
-                    'array(', '').replace(')', '')
+                attrib_str = ", " + str(attribs).replace("'", "").replace(
+                    "array(", ""
+                ).replace(")", "")
             # Report:
             qp.log.info(
-                f'- [{self.symbols[types[i_ion]]}, {position[0]:11.8f},'
-                f' {position[1]:11.8f}, {position[2]:11.8f}{attrib_str}]')
+                f"- [{self.symbols[types[i_ion]]}, {position[0]:11.8f},"
+                f" {position[1]:11.8f}, {position[2]:11.8f}{attrib_str}]"
+            )
 
     def update(self, system: qp.System) -> None:
         """Update ionic potentials, projectors and energy components.
@@ -217,21 +234,25 @@ class Ions(qp.TreeNode):
         n_densities = system.electrons.n_densities
         self.rho_t = qp.grid.FieldH(grid)  # initialize zero ionic charge
         self.Vloc_t = qp.grid.FieldH(grid)  # initizliae zero local potential
-        self.n_core_t = qp.grid.FieldH(grid,  # initialize zero core density
-                                       shape_batch=(n_densities,))
+        self.n_core_t = qp.grid.FieldH(
+            grid, shape_batch=(n_densities,)  # initialize zero core density
+        )
         if not self.n_ions:
             return  # no contributions below if no ions!
-        system.energy['Eewald'] = system.coulomb.ewald(self.positions,
-                                                       self.Z[self.types])[0]
+        system.energy["Eewald"] = system.coulomb.ewald(
+            self.positions, self.Z[self.types]
+        )[0]
         # Update ionic densities and potentials:
         from .quintic_spline import Interpolator
-        iG = grid.get_mesh('H').to(torch.double)  # half-space
-        Gsq = ((iG @ grid.lattice.Gbasis.T)**2).sum(dim=-1)
+
+        iG = grid.get_mesh("H").to(torch.double)  # half-space
+        Gsq = ((iG @ grid.lattice.Gbasis.T) ** 2).sum(dim=-1)
         G = Gsq.sqrt()
         Ginterp = Interpolator(G, qp.ions.RadialFunction.DG)
-        SF = torch.empty((self.n_types,) + G.shape, dtype=torch.cdouble,
-                         device=G.device)  # structure factor by species
-        inv_volume = 1. / grid.lattice.volume
+        SF = torch.empty(
+            (self.n_types,) + G.shape, dtype=torch.cdouble, device=G.device
+        )  # structure factor by species
+        inv_volume = 1.0 / grid.lattice.volume
         # --- collect radial coefficients
         Vloc_coeff = []
         n_core_coeff = []
@@ -239,16 +260,17 @@ class Ions(qp.TreeNode):
         ion_width = system.coulomb.ion_width
         for i_type, ps in enumerate(self.pseudopotentials):
             ps.update(Gmax, ion_width)
-            SF[i_type] = self.translation_phase(iG, self.slices[i_type]
-                                                ).sum(dim=-1) * inv_volume
+            SF[i_type] = (
+                self.translation_phase(iG, self.slices[i_type]).sum(dim=-1) * inv_volume
+            )
             Vloc_coeff.append(ps.Vloc.f_t_coeff)
             n_core_coeff.append(ps.n_core.f_t_coeff)
         # --- interpolate to G and collect with structure factors
         self.Vloc_t.data = (SF * Ginterp(torch.hstack(Vloc_coeff))).sum(dim=0)
-        self.n_core_t.data[0] = (SF * Ginterp(torch.hstack(n_core_coeff))
-                                 ).sum(dim=0)
-        self.rho_t.data = ((-self.Z.view(-1, 1, 1, 1) * SF).sum(dim=0)
-                           * torch.exp((-0.5*(ion_width**2)) * Gsq))
+        self.n_core_t.data[0] = (SF * Ginterp(torch.hstack(n_core_coeff))).sum(dim=0)
+        self.rho_t.data = (-self.Z.view(-1, 1, 1, 1) * SF).sum(dim=0) * torch.exp(
+            (-0.5 * (ion_width ** 2)) * Gsq
+        )
         # --- include long-range electrostatic part of Vloc:
         self.Vloc_t += system.coulomb(self.rho_t, correct_G0_width=True)
 
@@ -257,21 +279,24 @@ class Ions(qp.TreeNode):
         self.beta = self._get_projectors(system.electrons.basis)
         self.beta_version += 1  # will auto-invalidate cached projections
 
-    def translation_phase(self, iG: torch.Tensor,
-                          atom_slice: slice = slice(None)) -> torch.Tensor:
+    def translation_phase(
+        self, iG: torch.Tensor, atom_slice: slice = slice(None)
+    ) -> torch.Tensor:
         """Get translation phases at `iG` for a slice of atoms.
         The result has atoms as the final dimension; summing over that
         dimension yields the structure factor corresponding to these atoms.
         """
-        return qp.utils.cis((-2*np.pi) * (iG @ self.positions[atom_slice].T))
+        return qp.utils.cis((-2 * np.pi) * (iG @ self.positions[atom_slice].T))
 
-    def _get_projectors(self, basis: qp.electrons.Basis,
-                        get_psi: bool = False) -> qp.electrons.Wavefunction:
+    def _get_projectors(
+        self, basis: qp.electrons.Basis, get_psi: bool = False
+    ) -> qp.electrons.Wavefunction:
         """Get projectors corresponding to specified `basis`.
         If get_psi is True, get atomic orbitals instead. This mode is only for
         internal use by :meth:`get_atomic_orbitals`, which does additional
         transformations on the spin and spinorial dimensions."""
         from .quintic_spline import Interpolator
+
         iGk = basis.iG[:, basis.mine] + basis.k[:, None]  # fractional G + k
         Gk = iGk @ basis.lattice.Gbasis.T  # Cartesian G + k (of this process)
         # Prepare interpolator for radial functions:
@@ -279,18 +304,23 @@ class Ions(qp.TreeNode):
         Ginterp = Interpolator(Gk_mag, qp.ions.RadialFunction.DG)
         # Prepare output:
         nk_mine, n_basis_each = Gk_mag.shape
-        n_proj_tot = (self.n_orbital_projectors if get_psi
-                      else self.n_projectors)
-        proj = torch.empty((1, nk_mine, n_proj_tot, 1, n_basis_each),
-                           dtype=torch.complex128, device=self.rc.device)
+        n_proj_tot = self.n_orbital_projectors if get_psi else self.n_projectors
+        proj = torch.empty(
+            (1, nk_mine, n_proj_tot, 1, n_basis_each),
+            dtype=torch.complex128,
+            device=self.rc.device,
+        )
         if not n_proj_tot:  # no ions or all local pseudopotentials
             return qp.electrons.Wavefunction(basis, coeff=proj)
         # Get harmonics (per l,m):
         l_max = max(ps.l_max for ps in self.pseudopotentials)
         Ylm_t = qp.ions.spherical_harmonics.get_harmonics_t(l_max, Gk)
         # Get per-atom translations:
-        translations = (self.translation_phase(iGk).transpose(1, 2)  # k,atom,G
-                        / np.sqrt(basis.lattice.volume))  # due to factor in C
+        translations = self.translation_phase(iGk).transpose(
+            1, 2
+        ) / np.sqrt(  # k,atom,G
+            basis.lattice.volume
+        )  # due to factor in C
         # Compute projectors by species:
         i_proj_start = 0
         for i_ps, ps in enumerate(self.pseudopotentials):
@@ -301,19 +331,24 @@ class Ions(qp.TreeNode):
             n_proj_cur = pqn.n_tot * self.n_ions_type[i_ps]
             i_proj_stop = i_proj_start + n_proj_cur
             # Compute atomic template:
-            proj_atom = (Ginterp(f_t_coeff)[pqn.i_rf] * Ylm_t[pqn.i_lm]
-                         ).transpose(0, 1)[:, None]  # k,1,i_proj,G
+            proj_atom = (Ginterp(f_t_coeff)[pqn.i_rf] * Ylm_t[pqn.i_lm]).transpose(
+                0, 1
+            )[
+                :, None
+            ]  # k,1,i_proj,G
             # Repeat by translation to each atom:
             trans_cur = translations[:, self.slices[i_ps], None]  # k,atom,1,G
-            proj[0, :, i_proj_start:i_proj_stop, 0] = (proj_atom * trans_cur
-                                                       ).flatten(1, 2)
+            proj[0, :, i_proj_start:i_proj_stop, 0] = (proj_atom * trans_cur).flatten(
+                1, 2
+            )
             # Prepare for next species:
             i_proj_start = i_proj_stop
-        proj[basis.pad_index_mine] = 0.  # project out padded entries
+        proj[basis.pad_index_mine] = 0.0  # project out padded entries
         return qp.electrons.Wavefunction(basis, coeff=proj)
 
-    def get_atomic_orbitals(self, basis: qp.electrons.Basis
-                            ) -> qp.electrons.Wavefunction:
+    def get_atomic_orbitals(
+        self, basis: qp.electrons.Basis
+    ) -> qp.electrons.Wavefunction:
         """Get atomic orbitals (across all species) for specified `basis`."""
         psi = self._get_projectors(basis, get_psi=True)
         n_spinor = basis.n_spinor
@@ -322,9 +357,11 @@ class Ions(qp.TreeNode):
             proj = psi.coeff
             n_spins, nk_mine, _, _, n_basis_each = proj.shape
             n_psi_tot = self.n_atomic_orbitals(n_spinor)
-            psi_s = torch.empty((n_spins, nk_mine, n_psi_tot,
-                                 n_spinor, n_basis_each),
-                                dtype=torch.complex128, device=self.rc.device)
+            psi_s = torch.empty(
+                (n_spins, nk_mine, n_psi_tot, n_spinor, n_basis_each),
+                dtype=torch.complex128,
+                device=self.rc.device,
+            )
             i_proj_start = 0
             i_psi_start = 0
             for i_ps, ps in enumerate(self.pseudopotentials):
@@ -338,11 +375,13 @@ class Ions(qp.TreeNode):
                 psi_cur = psi_s[:, :, i_psi_start:i_psi_stop]  # spinorial
                 # Convert projectors to orbitals for this species:
                 if ps.is_relativistic:
-                    proj_cur = proj_cur.view((nk_mine, n_ions_i,
-                                              n_proj_each, n_basis_each))
+                    proj_cur = proj_cur.view(
+                        (nk_mine, n_ions_i, n_proj_each, n_basis_each)
+                    )
                     Ylm_to_spin_angle = ps.pqn_psi.get_spin_angle_transform()
-                    psi_cur[0] = torch.einsum('kipg, psb -> kibsg', proj_cur,
-                                              Ylm_to_spin_angle).flatten(1, 2)
+                    psi_cur[0] = torch.einsum(
+                        "kipg, psb -> kibsg", proj_cur, Ylm_to_spin_angle
+                    ).flatten(1, 2)
                 else:
                     # Repeat twice as pure up and down spinorial orbitals:
                     psi_cur.zero_()
@@ -362,27 +401,34 @@ class Ions(qp.TreeNode):
     @property
     def n_projectors(self) -> int:
         """Total number of pseudopotential projectors."""
-        return sum((ps.n_projectors * self.n_ions_type[i_ps])
-                   for i_ps, ps in enumerate(self.pseudopotentials))
+        return sum(
+            (ps.n_projectors * self.n_ions_type[i_ps])
+            for i_ps, ps in enumerate(self.pseudopotentials)
+        )
 
     @property
     def n_orbital_projectors(self) -> int:
         """Total number of projectors used to generate atomic orbitals."""
-        return sum((ps.n_orbital_projectors * self.n_ions_type[i_ps])
-                   for i_ps, ps in enumerate(self.pseudopotentials))
+        return sum(
+            (ps.n_orbital_projectors * self.n_ions_type[i_ps])
+            for i_ps, ps in enumerate(self.pseudopotentials)
+        )
 
     def n_atomic_orbitals(self, n_spinor: int) -> int:
         """Total number of atomic orbitals. This depends on the number
         of spinorial components `n_spinor`."""
-        return sum((ps.n_atomic_orbitals(n_spinor) * self.n_ions_type[i_ps])
-                   for i_ps, ps in enumerate(self.pseudopotentials))
+        return sum(
+            (ps.n_atomic_orbitals(n_spinor) * self.n_ions_type[i_ps])
+            for i_ps, ps in enumerate(self.pseudopotentials)
+        )
 
     def _collect_ps_matrix(self, n_spinor: int) -> None:
         """Collect pseudopotential matrices across species and atoms.
         Initializes `D_all`."""
         n_proj = self.n_projectors * n_spinor
-        self.D_all = torch.zeros((n_proj, n_proj), device=self.rc.device,
-                                 dtype=torch.complex128)
+        self.D_all = torch.zeros(
+            (n_proj, n_proj), device=self.rc.device, dtype=torch.complex128
+        )
         i_proj_start = 0
         for i_ps, ps in enumerate(self.pseudopotentials):
             D_nlms = ps.pqn_beta.expand_matrix(ps.D, n_spinor)
@@ -394,13 +440,15 @@ class Ions(qp.TreeNode):
                 self.D_all[slice_cur, slice_cur] = D_nlms
                 i_proj_start = i_proj_stop
 
-    def get_atomic_density(self, grid: qp.grid.Grid,
-                           M_tot: torch.Tensor) -> qp.grid.FieldH:
+    def get_atomic_density(
+        self, grid: qp.grid.Grid, M_tot: torch.Tensor
+    ) -> qp.grid.FieldH:
         """Get atomic reference density (for LCAO) on `grid`.
         The magnetization mode and overall magnitude is set by `M_tot`."""
         from .quintic_spline import Interpolator
-        iG = grid.get_mesh('H').to(torch.double)  # half-space
-        G = ((iG @ grid.lattice.Gbasis.T)**2).sum(dim=-1).sqrt()
+
+        iG = grid.get_mesh("H").to(torch.double)  # half-space
+        G = ((iG @ grid.lattice.Gbasis.T) ** 2).sum(dim=-1).sqrt()
         Ginterp = Interpolator(G, qp.ions.RadialFunction.DG)
         # Compute magnetization on each atom if needed:
         n_mag = M_tot.shape[0]
@@ -408,25 +456,27 @@ class Ions(qp.TreeNode):
             if self.M_initial is not None:
                 if n_mag == 1:
                     if len(self.M_initial.shape) != 1:
-                        raise ValueError('Per-ion magnetization must be a'
-                                         ' scalar in non-spinorial mode')
+                        raise ValueError(
+                            "Per-ion magnetization must be a"
+                            " scalar in non-spinorial mode"
+                        )
                 else:  # n_mag == 3:
                     if len(self.M_initial.shape) != 3:
-                        raise ValueError('Per-ion magnetization must be a'
-                                         ' 3-vector in spinorial mode')
+                        raise ValueError(
+                            "Per-ion magnetization must be a"
+                            " 3-vector in spinorial mode"
+                        )
                 M_initial = self.M_initial.view((self.n_ions, n_mag))
             else:
-                M_initial = torch.zeros((self.n_ions, n_mag),
-                                        device=M_tot.device)
+                M_initial = torch.zeros((self.n_ions, n_mag), device=M_tot.device)
             # Get fractional magnetization of each atom:
             M_frac = M_initial / self.Z[self.types, None]
             if M_tot.norm().item():
                 # Correct to match overall magnetization, if specified:
-                M_frac += ((M_tot - M_initial.sum(dim=0))/self.Z_tot)[None, :]
+                M_frac += ((M_tot - M_initial.sum(dim=0)) / self.Z_tot)[None, :]
             # Make sure fractional magnetization in range:
             M_frac_max = 0.9  # need some minority spin for numerical stability
-            M_frac *= (M_frac_max
-                       / M_frac.norm(dim=1).clamp(min=M_frac_max))[:, None]
+            M_frac *= (M_frac_max / M_frac.norm(dim=1).clamp(min=M_frac_max))[:, None]
 
         # Collect density from each atom:
         n_densities = 1 + n_mag
@@ -437,6 +487,7 @@ class Ions(qp.TreeNode):
             n.data[0] += rho_i[0] * SF.sum(dim=-1)
             if n_mag:
                 for i_ion, M_ion in enumerate(M_frac[self.slices[i_type]]):
-                    n.data[1:] += (rho_i * SF[None, ..., i_ion]
-                                   * M_ion.view((n_mag, 1, 1, 1)))
+                    n.data[1:] += (
+                        rho_i * SF[None, ..., i_ion] * M_ion.view((n_mag, 1, 1, 1))
+                    )
         return n

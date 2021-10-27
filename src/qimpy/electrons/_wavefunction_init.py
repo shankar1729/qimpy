@@ -11,17 +11,22 @@ def _randn(x: torch.Tensor) -> torch.Tensor:
     u = []
     for i_repeat in range(2):
         # Xor-shift RNG (64-bit):
-        x ^= (x << 13)
-        x ^= (x >> 7)
-        x ^= (x << 17)
-        u.append(((0.5**64) * x) + 0.5)
+        x ^= x << 13
+        x ^= x >> 7
+        x ^= x << 17
+        u.append(((0.5 ** 64) * x) + 0.5)
     # Complex normal random number using Box-Muller transform:
-    return (torch.sqrt(-2.*torch.log(u[0]))  # Magnitude
-            * torch.exp((2j*np.pi) * u[1]))  # Phase
+    return torch.sqrt(-2.0 * torch.log(u[0])) * torch.exp(  # Magnitude
+        (2j * np.pi) * u[1]
+    )  # Phase
 
 
-def _randomize(self: qp.electrons.Wavefunction, seed: int = 0,
-               b_start: int = 0, b_stop: Optional[int] = None) -> None:
+def _randomize(
+    self: qp.electrons.Wavefunction,
+    seed: int = 0,
+    b_start: int = 0,
+    b_stop: Optional[int] = None,
+) -> None:
     """Set wavefunction coefficients to bandwidth-limited random numbers.
     This is done reproducibly, regardless of MPI configuration of the run,
     by running a separate xor-shift random number generator with a different
@@ -38,21 +43,23 @@ def _randomize(self: qp.electrons.Wavefunction, seed: int = 0,
         Stopping band index (global index if MPI-split over bands)
     """
     basis = self.basis
-    watch = qp.utils.StopWatch('Wavefunction.randomize', basis.rc)
+    watch = qp.utils.StopWatch("Wavefunction.randomize", basis.rc)
 
     # Range of bands and basis to operate on:
     if self.band_division is None:
         b_start_local = b_start
-        b_stop_local = (b_stop if b_stop else self.coeff.shape[2])
+        b_stop_local = b_stop if b_stop else self.coeff.shape[2]
         n_bands_prev = b_start
         basis_start = basis.division.i_start
         basis_stop = basis.division.i_stop
         pad_index = basis.pad_index_mine
     else:
         b_start_local = max(b_start - self.band_division.i_start, 0)
-        b_stop_local = (min(b_stop - self.band_division.i_start,
-                            self.band_division.n_mine) if b_stop
-                        else self.band_division.n_mine)
+        b_stop_local = (
+            min(b_stop - self.band_division.i_start, self.band_division.n_mine)
+            if b_stop
+            else self.band_division.n_mine
+        )
         n_bands_prev = self.band_division.i_start + b_start_local
         basis_start = 0
         basis_stop = basis.n_tot
@@ -63,16 +70,24 @@ def _randomize(self: qp.electrons.Wavefunction, seed: int = 0,
 
     # Initialize random number state based on global coeff index and seed:
     def init_state(basis_index: torch.Tensor) -> torch.Tensor:
-        i_spinor = torch.arange(basis.n_spinor,
-                                device=self.coeff.device).view(1, 1, -1, 1)
-        i_k = torch.arange(basis.kpoints.division.i_start,
-                           basis.kpoints.division.i_stop,
-                           device=self.coeff.device).view(1, -1, 1, 1)
-        i_spin = torch.arange(basis.n_spins,
-                              device=self.coeff.device).view(-1, 1, 1, 1)
-        return (1 + seed) + basis_index.view(1, 1, 1, -1) + basis.n_max * (
-            i_spinor + basis.n_spinor * (i_k + basis.kpoints.division.n_tot
-                                         * i_spin))
+        i_spinor = torch.arange(basis.n_spinor, device=self.coeff.device).view(
+            1, 1, -1, 1
+        )
+        i_k = torch.arange(
+            basis.kpoints.division.i_start,
+            basis.kpoints.division.i_stop,
+            device=self.coeff.device,
+        ).view(1, -1, 1, 1)
+        i_spin = torch.arange(basis.n_spins, device=self.coeff.device).view(-1, 1, 1, 1)
+        return (
+            (1 + seed)
+            + basis_index.view(1, 1, 1, -1)
+            + basis.n_max
+            * (
+                i_spinor
+                + basis.n_spinor * (i_k + basis.kpoints.division.n_tot * i_spin)
+            )
+        )
 
     # Create random complex numbers for each band with index-based seed:
     i_basis = torch.arange(basis_start, basis_stop, device=self.coeff.device)
@@ -100,45 +115,62 @@ def _randomize(self: qp.electrons.Wavefunction, seed: int = 0,
         coeff_cur[..., iz0] *= np.sqrt(0.5)  # keep variance = 1
 
     # Mask out inactive basis elements:
-    coeff_cur[pad_index] = 0.
+    coeff_cur[pad_index] = 0.0
 
     # Bandwidth limit:
     ke = basis.get_ke(slice(basis_start, basis_stop))[None, :, None, None, :]
-    coeff_cur *= 1. / (1. + ((4./3)*ke) ** 6)  # damp-out high-KE coefficients
+    coeff_cur *= 1.0 / (1.0 + ((4.0 / 3) * ke) ** 6)  # damp-out high-KE coefficients
     watch.stop()
 
 
-_RandomizeSelected = Callable[['qp.electrons.Wavefunction', torch.Tensor,
-                               torch.Tensor, torch.Tensor, int], None]
+_RandomizeSelected = Callable[
+    ["qp.electrons.Wavefunction", torch.Tensor, torch.Tensor, torch.Tensor, int], None
+]
 
 
-def _randomize_selected(self: qp.electrons.Wavefunction, i_spin: torch.Tensor,
-                        i_k: torch.Tensor, i_band: torch.Tensor,
-                        seed: int) -> None:
+def _randomize_selected(
+    self: qp.electrons.Wavefunction,
+    i_spin: torch.Tensor,
+    i_k: torch.Tensor,
+    i_band: torch.Tensor,
+    seed: int,
+) -> None:
     """Randomize wavefunction coefficients of selected bands.
     The bands are indexed by a tuple (`i_spin`, `i_k`, `i_band`) of 1D
     index tensors with same shape. This is only supported for wavefunctions
     split over basis (i.e. no band_division).
     """
-    assert(self.band_division is None)
+    assert self.band_division is None
     basis = self.basis
     n_bands = self.n_bands()
-    watch = qp.utils.StopWatch('Wavefunction.randomize_sel', basis.rc)
+    watch = qp.utils.StopWatch("Wavefunction.randomize_sel", basis.rc)
 
     # Initialize random number state based on global coeff index and seed:
     def init_state(basis_index: torch.Tensor) -> torch.Tensor:
-        i_spinor = torch.arange(basis.n_spinor,
-                                device=self.coeff.device).view(1, -1, 1)
+        i_spinor = torch.arange(basis.n_spinor, device=self.coeff.device).view(1, -1, 1)
         i_k_global = (basis.kpoints.division.i_start + i_k).view(-1, 1, 1)
-        return (1 + seed) + basis_index.view(1, 1, -1) + basis.n_max * (
-            i_spinor + basis.n_spinor * (
-                i_band.view(-1, 1, 1) + n_bands * (
-                    i_k_global + basis.kpoints.division.n_tot
-                    * i_spin.view(-1, 1, 1))))
+        return (
+            (1 + seed)
+            + basis_index.view(1, 1, -1)
+            + basis.n_max
+            * (
+                i_spinor
+                + basis.n_spinor
+                * (
+                    i_band.view(-1, 1, 1)
+                    + n_bands
+                    * (
+                        i_k_global
+                        + basis.kpoints.division.n_tot * i_spin.view(-1, 1, 1)
+                    )
+                )
+            )
+        )
 
     # Create random complex numbers for each band with index-based seed:
-    i_basis = torch.arange(basis.division.i_start, basis.division.i_stop,
-                           device=self.coeff.device)
+    i_basis = torch.arange(
+        basis.division.i_start, basis.division.i_stop, device=self.coeff.device
+    )
     x = init_state(i_basis)
     _randn(x)  # warm-up RNG: discard one output after seed
     self.coeff[(i_spin, i_k, i_band)] = _randn(x)
@@ -152,9 +184,9 @@ def _randomize_selected(self: qp.electrons.Wavefunction, i_spin: torch.Tensor,
         self.coeff[(i_spin, i_k, i_band)][..., iz0_local] += _randn(x).conj()
 
     # Mask out inactive basis elements:
-    self.coeff[basis.pad_index_mine] = 0.
+    self.coeff[basis.pad_index_mine] = 0.0
 
     # Bandwidth limit:
     ke = basis.get_ke(basis.mine)[i_k, None, :]
-    self.coeff[(i_spin, i_k, i_band)] *= 1. / (1. + ((4./3)*ke) ** 6)
+    self.coeff[(i_spin, i_k, i_band)] *= 1.0 / (1.0 + ((4.0 / 3) * ke) ** 6)
     watch.stop()

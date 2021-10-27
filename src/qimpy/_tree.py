@@ -3,9 +3,9 @@ import qimpy as qp
 from typing import List, Union, TypeVar, Type, final
 
 
-ClassType = TypeVar('ClassType')
-TreeNodeType = TypeVar('TreeNodeType', bound='TreeNode')
-TreeNodeType2 = TypeVar('TreeNodeType2', bound='TreeNode')
+ClassType = TypeVar("ClassType")
+TreeNodeType = TypeVar("TreeNodeType", bound="TreeNode")
+TreeNodeType2 = TypeVar("TreeNodeType2", bound="TreeNode")
 
 
 class TreeNode:
@@ -13,7 +13,8 @@ class TreeNode:
     Provides functionality to set-up tree heirarchy based on input dicts,
     such as from YAML files, and to output to checkpoints such as in HDF5
     files preserving the same tree structure."""
-    __slots__ = ('child_names',)
+
+    __slots__ = ("child_names",)
     child_names: List[str]  #: Names of attributes with child objects.
 
     def __init__(self, **kwargs):
@@ -30,18 +31,22 @@ class TreeNode:
                 qp.log.info(f'  {cp_path.path} <- {", ".join(saved)}')
             # Recur down the hierarchy:
             for child_name in self.child_names:
-                getattr(self, child_name
-                        ).save_checkpoint(cp_path.relative(child_name))
+                getattr(self, child_name).save_checkpoint(cp_path.relative(child_name))
 
     def _save_checkpoint(self, cp_path: qp.utils.CpPath) -> List[str]:
         """Override to save required quantities to `cp_path`.
         Return names of objects saved (for logging)."""
         return []
 
-    def add_child(self, attr_name: str, cls: Type[TreeNodeType],
-                  params: Union[TreeNodeType, dict, None],
-                  checkpoint_in: qp.utils.CpPath,
-                  attr_version_name: str = '', **kwargs) -> None:
+    def add_child(
+        self,
+        attr_name: str,
+        cls: Type[TreeNodeType],
+        params: Union[TreeNodeType, dict, None],
+        checkpoint_in: qp.utils.CpPath,
+        attr_version_name: str = "",
+        **kwargs,
+    ) -> None:
         """Construct child object `self`.`attr_name` of type `cls`.
         Specifically, construct object from `params` and `kwargs`
         if `params` is a dict, and just from `kwargs` if `params` is None.
@@ -61,20 +66,25 @@ class TreeNode:
 
         # Try all the valid possibilities:
         if isinstance(params, dict):
-            result = cls(**kwargs, **qp.utils.dict.key_cleanup(params),
-                         checkpoint_in=checkpoint_in.relative(attr_name))
+            result = cls(
+                **kwargs,
+                **qp.utils.dict.key_cleanup(params),
+                checkpoint_in=checkpoint_in.relative(attr_name),
+            )
         elif isinstance(params, cls):
             result = params
         else:
             # Report error with canonicalized class name:
             module = cls.__module__
-            module_elems = ([] if module is None else (
-                [elem for elem in module.split('.')
-                 if not elem.startswith('_')]))  # drop internal module names
+            module_elems = (
+                []
+                if module is None
+                else ([elem for elem in module.split(".") if not elem.startswith("_")])
+            )  # drop internal module names
             module_elems.append(cls.__qualname__)
-            class_name = '.'.join(module_elems)
-            a_name = (attr_version_name if attr_version_name else attr_name)
-            raise TypeError(f'{a_name} must be dict or {class_name}')
+            class_name = ".".join(module_elems)
+            a_name = attr_version_name if attr_version_name else attr_name
+            raise TypeError(f"{a_name} must be dict or {class_name}")
 
         # Add as an attribute and child in hierarchy:
         setattr(self, attr_name, result)

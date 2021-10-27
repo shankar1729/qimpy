@@ -60,49 +60,78 @@ if __name__ == "__main__":
         class ArgumentParser(argparse.ArgumentParser):
             def error(self, message):
                 self.print_usage(sys.stderr)
-                print(f'{self.prog}: error: {message}\n', file=sys.stderr)
+                print(f"{self.prog}: error: {message}\n", file=sys.stderr)
                 raise ValueError(message)  # Quit after bcast'ing error
+
         parser = ArgumentParser(
             add_help=False,
-            prog='python -m qimpy.run',
-            description='Run a QimPy calculation from an input file')
+            prog="python -m qimpy.run",
+            description="Run a QimPy calculation from an input file",
+        )
         # --- mutually-exclusive group of help, version or input file
         group = parser.add_mutually_exclusive_group(required=True)
         group.add_argument(
-            '-h', '--help', action='store_true',
-            help='show this help message and exit')
+            "-h", "--help", action="store_true", help="show this help message and exit"
+        )
         group.add_argument(
-            '-v', '--version', action='store_true',
-            help='print version information and quit')
+            "-v",
+            "--version",
+            action="store_true",
+            help="print version information and quit",
+        )
         group.add_argument(
-            '-i', '--input-file', metavar='FILE',
-            help='input file in YAML format')
+            "-i", "--input-file", metavar="FILE", help="input file in YAML format"
+        )
         # ---
         parser.add_argument(
-            '-o', '--output-file', metavar='FILE',
-            help='output file (stdout if unspecified)')
+            "-o",
+            "--output-file",
+            metavar="FILE",
+            help="output file (stdout if unspecified)",
+        )
         parser.add_argument(
-            '-c', '--cores', type=int, metavar='C',
-            help='number of cores per process (overridden by SLURM)')
+            "-c",
+            "--cores",
+            type=int,
+            metavar="C",
+            help="number of cores per process (overridden by SLURM)",
+        )
         parser.add_argument(
-            '-p', '--process-grid', type=int, nargs=3,
-            default=[-1, -1, -1], metavar=('Pr', 'Pk', 'Pb'),
-            help='dimensions of process grid: replicas x kpoints x bands/basis'
-            ', whose product must match process count; any -1 will be set to '
-            'distribute available tasks for that dimension most equally. '
-            'Default: -1 -1 -1 implies all dimensions set automatically.')
+            "-p",
+            "--process-grid",
+            type=int,
+            nargs=3,
+            default=[-1, -1, -1],
+            metavar=("Pr", "Pk", "Pb"),
+            help="dimensions of process grid: replicas x kpoints x bands/basis"
+            ", whose product must match process count; any -1 will be set to "
+            "distribute available tasks for that dimension most equally. "
+            "Default: -1 -1 -1 implies all dimensions set automatically.",
+        )
         parser.add_argument(
-            '-n', '--dry-run', action='store_true',
-            help='quit after initialization (to check input file)')
+            "-n",
+            "--dry-run",
+            action="store_true",
+            help="quit after initialization (to check input file)",
+        )
         parser.add_argument(
-            '-d', '--no-append', action='store_true',
-            help='overwrite output file instead of appending')
+            "-d",
+            "--no-append",
+            action="store_true",
+            help="overwrite output file instead of appending",
+        )
         parser.add_argument(
-            '-m', '--mpi-log', metavar='FILE',
-            help='file prefix for debug logs from other MPI processes')
+            "-m",
+            "--mpi-log",
+            metavar="FILE",
+            help="file prefix for debug logs from other MPI processes",
+        )
         parser.add_argument(
-            '-V', '--verbose', action='store_true',
-            help='print extra information in log for debugging')
+            "-V",
+            "--verbose",
+            action="store_true",
+            help="print extra information in log for debugging",
+        )
         try:
             args = parser.parse_args()
             setattr(args, "error_occured", False)
@@ -120,7 +149,7 @@ if __name__ == "__main__":
     if args.version:
         # Print version and exit:
         if i_proc == 0:
-            print('QimPy', qp.__version__)
+            print("QimPy", qp.__version__)
         exit()
 
     if args.help:
@@ -135,10 +164,11 @@ if __name__ == "__main__":
         mpi_log=args.mpi_log,
         mpi_comm=qp.MPI.COMM_WORLD,
         append=(not args.no_append),
-        verbose=args.verbose)
+        verbose=args.verbose,
+    )
 
     # Print version header
-    qp.log.info('*'*15 + ' QimPy ' + qp.__version__ + ' ' + '*'*15)
+    qp.log.info("*" * 15 + " QimPy " + qp.__version__ + " " + "*" * 15)
 
     # Set up run configuration
     rc = qp.utils.RunConfig(cores=args.cores, process_grid=args.process_grid)
@@ -146,17 +176,16 @@ if __name__ == "__main__":
     # Load input parameters from YAML file:
     input_dict = qp.utils.dict.key_cleanup(qp.utils.yaml.load(args.input_file))
     # --- Set default checkpoint file (if not specified in input):
-    input_dict.setdefault('checkpoint',
-                          os.path.splitext(args.input_file)[0] + '.h5')
+    input_dict.setdefault("checkpoint", os.path.splitext(args.input_file)[0] + ".h5")
     # --- Include processed input in log:
-    qp.log.info(f'\n# Processed input:\n{qp.utils.yaml.dump(input_dict)}')
+    qp.log.info(f"\n# Processed input:\n{qp.utils.yaml.dump(input_dict)}")
 
     # Initialize system with input parameters:
     system = qp.System(rc=rc, **input_dict)
 
     # Dry-run bypass:
     if args.dry_run:
-        qp.log.info('Dry run initialization successful: input is valid.')
+        qp.log.info("Dry run initialization successful: input is valid.")
         rc.report_end()
         qp.utils.StopWatch.print_stats()
         exit()

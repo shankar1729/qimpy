@@ -1,5 +1,5 @@
 """Utilities to manipulate dictionaries used as input to constructors."""
-__all__ = ['key_cleanup', 'flatten', 'unflatten', 'merge']
+__all__ = ["key_cleanup", "flatten", "unflatten", "merge"]
 
 from typing import List
 
@@ -10,7 +10,7 @@ def key_cleanup(params: dict) -> dict:
     with passing as keyword-only arguments to constructors. Currently, this
     replaces hyphens (which look nicer) in keys to underscores internally,
     so that they become valid identifiers within the code."""
-    return dict((k.replace('-', '_'), v) for k, v in params.items())
+    return dict((k.replace("-", "_"), v) for k, v in params.items())
 
 
 def flatten(d: dict, _key_prefix: tuple = tuple()) -> dict:

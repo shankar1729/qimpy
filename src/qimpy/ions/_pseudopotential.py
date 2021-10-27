@@ -10,10 +10,31 @@ class Pseudopotential:
     """Specification of electron-ion interactions. Contains
     for local potential, nonlocal projectors and atomic orbitals.
     Currently supports norm-conserving pseudopotentials."""
-    __slots__ = ('rc', 'element', 'atomic_number', 'is_paw', 'Z', 'l_max',
-                 'r', 'dr', 'rho_atom', 'n_core', 'Vloc', 'ion_width',
-                 'beta', 'psi', 'is_relativistic', 'j_beta', 'j_psi',
-                 'eig_psi', 'D', 'Gmax', 'pqn_beta', 'pqn_psi')
+
+    __slots__ = (
+        "rc",
+        "element",
+        "atomic_number",
+        "is_paw",
+        "Z",
+        "l_max",
+        "r",
+        "dr",
+        "rho_atom",
+        "n_core",
+        "Vloc",
+        "ion_width",
+        "beta",
+        "psi",
+        "is_relativistic",
+        "j_beta",
+        "j_psi",
+        "eig_psi",
+        "D",
+        "Gmax",
+        "pqn_beta",
+        "pqn_psi",
+    )
     rc: qp.utils.RunConfig
     element: str  #: Chemical symbol of element
     atomic_number: int  #: Atomic number of element
@@ -51,9 +72,9 @@ class Pseudopotential:
             Currently, only norm-conserving UPF files are supported.
         """
         self.rc = rc
-        assert(filename[-4:].lower() == '.upf')
+        assert filename[-4:].lower() == ".upf"
         self.read_upf(filename, rc)
-        self.Gmax = 0.  # reciprocal space versions not yet initialized
+        self.Gmax = 0.0  # reciprocal space versions not yet initialized
         self.pqn_beta = qp.ions.PseudoQuantumNumbers(self.beta.l, self.j_beta)
         self.pqn_psi = qp.ions.PseudoQuantumNumbers(self.psi.l, self.j_psi)
 
@@ -66,21 +87,26 @@ class Pseudopotential:
         if ion_width != self.ion_width:
             eta_self = np.sqrt(0.5) / self.ion_width  # current erf parameter
             eta = np.sqrt(0.5) / ion_width  # target erf parameter
-            self.Vloc.f[0] -= self.Z * (torch.erf(eta_self * self.r)
-                                        - torch.erf(eta * self.r)) / self.r
+            self.Vloc.f[0] -= (
+                self.Z
+                * (torch.erf(eta_self * self.r) - torch.erf(eta * self.r))
+                / self.r
+            )
             if Gmax <= self.Gmax:
                 # Not a global Gmax update, transform Vloc separately:
-                qp.ions.RadialFunction.transform([self.Vloc], Gmax,
-                                                 self.rc.comm_kb, self.element)
+                qp.ions.RadialFunction.transform(
+                    [self.Vloc], Gmax, self.rc.comm_kb, self.element
+                )
             self.ion_width = ion_width
 
         # Update radial transforms if necessary:
         if Gmax > self.Gmax:
             transform_list = [self.rho_atom, self.Vloc, self.beta, self.psi]
-            if hasattr(self, 'n_core'):
+            if hasattr(self, "n_core"):
                 transform_list.append(self.n_core)
-            qp.ions.RadialFunction.transform(transform_list, Gmax,
-                                             self.rc.comm_kb, self.element)
+            qp.ions.RadialFunction.transform(
+                transform_list, Gmax, self.rc.comm_kb, self.element
+            )
             self.Gmax = Gmax
 
     @property
@@ -101,8 +127,9 @@ class Pseudopotential:
         """Number of orbitals per atom."""
         if self.is_relativistic:
             if n_spinor != 2:
-                raise ValueError("Relativistic pseudopotentials require"
-                                 " spinorial calculation")
+                raise ValueError(
+                    "Relativistic pseudopotentials require" " spinorial calculation"
+                )
             return self.pqn_psi.n_tot_s
         else:
             return self.pqn_psi.n_tot * n_spinor

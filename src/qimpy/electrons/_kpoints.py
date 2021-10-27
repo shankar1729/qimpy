@@ -8,47 +8,57 @@ from typing import Union, Sequence, Tuple
 class Kpoints(qp.TreeNode):
     """Set of k-points in Brillouin zone.
     The underlying :class:`TaskDivision` splits k-points over `rc.comm_k`."""
-    __slots__ = ('rc', 'k', 'wk', 'division')
+
+    __slots__ = ("rc", "k", "wk", "division")
     rc: qp.utils.RunConfig
     k: torch.Tensor  #: Array of k-points (N x 3)
     wk: torch.Tensor  #: Integration weights for each k (adds to 1)
     division: qp.utils.TaskDivision  #: Division of k-points across `rc.comm_k`
 
-    def __init__(self, *, rc: qp.utils.RunConfig,
-                 k: torch.Tensor, wk: torch.Tensor,
-                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath()) -> None:
+    def __init__(
+        self,
+        *,
+        rc: qp.utils.RunConfig,
+        k: torch.Tensor,
+        wk: torch.Tensor,
+        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+    ) -> None:
         """Initialize from list of k-points and weights. Typically, this should
-         be used only by derived classes :class:`Kmesh` or :class:`Kpath`.
+        be used only by derived classes :class:`Kmesh` or :class:`Kpath`.
         """
         super().__init__()
         self.rc = rc
         self.k = k
         self.wk = wk
-        assert(abs(wk.sum() - 1.) < 1e-14)
+        assert abs(wk.sum() - 1.0) < 1e-14
 
         # Initialize process grid dimension (if -1) and split k-points:
         rc.provide_n_tasks(1, k.shape[0])
-        self.division = qp.utils.TaskDivision(n_tot=k.shape[0],
-                                              n_procs=rc.n_procs_k,
-                                              i_proc=rc.i_proc_k,
-                                              name='k-point')
+        self.division = qp.utils.TaskDivision(
+            n_tot=k.shape[0], n_procs=rc.n_procs_k, i_proc=rc.i_proc_k, name="k-point"
+        )
 
 
 class Kmesh(Kpoints):
     """Uniform k-mesh sampling of Brillouin zone"""
-    __slots__ = ('size', 'i_reduced', 'i_sym', 'invert')
+
+    __slots__ = ("size", "i_reduced", "i_sym", "invert")
     size: Tuple[int, ...]  #: Dimensions of k-mesh
     i_reduced: torch.Tensor  #: Reduced index of each k-point in mesh
     i_sym: torch.Tensor  #: Symmetry index that maps mesh points to reduced set
     invert: torch.Tensor  #: Inversion factor (1, -1) in reduction of each k
 
-    def __init__(self, *, rc: qp.utils.RunConfig,
-                 symmetries: qp.symmetries.Symmetries,
-                 lattice: qp.lattice.Lattice,
-                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
-                 offset: Union[Sequence[float], np.ndarray] = (0., 0., 0.),
-                 size: Union[float, Sequence[int], np.ndarray] = (1, 1, 1),
-                 use_inversion: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        rc: qp.utils.RunConfig,
+        symmetries: qp.symmetries.Symmetries,
+        lattice: qp.lattice.Lattice,
+        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        offset: Union[Sequence[float], np.ndarray] = (0.0, 0.0, 0.0),
+        size: Union[float, Sequence[int], np.ndarray] = (1, 1, 1),
+        use_inversion: bool = True,
+    ) -> None:
         """Construct k-mesh of specified `size` and `offset`.
 
         Parameters
@@ -83,32 +93,37 @@ class Kmesh(Kpoints):
             sup_length = float(size)
             L_i = torch.linalg.norm(lattice.Rbasis, dim=0)  # lattice lengths
             size = torch.ceil(sup_length / L_i).to(torch.int).tolist()
-            qp.log.info(f'Selecting {size[0]} x {size[1]} x {size[2]} k-mesh'
-                        f' for supercell size >= {sup_length:g} bohrs')
+            qp.log.info(
+                f"Selecting {size[0]} x {size[1]} x {size[2]} k-mesh"
+                f" for supercell size >= {sup_length:g} bohrs"
+            )
 
         # Check types and sizes:
         offset = np.array(offset)
         size = np.array(size)
-        assert((offset.shape == (3,)) and (offset.dtype == float))
-        assert((size.shape == (3,)) and (size.dtype == int))
+        assert (offset.shape == (3,)) and (offset.dtype == float)
+        assert (size.shape == (3,)) and (size.dtype == int)
         kmesh_method_str = (
-            'centered at Gamma'
-            if (np.linalg.norm(offset) == 0.)
-            else ('offset by ' + np.array2string(offset, separator=', ')))
-        qp.log.info(f'Creating {size[0]} x {size[1]} x {size[2]} uniform'
-                    f' k-mesh {kmesh_method_str}')
+            "centered at Gamma"
+            if (np.linalg.norm(offset) == 0.0)
+            else ("offset by " + np.array2string(offset, separator=", "))
+        )
+        qp.log.info(
+            f"Creating {size[0]} x {size[1]} x {size[2]} uniform"
+            f" k-mesh {kmesh_method_str}"
+        )
 
         # Check that offset is resolvable:
         min_offset = symmetries.tolerance  # detectable at that threshold
         if np.any(np.logical_and(offset != 0, np.abs(offset) < min_offset)):
-            raise ValueError(
-                f'Nonzero offset < {min_offset:g} symmetry tolerance')
+            raise ValueError(f"Nonzero offset < {min_offset:g} symmetry tolerance")
 
         # Create full mesh:
-        grids1d = [(offset[i] + torch.arange(size[i], device=rc.device))
-                   / size[i] for i in range(3)]
-        mesh = torch.stack(torch.meshgrid(*tuple(grids1d),
-                                          indexing='ij')).view(3, -1).T
+        grids1d = [
+            (offset[i] + torch.arange(size[i], device=rc.device)) / size[i]
+            for i in range(3)
+        ]
+        mesh = torch.stack(torch.meshgrid(*tuple(grids1d), indexing="ij")).view(3, -1).T
         mesh -= torch.floor(0.5 + mesh)  # wrap to [-0.5,0.5)
 
         # Compute mapping of arbitrary k-points to mesh:
@@ -118,15 +133,15 @@ class Kmesh(Kpoints):
             size_i = torch.tensor(size, dtype=torch.int, device=rc.device)
             size_f = size_i.to(torch.double)  # need as both int and float
             offset_f = torch.tensor(offset, device=rc.device)
-            stride_i = torch.tensor([size[1]*size[2], size[2], 1],
-                                    dtype=torch.int, device=rc.device)
+            stride_i = torch.tensor(
+                [size[1] * size[2], size[2], 1], dtype=torch.int, device=rc.device
+            )
             not_found_index = size.prod()
             # Compute mesh coordinates:
             mesh_coord = k * size_f - offset_f
             int_coord = torch.round(mesh_coord)
             on_mesh = ((mesh_coord - int_coord).abs() < min_offset).all(dim=-1)
-            mesh_index = ((int_coord.to(torch.int) % size_i) * stride_i
-                          ).sum(dim=-1)
+            mesh_index = ((int_coord.to(torch.int) % size_i) * stride_i).sum(dim=-1)
             return on_mesh, torch.where(on_mesh, mesh_index, not_found_index)
 
         # Check whether to add explicit inversion:
@@ -139,15 +154,19 @@ class Kmesh(Kpoints):
         # --- k-points transform by rot.T, so no transpose on right-multiply
         on_mesh, mesh_index = mesh_map(mesh @ rot)
         if not on_mesh.all():
-            qp.log.info('WARNING: k-mesh symmetries are a subgroup of size '
-                        + str(on_mesh.all(dim=-1).count_nonzero().item()))
+            qp.log.info(
+                "WARNING: k-mesh symmetries are a subgroup of size "
+                + str(on_mesh.all(dim=-1).count_nonzero().item())
+            )
         first_equiv, i_sym = mesh_index.min(dim=0)  # first equiv k and sym
         reduced_index, i_reduced, reduced_counts = first_equiv.unique(
-            return_inverse=True, return_counts=True)
+            return_inverse=True, return_counts=True
+        )
         k = mesh[reduced_index]  # k in irreducible wedge
         wk = reduced_counts / size.prod()  # corresponding weights
-        qp.log.info(f'Reduced {size.prod()} points on k-mesh to'
-                    f' {len(k)} under symmetries')
+        qp.log.info(
+            f"Reduced {size.prod()} points on k-mesh to" f" {len(k)} under symmetries"
+        )
         # --- store mapping from full k-mesh to reduced set:
         size = tuple(size)
         self.i_reduced = i_reduced.reshape(size)  # index into k
@@ -156,7 +175,7 @@ class Kmesh(Kpoints):
         self.invert = torch.where(self.i_sym > symmetries.n_sym, -1, +1)
         self.i_sym = self.i_sym % symmetries.n_sym
         if self.invert.min() < 0:
-            qp.log.info('Note: used k-inversion (conjugation) symmetry')
+            qp.log.info("Note: used k-inversion (conjugation) symmetry")
 
         # Initialize base class:
         super().__init__(rc=rc, k=k, wk=wk, checkpoint_in=checkpoint_in)
@@ -166,9 +185,15 @@ class Kpath(Kpoints):
     """Path of k-points traversing Brillouin zone.
     Typically used only for band structure calculations."""
 
-    def __init__(self, *, rc: qp.utils.RunConfig, lattice: qp.lattice.Lattice,
-                 dk: float, points: list,
-                 checkpoint_in: qp.utils.CpPath = qp.utils.CpPath()) -> None:
+    def __init__(
+        self,
+        *,
+        rc: qp.utils.RunConfig,
+        lattice: qp.lattice.Lattice,
+        dk: float,
+        points: list,
+        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+    ) -> None:
         """Initialize k-path with spacing `dk` connecting `points`.
 
         Parameters
@@ -189,33 +214,37 @@ class Kpath(Kpoints):
 
         # Check types, sizes and separate labels from points:
         dk = float(dk)
-        labels = [(point[3] if (len(point) > 3) else '') for point in points]
-        kverts = torch.tensor([point[:3] for point in points],
-                              dtype=torch.double, device=rc.device)
-        qp.log.info(f'Creating k-path with dk = {dk:g} connecting'
-                    f' {kverts.shape[0]} special points')
+        labels = [(point[3] if (len(point) > 3) else "") for point in points]
+        kverts = torch.tensor(
+            [point[:3] for point in points], dtype=torch.double, device=rc.device
+        )
+        qp.log.info(
+            f"Creating k-path with dk = {dk:g} connecting"
+            f" {kverts.shape[0]} special points"
+        )
 
         # Create path one segment at a time:
         k_list = [kverts[:1]]
         self.labels = {0: labels[0]}
         k_length = [np.zeros((1,), dtype=float)]
         nk_tot = 1
-        distance_tot = 0.
+        distance_tot = 0.0
         dkverts = kverts.diff(dim=0)
-        distances = torch.sqrt(((dkverts @ lattice.Gbasis.T)**2).sum(dim=1))
+        distances = torch.sqrt(((dkverts @ lattice.Gbasis.T) ** 2).sum(dim=1))
         for i, distance in enumerate(distances):
             nk = int(torch.ceil(distance / dk).item())  # for this segment
-            t = torch.arange(1, nk+1, device=rc.device) / nk
+            t = torch.arange(1, nk + 1, device=rc.device) / nk
             k_list.append(kverts[i] + t[:, None] * dkverts[i])
             nk_tot += nk
-            self.labels[nk_tot - 1] = labels[i+1]  # label at end of segment
+            self.labels[nk_tot - 1] = labels[i + 1]  # label at end of segment
             k_length.append((distance_tot + distance * t).to(rc.cpu).numpy())
             distance_tot += distance
         k = torch.cat(k_list)
-        wk = torch.full((nk_tot,),  1./nk_tot, device=rc.device)
+        wk = torch.full((nk_tot,), 1.0 / nk_tot, device=rc.device)
         self.k_length = np.concatenate(k_length)  # cumulative length on path
-        qp.log.info(f'Created {nk_tot} k-points on k-path of'
-                    f' length {distance_tot:g}')
+        qp.log.info(
+            f"Created {nk_tot} k-points on k-path of" f" length {distance_tot:g}"
+        )
 
         # Initialize base class:
         super().__init__(rc=rc, k=k, wk=wk, checkpoint_in=checkpoint_in)
@@ -234,34 +263,41 @@ class Kpath(Kpoints):
             return  # only overall head needs to plot
         else:
             eig_all = np.zeros((n_spins, self.division.n_tot, n_bands))
-            eig_all[:, :self.division.n_mine] = eig
+            eig_all[:, : self.division.n_mine] = eig
             for i_proc in range(1, self.rc.n_procs_k):
                 i_start = self.division.n_prev[i_proc]
-                i_stop = self.division.n_prev[i_proc+1]
+                i_stop = self.division.n_prev[i_proc + 1]
                 self.rc.comm_k.Recv(eig_all[:, i_start:i_stop], i_proc)
 
         # Check for semi-core gap (only among occupied bands):
-        n_occupied_bands = int(np.floor(electrons.fillings.n_electrons
-                                        * electrons.n_spinor / 2))
-        gaps_start = eig_all[..., :n_occupied_bands-1].max(axis=(0, 1))
+        n_occupied_bands = int(
+            np.floor(electrons.fillings.n_electrons * electrons.n_spinor / 2)
+        )
+        gaps_start = eig_all[..., : n_occupied_bands - 1].max(axis=(0, 1))
         gaps_stop = eig_all[..., 1:n_occupied_bands].min(axis=(0, 1))
         gaps = gaps_stop - gaps_start
         gap_cut = 0.5  # threshold on semi-core gap at which to break y-axis
         i_gaps = np.where(gaps > gap_cut)[0] + 1
-        split_axis = (len(i_gaps) > 0)
+        split_axis = len(i_gaps) > 0
         i_band_edges = np.concatenate(([0], i_gaps, [n_bands]))
         band_ranges = list(zip(i_band_edges[:-1], i_band_edges[1:]))
 
         # Plot
         import matplotlib
-        matplotlib.use('Agg')
+
+        matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         import matplotlib.ticker as ticker
+
         yformatter = ticker.ScalarFormatter(useOffset=False)
-        ax_heights = [3] + [1]*(len(band_ranges) - 1)
+        ax_heights = [3] + [1] * (len(band_ranges) - 1)
         if split_axis:
-            _, axes = plt.subplots(len(band_ranges), 1, sharex=True,
-                                   gridspec_kw={'height_ratios': ax_heights})
+            _, axes = plt.subplots(
+                len(band_ranges),
+                1,
+                sharex=True,
+                gridspec_kw={"height_ratios": ax_heights},
+            )
             plt.subplots_adjust(hspace=0.03)
         else:
             plt.figure()
@@ -270,37 +306,38 @@ class Kpath(Kpoints):
         for i_ax, band_range in enumerate(band_ranges[::-1]):
             plt.sca(axes[i_ax])
             for i_spin in range(n_spins):
-                plt.plot(self.k_length, eig_all[i_spin, :, slice(*band_range)],
-                         color='kr'[i_spin])
+                plt.plot(
+                    self.k_length,
+                    eig_all[i_spin, :, slice(*band_range)],
+                    color="kr"[i_spin],
+                )
             for pos in tick_pos[1:-1]:
-                plt.axvline(pos, color='k', ls='dotted', lw=1)
+                plt.axvline(pos, color="k", ls="dotted", lw=1)
             plt.xlim(0, self.k_length[-1])
             axes[i_ax].yaxis.set_major_formatter(yformatter)
             if (not np.isnan(electrons.fillings.mu)) and (not i_ax):
-                plt.axhline(electrons.fillings.mu, color='k',
-                            ls='dotted', lw=1)
+                plt.axhline(electrons.fillings.mu, color="k", ls="dotted", lw=1)
 
         # Axis settings for arbitrary number of splits:
-        axes[0].set_ylabel(r'$E$ [$E_h$]')
+        axes[0].set_ylabel(r"$E$ [$E_h$]")
         axes[0].set_ylim(None, eig_all[..., -1].min())
         for ax in axes[:-1]:
-            ax.spines['bottom'].set_visible(False)
-            ax.tick_params(axis='x', top=False, bottom=False)  # no x-ticks
+            ax.spines["bottom"].set_visible(False)
+            ax.tick_params(axis="x", top=False, bottom=False)  # no x-ticks
         for ax in axes[1:]:
-            ax.spines['top'].set_visible(False)
+            ax.spines["top"].set_visible(False)
         axes[-1].xaxis.tick_bottom()
         axes[-1].set_xticks(tick_pos)
         axes[-1].set_xticklabels(self.labels.values())
 
         # Axis break annotations:
         for i_ax, ax in enumerate(axes):
-            dx = .01
+            dx = 0.01
             dy = (dx * 0.5 * sum(ax_heights)) / ax_heights[i_ax]
-            kwargs = dict(transform=ax.transAxes, color='k',
-                          clip_on=False, lw=1)
+            kwargs = dict(transform=ax.transAxes, color="k", clip_on=False, lw=1)
             for x0 in (0, 1):
                 if i_ax + 1 < len(axes):
                     ax.plot((x0 - dx, x0 + dx), (-dy, +dy), **kwargs)
                 if i_ax:
                     ax.plot((x0 - dx, x0 + dx), (1 - dy, 1 + dy), **kwargs)
-        plt.savefig(filename, bbox_inches='tight')
+        plt.savefig(filename, bbox_inches="tight")

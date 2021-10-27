@@ -6,9 +6,24 @@ from typing import Optional
 
 class PseudoQuantumNumbers:
     """Quantum numbers of pseudo-atom in projector or orbital order."""
-    __slots__ = ('n_tot', 'l_max', 'i_rf', 'n', 'l', 'm', 'i_lm',
-                 'is_relativistic',
-                 'n_tot_s', 'ns', 'ls', 'j', 'mj', 'i_ljm', 'i_ljms')
+
+    __slots__ = (
+        "n_tot",
+        "l_max",
+        "i_rf",
+        "n",
+        "l",
+        "m",
+        "i_lm",
+        "is_relativistic",
+        "n_tot_s",
+        "ns",
+        "ls",
+        "j",
+        "mj",
+        "i_ljm",
+        "i_ljms",
+    )
     n_tot: int  #: total number of projectors / orbitals (accounting for m)
     l_max: int  #: maximum l of projectors / orbitals
     i_rf: torch.Tensor  #: index of radial function (across all l)
@@ -32,7 +47,7 @@ class PseudoQuantumNumbers:
         pseudopotential. The input corresponds to the distinct radial functions
         read from a pseudoptential, while the members of this class are for
         each projector function including spherical harmonics."""
-        self.n_tot = int((2*l + 1).sum().item())
+        self.n_tot = int((2 * l + 1).sum().item())
         self.l_max = int(l.max().item())
         self.n = torch.zeros(self.n_tot, dtype=torch.long, device=l.device)
         self.l = torch.zeros_like(self.n)
@@ -45,16 +60,16 @@ class PseudoQuantumNumbers:
             # Size of shell at current m:
             l_i = l_iter.item()
             n_l[l_i] += 1  # starts at 1 for first of each l
-            m_count = 2*l_i + 1
+            m_count = 2 * l_i + 1
             i_stop = i_start + m_count
             # Assign properties for this shell:
             self.i_rf[i_start:i_stop] = i_rf
             self.n[i_start:i_stop] = n_l[l_i]
             self.l[i_start:i_stop] = l_i
-            self.m[i_start:i_stop] = torch.arange(-l_i, l_i+1, device=l.device)
+            self.m[i_start:i_stop] = torch.arange(-l_i, l_i + 1, device=l.device)
             # To next shell:
             i_start = i_stop
-        self.i_lm = self.l*(self.l + 1) + self.m
+        self.i_lm = self.l * (self.l + 1) + self.m
 
         if j is None:
             self.is_relativistic = False
@@ -62,37 +77,38 @@ class PseudoQuantumNumbers:
             self.is_relativistic = True
             self._initialize_relativistic(l, j)
 
-    def _initialize_relativistic(self, l: torch.Tensor,
-                                 j: torch.Tensor) -> None:
+    def _initialize_relativistic(self, l: torch.Tensor, j: torch.Tensor) -> None:
         """Initialize the relativistic quantum numbers and indices."""
         assert ((j - l).abs() == 0.5).all()
-        self.n_tot_s = int((2*j + 1).sum().item())
+        self.n_tot_s = int((2 * j + 1).sum().item())
         self.ns = torch.zeros(self.n_tot_s, dtype=torch.long, device=l.device)
         self.ls = torch.zeros_like(self.ns)
         self.j = torch.zeros_like(self.ns, dtype=j.dtype)  # half-integral
         self.mj = torch.zeros_like(self.j)
         # Initialize one l, j set at a time:
         i_start = 0
-        n_lj = [0] * (2*self.l_max + 1)
+        n_lj = [0] * (2 * self.l_max + 1)
         for i_rf, l_iter in enumerate(l):
             # Size of shell at current m:
             l_i = l_iter.item()
             j_i = j[i_rf].item()
-            lj_i = (2*l_i - 1) if (j_i < l_i) else (2*l_i)
+            lj_i = (2 * l_i - 1) if (j_i < l_i) else (2 * l_i)
             n_lj[lj_i] += 1  # starts at 1 for first of each l, j
-            mj_count = int(2*j_i + 1)
+            mj_count = int(2 * j_i + 1)
             i_stop = i_start + mj_count
             # Assign properties for this shell:
             self.n[self.i_rf == i_rf] = n_lj[lj_i]  # fix n computed without j
             self.ns[i_start:i_stop] = n_lj[lj_i]
             self.ls[i_start:i_stop] = l_i
             self.j[i_start:i_stop] = j_i
-            self.mj[i_start:i_stop] = (torch.arange(mj_count, device=l.device)
-                                       - j_i)
+            self.mj[i_start:i_stop] = torch.arange(mj_count, device=l.device) - j_i
             # To next shell:
             i_start = i_stop
-        self.i_ljm = (self.ls*(2*self.j + 1)  # from previous l,j
-                      + self.j + self.mj).to(torch.long)  # within current l,j
+        self.i_ljm = (
+            self.ls * (2 * self.j + 1) + self.j + self.mj  # from previous l,j
+        ).to(
+            torch.long
+        )  # within current l,j
         self.i_ljms = self._get_i_ljms(j)
 
     def _get_i_ljms(self, j: torch.Tensor) -> torch.Tensor:
@@ -119,8 +135,9 @@ class PseudoQuantumNumbers:
         """
         if self.is_relativistic:
             if n_spinor != 2:
-                raise ValueError("Relativistic pseudopotentials require"
-                                 " spinorial calculation")
+                raise ValueError(
+                    "Relativistic pseudopotentials require" " spinorial calculation"
+                )
             # Collect matrix with spinor repetition:
             i_rf = self.i_rf[:, None].tile((1, 2)).flatten()  # spinor repeat
             D_nljms = D[i_rf][:, i_rf].contiguous()
@@ -130,14 +147,15 @@ class PseudoQuantumNumbers:
         else:
             # Non-relativistic pseuodopotential:
             D_nlm = D[self.i_rf][:, self.i_rf].contiguous()
-            D_nlm[self.i_lm[None] != self.i_lm[:, None]] = 0.  # delta_{lm,lm'}
+            D_nlm[self.i_lm[None] != self.i_lm[:, None]] = 0.0  # delta_{lm,lm'}
             if n_spinor == 1:
                 return D_nlm
             else:  # n_spinor == 2
                 # Repeat for spinor component:
                 n_nlms = D_nlm.shape[0] * n_spinor
-                D_nlms = torch.zeros((n_nlms, n_nlms), dtype=D_nlm.dtype,
-                                     device=D_nlm.device)
+                D_nlms = torch.zeros(
+                    (n_nlms, n_nlms), dtype=D_nlm.dtype, device=D_nlm.device
+                )
                 for i_spinor in range(n_spinor):
                     D_nlms[i_spinor::n_spinor, i_spinor::n_spinor] = D_nlm
                 return D_nlms
@@ -146,13 +164,11 @@ class PseudoQuantumNumbers:
         """Return transformation matrix from (l, j, m_l), s to (l, j, m_j).
         Only for relativistic cases, with output shape n_tot x 2 x n_tot_s.
         """
-        C = torch.from_numpy(get_Ylm_to_spin_angle_all(self.l_max)
-                             ).to(self.l.device)
-        C_out = C[self.i_ljms][:, self.i_ljm].reshape((self.n_tot, 2,
-                                                       self.n_tot_s))
+        C = torch.from_numpy(get_Ylm_to_spin_angle_all(self.l_max)).to(self.l.device)
+        C_out = C[self.i_ljms][:, self.i_ljm].reshape((self.n_tot, 2, self.n_tot_s))
         # Project out contributions between different shells:
         sel = torch.where(self.n[:, None] != self.ns[None, :])
-        C_out[sel[0], slice(None), sel[1]] = 0.
+        C_out[sel[0], slice(None), sel[1]] = 0.0
         return C_out
 
 
@@ -163,32 +179,35 @@ def get_Ylm_to_spin_angle(l: int) -> np.ndarray:
     The (j, mj) indices along the second dimension have an inner mj index for
     j = l - 1/2 first (2l entries) and then for j = l + 1/2 (2l + 2 entries).
     """
-    n_m = 2*l + 1
+    n_m = 2 * l + 1
     n_minus = n_m - 1  # number of mj at j = l - 1/2
     n_plus = n_m + 1  # number of mj at j = l + 1/2
 
     # Initialize Clebsch Gordon coefficients:
     C = np.zeros((2, n_m, n_minus + n_plus))  # s, m, (j,mj)
-    C_entries = np.sqrt(1. - np.arange(n_m)/n_m)  # unique entries at this l
+    C_entries = np.sqrt(1.0 - np.arange(n_m) / n_m)  # unique entries at this l
     if n_minus:
         np.fill_diagonal(C[0, 0:, :n_minus], C_entries[1:])
         np.fill_diagonal(C[1, 1:, :n_minus], -C_entries[:0:-1])
     if n_plus:
-        np.fill_diagonal(C[0, :, n_minus+1:], C_entries[::-1])
-        np.fill_diagonal(C[1, :, n_minus+0:], C_entries)
+        np.fill_diagonal(C[0, :, n_minus + 1 :], C_entries[::-1])
+        np.fill_diagonal(C[1, :, n_minus + 0 :], C_entries)
 
     # Account for real to complex harmonics transformation:
     Y = np.zeros((n_m, n_m), dtype=np.complex128)
-    Y[l, l] = 1.  # m = 0 not transformed
-    m = np.arange(1, l+1)
+    Y[l, l] = 1.0  # m = 0 not transformed
+    m = np.arange(1, l + 1)
     parity = (-1) ** m
     sqrt_half = np.sqrt(0.5)
-    Y[l+m, l+m] = sqrt_half * parity
-    Y[l+m, l-m] = sqrt_half
-    Y[l-m, l+m] = sqrt_half * parity * 1j
-    Y[l-m, l-m] = sqrt_half * (-1j)
-    return (Y @ C  # transform Clebsh-Gordon to apply for real harmonics
-            ).swapaxes(0, 1).reshape(n_m*2, n_m*2)  # s, m -> combined (m, s)
+    Y[l + m, l + m] = sqrt_half * parity
+    Y[l + m, l - m] = sqrt_half
+    Y[l - m, l + m] = sqrt_half * parity * 1j
+    Y[l - m, l - m] = sqrt_half * (-1j)
+    return (
+        (Y @ C)  # transform Clebsh-Gordon to apply for real harmonics
+        .swapaxes(0, 1)
+        .reshape(n_m * 2, n_m * 2)
+    )  # s, m -> combined (m, s)
 
 
 @lru_cache
@@ -202,8 +221,8 @@ def get_Ylm_to_spin_angle_all(l_max: int) -> np.ndarray:
     else:
         C_prev = get_Ylm_to_spin_angle_all(l_max - 1)
         i_minus_0, i_minus_1 = C_prev.shape
-        C_minus = C[:, :2*l_max]
-        C_plus = C[:, 2*l_max:]
+        C_minus = C[:, : 2 * l_max]
+        C_plus = C[:, 2 * l_max :]
         # First index covers m, s for each l, j
         i_plus_0 = i_minus_0 + C.shape[0]
         n_tot_0 = i_plus_0 + C.shape[0]
@@ -230,8 +249,8 @@ def get_Ylm_overlaps(l_max: int) -> np.ndarray:
         return C @ C.conj().T  # Only j = 1/2 for l = 0
     else:
         # Compute overlaps for j = l_max - 1/2 and l_max + 1/2 at l = l_max:
-        C_minus = C[:, :2*l_max]
-        C_plus = C[:, 2*l_max:]
+        C_minus = C[:, : 2 * l_max]
+        C_plus = C[:, 2 * l_max :]
         O_minus = C_minus @ C_minus.conj().T
         O_plus = C_plus @ C_plus.conj().T
         # Put together with results for previous l:

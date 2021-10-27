@@ -7,45 +7,52 @@ from typing import Tuple, Callable
 
 
 IndicesType = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
-MethodFFT = Callable[['qp.grid.Grid', torch.Tensor], torch.Tensor]
+MethodFFT = Callable[["qp.grid.Grid", torch.Tensor], torch.Tensor]
 FunctionFFT = Callable[[torch.Tensor], torch.Tensor]
 
 
 def _init_grid_fft(self: qp.grid.Grid) -> None:
     """Initialize local or parallel FFTs for class Grid."""
     # Half-reciprocal space global dimensions (for rfft/irfft):
-    self.shapeH = (self.shape[0], self.shape[1], 1+self.shape[2]//2)
-    qp.log.info(f'real-fft shape: {self.shapeH}')
+    self.shapeH = (self.shape[0], self.shape[1], 1 + self.shape[2] // 2)
+    qp.log.info(f"real-fft shape: {self.shapeH}")
     # MPI division:
-    self.split0 = TaskDivision(n_tot=self.shape[0],
-                               n_procs=self.n_procs, i_proc=self.i_proc)
-    self.split2 = TaskDivision(n_tot=self.shape[2],
-                               n_procs=self.n_procs, i_proc=self.i_proc)
-    self.split2H = TaskDivision(n_tot=self.shapeH[2],
-                                n_procs=self.n_procs, i_proc=self.i_proc)
+    self.split0 = TaskDivision(
+        n_tot=self.shape[0], n_procs=self.n_procs, i_proc=self.i_proc
+    )
+    self.split2 = TaskDivision(
+        n_tot=self.shape[2], n_procs=self.n_procs, i_proc=self.i_proc
+    )
+    self.split2H = TaskDivision(
+        n_tot=self.shapeH[2], n_procs=self.n_procs, i_proc=self.i_proc
+    )
     # Overall local grid dimensions:
     self.shapeR_mine = (self.split0.n_mine, self.shape[1], self.shape[2])
     self.shapeG_mine = (self.shape[0], self.shape[1], self.split2.n_mine)
     self.shapeH_mine = (self.shape[0], self.shape[1], self.split2H.n_mine)
     if self.n_procs > 1:
-        qp.log.info(f'split over {self.n_procs} processes:')
-        qp.log.info(f'  local selected shape: {self.shapeR_mine}')
-        qp.log.info(f'  local full-fft shape: {self.shapeG_mine}')
-        qp.log.info(f'  local real-fft shape: {self.shapeH_mine}')
+        qp.log.info(f"split over {self.n_procs} processes:")
+        qp.log.info(f"  local selected shape: {self.shapeR_mine}")
+        qp.log.info(f"  local full-fft shape: {self.shapeG_mine}")
+        qp.log.info(f"  local real-fft shape: {self.shapeH_mine}")
     # Create 1D grids for real and reciprocal spaces:
     # --- global versions first
     iv1D = tuple(torch.arange(s, device=self.rc.device) for s in self.shape)
-    iG1D = tuple(torch.where(iv <= self.shape[dim]//2, iv, iv-self.shape[dim])
-                 for dim, iv in enumerate(iv1D))
+    iG1D = tuple(
+        torch.where(iv <= self.shape[dim] // 2, iv, iv - self.shape[dim])
+        for dim, iv in enumerate(iv1D)
+    )
     # --- slice parts of Real, G-space and Half G-space for `get_mesh`:
     self._mesh1D = {  # Global versions:
-        'R': iv1D,
-        'G': iG1D,
-        'H': iG1D[:2] + (iG1D[2][:self.shapeH[2]],)}
+        "R": iv1D,
+        "G": iG1D,
+        "H": iG1D[:2] + (iG1D[2][: self.shapeH[2]],),
+    }
     self._mesh1D_mine = {  # Local versions:
-        'R': (iv1D[0][self.split0.i_start:self.split0.i_stop],) + iv1D[1:],
-        'G': iG1D[:2] + (iG1D[2][self.split2.i_start:self.split2.i_stop],),
-        'H': iG1D[:2] + (iG1D[2][self.split2H.i_start:self.split2H.i_stop],)}
+        "R": (iv1D[0][self.split0.i_start : self.split0.i_stop],) + iv1D[1:],
+        "G": iG1D[:2] + (iG1D[2][self.split2.i_start : self.split2.i_stop],),
+        "H": iG1D[:2] + (iG1D[2][self.split2H.i_start : self.split2H.i_stop],),
+    }
 
     def get_indices(in_prev: np.ndarray, n_out_mine: int) -> IndicesType:
         """Get index arrays for unscrambling data after MPI rearrangement.
@@ -91,15 +98,21 @@ def _init_grid_fft(self: qp.grid.Grid) -> None:
         # --- coefficient of 1
         index_1 = torch.tensor(
             S1 * (i_in - in_prev[src_proc])[None, None, None, :]
-            + i1[None, None, :, None]).to(self.rc.device)
+            + i1[None, None, :, None]
+        ).to(self.rc.device)
         # --- coefficient of i_batch
-        index_i_batch = torch.tensor(
-            S1 * in_counts[None, None, None, src_proc]).to(self.rc.device)
+        index_i_batch = torch.tensor(S1 * in_counts[None, None, None, src_proc]).to(
+            self.rc.device
+        )
         # --- coefficient of n_batch
         index_n_batch = torch.tensor(
             n_out_mine * S1 * in_prev[None, None, None, src_proc]
-            + (i_out_mine[None, :, None, None] * S1
-               * in_counts[None, None, None, src_proc])).to(self.rc.device)
+            + (
+                i_out_mine[None, :, None, None]
+                * S1
+                * in_counts[None, None, None, src_proc]
+            )
+        ).to(self.rc.device)
         return index_1, index_i_batch, index_n_batch
 
     # Pre-calculate these arrays for each of the transforms:
@@ -110,12 +123,19 @@ def _init_grid_fft(self: qp.grid.Grid) -> None:
 
 
 def parallel_transform(
-        rc: qp.utils.RunConfig, comm: qp.MPI.Comm, v: torch.Tensor,
-        shape_in: Tuple[int, ...], shape_out: Tuple[int, ...],
-        fft_before: FunctionFFT, fft_after: FunctionFFT,
-        in_prev: np.ndarray, out_prev: np.ndarray,
-        index_1: torch.Tensor, index_i_batch: torch.Tensor,
-        index_n_batch: torch.Tensor) -> torch.Tensor:
+    rc: qp.utils.RunConfig,
+    comm: qp.MPI.Comm,
+    v: torch.Tensor,
+    shape_in: Tuple[int, ...],
+    shape_out: Tuple[int, ...],
+    fft_before: FunctionFFT,
+    fft_after: FunctionFFT,
+    in_prev: np.ndarray,
+    out_prev: np.ndarray,
+    index_1: torch.Tensor,
+    index_i_batch: torch.Tensor,
+    index_n_batch: torch.Tensor,
+) -> torch.Tensor:
     """Helper function that performs the work of all the parallel
     FFT functions in class qimpy.grid.Grid. This function should
     be called only for n_procs > 1 i.e. when actually parallelized.
@@ -159,19 +179,18 @@ def parallel_transform(
     # MPI rearrangement:
     send_prev = in_prev * v_tilde.shape[1]
     recv_prev = out_prev * (np.prod(shape_out[:2]) * n_batch)
-    v_tmp = torch.zeros(recv_prev[-1], dtype=v_tilde.dtype,
-                        device=v_tilde.device)
+    v_tmp = torch.zeros(recv_prev[-1], dtype=v_tilde.dtype, device=v_tilde.device)
     mpi_type = rc.mpi_type[v_tilde.dtype]
     comm.Alltoallv(
         (BufferView(v_tilde), np.diff(send_prev), send_prev[:-1], mpi_type),
-        (BufferView(v_tmp), np.diff(recv_prev), recv_prev[:-1], mpi_type))
+        (BufferView(v_tmp), np.diff(recv_prev), recv_prev[:-1], mpi_type),
+    )
 
     # Unscramble:
     if n_batch == 1:
         index = index_1 + index_n_batch
     else:
-        i_batch = torch.arange(n_batch, device=index_1.device).view(n_batch,
-                                                                    1, 1, 1)
+        i_batch = torch.arange(n_batch, device=index_1.device).view(n_batch, 1, 1, 1)
         index = index_1 + index_i_batch * i_batch + index_n_batch * n_batch
     v_tilde = v_tmp[index].view(v.shape[:-3] + shape_out)
     del v_tmp
@@ -205,28 +224,45 @@ def _fft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
         if v.shape[:-3].count(0):  # zero-sized batches
             return v
         if self.n_procs == 1:
-            return torch.fft.fftn(v, s=self.shape, norm='forward')
+            return torch.fft.fftn(v, s=self.shape, norm="forward")
         assert self.comm is not None
         return parallel_transform(
-            self.rc, self.comm, v,
-            self.shapeR_mine, self.shapeG_mine[::-1],
-            safe_fft2, safe_fft, self.split2.n_prev, self.split0.n_prev,
-            *self._indices_fft).swapaxes(-1, -3)
+            self.rc,
+            self.comm,
+            v,
+            self.shapeR_mine,
+            self.shapeG_mine[::-1],
+            safe_fft2,
+            safe_fft,
+            self.split2.n_prev,
+            self.split0.n_prev,
+            *self._indices_fft,
+        ).swapaxes(-1, -3)
     else:
         # Real to complex forward transform:
         assert v.dtype.is_floating_point
         if v.shape[:-3].count(0):  # zero-sized batches
-            return torch.zeros(v.shape[:-3] + self.shapeH_mine,
-                               dtype=COMPLEX_TYPE[v.dtype], device=v.device)
+            return torch.zeros(
+                v.shape[:-3] + self.shapeH_mine,
+                dtype=COMPLEX_TYPE[v.dtype],
+                device=v.device,
+            )
         if self.n_procs == 1:
-            return torch.fft.rfftn(v, s=self.shape, norm='forward')
+            return torch.fft.rfftn(v, s=self.shape, norm="forward")
         assert v.dtype.is_floating_point
         assert self.comm is not None
         return parallel_transform(
-            self.rc, self.comm, v,
-            self.shapeR_mine, self.shapeH_mine[::-1],
-            safe_rfft, safe_fft2, self.split2H.n_prev, self.split0.n_prev,
-            *self._indices_rfft).swapaxes(-1, -3)
+            self.rc,
+            self.comm,
+            v,
+            self.shapeR_mine,
+            self.shapeH_mine[::-1],
+            safe_rfft,
+            safe_fft2,
+            self.split2H.n_prev,
+            self.split0.n_prev,
+            *self._indices_rfft,
+        ).swapaxes(-1, -3)
 
 
 def _ifft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
@@ -263,116 +299,144 @@ def _ifft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
         if v.shape[:-3].count(0):  # zero-sized batches
             return v
         if self.n_procs == 1:
-            return torch.fft.ifftn(v, s=self.shape, norm='forward')
+            return torch.fft.ifftn(v, s=self.shape, norm="forward")
         assert self.comm is not None
         return parallel_transform(
-            self.rc, self.comm, v.swapaxes(-1, -3),
-            self.shapeG_mine[::-1], self.shapeR_mine,
-            safe_ifft, safe_ifft2, self.split0.n_prev, self.split2.n_prev,
-            *self._indices_ifft)
+            self.rc,
+            self.comm,
+            v.swapaxes(-1, -3),
+            self.shapeG_mine[::-1],
+            self.shapeR_mine,
+            safe_ifft,
+            safe_ifft2,
+            self.split0.n_prev,
+            self.split2.n_prev,
+            *self._indices_ifft,
+        )
     else:
         # Complex to real inverse transform:
         assert shape2 == self.shapeH[2]
         if v.shape[:-3].count(0):  # zero-sized batches
-            return torch.zeros(v.shape[:-3] + self.shapeR_mine,
-                               dtype=REAL_TYPE[v.dtype], device=v.device)
+            return torch.zeros(
+                v.shape[:-3] + self.shapeR_mine,
+                dtype=REAL_TYPE[v.dtype],
+                device=v.device,
+            )
         if self.n_procs == 1:
-            return torch.fft.irfftn(v, s=self.shape, norm='forward')
+            return torch.fft.irfftn(v, s=self.shape, norm="forward")
         assert v.dtype.is_complex
         assert self.comm is not None
-        shapeR_mine_complex = (self.split0.n_mine,
-                               self.shape[1], self.shapeH[2])
+        shapeR_mine_complex = (self.split0.n_mine, self.shape[1], self.shapeH[2])
         return parallel_transform(
-            self.rc, self.comm, v.swapaxes(-1, -3),
-            self.shapeH_mine[::-1], shapeR_mine_complex,
-            safe_ifft2, safe_irfft, self.split0.n_prev, self.split2H.n_prev,
-            *self._indices_irfft)
+            self.rc,
+            self.comm,
+            v.swapaxes(-1, -3),
+            self.shapeH_mine[::-1],
+            shapeR_mine_complex,
+            safe_ifft2,
+            safe_irfft,
+            self.split0.n_prev,
+            self.split2H.n_prev,
+            *self._indices_irfft,
+        )
 
 
 # Maps between corresponding real and complex types:
-REAL_TYPE = {
-    torch.complex128: torch.double,
-    torch.complex64: torch.float}
-COMPLEX_TYPE = {
-    torch.double: torch.complex128,
-    torch.float: torch.complex64}
+REAL_TYPE = {torch.complex128: torch.double, torch.complex64: torch.float}
+COMPLEX_TYPE = {torch.double: torch.complex128, torch.float: torch.complex64}
 
 
 # --- Wrappers to torch FFTs that are safe for zero sizes ---
 def safe_fft(v: torch.Tensor) -> torch.Tensor:
-    return torch.fft.fft(v, norm='forward') if v.numel() else v
+    return torch.fft.fft(v, norm="forward") if v.numel() else v
 
 
 def safe_fft2(v: torch.Tensor) -> torch.Tensor:
-    return torch.fft.fft2(v, norm='forward') if v.numel() else v
+    return torch.fft.fft2(v, norm="forward") if v.numel() else v
 
 
 def safe_ifft(v: torch.Tensor) -> torch.Tensor:
-    return torch.fft.ifft(v, norm='forward') if v.numel() else v
+    return torch.fft.ifft(v, norm="forward") if v.numel() else v
 
 
 def safe_ifft2(v: torch.Tensor) -> torch.Tensor:
-    return torch.fft.ifft2(v, norm='forward') if v.numel() else v
+    return torch.fft.ifft2(v, norm="forward") if v.numel() else v
 
 
 def safe_rfft(v: torch.Tensor) -> torch.Tensor:
     if v.numel():
-        return torch.fft.rfft(v, norm='forward')
+        return torch.fft.rfft(v, norm="forward")
     else:
-        return torch.zeros(v.shape[:-1] + (v.shape[-1]//2+1,),
-                           dtype=COMPLEX_TYPE[v.dtype], device=v.device)
+        return torch.zeros(
+            v.shape[:-1] + (v.shape[-1] // 2 + 1,),
+            dtype=COMPLEX_TYPE[v.dtype],
+            device=v.device,
+        )
 
 
 def safe_irfft(v: torch.Tensor) -> torch.Tensor:
     if v.numel():
-        return torch.fft.irfft(v, norm='forward')
+        return torch.fft.irfft(v, norm="forward")
     else:
-        return torch.zeros(v.shape[:-1] + (2*(v.shape[-1]-1),),
-                           dtype=REAL_TYPE[v.dtype], device=v.device)
+        return torch.zeros(
+            v.shape[:-1] + (2 * (v.shape[-1] - 1),),
+            dtype=REAL_TYPE[v.dtype],
+            device=v.device,
+        )
 
 
 # Test / benchmark parallelization of FFTs:
 if __name__ == "__main__":
     qp.utils.log_config()
-    qp.log.info('*'*15 + ' QimPy ' + qp.__version__ + ' ' + '*'*15)
+    qp.log.info("*" * 15 + " QimPy " + qp.__version__ + " " + "*" * 15)
     rc = qp.utils.RunConfig()
 
     # Get dimensions from input:
     import sys
+
     if len(sys.argv) < 4:
-        qp.log.info(
-            'Usage: _fft.py [<n_batch1> ...] <shape_0> <shape_1> <shape_2>')
+        qp.log.info("Usage: _fft.py [<n_batch1> ...] <shape_0> <shape_1> <shape_2>")
         exit(1)
     shape = tuple(int(arg) for arg in sys.argv[-3:])
     n_batch = tuple(int(arg) for arg in sys.argv[1:-3])
 
     # Prerequisites for creating grid:
     lattice = qp.lattice.Lattice(
-        rc=rc, system='triclinic', a=2.1, b=2.2, c=2.3,
-        alpha=75, beta=80, gamma=85)  # pick one with no symmetries
+        rc=rc, system="triclinic", a=2.1, b=2.2, c=2.3, alpha=75, beta=80, gamma=85
+    )  # pick one with no symmetries
     ions = qp.ions.Ions(rc=rc, pseudopotentials=[], coordinates=[])
     symmetries = qp.symmetries.Symmetries(rc=rc, lattice=lattice, ions=ions)
 
     # Create grids with and without parallelization:
-    grid_par = qp.grid.Grid(rc=rc, lattice=lattice, symmetries=symmetries,
-                            shape=shape, comm=rc.comm)  # parallel version
-    grid_seq = qp.grid.Grid(rc=rc, lattice=lattice, symmetries=symmetries,
-                            shape=shape, comm=None)  # sequential version
+    grid_par = qp.grid.Grid(
+        rc=rc, lattice=lattice, symmetries=symmetries, shape=shape, comm=rc.comm
+    )  # parallel version
+    grid_seq = qp.grid.Grid(
+        rc=rc, lattice=lattice, symmetries=symmetries, shape=shape, comm=None
+    )  # sequential version
 
-    def test(name, dtype_in, seq_func, par_func,
-             in_start, in_stop, out_start, out_stop,
-             shape_in, inverse):
+    def test(
+        name,
+        dtype_in,
+        seq_func,
+        par_func,
+        in_start,
+        in_stop,
+        out_start,
+        out_stop,
+        shape_in,
+        inverse,
+    ):
         """Helper function to test parallel and sequential versions
         of each Grid.fft routine against each other"""
         # Create test data:
-        v_ref = torch.randn(n_batch + shape_in, dtype=dtype_in,
-                            device=rc.device)
+        v_ref = torch.randn(n_batch + shape_in, dtype=dtype_in, device=rc.device)
         rc.comm.Bcast(BufferView(v_ref), 0)
-        n_repeats = 2 + int(1E8/np.prod(n_batch + shape))
+        n_repeats = 2 + int(1e8 / np.prod(n_batch + shape))
         for i_repeat in range(n_repeats):
             # --- transform locally:
             if i_repeat:
-                watch = qp.utils.StopWatch(name + '(seq)', rc)
+                watch = qp.utils.StopWatch(name + "(seq)", rc)
             v_tld = seq_func(v_ref)
             if i_repeat:
                 watch.stop()
@@ -386,34 +450,69 @@ if __name__ == "__main__":
             # --- transform with MPI version:
             rc.comm.Barrier()  # for accurate timing
             if i_repeat:
-                watch = qp.utils.StopWatch(name+'(par)', rc)
+                watch = qp.utils.StopWatch(name + "(par)", rc)
             v_tld = par_func(v)
             if i_repeat:
                 watch.stop()
             # --- check accuracy:
             if not i_repeat:
-                errors = np.array([
-                    (torch.abs(v_tld - v_tld_ref)**2).sum().item(),
-                    (torch.abs(v_tld_ref)**2).sum().item()])
+                errors = np.array(
+                    [
+                        (torch.abs(v_tld - v_tld_ref) ** 2).sum().item(),
+                        (torch.abs(v_tld_ref) ** 2).sum().item(),
+                    ]
+                )
                 rc.comm.Allreduce(qp.MPI.IN_PLACE, errors)
-                rmse = np.sqrt(errors[0]/errors[1])
-                qp.log.info(f'{name} RMSE: {rmse:.2e}')
+                rmse = np.sqrt(errors[0] / errors[1])
+                qp.log.info(f"{name} RMSE: {rmse:.2e}")
 
     # Run tests for all four transform types:
-    test('fft(c-c)', torch.complex128, grid_seq.fft, grid_par.fft,
-         grid_par.split0.i_start, grid_par.split0.i_stop,
-         grid_par.split2.i_start, grid_par.split2.i_stop,
-         grid_par.shape, False)
-    test('ifft(c-c)', torch.complex128, grid_seq.ifft, grid_par.ifft,
-         grid_par.split2.i_start, grid_par.split2.i_stop,
-         grid_par.split0.i_start, grid_par.split0.i_stop,
-         grid_par.shape, True)
-    test('fft(r-c)', torch.double, grid_seq.fft, grid_par.fft,
-         grid_par.split0.i_start, grid_par.split0.i_stop,
-         grid_par.split2H.i_start, grid_par.split2H.i_stop,
-         grid_par.shape, False)
-    test('ifft(c-r)', torch.complex128, grid_seq.ifft, grid_par.ifft,
-         grid_par.split2H.i_start, grid_par.split2H.i_stop,
-         grid_par.split0.i_start, grid_par.split0.i_stop,
-         grid_par.shapeH, True)
+    test(
+        "fft(c-c)",
+        torch.complex128,
+        grid_seq.fft,
+        grid_par.fft,
+        grid_par.split0.i_start,
+        grid_par.split0.i_stop,
+        grid_par.split2.i_start,
+        grid_par.split2.i_stop,
+        grid_par.shape,
+        False,
+    )
+    test(
+        "ifft(c-c)",
+        torch.complex128,
+        grid_seq.ifft,
+        grid_par.ifft,
+        grid_par.split2.i_start,
+        grid_par.split2.i_stop,
+        grid_par.split0.i_start,
+        grid_par.split0.i_stop,
+        grid_par.shape,
+        True,
+    )
+    test(
+        "fft(r-c)",
+        torch.double,
+        grid_seq.fft,
+        grid_par.fft,
+        grid_par.split0.i_start,
+        grid_par.split0.i_stop,
+        grid_par.split2H.i_start,
+        grid_par.split2H.i_stop,
+        grid_par.shape,
+        False,
+    )
+    test(
+        "ifft(c-r)",
+        torch.complex128,
+        grid_seq.ifft,
+        grid_par.ifft,
+        grid_par.split2H.i_start,
+        grid_par.split2H.i_stop,
+        grid_par.split0.i_start,
+        grid_par.split0.i_stop,
+        grid_par.shapeH,
+        True,
+    )
     qp.utils.StopWatch.print_stats()

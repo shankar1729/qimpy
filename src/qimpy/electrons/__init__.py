@@ -1,10 +1,19 @@
 """Electronic sub-system"""
 # List exported symbols for doc generation
 __all__ = [
-    'Electrons',
-    'Kpoints', 'Kmesh', 'Kpath',
-    'Fillings', 'Basis', 'Wavefunction',
-    'Davidson', 'CheFSI', 'SCF', 'LCAO', 'xc']
+    "Electrons",
+    "Kpoints",
+    "Kmesh",
+    "Kpath",
+    "Fillings",
+    "Basis",
+    "Wavefunction",
+    "Davidson",
+    "CheFSI",
+    "SCF",
+    "LCAO",
+    "xc",
+]
 
 from ._electrons import Electrons
 from ._kpoints import Kpoints, Kmesh, Kpath

@@ -7,7 +7,7 @@ def prime_factorization(N: int) -> List[int]:
     """Get list of prime factors of `N` in ascending order"""
     factors = []
     p = 2
-    while p*p <= N:
+    while p * p <= N:
         while N % p == 0:
             factors.append(p)
             N //= p
@@ -26,15 +26,15 @@ def fft_suitable(N: int) -> bool:
             N //= p
     # All suitable prime factors taken out
     # --- a suitable N should be left with just 1
-    return (N == 1)
+    return N == 1
 
 
-IntLike = TypeVar('IntLike', int, np.ndarray)
+IntLike = TypeVar("IntLike", int, np.ndarray)
 
 
 def ceildiv(num: IntLike, den: IntLike) -> IntLike:
     """Compute ceil(num/den) with purely integer operations"""
-    return (num + den-1) // den
+    return (num + den - 1) // den
 
 
 def cis(x: torch.Tensor) -> torch.Tensor:
@@ -57,8 +57,13 @@ def abs_squared(x: torch.Tensor) -> torch.Tensor:
         return x.square()
 
 
-def accum_norm_(f: torch.Tensor, x: torch.Tensor, out: torch.Tensor,
-                start_dim: int, safe_mode: bool = False) -> None:
+def accum_norm_(
+    f: torch.Tensor,
+    x: torch.Tensor,
+    out: torch.Tensor,
+    start_dim: int,
+    safe_mode: bool = False,
+) -> None:
     """Accumulate :math:`f |x|^2` to `out` in-place. The result is accumulated
     over dimensions `start_dim` to number of dimensions of `f`. Dimensions of
     `f` must match the starting dimensions of `x`. Dimensions of `out` must
@@ -78,8 +83,9 @@ def accum_norm_(f: torch.Tensor, x: torch.Tensor, out: torch.Tensor,
     stop_dim = len(f.shape)
     if safe_mode:
         n_extra = len(x.shape) - stop_dim
-        out += (f.view(f.shape + (1,)*n_extra) * abs_squared(x)
-                ).sum(dim=tuple(range(start_dim, stop_dim)))
+        out += (f.view(f.shape + (1,) * n_extra) * abs_squared(x)).sum(
+            dim=tuple(range(start_dim, stop_dim))
+        )
         return
     assert f.shape == x.shape[:stop_dim]
     assert f.shape[:start_dim] == out.shape[:start_dim]
@@ -97,9 +103,14 @@ def accum_norm_(f: torch.Tensor, x: torch.Tensor, out: torch.Tensor,
             out_cur.addcmul_(x_cur, x_cur, value=f_cur)
 
 
-def accum_prod_(f: torch.Tensor, x: torch.Tensor, y: torch.Tensor,
-                out: torch.Tensor, start_dim: int,
-                safe_mode: bool = False) -> None:
+def accum_prod_(
+    f: torch.Tensor,
+    x: torch.Tensor,
+    y: torch.Tensor,
+    out: torch.Tensor,
+    start_dim: int,
+    safe_mode: bool = False,
+) -> None:
     """Accumulate :math:`f x y` to `out` in-place.
     Similar to `accum_norm_`, except for a product of two tensors `x` and `y`,
     instead of the norm of a single tensor `x`. See :func:`accum_norm` for
@@ -107,8 +118,9 @@ def accum_prod_(f: torch.Tensor, x: torch.Tensor, y: torch.Tensor,
     stop_dim = len(f.shape)
     if safe_mode:
         n_extra = len(x.shape) - stop_dim
-        out += (f.view(f.shape + (1,)*n_extra) * x * y
-                ).sum(dim=tuple(range(start_dim, stop_dim)))
+        out += (f.view(f.shape + (1,) * n_extra) * x * y).sum(
+            dim=tuple(range(start_dim, stop_dim))
+        )
         return
     assert f.shape == x.shape[:stop_dim]
     assert f.shape[:start_dim] == out.shape[:start_dim]
@@ -140,22 +152,24 @@ def ortho_matrix(O: torch.Tensor, use_cholesky: bool = True) -> torch.Tensor:
         by diagonalizing O, which may be more stable, but may be an order of
         magnitude slower than the default Cholesky method
     """
-    assert(O.shape[-2] == O.shape[-1])  # check square
+    assert O.shape[-2] == O.shape[-1]  # check square
     if use_cholesky:
         # Gram-Schmidt orthonormalization matrix:
-        identity = torch.eye(O.shape[-1], device=O.device,
-                             dtype=O.dtype).view((1,) * (len(O.shape) - 2)
-                                                 + O.shape[-2:])
-        return dagger(torch.triangular_solve(
-            identity, torch.linalg.cholesky(O), upper=False)[0])
+        identity = torch.eye(O.shape[-1], device=O.device, dtype=O.dtype).view(
+            (1,) * (len(O.shape) - 2) + O.shape[-2:]
+        )
+        return dagger(
+            torch.triangular_solve(identity, torch.linalg.cholesky(O), upper=False)[0]
+        )
     else:
         # Symmetric orthonormalization matrix:
         lbda, V = torch.linalg.eigh(O)
-        return V @ ((1./torch.sqrt(lbda))[..., None] * dagger(V))
+        return V @ ((1.0 / torch.sqrt(lbda))[..., None] * dagger(V))
 
 
-def eighg(H: torch.Tensor, O: torch.Tensor,
-          use_cholesky: bool = True) -> Tuple[torch.Tensor, torch.Tensor]:
+def eighg(
+    H: torch.Tensor, O: torch.Tensor, use_cholesky: bool = True
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """Solve Hermitian generalized eigenvalue problem.
     Specifically, find `E` and `V` that satisfy `H` @ `V` = `O` @ `V` @ `E`.
 
