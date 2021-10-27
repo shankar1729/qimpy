@@ -73,3 +73,4 @@ html_theme_options = {
 html_static_path = ['_static']
 html_css_files = ['css/custom.css']
 html_logo = '../qimpy.svg'
+html_favicon = '../qimpy.ico'
