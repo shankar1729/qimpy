@@ -102,14 +102,14 @@ def test_minimize(n_dim: int, method: str, rc: qp.utils.RunConfig):
     assert abs(E - rf.E0) < (n_dim * rf.energy_threshold)
 
 
+def main():
+    """Manually run a test with full output"""
+    qp.utils.log_config()
+    rc = qp.utils.RunConfig()
+    rf = RandomFunction(rc=rc, n_dim=100, method="cg")
+    rf.finite_difference_test(rf.random_direction())
+    rf.minimize()
+
+
 if __name__ == "__main__":
-
-    def main():
-        """Manually run a test with full output"""
-        qp.utils.log_config()
-        rc = qp.utils.RunConfig()
-        rf = RandomFunction(rc=rc, n_dim=100, method="cg")
-        rf.finite_difference_test(rf.random_direction())
-        rf.minimize()
-
     main()
