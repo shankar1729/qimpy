@@ -1,9 +1,12 @@
 import qimpy as qp
 import torch
+import pytest
 from typing import Sequence
 
 
-class TestFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
+class RandomFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
+    """Random objective function to test minimization algorithms."""
+
     grid: qp.grid.Grid  #: Dummy grid for the fields below
     x: qp.grid.FieldR  #: State of test system
     x0: qp.grid.FieldR  #: True solution
@@ -14,7 +17,8 @@ class TestFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
     def __init__(
         self,
         rc: qp.utils.RunConfig,
-        n_dim,
+        n_dim: int,
+        method: str,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
     ):
         super().__init__(
@@ -23,9 +27,9 @@ class TestFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
             checkpoint_in=checkpoint_in,
             name="TestMinimize",
             n_iterations=100,
-            energy_threshold=1e-8,
+            energy_threshold=1e-9,
             extra_thresholds={"|grad|": 1e-8},
-            method="l-bfgs",
+            method=method,
         )
         lattice = qp.lattice.Lattice(rc=rc, system="Orthorhombic", a=1.0, b=1.0, c=10.0)
         ions = qp.ions.Ions(rc=rc, pseudopotentials=[], coordinates=[])
@@ -73,13 +77,15 @@ class TestFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
         return qp.grid.FieldR(self.grid, data=data)
 
 
-if __name__ == "__main__":
-
-    def main():
-        qp.utils.log_config()
-        rc = qp.utils.RunConfig()
-        tf = TestFunction(rc=rc, n_dim=100)
-        tf.finite_difference_test(tf.random_direction())
-        tf.minimize()
-
-    main()
+@pytest.mark.mpi_skip
+@pytest.mark.parametrize(
+    "n_dim, method", [(10, "cg"), (100, "cg"), (10, "l-bfgs"), (100, "l-bfgs")]
+)
+def test_minimize(n_dim: int, method: str):
+    rc = qp.utils.RunConfig()
+    n_dim = 100
+    method = "cg"
+    rf = RandomFunction(rc=rc, n_dim=n_dim, method=method)
+    rf.finite_difference_test(rf.random_direction())
+    E = float(rf.minimize())
+    assert abs(E - rf.E0) < (n_dim * rf.energy_threshold)
