@@ -81,8 +81,7 @@ class RandomFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
 @pytest.mark.parametrize(
     "n_dim, method", [(10, "cg"), (100, "cg"), (10, "l-bfgs"), (100, "l-bfgs")]
 )
-def test_minimize(n_dim: int, method: str):
-    rc = qp.utils.RunConfig()
+def test_minimize(n_dim: int, method: str, rc: qp.utils.RunConfig):
     n_dim = 100
     method = "cg"
     rf = RandomFunction(rc=rc, n_dim=n_dim, method=method)
