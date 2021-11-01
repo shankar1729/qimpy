@@ -8,11 +8,11 @@ typecheck:
 
 .PHONY: test-nompi
 test-nompi:
-	python -m pytest tests/
+	python -m pytest
 
 .PHONY: test-mpi
 test-mpi:
-	mpirun tests/mpi_print_from_head.sh python -m pytest --with-mpi tests/
+	mpirun tests/mpi_print_from_head.sh python -m pytest --with-mpi
 
 .PHONY: test
 test: test-nompi test-mpi
