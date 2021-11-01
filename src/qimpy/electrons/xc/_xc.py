@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from . import lda, gga
 from .functional import Functional, get_libxc_functional_names, FunctionalsLibxc
-from typing import Tuple, List, Dict, Optional, Union
+from typing import Tuple, List, Dict, Union
 
 
 N_CUT = 1e-16  # Regularization threshold for densities
@@ -105,7 +105,7 @@ class XC(qp.TreeNode):
 
         # Get required quantities in local-spin basis:
         def from_magnetization(x_in: torch.Tensor) -> torch.Tensor:
-            """Transform a quantity from magnetization to up/dn basis.
+            """Transform a density-like quantity `x` from magnetization to up/dn basis.
             First dimension of `x_in` must be the spin dimension."""
             if n_densities == 1:
                 return x_in
@@ -164,68 +164,64 @@ class XC(qp.TreeNode):
             E += functional(n, sigma, lap, tau) * grid.dV
 
         # Gradient propagation for potential:
-        def from_magnetization_grad(
-            E_x: torch.Tensor, x_in: Optional[torch.Tensor] = None
-        ) -> torch.Tensor:
+        def from_magnetization_grad(x: torch.Tensor, x_in: torch.Tensor) -> None:
             """Gradient propagation corresponding to `from_magnetization`.
-            Returns the gradient contribution to `E_x_in` from `E_x`.
-            In vector-spin mode, this also contributes to `E_n_in`, even
-            when `x` is not `n` because `n` determines `Mhat`.
-            Parameter `x_in` must be provided when x is not n."""
+            Sets the gradient contribution to `x_in.grad` from `x.grad`.
+            In vector-spin mode, this also contributes to `n_in.grad`, even
+            when `x` is not `n` because `n` determines `Mhat`."""
             if n_densities == 1:
-                return E_x
-            E_x_in = torch.empty(
-                (n_densities,) + E_x.shape[1:], dtype=E_x.dtype, device=E_x.device
+                return
+            x_in.grad = torch.empty(
+                (n_densities,) + x.shape[1:], dtype=x.dtype, device=x.device
             )
-            E_x_in[0] = 0.5 * (E_x[0] + E_x[1])
-            E_x_diff = 0.5 * (E_x[0] - E_x[1])
+            x_in.grad[0] = 0.5 * (x.grad[0] + x.grad[1])
+            x_diff_grad = 0.5 * (x.grad[0] - x.grad[1])
             if n_densities == 4:
                 # Broadcast Mhat with any batch dimensions of x_in:
-                n_batch = len(E_x.shape) - 4
+                n_batch = len(x.shape) - 4
                 Mhat_view = Mhat.view((3,) + (1,) * n_batch + Mhat.shape[1:])
-                # Propagate E_Mhat = E_x_diff to E_x_in:
-                E_x_in[1:] = E_x_diff * Mhat_view
-                # Additional propagation of E_Mhat to E_n_in:
+                # Propagate x_diff_grad (which is Mhat_grad) to x_in.grad:
+                x_in.grad[1:] = x_diff_grad * Mhat_view
+                # Additional propagation of Mhat_grad to n_in.grad:
                 if x_in is not None:
                     x_vec = x_in[1:]
-                    E_M = (
-                        E_x_diff
+                    M_grad = (
+                        x_diff_grad
                         * MmagInv
                         * (x_vec - Mhat_view * (Mhat_view * x_vec).sum(dim=0))
                     )
                     if n_batch:
                         batch_dims = tuple(range(1, 1 + n_batch))
-                        E_M = E_M.sum(dim=batch_dims)
-                    E_n_in[1:] += E_M
+                        M_grad = M_grad.sum(dim=batch_dims)
+                    n_in.grad[1:] += M_grad
             else:  # n_densities == 2:
-                E_x_in[1] = E_x_diff
-            return E_x_in
+                x_in.grad[1] = x_diff_grad
 
         n.grad[clamp_sel] = 0.0  # account for any clamping
-        E_n_in = from_magnetization_grad(n.grad)
+        from_magnetization_grad(n, n_in)
         # --- contributions from GGA gradients:
         if self.need_sigma:
-            E_Dn = torch.zeros_like(Dn)
+            Dn.grad = torch.zeros_like(Dn)
             for s1 in range(n_spins):
                 for s2 in range(s1, n_spins):
-                    E_Dn[s1] += sigma.grad[s1 + s2] * Dn[s2]
-                    E_Dn[s2] += sigma.grad[s1 + s2] * Dn[s1]
-            E_Dn_in = from_magnetization_grad(E_Dn, Dn_in)
-            E_n_t = -(~qp.grid.FieldR(grid, data=E_Dn_in)).divergence(dim=1)
+                    Dn.grad[s1] += sigma.grad[s1 + s2] * Dn[s2]
+                    Dn.grad[s2] += sigma.grad[s1 + s2] * Dn[s1]
+            from_magnetization_grad(Dn, Dn_in)
+            E_n_t = -(~qp.grid.FieldR(grid, data=Dn_in.grad)).divergence(dim=1)
         else:
             E_n_t = n_t.zeros_like()
         # --- contributions from Laplacian:
         if self.need_lap:
-            E_lap_in = from_magnetization_grad(lap.grad, lap_in)
-            E_n_t += (~qp.grid.FieldR(grid, data=E_lap_in)).laplacian()
+            from_magnetization_grad(lap, lap_in)
+            E_n_t += (~qp.grid.FieldR(grid, data=lap_in.grad)).laplacian()
         # --- contributions from KE density:
         if self.need_tau:
-            E_tau_in = from_magnetization_grad(tau.grad, tau_in)
-            E_tau_t = ~qp.grid.FieldR(grid, data=E_tau_in)
+            from_magnetization_grad(tau, tau_in)
+            E_tau_t = ~qp.grid.FieldR(grid, data=tau_in.grad)
         else:
             E_tau_t = tau_t.zeros_like()
         # --- direct n contributions
-        E_n_t += ~qp.grid.FieldR(grid, data=E_n_in)
+        E_n_t += ~qp.grid.FieldR(grid, data=n_in.grad)
 
         # Collect energy
         if grid.comm is not None:
