@@ -1,5 +1,6 @@
 from typing import Generic, TypeVar
-from abc import ABC
+from abc import ABC, abstractmethod
+
 
 GradientType = TypeVar("GradientType")
 
@@ -23,3 +24,7 @@ class Gradable(ABC, Generic[GradientType]):
 
     def __init__(self) -> None:
         self._requires_grad = False
+
+    @abstractmethod
+    def zeros_like(self: GradientType) -> GradientType:
+        ...
