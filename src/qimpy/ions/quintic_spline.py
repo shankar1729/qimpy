@@ -2,7 +2,6 @@
 # List exported symbols for doc generation
 __all__ = ["get_coeff", "Interpolator"]
 
-import qimpy as qp
 import numpy as np
 import torch
 from scipy.linalg import solve_banded
@@ -127,50 +126,3 @@ class Interpolator:
         else:
             result = (self._mat @ coeff[:n_coeff_needed].flatten(1)).T
             return result.view(coeff.shape[1:] + self._shape)
-
-
-if __name__ == "__main__":
-
-    def main():
-        import matplotlib.pyplot as plt
-
-        qp.utils.log_config()
-        qp.utils.RunConfig()
-
-        # Plot a single blip function for testing:
-        plt.figure()
-        coeff = torch.zeros(12)
-        coeff[5] = 1
-        t = torch.linspace(0.0, 12.0, 101)
-        for deriv in range(5):
-            plt.plot(t, Interpolator(t, 2.0, deriv)(coeff), label=f"Deriv: {deriv}")
-        plt.axhline(0, color="k", ls="dotted")
-        plt.legend()
-
-        # Generate test data:
-        def f_test(x):
-            """Non-trivial test function with correct symmetries"""
-            return torch.exp(-torch.sin(0.01 * x * x)) * torch.cos(0.1 * x)
-
-        dx = 0.1
-        x = torch.arange(0.0, 40.0, dx)
-        x_fine = torch.linspace(x.min(), x.max() - 1e-6 * dx, 2001)
-        y = f_test(x)
-        y_fine = f_test(x_fine)
-        y_coeff = get_coeff(y)  # blip coefficients for interpolation below
-
-        # Plot results:
-        plt.figure()
-        plt.plot(x, y, "r+", label="Nodes")
-        plt.plot(x_fine, y_fine, label="Reference data")
-        for deriv in range(5):
-            plt.plot(
-                x_fine,
-                Interpolator(x_fine, dx, deriv)(y_coeff),
-                label=f"Interpolant (deriv: {deriv})",
-            )
-        plt.axhline(0, color="k", ls="dotted")
-        plt.legend()
-        plt.show()
-
-    main()
