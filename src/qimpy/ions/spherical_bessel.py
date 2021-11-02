@@ -47,25 +47,3 @@ def jl_by_xl(l_max: int, x: torch.Tensor) -> torch.Tensor:
                 x_sel * x_sel
             )  # j_l/x^l by recursion for l>1
     return result
-
-
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    from scipy.special import spherical_jn
-    import qimpy as qp
-    import numpy as np
-
-    qp.utils.log_config()
-    rc = qp.utils.RunConfig()
-    x = np.logspace(-3, 3, 6000)
-    l_max = 6
-    jl_ref = [spherical_jn(l, x) / (x ** l) for l in range(l_max + 1)]
-    jl_test = jl_by_xl(l_max, torch.tensor(x, device=rc.device)).to(rc.cpu)
-    for l in range(l_max + 1):
-        err_scale = np.maximum(x ** (l + 1), 1)  # to match forms near 0 and infty
-        err = np.abs(jl_test[l] - jl_ref[l]) * err_scale
-        plt.plot(x, err, label=f"l = {l}")
-        print(f"l: {l}  ErrMean: {err.mean():.3e}  ErrMax: {err.max():.3e}")
-    plt.xscale("log")
-    plt.legend()
-    plt.show()
