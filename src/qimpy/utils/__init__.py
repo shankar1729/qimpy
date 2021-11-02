@@ -17,6 +17,7 @@ __all__ = [
     "log_config",
     "RunConfig",
     "StopWatch",
+    "Gradable",
     "Optimizable",
     "ConvergenceCheck",
     "MatrixArray",
@@ -46,6 +47,7 @@ from . import dict, globalreduce, yaml
 from ._log import log_config
 from ._runconfig import RunConfig
 from ._stopwatch import StopWatch
+from ._gradable import Gradable
 from ._optimizable import Optimizable, ConvergenceCheck, MatrixArray
 from ._pulay import Pulay
 from ._minimize import Minimize, MinimizeState

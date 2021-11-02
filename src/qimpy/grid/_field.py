@@ -1,7 +1,7 @@
 from __future__ import annotations
 import qimpy as qp
 import torch
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from numbers import Number
 from ._change import _change_real, _change_recip
 from typing import TypeVar, Any, Tuple, Optional, Sequence
@@ -10,7 +10,7 @@ from typing import TypeVar, Any, Tuple, Optional, Sequence
 FieldType = TypeVar("FieldType", bound="Field")  #: Type for field ops.
 
 
-class Field:
+class Field(ABC):
     """Abstract base class for scalar/vector fields in real/reciprocal space.
     Provides common operators for fields in either space, but any fields
     used must specifically be in real (:class:`FieldR` and :class:`FieldC`),
@@ -56,6 +56,7 @@ class Field:
         data
             Initial data if provided; initialize to zero otherwise
         """
+        super().__init__()
         self.grid = grid
         shape_grid_mine = self.shape_grid_mine()
         dtype = self.dtype()
@@ -265,7 +266,7 @@ class Field:
             checkpoint.write_slice(dset, offset, self.data)
 
 
-class FieldR(Field):
+class FieldR(Field, qp.utils.Gradable["FieldR"]):
     """Real fields in real space."""
 
     def dtype(self) -> torch.dtype:
@@ -292,7 +293,7 @@ class FieldR(Field):
         return _change_real(self, grid)
 
 
-class FieldC(Field):
+class FieldC(Field, qp.utils.Gradable["FieldC"]):
     """Complex fields in real space."""
 
     def dtype(self) -> torch.dtype:
@@ -319,7 +320,7 @@ class FieldC(Field):
         return _change_real(self, grid)
 
 
-class FieldH(Field):
+class FieldH(Field, qp.utils.Gradable["FieldH"]):
     """Real fields in (half) reciprocal space. Note that the underlying
     data is complex in reciprocal space, but reduced to one half of
     reciprocal space using Hermitian symmetry."""
@@ -353,7 +354,7 @@ class FieldH(Field):
         self.grid.field_symmetrizer(self)
 
 
-class FieldG(Field):
+class FieldG(Field, qp.utils.Gradable["FieldG"]):
     """Complex fields in (full) reciprocal space."""
 
     def dtype(self) -> torch.dtype:
