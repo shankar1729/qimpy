@@ -31,8 +31,6 @@ class Electrons(qp.TreeNode):
         "deig_max",
         "n_t",
         "tau_t",
-        "V_ks_t",
-        "V_tau_t",
     )
     rc: qp.utils.RunConfig
     kpoints: qp.electrons.Kpoints  #: Set of kpoints (mesh or path)
@@ -55,8 +53,6 @@ class Electrons(qp.TreeNode):
     deig_max: float  #: Estimate of accuracy of current `eig`
     n_t: qp.grid.FieldH  #: Electron density (and magnetization, if `spin_polarized`)
     tau_t: qp.grid.FieldH  #: KE density (only for meta-GGAs)
-    V_ks_t: qp.grid.FieldH  #: Kohn-Sham potential (local part)
-    V_tau_t: qp.grid.FieldH  #: KE potential
 
     hamiltonian = _hamiltonian
 
@@ -330,7 +326,7 @@ class Electrons(qp.TreeNode):
         cp_H = qp.utils.CpPath(
             checkpoint=qp.utils.Checkpoint(self.fixed_H, rc=self.rc), path="/electrons"
         )
-        # Read n and V_ks in real space from checkpoint:
+        # Read n and V_ks (n.grad) in real space from checkpoint:
         n_densities = self.n_densities
         n = qp.grid.FieldR(system.grid, shape_batch=(n_densities,))
         V_ks = qp.grid.FieldR(system.grid, shape_batch=(n_densities,))
@@ -338,7 +334,7 @@ class Electrons(qp.TreeNode):
         V_ks.read(cp_H.relative("V_ks"))
         # Store in reciprocal space:
         self.n_t = ~n
-        self.V_ks_t = ~V_ks
+        self.n_t.grad = ~V_ks
         qp.log.info("  Read n and V_ks.")
         # Use mu from checkpoint for fillings:
         self.fillings.mu = cp_H.relative("fillings").attrs["mu"]
@@ -359,17 +355,22 @@ class Electrons(qp.TreeNode):
 
     def update_potential(self, system: qp.System) -> None:
         """Update density-dependent energy terms and electron potential."""
+        self.n_t.requires_grad_()
+        self.tau_t.requires_grad_()
         # Exchange-correlation contributions:
-        system.energy["Exc"], self.V_ks_t, self.V_tau_t = self.xc(
-            self.n_t + system.ions.n_core_t, self.tau_t
-        )
+        n_xc_t = self.n_t + system.ions.n_core_t
+        n_xc_t.requires_grad_()
+        system.energy["Exc"] = self.xc(n_xc_t, self.tau_t)
+        self.n_t.grad += n_xc_t.grad
+        if system.ions.n_core_t.requires_grad:
+            system.ions.n_core_t += n_xc_t.grad
         # Hartree and local contributions:
         rho_t = self.n_t[0]  # total charge density
         VH_t = system.coulomb(rho_t)  # Hartree potential
-        self.V_ks_t[0] += system.ions.Vloc_t + VH_t
+        self.n_t.grad[0] += system.ions.Vloc_t + VH_t
         system.energy["Ehartree"] = 0.5 * (rho_t ^ VH_t).item()
         system.energy["Eloc"] = (rho_t ^ system.ions.Vloc_t).item()
-        self.V_ks_t.symmetrize()
+        self.n_t.grad.symmetrize()
 
     def update(self, system: qp.System) -> None:
         """Update electronic system to current wavefunctions and eigenvalues.
@@ -415,7 +416,7 @@ class Electrons(qp.TreeNode):
 
     def _save_checkpoint(self, cp_path: qp.utils.CpPath) -> List[str]:
         (~self.n_t).write(cp_path.relative("n"))
-        (~self.V_ks_t).write(cp_path.relative("V_ks"))
+        (~self.n_t.grad).write(cp_path.relative("V_ks"))
         self.fillings.write_band_scalars(cp_path.relative("eig"), self.eig)
         saved_list = ["n", "V_ks", "eig"]
         if self.save_wavefunction:

@@ -160,7 +160,7 @@ class SCF(qp.utils.Pulay[qp.grid.FieldH]):
     def variable(self) -> qp.grid.FieldH:
         """Get density or potential, depending on `mix_density`."""
         electrons = self.system.electrons
-        return electrons.n_t if self.mix_density else electrons.V_ks_t
+        return electrons.n_t if self.mix_density else electrons.n_t.grad
 
     @variable.setter
     def variable(self, v: qp.grid.FieldH) -> None:
@@ -170,7 +170,7 @@ class SCF(qp.utils.Pulay[qp.grid.FieldH]):
             electrons.n_t = v
             electrons.update_potential(self.system)
         else:
-            electrons.V_ks_t = v
+            electrons.n_t.grad = v
 
     def precondition(self, v: qp.grid.FieldH) -> qp.grid.FieldH:
         result = qp.grid.FieldH(v.grid, data=(v.data * self.K_kerker))

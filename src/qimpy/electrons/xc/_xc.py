@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from . import lda, gga
 from .functional import Functional, get_libxc_functional_names, FunctionalsLibxc
-from typing import Tuple, List, Dict, Union
+from typing import List, Dict, Union
 
 
 N_CUT = 1e-16  # Regularization threshold for densities
@@ -86,9 +86,7 @@ class XC(qp.TreeNode):
         self.need_lap = any(func.needs_lap for func in self._functionals)
         self.need_tau = any(func.needs_tau for func in self._functionals)
 
-    def __call__(
-        self, n_t: qp.grid.FieldH, tau_t: qp.grid.FieldH
-    ) -> Tuple[float, qp.grid.FieldH, qp.grid.FieldH]:
+    def __call__(self, n_t: qp.grid.FieldH, tau_t: qp.grid.FieldH) -> float:
         """Compute exchange-correlation energy and potential.
         Here, `n_t` and `tau_t` are the electron density and KE density
         (used if `need_tau` is True) in reciprocal space."""
@@ -207,27 +205,27 @@ class XC(qp.TreeNode):
                     Dn.grad[s1] += sigma.grad[s1 + s2] * Dn[s2]
                     Dn.grad[s2] += sigma.grad[s1 + s2] * Dn[s1]
             from_magnetization_grad(Dn, Dn_in)
-            E_n_t = -(~qp.grid.FieldR(grid, data=Dn_in.grad)).divergence(dim=1)
+            n_t.grad = -(~qp.grid.FieldR(grid, data=Dn_in.grad)).divergence(dim=1)
         else:
-            E_n_t = n_t.zeros_like()
+            n_t.grad = n_t.zeros_like()
         # --- contributions from Laplacian:
         if self.need_lap:
             from_magnetization_grad(lap, lap_in)
-            E_n_t += (~qp.grid.FieldR(grid, data=lap_in.grad)).laplacian()
+            n_t.grad += (~qp.grid.FieldR(grid, data=lap_in.grad)).laplacian()
         # --- contributions from KE density:
         if self.need_tau:
             from_magnetization_grad(tau, tau_in)
-            E_tau_t = ~qp.grid.FieldR(grid, data=tau_in.grad)
+            tau_t.grad = ~qp.grid.FieldR(grid, data=tau_in.grad)
         else:
-            E_tau_t = tau_t.zeros_like()
+            tau_t.grad = tau_t.zeros_like()
         # --- direct n contributions
-        E_n_t += ~qp.grid.FieldR(grid, data=n_in.grad)
+        n_t.grad += ~qp.grid.FieldR(grid, data=n_in.grad)
 
         # Collect energy
         if grid.comm is not None:
             E = grid.comm.allreduce(E, qp.MPI.SUM)
         watch.stop()
-        return E, E_n_t, E_tau_t
+        return E
 
 
 INTERNAL_FUNCTIONAL_NAMES = {
