@@ -86,13 +86,16 @@ class XC(qp.TreeNode):
         self.need_lap = any(func.needs_lap for func in self._functionals)
         self.need_tau = any(func.needs_tau for func in self._functionals)
 
-    def __call__(self, n_t: qp.grid.FieldH, tau_t: qp.grid.FieldH) -> float:
+    def __call__(self, n_tilde: qp.grid.FieldH, tau_tilde: qp.grid.FieldH) -> float:
         """Compute exchange-correlation energy and potential.
-        Here, `n_t` and `tau_t` are the electron density and KE density
-        (used if `need_tau` is True) in reciprocal space."""
-        grid = n_t.grid
+        Here, `n_tilde` and `tau_tilde` are the electron density and KE density
+        (used if `need_tau` is True) in reciprocal space.
+        Potentials i.e. gradients with respect to `n_tilde` and `tau_tilde` are set
+        within the corresponding `grad` attributes if `required_grad` is True.
+        Presently, either both gradients or no gradients should be requested."""
+        grid = n_tilde.grid
         watch = qp.utils.StopWatch("XC", grid.rc)
-        n_in = (~n_t).data
+        n_in = (~n_tilde).data
         n_densities = n_in.shape[0]
 
         # Initialize local spin basis for vector-spin mode:
@@ -125,7 +128,7 @@ class XC(qp.TreeNode):
         n_spins = n.shape[0]  # always 1 or 2 (local basis in vector case)
         # --- density gradient:
         if self.need_sigma:
-            Dn_in = (~(n_t.gradient(dim=1))).data
+            Dn_in = (~(n_tilde.gradient(dim=1))).data
             Dn = from_magnetization(Dn_in)
             sigma = torch.empty(
                 (2 * n_spins - 1,) + n.shape[1:], dtype=n.dtype, device=n.device
@@ -137,13 +140,13 @@ class XC(qp.TreeNode):
             sigma = torch.tensor(0.0, device=n.device)
         # --- laplacian:
         if self.need_lap:
-            lap_in = (~(n_t.laplacian())).data
+            lap_in = (~(n_tilde.laplacian())).data
             lap = from_magnetization(lap_in)
         else:
             lap = torch.tensor(0.0, device=n.device)
         # --- KE density:
         if self.need_tau:
-            tau_in = (~tau_t).data
+            tau_in = (~tau_tilde).data
             tau = from_magnetization(tau_in)
         else:
             tau = torch.tensor(0.0, device=n.device)
@@ -153,13 +156,16 @@ class XC(qp.TreeNode):
         n[clamp_sel] = N_CUT
 
         # Evaluate functionals:
-        n.grad = torch.zeros_like(n)
-        sigma.grad = torch.zeros_like(sigma)
-        lap.grad = torch.zeros_like(lap)
-        tau.grad = torch.zeros_like(tau)
+        requires_grad = n_tilde.requires_grad
+        assert requires_grad == tau_tilde.requires_grad  # compute all or no gradients
+        if requires_grad:
+            n.grad = torch.zeros_like(n)
+            sigma.grad = torch.zeros_like(sigma)
+            lap.grad = torch.zeros_like(lap)
+            tau.grad = torch.zeros_like(tau)
         E = 0.0
         for functional in self._functionals:
-            E += functional(n, sigma, lap, tau) * grid.dV
+            E += functional(n, sigma, lap, tau, requires_grad) * grid.dV
 
         # Gradient propagation for potential:
         def from_magnetization_grad(x: torch.Tensor, x_in: torch.Tensor) -> None:
@@ -195,31 +201,30 @@ class XC(qp.TreeNode):
             else:  # n_densities == 2:
                 x_in.grad[1] = x_diff_grad
 
-        n.grad[clamp_sel] = 0.0  # account for any clamping
-        from_magnetization_grad(n, n_in)
-        # --- contributions from GGA gradients:
-        if self.need_sigma:
-            Dn.grad = torch.zeros_like(Dn)
-            for s1 in range(n_spins):
-                for s2 in range(s1, n_spins):
-                    Dn.grad[s1] += sigma.grad[s1 + s2] * Dn[s2]
-                    Dn.grad[s2] += sigma.grad[s1 + s2] * Dn[s1]
-            from_magnetization_grad(Dn, Dn_in)
-            n_t.grad = -(~qp.grid.FieldR(grid, data=Dn_in.grad)).divergence(dim=1)
-        else:
-            n_t.grad = n_t.zeros_like()
-        # --- contributions from Laplacian:
-        if self.need_lap:
-            from_magnetization_grad(lap, lap_in)
-            n_t.grad += (~qp.grid.FieldR(grid, data=lap_in.grad)).laplacian()
-        # --- contributions from KE density:
-        if self.need_tau:
-            from_magnetization_grad(tau, tau_in)
-            tau_t.grad = ~qp.grid.FieldR(grid, data=tau_in.grad)
-        else:
-            tau_t.grad = tau_t.zeros_like()
-        # --- direct n contributions
-        n_t.grad += ~qp.grid.FieldR(grid, data=n_in.grad)
+        if requires_grad:
+            n.grad[clamp_sel] = 0.0  # account for any clamping
+            from_magnetization_grad(n, n_in)
+            # --- contributions from GGA gradients:
+            if self.need_sigma:
+                Dn.grad = torch.zeros_like(Dn)
+                for s1 in range(n_spins):
+                    for s2 in range(s1, n_spins):
+                        Dn.grad[s1] += sigma.grad[s1 + s2] * Dn[s2]
+                        Dn.grad[s2] += sigma.grad[s1 + s2] * Dn[s1]
+                from_magnetization_grad(Dn, Dn_in)
+                n_tilde.grad -= (~qp.grid.FieldR(grid, data=Dn_in.grad)).divergence(
+                    dim=1
+                )
+            # --- contributions from Laplacian:
+            if self.need_lap:
+                from_magnetization_grad(lap, lap_in)
+                n_tilde.grad += (~qp.grid.FieldR(grid, data=lap_in.grad)).laplacian()
+            # --- contributions from KE density:
+            if self.need_tau:
+                from_magnetization_grad(tau, tau_in)
+                tau_tilde.grad += ~qp.grid.FieldR(grid, data=tau_in.grad)
+            # --- direct n contributions
+            n_tilde.grad += ~qp.grid.FieldR(grid, data=n_in.grad)
 
         # Collect energy
         if grid.comm is not None:

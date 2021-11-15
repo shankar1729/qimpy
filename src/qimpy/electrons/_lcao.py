@@ -83,7 +83,7 @@ class LCAO(Minimize[MatrixArray]):
         system = self.system
         el = system.electrons
         # Compute energy and subspace Hamiltonian:
-        el.update(system)
+        el.update(system, requires_grad=(not energy_only))
         state.energy = system.energy
         if energy_only:
             return

@@ -17,15 +17,21 @@ class KE_TF(Functional):
         )
 
     def __call__(
-        self, n: torch.Tensor, sigma: torch.Tensor, lap: torch.Tensor, tau: torch.Tensor
+        self,
+        n: torch.Tensor,
+        sigma: torch.Tensor,
+        lap: torch.Tensor,
+        tau: torch.Tensor,
+        requires_grad: bool,
     ) -> float:
         n_spins = n.shape[0]
         prefactor = (
             0.3 * ((3 * (np.pi ** 2) * n_spins) ** (2.0 / 3.0)) * self.scale_factor
         )
-        n.requires_grad_()
+        n.requires_grad_(requires_grad)
         E = prefactor * (n ** (5.0 / 3)).sum()
-        E.backward()  # updates n.grad
+        if requires_grad:
+            E.backward()  # updates n.grad
         return E.item()
 
 
@@ -38,13 +44,19 @@ class X_Slater(Functional):
         )
 
     def __call__(
-        self, n: torch.Tensor, sigma: torch.Tensor, lap: torch.Tensor, tau: torch.Tensor
+        self,
+        n: torch.Tensor,
+        sigma: torch.Tensor,
+        lap: torch.Tensor,
+        tau: torch.Tensor,
+        requires_grad: bool,
     ) -> float:
         n_spins = n.shape[0]
         prefactor = -0.75 * ((3 * n_spins / np.pi) ** (1.0 / 3.0)) * self.scale_factor
-        n.requires_grad_()
+        n.requires_grad_(requires_grad)
         E = prefactor * (n ** (4.0 / 3)).sum()
-        E.backward()  # updates n.grad
+        if requires_grad:
+            E.backward()  # updates n.grad
         return E.item()
 
 
@@ -60,11 +72,16 @@ class SpinInterpolated(Functional):
         self.stiffness_scale = (9.0 / 4) * (2.0 ** (1.0 / 3) - 1)  # overridden in PW
 
     def __call__(
-        self, n: torch.Tensor, sigma: torch.Tensor, lap: torch.Tensor, tau: torch.Tensor
+        self,
+        n: torch.Tensor,
+        sigma: torch.Tensor,
+        lap: torch.Tensor,
+        tau: torch.Tensor,
+        requires_grad: bool,
     ) -> float:
         """Main interface function including gradient evaluation."""
         n_spins = n.shape[0]
-        n.requires_grad_()
+        n.requires_grad_(requires_grad)
         n_tot = n.sum(dim=0)
         rs = ((4.0 * np.pi / 3.0) * n_tot) ** (-1.0 / 3)
         zeta = (
@@ -73,7 +90,8 @@ class SpinInterpolated(Functional):
             else torch.zeros(1, dtype=n.dtype, device=n.device)
         )
         E = (n_tot * self.get_ec(rs, zeta)).sum() * self.scale_factor
-        E.backward()  # updates n.grad
+        if requires_grad:
+            E.backward()  # updates n.grad
         return E.item()
 
     def get_ec(self, rs: torch.Tensor, zeta: torch.Tensor) -> torch.Tensor:
@@ -266,10 +284,15 @@ class XC_Teter(Functional):
         )
 
     def __call__(
-        self, n: torch.Tensor, sigma: torch.Tensor, lap: torch.Tensor, tau: torch.Tensor
+        self,
+        n: torch.Tensor,
+        sigma: torch.Tensor,
+        lap: torch.Tensor,
+        tau: torch.Tensor,
+        requires_grad: bool,
     ) -> float:
         n_spins = n.shape[0]
-        n.requires_grad_()
+        n.requires_grad_(requires_grad)
         n_tot = n.sum(dim=0)
         rs = ((4.0 * np.pi / 3.0) * n_tot) ** (-1.0 / 3)
         # Spin interpolate the parameters (if needed):
@@ -288,5 +311,6 @@ class XC_Teter(Functional):
             rs * (1.0 + rs * (b2 + rs * (b3 + rs * b4)))
         )
         E = (minus_exc * n_tot).sum() * (-self.scale_factor)
-        E.backward()  # updates n.grad
+        if requires_grad:
+            E.backward()  # updates n.grad
         return E.item()

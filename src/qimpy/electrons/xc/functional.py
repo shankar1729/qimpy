@@ -72,14 +72,21 @@ class Functional(ABC):
 
     @abstractmethod
     def __call__(
-        self, n: torch.Tensor, sigma: torch.Tensor, lap: torch.Tensor, tau: torch.Tensor
+        self,
+        n: torch.Tensor,
+        sigma: torch.Tensor,
+        lap: torch.Tensor,
+        tau: torch.Tensor,
+        requires_grad: bool,
     ) -> float:
         """Compute exchange/correlation/kinetic functional for several points.
         The first dimension of each tensor corresponds to spin channels,
         and all subsequent dimenions are grid points.
-        Gradients with respect to each input should be accumulated to the
-        corresponding `grad` fields (eg. `n.grad`), allowing convenient
+        If `requires_grad` is True, gradients with respect to each input should be
+        accumulated to the corresponding `grad` fields (eg. `n.grad`), allowing
         internal use of torch's autograd functionality wherever applicable.
+        For simplicity, this interface specifies a common `requires_grad` for all
+        inputs so that it is not necessary to check each input and compute selectively.
 
         Parameters
         ----------
@@ -195,7 +202,7 @@ class _FunctionalLibxc:
         scale_str = "" if (scale_factor == 1.0) else f" (scaled by {scale_factor})"
         qp.log.info(f"  {name_str} functional from Libxc{scale_str}.")
 
-        # LIst of outputs that will be generated:
+        # List of outputs that will be generated:
         self.output_labels = ["vrho"]  # potential always generated
         if self.has_energy:
             self.output_labels.append("zk")
@@ -207,12 +214,18 @@ class _FunctionalLibxc:
             self.output_labels.append("vtau")
 
     def __call__(
-        self, inputs: Dict[str, np.ndarray], outputs: Dict[str, np.ndarray]
+        self,
+        inputs: Dict[str, np.ndarray],
+        outputs: Dict[str, np.ndarray],
+        requires_grad: bool,
     ) -> None:
-        out = self.functional.compute(inputs, do_exc=self.has_energy, do_vxc=True)
+        out = self.functional.compute(
+            inputs, do_exc=self.has_energy, do_vxc=requires_grad
+        )
         # Accumulate results:
         for label in self.output_labels:
-            outputs[label] += out[label]
+            if requires_grad or (label == "zk"):
+                outputs[label] += out[label]
 
 
 class FunctionalsLibxc(Functional):
@@ -259,7 +272,12 @@ class FunctionalsLibxc(Functional):
         return out.permute(3, 0, 1, 2).to(self.rc.device)  # spin first now
 
     def __call__(
-        self, n: torch.Tensor, sigma: torch.Tensor, lap: torch.Tensor, tau: torch.Tensor
+        self,
+        n: torch.Tensor,
+        sigma: torch.Tensor,
+        lap: torch.Tensor,
+        tau: torch.Tensor,
+        requires_grad: bool,
     ) -> float:
         # Prepare inputs and empty outputs in LibXC expected form:
         inputs = {"rho": self.to_xc(n)}
@@ -271,20 +289,23 @@ class FunctionalsLibxc(Functional):
             inputs["tau"] = self.to_xc(tau)
 
         # Prepare empty outputs in LibXC expected form:
-        outputs = {("v" + label): np.zeros_like(data) for label, data in inputs.items()}
-        outputs["zk"] = np.zeros((np.prod(n.shape[1:]), 1))  # for energy
+        outputs = {"zk": np.zeros((np.prod(n.shape[1:]), 1))}  # for energy
+        if requires_grad:
+            for label, data in inputs.items():
+                outputs["v" + label] = np.zeros_like(data)
 
         # Compute:
         for functional in self._functionals:
-            functional(inputs, outputs)
+            functional(inputs, outputs, requires_grad)
 
         # Convert outputs back to internal form:
         e = self.from_xc(outputs["zk"], n[:1])
-        n.grad += self.from_xc(outputs["vrho"], n)
-        if self.needs_sigma:
-            sigma.grad += self.from_xc(outputs["vsigma"], sigma)
-        if self.needs_lap:
-            lap.grad += self.from_xc(outputs["vlapl"], lap)
-        if self.needs_tau:
-            tau.grad += self.from_xc(outputs["vtau"], tau)
+        if requires_grad:
+            n.grad += self.from_xc(outputs["vrho"], n)
+            if self.needs_sigma:
+                sigma.grad += self.from_xc(outputs["vsigma"], sigma)
+            if self.needs_lap:
+                lap.grad += self.from_xc(outputs["vlapl"], lap)
+            if self.needs_tau:
+                tau.grad += self.from_xc(outputs["vtau"], tau)
         return (n * e).sum().item()

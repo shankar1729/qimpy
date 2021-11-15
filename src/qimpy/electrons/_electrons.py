@@ -353,31 +353,35 @@ class Electrons(qp.TreeNode):
         self.tau_t = qp.grid.FieldH(system.grid, shape_batch=(0,))
         # TODO: actually compute KE density if required
 
-    def update_potential(self, system: qp.System) -> None:
-        """Update density-dependent energy terms and electron potential."""
-        self.n_t.requires_grad_()
-        self.tau_t.requires_grad_()
+    def update_potential(self, system: qp.System, requires_grad: bool = True) -> None:
+        """Update density-dependent energy terms and electron potential.
+        If `requires_grad` is False, only compute the energy (skip the potentials)."""
+        self.n_t.requires_grad_(requires_grad)
+        self.tau_t.requires_grad_(requires_grad)
         # Exchange-correlation contributions:
         n_xc_t = self.n_t + system.ions.n_core_t
-        n_xc_t.requires_grad_()
+        n_xc_t.requires_grad_(requires_grad)
         system.energy["Exc"] = self.xc(n_xc_t, self.tau_t)
-        self.n_t.grad += n_xc_t.grad
-        if system.ions.n_core_t.requires_grad:
-            system.ions.n_core_t += n_xc_t.grad
+        if requires_grad:
+            self.n_t.grad += n_xc_t.grad
+            if system.ions.n_core_t.requires_grad:
+                system.ions.n_core_t += n_xc_t.grad
         # Hartree and local contributions:
         rho_t = self.n_t[0]  # total charge density
         VH_t = system.coulomb(rho_t)  # Hartree potential
-        self.n_t.grad[0] += system.ions.Vloc_t + VH_t
         system.energy["Ehartree"] = 0.5 * (rho_t ^ VH_t).item()
         system.energy["Eloc"] = (rho_t ^ system.ions.Vloc_t).item()
-        self.n_t.grad.symmetrize()
+        if requires_grad:
+            self.n_t.grad[0] += system.ions.Vloc_t + VH_t
+            self.n_t.grad.symmetrize()
 
-    def update(self, system: qp.System) -> None:
+    def update(self, system: qp.System, requires_grad: bool = True) -> None:
         """Update electronic system to current wavefunctions and eigenvalues.
-        This updates occupations, density, potential and electronic energy."""
+        This updates occupations, density, potential and electronic energy.
+        If `requires_grad` is False, only compute the energy (skip the potentials)."""
         self.fillings.update(system.energy)
         self.update_density(system)
-        self.update_potential(system)
+        self.update_potential(system, requires_grad)
         f = self.fillings.f
         system.energy["KE"] = qp.utils.globalreduce.sum(
             self.C.band_ke()[:, :, : f.shape[2]] * self.basis.w_sk * f, self.rc.comm_k

@@ -16,16 +16,22 @@ class SpinScaled(Functional):
         super().__init__(needs_sigma=True, **kwargs)
 
     def __call__(
-        self, n: torch.Tensor, sigma: torch.Tensor, lap: torch.Tensor, tau: torch.Tensor
+        self,
+        n: torch.Tensor,
+        sigma: torch.Tensor,
+        lap: torch.Tensor,
+        tau: torch.Tensor,
+        requires_grad: bool,
     ) -> float:
         n_spins = n.shape[0]
-        n.requires_grad_()
-        sigma.requires_grad_()
+        n.requires_grad_(requires_grad)
+        sigma.requires_grad_(requires_grad)
         rs = ((n_spins * 4.0 * np.pi / 3.0) * n) ** (-1.0 / 3)  # rs for each spin
         s2 = ((18.0 * np.pi) ** (-2.0 / 3)) * sigma[::2] * (rs / n).square()
         e = self.compute(rs, s2)
         E = (e * n).sum() * self.scale_factor
-        E.backward()  # updates n.grad and sigma.grad
+        if requires_grad:
+            E.backward()  # updates n.grad and sigma.grad
         return E.item()
 
     @abstractmethod
@@ -62,11 +68,16 @@ class SpinInterpolated(Functional):
         super().__init__(needs_sigma=True, **kwargs)
 
     def __call__(
-        self, n: torch.Tensor, sigma: torch.Tensor, lap: torch.Tensor, tau: torch.Tensor
+        self,
+        n: torch.Tensor,
+        sigma: torch.Tensor,
+        lap: torch.Tensor,
+        tau: torch.Tensor,
+        requires_grad: bool,
     ) -> float:
         n_spins = n.shape[0]
-        n.requires_grad_()
-        sigma.requires_grad_()
+        n.requires_grad_(requires_grad)
+        sigma.requires_grad_(requires_grad)
         # Compute dimensionless parameters of correlation functionals:
         n_tot = n.sum(dim=0)
         rs = ((4.0 * np.pi / 3.0) * n_tot) ** (-1.0 / 3)
@@ -82,7 +93,8 @@ class SpinInterpolated(Functional):
         # Compute per-particle energy and total:
         e = self.compute(rs, zeta, g, t2)
         E = (e * n_tot).sum() * self.scale_factor
-        E.backward()  # updates n.grad and sigma.grad
+        if requires_grad:
+            E.backward()  # updates n.grad and sigma.grad
         return E.item()
 
     @abstractmethod
