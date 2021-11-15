@@ -6,21 +6,21 @@ from typing import Optional, Union, List
 
 class RadialFunction:
     """Set of radial functions in real and reciprocal space.
-    For l > 0, the convention is to remove a factor of r^l in real space (f)
-    and G^l in reciprocal space (f_t). This makes it convenient to work with
+    For l > 0, the convention is to remove a factor of r^l in real space (`f`)
+    and G^l in reciprocal space (`f_tilde`). This makes it convenient to work with
     solid harmonics that already contain these factors of r^l or G^l.
     """
 
-    __slots__ = ("r", "dr", "f", "l", "Gmax", "G", "f_t", "f_t_coeff")
+    __slots__ = ("r", "dr", "f", "l", "Gmax", "G", "f_tilde", "f_tilde_coeff")
     r: torch.Tensor  #: radial grid
     dr: torch.Tensor  #: radial grid integration weights (dr in 4 pi r^2 dr)
     f: torch.Tensor  #: real-space values corresponding to r (n x len(r))
-    l: torch.Tensor  #: angular momentum for each function in f
+    l: torch.Tensor  #: angular momentum for each function in `f`
     DG: float = 0.02  #: reciprocal space spacing of (quintic) spline nodes
     Gmax: float  #: max G till which reciprocal space versions are current
     G: torch.Tensor  #: uniform reciprocal-space grid
-    f_t: torch.Tensor  #: reciprocal-space version of each f on `G`
-    f_t_coeff: torch.Tensor  #: quintic spline coefficients for `f_t`
+    f_tilde: torch.Tensor  #: reciprocal-space version of each `f` on `G`
+    f_tilde_coeff: torch.Tensor  #: quintic spline coefficients for `f_tilde`
 
     def __init__(
         self,
@@ -93,26 +93,26 @@ class RadialFunction:
         G = torch.arange(nG, device=r.device) * cls.DG
 
         # Perform transform for each l:
-        f_t = torch.empty((f.shape[0], nG), device=f.device)
+        f_tilde = torch.empty((f.shape[0], nG), device=f.device)
         jl_by_Grl = qp.ions.spherical_bessel.jl_by_xl(l_max, r.outer(G))
         for l_i in range(0, l_max + 1):
             sel = torch.where(l == l_i)[0]
-            f_t[sel] = (f[sel] * (r ** (2 * l_i)) * wr) @ jl_by_Grl[l_i]
+            f_tilde[sel] = (f[sel] * (r ** (2 * l_i)) * wr) @ jl_by_Grl[l_i]
         comm.Allreduce(
-            qp.MPI.IN_PLACE, qp.utils.BufferView(f_t), op=qp.MPI.SUM
+            qp.MPI.IN_PLACE, qp.utils.BufferView(f_tilde), op=qp.MPI.SUM
         )  # collect over r that was split above
 
         # Compute spline coefficients:
-        f_t_coeff = qp.ions.quintic_spline.get_coeff(f_t)
+        f_tilde_coeff = qp.ions.quintic_spline.get_coeff(f_tilde)
 
         # Split results back over input radial functions:
         nf = [rf.f.shape[0] for rf in radial_functions]
-        f_t_split = f_t.split(nf)
-        f_t_coeff_split = f_t_coeff.split(nf, dim=1)
+        f_tilde_split = f_tilde.split(nf)
+        f_tilde_coeff_split = f_tilde_coeff.split(nf, dim=1)
         for i_rf, rf in enumerate(radial_functions):
             rf.G = G
-            rf.f_t = f_t_split[i_rf]
-            rf.f_t_coeff = f_t_coeff_split[i_rf]
+            rf.f_tilde = f_tilde_split[i_rf]
+            rf.f_tilde_coeff = f_tilde_coeff_split[i_rf]
         if name:
             qp.log.info(
                 f"Transformed {f.shape[0]} radial functions for {name}"

@@ -9,7 +9,7 @@ def _hamiltonian(
     basis = C.basis
     ions = basis.ions
     HC = basis.apply_ke(C)
-    HC += basis.apply_potential(self.n_t.grad, C)
+    HC += basis.apply_potential(self.n_tilde.grad, C)
     # Nonlocal ps:
     beta_C = C.proj
     HC += ions.beta @ (ions.D_all @ beta_C)

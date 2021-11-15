@@ -69,7 +69,7 @@ def get_harmonics(l_max: int, r: torch.Tensor) -> torch.Tensor:
     return result
 
 
-def get_harmonics_t(l_max: int, G: torch.Tensor) -> torch.Tensor:
+def get_harmonics_tilde(l_max: int, G: torch.Tensor) -> torch.Tensor:
     """Same as :func:`get_harmonics`, but in reciprocal space. The result
     is a complex tensor containing :math:`(iG)^l Y_{lm}(G)`, where the extra
     phase factor is from the Fourier transform of spherical harmonics. This is

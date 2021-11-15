@@ -23,9 +23,9 @@ class Ions(qp.TreeNode):
         "M_initial",
         "Z",
         "Z_tot",
-        "rho_t",
-        "Vloc_t",
-        "n_core_t",
+        "rho_tilde",
+        "Vloc_tilde",
+        "n_core_tilde",
         "beta",
         "beta_version",
         "D_all",
@@ -42,9 +42,9 @@ class Ions(qp.TreeNode):
     M_initial: Optional[torch.Tensor]  #: initial magnetic moment for each ion
     Z: torch.Tensor  #: charge of each ion type (n_types, float)
     Z_tot: float  #: total ionic charge
-    rho_t: qp.grid.FieldH  #: ionic charge density (uses coulomb.ion_width)
-    Vloc_t: qp.grid.FieldH  #: local potential due to ions (including from rho)
-    n_core_t: qp.grid.FieldH  #: partial core electronic density (for XC)
+    rho_tilde: qp.grid.FieldH  #: ionic charge density (uses coulomb.ion_width)
+    Vloc_tilde: qp.grid.FieldH  #: local potential due to ions (including from rho)
+    n_core_tilde: qp.grid.FieldH  #: partial core electronic density (for XC)
     beta: qp.electrons.Wavefunction  #: pseudopotential projectors
     beta_version: int  #: version of `beta` to invalidate cached projections
     D_all: torch.Tensor  #: nonlocal pseudopotential matrix (all atoms)
@@ -232,9 +232,9 @@ class Ions(qp.TreeNode):
         """
         grid = system.grid
         n_densities = system.electrons.n_densities
-        self.rho_t = qp.grid.FieldH(grid)  # initialize zero ionic charge
-        self.Vloc_t = qp.grid.FieldH(grid)  # initizliae zero local potential
-        self.n_core_t = qp.grid.FieldH(
+        self.rho_tilde = qp.grid.FieldH(grid)  # initialize zero ionic charge
+        self.Vloc_tilde = qp.grid.FieldH(grid)  # initizliae zero local potential
+        self.n_core_tilde = qp.grid.FieldH(
             grid, shape_batch=(n_densities,)  # initialize zero core density
         )
         if not self.n_ions:
@@ -263,16 +263,18 @@ class Ions(qp.TreeNode):
             SF[i_type] = (
                 self.translation_phase(iG, self.slices[i_type]).sum(dim=-1) * inv_volume
             )
-            Vloc_coeff.append(ps.Vloc.f_t_coeff)
-            n_core_coeff.append(ps.n_core.f_t_coeff)
+            Vloc_coeff.append(ps.Vloc.f_tilde_coeff)
+            n_core_coeff.append(ps.n_core.f_tilde_coeff)
         # --- interpolate to G and collect with structure factors
-        self.Vloc_t.data = (SF * Ginterp(torch.hstack(Vloc_coeff))).sum(dim=0)
-        self.n_core_t.data[0] = (SF * Ginterp(torch.hstack(n_core_coeff))).sum(dim=0)
-        self.rho_t.data = (-self.Z.view(-1, 1, 1, 1) * SF).sum(dim=0) * torch.exp(
+        self.Vloc_tilde.data = (SF * Ginterp(torch.hstack(Vloc_coeff))).sum(dim=0)
+        self.n_core_tilde.data[0] = (SF * Ginterp(torch.hstack(n_core_coeff))).sum(
+            dim=0
+        )
+        self.rho_tilde.data = (-self.Z.view(-1, 1, 1, 1) * SF).sum(dim=0) * torch.exp(
             (-0.5 * (ion_width ** 2)) * Gsq
         )
         # --- include long-range electrostatic part of Vloc:
-        self.Vloc_t += system.coulomb(self.rho_t, correct_G0_width=True)
+        self.Vloc_tilde += system.coulomb(self.rho_tilde, correct_G0_width=True)
 
         # Update pseudopotential matrix and projectors:
         self._collect_ps_matrix(system.electrons.n_spinor)
@@ -314,7 +316,7 @@ class Ions(qp.TreeNode):
             return qp.electrons.Wavefunction(basis, coeff=proj)
         # Get harmonics (per l,m):
         l_max = max(ps.l_max for ps in self.pseudopotentials)
-        Ylm_t = qp.ions.spherical_harmonics.get_harmonics_t(l_max, Gk)
+        Ylm_tilde = qp.ions.spherical_harmonics.get_harmonics_tilde(l_max, Gk)
         # Get per-atom translations:
         translations = self.translation_phase(iGk).transpose(
             1, 2
@@ -326,12 +328,12 @@ class Ions(qp.TreeNode):
         for i_ps, ps in enumerate(self.pseudopotentials):
             # Select projectors (beta) or orbitals (psi) as requested:
             pqn = ps.pqn_psi if get_psi else ps.pqn_beta
-            f_t_coeff = (ps.psi if get_psi else ps.beta).f_t_coeff
+            f_t_coeff = (ps.psi if get_psi else ps.beta).f_tilde_coeff
             # Current range:
             n_proj_cur = pqn.n_tot * self.n_ions_type[i_ps]
             i_proj_stop = i_proj_start + n_proj_cur
             # Compute atomic template:
-            proj_atom = (Ginterp(f_t_coeff)[pqn.i_rf] * Ylm_t[pqn.i_lm]).transpose(
+            proj_atom = (Ginterp(f_t_coeff)[pqn.i_rf] * Ylm_tilde[pqn.i_lm]).transpose(
                 0, 1
             )[
                 :, None
@@ -482,7 +484,7 @@ class Ions(qp.TreeNode):
         n_densities = 1 + n_mag
         n = qp.grid.FieldH(grid, shape_batch=(n_densities,))
         for i_type, ps in enumerate(self.pseudopotentials):
-            rho_i = Ginterp(ps.rho_atom.f_t_coeff / grid.lattice.volume)
+            rho_i = Ginterp(ps.rho_atom.f_tilde_coeff / grid.lattice.volume)
             SF = self.translation_phase(iG, self.slices[i_type])
             n.data[0] += rho_i[0] * SF.sum(dim=-1)
             if n_mag:
