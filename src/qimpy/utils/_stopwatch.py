@@ -77,8 +77,10 @@ class StopWatch:
             t = np.array(times)
             t_total += t.sum()
             n_calls_total += len(t)
+            t_mid = np.median(t)
+            t_mad = np.median(abs(t - t_mid))  # mean absolute deviation
             qp.log.info(
-                f"StopWatch: {name:30s}  {t.mean():10.6f} +/- {t.std():10.6f}"
+                f"StopWatch: {name:30s}  {t_mid:10.6f} +/- {t_mad:10.6f}"
                 f" s, {len(t):4d} calls, {t.sum():10.6f} s total"
             )
         qp.log.info(
