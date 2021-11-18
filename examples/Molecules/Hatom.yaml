@@ -11,7 +11,7 @@ ions:
 
 electrons:
   xc:
-    functional: gga-xc-pbe
+    functional: ${FUNC}
   spin-polarized: yes
   fillings:
     M: 1

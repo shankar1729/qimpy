@@ -94,7 +94,7 @@ class XC(qp.TreeNode):
         within the corresponding `grad` attributes if `required_grad` is True.
         Presently, either both gradients or no gradients should be requested."""
         grid = n_tilde.grid
-        watch = qp.utils.StopWatch("XC", grid.rc)
+        watch = qp.utils.StopWatch("xc.prepare", grid.rc)
         n_in = (~n_tilde).data
         n_densities = n_in.shape[0]
 
@@ -154,8 +154,10 @@ class XC(qp.TreeNode):
         # Clamp low densities for numerical stability:
         clamp_sel = torch.where(n < N_CUT)
         n[clamp_sel] = N_CUT
+        watch.stop()
 
         # Evaluate functionals:
+        watch = qp.utils.StopWatch("xc.functional", grid.rc)
         requires_grad = n_tilde.requires_grad
         assert requires_grad == tau_tilde.requires_grad  # compute all or no gradients
         if requires_grad:
@@ -166,6 +168,7 @@ class XC(qp.TreeNode):
         E = 0.0
         for functional in self._functionals:
             E += functional(n, sigma, lap, tau, requires_grad) * grid.dV
+        watch.stop()
 
         # Gradient propagation for potential:
         def from_magnetization_grad(x: torch.Tensor, x_in: torch.Tensor) -> None:
@@ -202,6 +205,7 @@ class XC(qp.TreeNode):
                 x_in.grad[1] = x_diff_grad
 
         if requires_grad:
+            watch = qp.utils.StopWatch("xc.propagate_grad", grid.rc)
             n.grad[clamp_sel] = 0.0  # account for any clamping
             from_magnetization_grad(n, n_in)
             # --- contributions from GGA gradients:
@@ -225,11 +229,11 @@ class XC(qp.TreeNode):
                 tau_tilde.grad += ~qp.grid.FieldR(grid, data=tau_in.grad)
             # --- direct n contributions
             n_tilde.grad += ~qp.grid.FieldR(grid, data=n_in.grad)
+            watch.stop()
 
         # Collect energy
         if grid.comm is not None:
             E = grid.comm.allreduce(E, qp.MPI.SUM)
-        watch.stop()
         return E
 
 
