@@ -1,11 +1,11 @@
 """Internal interface for XC functionals."""
 from __future__ import annotations
-from abc import abstractmethod, ABC
 import qimpy as qp
 import numpy as np
 import torch
 from functools import lru_cache
-from typing import List, Set, Dict
+from dataclasses import dataclass
+from typing import List, Set, Dict, Callable, Optional
 
 # List exported symbols for doc generation
 __all__ = [
@@ -23,54 +23,34 @@ except ImportError:
     LIBXC_AVAILABLE = False
 
 
-class Functional(ABC):
-    """Abstract base class for exchange-correlation functionals."""
+FunctionalApply = Callable[
+    [torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, bool, float], float
+]
 
-    __slots__ = (
-        "needs_sigma",
-        "needs_lap",
-        "needs_tau",
-        "has_exchange",
-        "has_correlation",
-        "has_kinetic",
-        "has_energy",
-        "scale_factor",
-    )
-    needs_sigma: bool  #: Whether functional needs gradient :math:`\sigma`
-    needs_lap: bool  #: Whether functional needs Laplacian :math:`\nabla^2 n`
-    needs_tau: bool  #: Whether functional needs KE density :math:`\tau`
-    has_exchange: bool  #: Whether functional includes exchange
-    has_correlation: bool  #: Whether functional includes correlation
-    has_kinetic: bool  #: Whether functional includes kinetic energy
-    has_energy: bool  #: Whether functional has meaningful total energy
-    scale_factor: float  #: Scale factor in energy and potential
 
-    def __init__(
-        self,
-        *,
-        needs_sigma: bool = False,
-        needs_lap: bool = False,
-        needs_tau: bool = False,
-        has_exchange: bool = False,
-        has_correlation: bool = False,
-        has_kinetic: bool = False,
-        has_energy: bool = True,
-        scale_factor: float = 1.0,
-        name: str = "",
-    ) -> None:
-        self.needs_sigma = needs_sigma
-        self.needs_lap = needs_lap
-        self.needs_tau = needs_tau
-        self.has_exchange = has_exchange
-        self.has_correlation = has_correlation
-        self.has_kinetic = has_kinetic
-        self.has_energy = has_energy
-        self.scale_factor = scale_factor
-        if name:
-            scale_str = "" if (scale_factor == 1.0) else f" (scaled by {scale_factor})"
-            qp.log.info(f"  {name} functional{scale_str}.")
+@dataclass
+class Functional:
+    """Base class for exchange-correlation functional components."""
 
-    @abstractmethod
+    needs_sigma: bool = False  #: Whether functional needs gradient :math:`\sigma`
+    needs_lap: bool = False  #: Whether functional needs Laplacian :math:`\nabla^2 n`
+    needs_tau: bool = False  #: Whether functional needs KE density :math:`\tau`
+    has_exchange: bool = False  #: Whether functional includes exchange
+    has_correlation: bool = False  #: Whether functional includes correlation
+    has_kinetic: bool = False  #: Whether functional includes kinetic energy
+    has_energy: bool = True  #: Whether functional has meaningful total energy
+    scale_factor: float = 1.0  #: Scale factor in energy and potential
+    _apply: Optional[FunctionalApply] = None  #: Internal callable to evaluate XC
+    _apply_spin: Optional[
+        FunctionalApply
+    ] = None  #: If provided, override _apply for spin-polarized case
+
+    def report(self, name: str) -> None:
+        scale_str = (
+            "" if (self.scale_factor == 1.0) else f" (scaled by {self.scale_factor})"
+        )
+        qp.log.info(f"  {name} functional{scale_str}.")
+
     def __call__(
         self,
         n: torch.Tensor,
@@ -88,6 +68,10 @@ class Functional(ABC):
         For simplicity, this interface specifies a common `requires_grad` for all
         inputs so that it is not necessary to check each input and compute selectively.
 
+        If callable attribute `_apply` is provided, that will be used for evaluation.
+        If `_apply_spin` is provided, that will override spin-polarized evaluation.
+        If neither of those are provided, derived class must override `__call__`.
+
         Parameters
         ----------
         n
@@ -103,6 +87,14 @@ class Functional(ABC):
         -------
         Total energy density, summed over all input grid points.
         """
+        spin_polarized = n.shape[0] == 2
+        _apply = (
+            self._apply_spin
+            if (spin_polarized and (self._apply_spin is not None))
+            else self._apply
+        )
+        assert _apply is not None  # Derived class should override if no _apply provided
+        return _apply(n, sigma, lap, tau, requires_grad, self.scale_factor)
 
 
 @lru_cache

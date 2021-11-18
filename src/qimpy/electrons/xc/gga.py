@@ -49,8 +49,8 @@ class X_PBE(SpinScaled):
         super().__init__(
             has_exchange=True,
             scale_factor=scale_factor,
-            name=f'PBE{"sol" if sol else ""} GGA exchange',
         )
+        self.report(f'PBE{"sol" if sol else ""} GGA exchange')
         self.sol = sol
 
     def compute(self, rs: torch.Tensor, s2: torch.Tensor) -> torch.Tensor:
@@ -129,8 +129,8 @@ class C_PBE(SpinInterpolated):
         super().__init__(
             has_correlation=True,
             scale_factor=scale_factor,
-            name=f'PBE{"sol" if sol else ""} GGA correlation',
         )
+        self.report(f'PBE{"sol" if sol else ""} GGA correlation')
         self.sol = sol
         self._pw = C_PW(high_precision=True, helper=True)
 

@@ -13,26 +13,26 @@ class KE_TF(Functional):
 
     def __init__(self, scale_factor: float = 1.0) -> None:
         super().__init__(
-            has_kinetic=True, scale_factor=scale_factor, name="Thomas-Fermi LDA KE"
+            has_kinetic=True, scale_factor=scale_factor, _apply=torch.jit.script(_ke_tf)
         )
+        self.report("Thomas-Fermi LDA KE")
 
-    def __call__(
-        self,
-        n: torch.Tensor,
-        sigma: torch.Tensor,
-        lap: torch.Tensor,
-        tau: torch.Tensor,
-        requires_grad: bool,
-    ) -> float:
-        n_spins = n.shape[0]
-        prefactor = (
-            0.3 * ((3 * (np.pi ** 2) * n_spins) ** (2.0 / 3.0)) * self.scale_factor
-        )
-        n.requires_grad_(requires_grad)
-        E = prefactor * (n ** (5.0 / 3)).sum()
-        if requires_grad:
-            E.backward()  # updates n.grad
-        return E.item()
+
+def _ke_tf(
+    n: torch.Tensor,
+    sigma: torch.Tensor,
+    lap: torch.Tensor,
+    tau: torch.Tensor,
+    requires_grad: bool,
+    scale_factor: float,
+) -> float:
+    n_spins = n.shape[0]
+    prefactor = 0.3 * ((3 * (np.pi ** 2) * n_spins) ** (2.0 / 3.0)) * scale_factor
+    n.requires_grad_(requires_grad)
+    E = prefactor * (n ** (5.0 / 3)).sum()
+    if requires_grad:
+        E.backward()  # updates n.grad
+    return E.item()
 
 
 class X_Slater(Functional):
@@ -40,24 +40,29 @@ class X_Slater(Functional):
 
     def __init__(self, scale_factor: float = 1.0) -> None:
         super().__init__(
-            has_exchange=True, scale_factor=scale_factor, name="Slater LDA exchange"
+            has_exchange=True,
+            scale_factor=scale_factor,
+            _apply=torch.jit.script(_x_slater),
         )
+        self.report("Slater LDA exchange")
 
-    def __call__(
-        self,
-        n: torch.Tensor,
-        sigma: torch.Tensor,
-        lap: torch.Tensor,
-        tau: torch.Tensor,
-        requires_grad: bool,
-    ) -> float:
-        n_spins = n.shape[0]
-        prefactor = -0.75 * ((3 * n_spins / np.pi) ** (1.0 / 3.0)) * self.scale_factor
-        n.requires_grad_(requires_grad)
-        E = prefactor * (n ** (4.0 / 3)).sum()
-        if requires_grad:
-            E.backward()  # updates n.grad
-        return E.item()
+
+def _x_slater(
+    n: torch.Tensor,
+    sigma: torch.Tensor,
+    lap: torch.Tensor,
+    tau: torch.Tensor,
+    requires_grad: bool,
+    scale_factor: float,
+) -> float:
+    """Internal implementation of Slater exchange"""
+    n_spins = n.shape[0]
+    prefactor = -0.75 * ((3 * n_spins / np.pi) ** (1.0 / 3.0)) * scale_factor
+    n.requires_grad_(requires_grad)
+    E = prefactor * (n ** (4.0 / 3)).sum()
+    if requires_grad:
+        E.backward()  # updates n.grad
+    return E.item()
 
 
 class SpinInterpolated(Functional):
@@ -136,8 +141,8 @@ class C_PZ(SpinInterpolated):
         super().__init__(
             has_correlation=True,
             scale_factor=scale_factor,
-            name="Perdew-Zunger LDA correlation",
         )
+        self.report("Perdew-Zunger LDA correlation")
         self._params = torch.tensor(
             [
                 [0.0311, 0.01555],  # a
@@ -185,10 +190,9 @@ class C_PW(SpinInterpolated):
         super().__init__(
             has_correlation=True,
             scale_factor=scale_factor,
-            name=(
-                "" if helper else "Perdew-Zunger LDA correlation"  # skip printing name
-            ),
         )
+        if not helper:
+            self.report("Perdew-Zunger LDA correlation")
         if not high_precision:
             self.stiffness_scale = 1.0 / 1.709921  # limit to single precision
         self._params = torch.tensor(
@@ -227,8 +231,8 @@ class C_VWN(SpinInterpolated):
         super().__init__(
             has_correlation=True,
             scale_factor=scale_factor,
-            name="Vosko-Wilk-Nusair LDA correlation",
         )
+        self.report("Vosko-Wilk-Nusair LDA correlation")
         self._params = torch.tensor(
             [
                 [0.0310907, 0.01554535, 1.0 / (6.0 * (np.pi ** 2))],  # A
@@ -269,8 +273,8 @@ class XC_Teter(Functional):
             has_exchange=True,
             has_correlation=True,
             scale_factor=scale_factor,
-            name="Teter93 LSD exchange+correlation",
         )
+        self.report("Teter93 LSD exchange+correlation")
         self._params = torch.tensor(
             [
                 [0.4581652932831429, 0.119086804055547],  # a0  (para, ferro-para)
@@ -291,26 +295,47 @@ class XC_Teter(Functional):
         tau: torch.Tensor,
         requires_grad: bool,
     ) -> float:
+        return XC_Teter.call(
+            n,
+            sigma,
+            lap,
+            tau,
+            requires_grad,
+            scale_factor=self.scale_factor,
+            _params=self._params.to(n.device),
+        )
+
+    @staticmethod
+    @torch.jit.script
+    def call(
+        n: torch.Tensor,
+        sigma: torch.Tensor,
+        lap: torch.Tensor,
+        tau: torch.Tensor,
+        requires_grad: bool,
+        scale_factor: float,
+        _params: torch.Tensor,
+    ):
         n_spins = n.shape[0]
         n.requires_grad_(requires_grad)
         n_tot = n.sum(dim=0)
         rs = ((4.0 * np.pi / 3.0) * n_tot) ** (-1.0 / 3)
         # Spin interpolate the parameters (if needed):
         if n_spins == 1:
-            params = self._params[:, 0].to(n.device)
+            params = _params[:, 0]
         else:
             zeta = (n[0] - n[1]) / n_tot
             spin_interp = ((1 + zeta) ** (4.0 / 3) + (1 - zeta) ** (4.0 / 3) - 2.0) / (
                 2.0 ** (4.0 / 3) - 2.0
             )
-            params_para, params_dferro = self._params.to(n.device).unbind(dim=-1)
+            params_para, params_dferro = _params.unbind(dim=-1)
             params = params_para + spin_interp[..., None] * params_dferro
         # Pade approximant with spin-interpolated parameters:
         a0, a1, a2, a3, b2, b3, b4 = params.unbind(dim=-1)
         minus_exc = (a0 + rs * (a1 + rs * (a2 + rs * a3))) / (
             rs * (1.0 + rs * (b2 + rs * (b3 + rs * b4)))
         )
-        E = (minus_exc * n_tot).sum() * (-self.scale_factor)
+        E = (minus_exc * n_tot).sum() * (-scale_factor)
         if requires_grad:
             E.backward()  # updates n.grad
         return E.item()

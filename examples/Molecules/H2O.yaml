@@ -14,7 +14,7 @@ electrons:
   basis:
     real-wavefunctions: yes
   xc:
-    functional: gga-xc-pbe
+    functional: lda-pz #lda-teter #lda-xc-teter93
   scf:
     mix-density: no  # mix potential instead
 
