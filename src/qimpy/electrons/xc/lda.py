@@ -39,8 +39,8 @@ class C_PZ(Functional):
         super().__init__(
             has_correlation=True,
             scale_factor=scale_factor,
-            _apply=torch.jit.script(SpinUnpolarized(_C_PZ)),
-            _apply_spin=torch.jit.script(SpinInterpolate2(_C_PZ)),
+            _apply=torch.jit.script(SpinUnpolarized(SpinInterpolate1, _C_PZ)),
+            _apply_spin=torch.jit.script(SpinPolarized(SpinInterpolate2, _C_PZ)),
         )
         self.report("Perdew-Zunger LDA correlation")
 
@@ -61,9 +61,11 @@ class C_PW(Functional):
         super().__init__(
             has_correlation=True,
             scale_factor=scale_factor,
-            _apply=torch.jit.script(SpinUnpolarized(_C_PW, high_precision)),
+            _apply=torch.jit.script(
+                SpinUnpolarized(SpinInterpolate1, _C_PW, high_precision)
+            ),
             _apply_spin=torch.jit.script(
-                SpinInterpolate3(_C_PW, stiffness_scale, high_precision)
+                SpinPolarized(SpinInterpolate3, _C_PW, stiffness_scale, high_precision)
             ),
         )
         self.report("Perdew-Zunger LDA correlation")
@@ -76,8 +78,8 @@ class C_VWN(Functional):
         super().__init__(
             has_correlation=True,
             scale_factor=scale_factor,
-            _apply=torch.jit.script(SpinUnpolarized(_C_VWN)),
-            _apply_spin=torch.jit.script(SpinInterpolate3(_C_VWN)),
+            _apply=torch.jit.script(SpinUnpolarized(SpinInterpolate1, _C_VWN)),
+            _apply_spin=torch.jit.script(SpinPolarized(SpinInterpolate3, _C_VWN)),
         )
         self.report("Vosko-Wilk-Nusair LDA correlation")
 
@@ -90,13 +92,13 @@ class XC_Teter(Functional):
             has_exchange=True,
             has_correlation=True,
             scale_factor=scale_factor,
-            _apply=torch.jit.script(_xc_teter_unpolarized),
-            _apply_spin=torch.jit.script(_xc_teter_polarized),
+            _apply=torch.jit.script(SpinUnpolarized(_XC_TeterUnpolarized)),
+            _apply_spin=torch.jit.script(SpinPolarized(_XC_TeterPolarized)),
         )
         self.report("Teter93 LSD exchange+correlation")
 
 
-# ----- Internal implementations -----
+# ----- Internal exchange/kinetic implementations -----
 
 
 def _ke_tf(
@@ -147,12 +149,15 @@ def get_spin_interp(zeta: torch.Tensor) -> torch.Tensor:
     return ((1.0 + zeta) ** exponent + (1.0 - zeta) ** exponent - 2.0) * scale
 
 
-class SpinUnpolarized(torch.nn.Module):
-    """Wrapper for spin-unpolarized correlation (no spin interpolation)."""
+# ----- Internal correlation/combined-XC implementations -----
 
-    def __init__(self, Compute: type, *args) -> None:
+
+class SpinUnpolarized(torch.nn.Module):
+    """Unpolarized LDA correlation wrapper."""
+
+    def __init__(self, Get_ec: type, *args) -> None:
         super().__init__()
-        self.compute_para = Compute("para", *args)
+        self.get_ec = Get_ec(*args)
 
     def forward(
         self,
@@ -167,25 +172,19 @@ class SpinUnpolarized(torch.nn.Module):
         # Compute rs:
         n_tot = n[0]
         rs = get_rs(n_tot)
-        # Compute correlation:
-        ec = self.compute_para(rs)
         # Compute energy:
-        E = (n_tot * ec).sum() * scale_factor
+        E = (n_tot * self.get_ec(rs, rs)).sum() * scale_factor
         if requires_grad:
             E.backward()  # updates n.grad
         return E.item()
 
 
-class SpinInterpolate2(torch.nn.Module):
-    """Spin interpolate correlation using 2 channels: para and ferro."""
+class SpinPolarized(torch.nn.Module):
+    """Polarized LDA correlation wrapper."""
 
-    scale_factor: torch.jit.Final[float]
-
-    def __init__(self, Compute: type, *args) -> None:
+    def __init__(self, Get_ec: type, *args) -> None:
         super().__init__()
-        self.scale_factor = 1.0
-        self.compute_para = Compute("para", *args)
-        self.compute_ferro = Compute("ferro", *args)
+        self.get_ec = Get_ec(*args)
 
     def forward(
         self,
@@ -201,16 +200,38 @@ class SpinInterpolate2(torch.nn.Module):
         n_tot = n[0] + n[1]
         rs = get_rs(n_tot)
         zeta = (n[0] - n[1]) / n_tot
+        # Compute energy:
+        E = (n_tot * self.get_ec(rs, zeta)).sum() * scale_factor
+        if requires_grad:
+            E.backward()  # updates n.grad
+        return E.item()
+
+
+class SpinInterpolate1(torch.nn.Module):
+    """Correlation with single spin channel: para (no interpolation)."""
+
+    def __init__(self, Compute: type, *args) -> None:
+        super().__init__()
+        self.compute_para = Compute("para", *args)
+
+    def forward(self, rs: torch.Tensor, zeta: torch.Tensor) -> torch.Tensor:
+        return self.compute_para(rs)
+
+
+class SpinInterpolate2(torch.nn.Module):
+    """Spin interpolate correlation using 2 channels: para and ferro."""
+
+    def __init__(self, Compute: type, *args) -> None:
+        super().__init__()
+        self.compute_para = Compute("para", *args)
+        self.compute_ferro = Compute("ferro", *args)
+
+    def forward(self, rs: torch.Tensor, zeta: torch.Tensor) -> torch.Tensor:
         # Calculate each spin channel:
         ec_para = self.compute_para(rs)
         ec_ferro = self.compute_ferro(rs)
         # Interpolate between spin channels:
-        ec = ec_para + get_spin_interp(zeta) * (ec_ferro - ec_para)
-        # Compute energy:
-        E = (n_tot * ec).sum() * scale_factor
-        if requires_grad:
-            E.backward()  # updates n.grad
-        return E.item()
+        return ec_para + get_spin_interp(zeta) * (ec_ferro - ec_para)
 
 
 class SpinInterpolate3(torch.nn.Module):
@@ -227,20 +248,7 @@ class SpinInterpolate3(torch.nn.Module):
         self.compute_ferro = Compute("ferro", *args)
         self.compute_stiff = Compute("stiff", *args)
 
-    def forward(
-        self,
-        n: torch.Tensor,
-        sigma: torch.Tensor,
-        lap: torch.Tensor,
-        tau: torch.Tensor,
-        requires_grad: bool,
-        scale_factor: float,
-    ) -> float:
-        n.requires_grad_(requires_grad)
-        # Compute rs and zeta:
-        n_tot = n[0] + n[1]
-        rs = get_rs(n_tot)
-        zeta = (n[0] - n[1]) / n_tot
+    def forward(self, rs: torch.Tensor, zeta: torch.Tensor) -> torch.Tensor:
         # Calculate each spin channel:
         ec_para = self.compute_para(rs)
         ec_ferro = self.compute_ferro(rs)
@@ -250,12 +258,7 @@ class SpinInterpolate3(torch.nn.Module):
         zeta4 = zeta ** 4
         w1 = zeta4 * spin_interp
         w2 = (zeta4 - 1.0) * spin_interp * self.stiffness_scale
-        ec = ec_para + w1 * (ec_ferro - ec_para) + w2 * ec_stiff
-        # Compute energy:
-        E = (n_tot * ec).sum() * scale_factor
-        if requires_grad:
-            E.backward()  # updates n.grad
-        return E.item()
+        return ec_para + w1 * (ec_ferro - ec_para) + w2 * ec_stiff
 
 
 class _C_PZ(torch.nn.Module):
@@ -358,63 +361,38 @@ class _C_VWN(torch.nn.Module):
         )
 
 
-def _xc_teter_unpolarized(
-    n: torch.Tensor,
-    sigma: torch.Tensor,
-    lap: torch.Tensor,
-    tau: torch.Tensor,
-    requires_grad: bool,
-    scale_factor: float,
-) -> float:
+class _XC_TeterUnpolarized(torch.nn.Module):
     """Internal JIT-friendly implementation of unpolarized Teter functional."""
-    n.requires_grad_(requires_grad)
-    n_tot = n[0]
-    rs = get_rs(n_tot)
-    # Constant parameters in unpolarized case:
-    a0 = 0.4581652932831429
-    a1 = 2.217058676663745
-    a2 = 0.7405551735357053
-    a3 = 0.01968227878617998
-    b2 = 4.504130959426697
-    b3 = 1.110667363742916
-    b4 = 0.02359291751427506
-    # Pade approximant:
-    minus_exc = (a0 + rs * (a1 + rs * (a2 + rs * a3))) / (
-        rs * (1.0 + rs * (b2 + rs * (b3 + rs * b4)))
-    )
-    E = (minus_exc * n_tot).sum() * (-scale_factor)
-    if requires_grad:
-        E.backward()  # updates n.grad
-    return E.item()
+
+    def forward(self, rs: torch.Tensor, zeta: torch.Tensor) -> torch.Tensor:
+        # Constant parameters in unpolarized case:
+        a0 = 0.4581652932831429
+        a1 = 2.217058676663745
+        a2 = 0.7405551735357053
+        a3 = 0.01968227878617998
+        b2 = 4.504130959426697
+        b3 = 1.110667363742916
+        b4 = 0.02359291751427506
+        # Pade approximant:
+        return -(a0 + rs * (a1 + rs * (a2 + rs * a3))) / (
+            rs * (1.0 + rs * (b2 + rs * (b3 + rs * b4)))
+        )
 
 
-def _xc_teter_polarized(
-    n: torch.Tensor,
-    sigma: torch.Tensor,
-    lap: torch.Tensor,
-    tau: torch.Tensor,
-    requires_grad: bool,
-    scale_factor: float,
-) -> float:
+class _XC_TeterPolarized(torch.nn.Module):
     """Internal JIT-friendly implementation of spin-polarized Teter functional."""
-    n.requires_grad_(requires_grad)
-    n_tot = n[0] + n[1]
-    rs = get_rs(n_tot)
-    zeta = (n[0] - n[1]) / n_tot
-    spin_interp = get_spin_interp(zeta)
-    # Spin-interpolate parameters:
-    a0 = 0.4581652932831429 + spin_interp * 0.119086804055547
-    a1 = 2.217058676663745 + spin_interp * 0.6157402568883345
-    a2 = 0.7405551735357053 + spin_interp * 0.1574201515892867
-    a3 = 0.01968227878617998 + spin_interp * 0.003532336663397157
-    b2 = 4.504130959426697 + spin_interp * 0.2673612973836267
-    b3 = 1.110667363742916 + spin_interp * 0.2052004607777787
-    b4 = 0.02359291751427506 + spin_interp * 0.004200005045691381
-    # Pade approximant:
-    minus_exc = (a0 + rs * (a1 + rs * (a2 + rs * a3))) / (
-        rs * (1.0 + rs * (b2 + rs * (b3 + rs * b4)))
-    )
-    E = (minus_exc * n_tot).sum() * (-scale_factor)
-    if requires_grad:
-        E.backward()  # updates n.grad
-    return E.item()
+
+    def forward(self, rs: torch.Tensor, zeta: torch.Tensor) -> torch.Tensor:
+        spin_interp = get_spin_interp(zeta)
+        # Spin-interpolate parameters:
+        a0 = 0.4581652932831429 + spin_interp * 0.119086804055547
+        a1 = 2.217058676663745 + spin_interp * 0.6157402568883345
+        a2 = 0.7405551735357053 + spin_interp * 0.1574201515892867
+        a3 = 0.01968227878617998 + spin_interp * 0.003532336663397157
+        b2 = 4.504130959426697 + spin_interp * 0.2673612973836267
+        b3 = 1.110667363742916 + spin_interp * 0.2052004607777787
+        b4 = 0.02359291751427506 + spin_interp * 0.004200005045691381
+        # Pade approximant:
+        return -(a0 + rs * (a1 + rs * (a2 + rs * a3))) / (
+            rs * (1.0 + rs * (b2 + rs * (b3 + rs * b4)))
+        )
