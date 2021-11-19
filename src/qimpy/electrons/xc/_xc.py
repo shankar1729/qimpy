@@ -267,35 +267,35 @@ def _get_functionals(name: str, scale_factor: float) -> List[Union[Functional, s
         # Initialize appropriate combination of internal functionals:
         if key == "lda_pz":
             return [
-                lda.X_Slater(scale_factor=scale_factor),
-                lda.C_PZ(scale_factor=scale_factor),
+                lda.x_slater(scale_factor=scale_factor),
+                lda.c_pz(scale_factor=scale_factor),
             ]
         elif key == "lda_pw":
             return [
-                lda.X_Slater(scale_factor=scale_factor),
-                lda.C_PW(scale_factor=scale_factor, high_precision=False),
+                lda.x_slater(scale_factor=scale_factor),
+                lda.c_pw(scale_factor=scale_factor, high_precision=False),
             ]
         elif key == "lda_pw_prec":
             return [
-                lda.X_Slater(scale_factor=scale_factor),
-                lda.C_PW(scale_factor=scale_factor, high_precision=True),
+                lda.x_slater(scale_factor=scale_factor),
+                lda.c_pw(scale_factor=scale_factor, high_precision=True),
             ]
         elif key == "lda_vwn":
             return [
-                lda.X_Slater(scale_factor=scale_factor),
-                lda.C_VWN(scale_factor=scale_factor),
+                lda.x_slater(scale_factor=scale_factor),
+                lda.c_vwn(scale_factor=scale_factor),
             ]
         elif key == "lda_teter":
-            return [lda.XC_Teter(scale_factor=scale_factor)]
+            return [lda.xc_teter(scale_factor=scale_factor)]
         elif key == "gga_pbe":
             return [
-                gga.X_PBE(scale_factor=scale_factor, sol=False),
-                gga.C_PBE(scale_factor=scale_factor, sol=False),
+                gga.x_pbe(scale_factor=scale_factor, sol=False),
+                gga.c_pbe(scale_factor=scale_factor, sol=False),
             ]
         else:  # key == 'gga_pbesol'
             return [
-                gga.X_PBE(scale_factor=scale_factor, sol=True),
-                gga.C_PBE(scale_factor=scale_factor, sol=True),
+                gga.x_pbe(scale_factor=scale_factor, sol=True),
+                gga.c_pbe(scale_factor=scale_factor, sol=True),
             ]
     else:
         # Check LibXC functionals:

@@ -1,101 +1,87 @@
 """Internal LDA implementations."""
 # List exported symbols for doc generation
-__all__ = ["KE_TF", "X_Slater", "C_PZ", "C_PW", "C_VWN", "XC_Teter"]
+__all__ = ["ke_tf", "x_slater", "c_pz", "c_pw", "c_vwn", "xc_teter"]
 
 from .functional import Functional
 import numpy as np
 import torch
 
 
-class KE_TF(Functional):
-    """Thomas-Fermi kinetic energy functional."""
-
-    def __init__(self, scale_factor: float = 1.0) -> None:
-        super().__init__(
-            has_kinetic=True, scale_factor=scale_factor, _apply=torch.jit.script(_ke_tf)
-        )
-        self.report("Thomas-Fermi LDA KE")
-
-
-class X_Slater(Functional):
-    """Slater exchange functional."""
-
-    def __init__(self, scale_factor: float = 1.0) -> None:
-        super().__init__(
-            has_exchange=True,
-            scale_factor=scale_factor,
-            _apply=torch.jit.script(_x_slater),
-        )
-        self.report("Slater LDA exchange")
+def ke_tf(scale_factor: float = 1.0) -> Functional:
+    """Create Thomas-Fermi kinetic energy functional."""
+    return Functional(
+        name="Thomas-Fermi LDA KE",
+        has_kinetic=True,
+        scale_factor=scale_factor,
+        _apply=torch.jit.script(_ke_tf),
+    )
 
 
-class C_PZ(Functional):
-    """Perdew-Zunger LDA correlation functional."""
-
-    __slots__ = ("_params",)
-    _params: torch.Tensor  # PZ functional parameters
-
-    def __init__(self, scale_factor: float = 1.0) -> None:
-        super().__init__(
-            has_correlation=True,
-            scale_factor=scale_factor,
-            _apply=torch.jit.script(SpinUnpolarized(SpinInterpolate1, _C_PZ)),
-            _apply_spin=torch.jit.script(SpinPolarized(SpinInterpolate2, _C_PZ)),
-        )
-        self.report("Perdew-Zunger LDA correlation")
+def x_slater(scale_factor: float = 1.0) -> Functional:
+    """Create Slater exchange functional."""
+    return Functional(
+        name="Slater LDA exchange",
+        has_exchange=True,
+        scale_factor=scale_factor,
+        _apply=torch.jit.script(_x_slater),
+    )
 
 
-class C_PW(Functional):
-    """Perdew-Wang LDA correlation functional."""
-
-    def __init__(self, high_precision: bool, scale_factor: float = 1.0) -> None:
-        """Initialize PW correlation functional.
-        Here, `high_precision` controls whether parameters are at the
-        full precision (if True) as used within the PBE GGA, or at the
-        original precision (if False) as in the original PW-LDA paper."""
-        stiffness_scale = (
-            0.0  # use the default full precision
-            if high_precision
-            else 1.0 / 1.709921  # limit to single precision
-        )
-        super().__init__(
-            has_correlation=True,
-            scale_factor=scale_factor,
-            _apply=torch.jit.script(
-                SpinUnpolarized(SpinInterpolate1, _C_PW, high_precision)
-            ),
-            _apply_spin=torch.jit.script(
-                SpinPolarized(SpinInterpolate3, _C_PW, stiffness_scale, high_precision)
-            ),
-        )
-        self.report("Perdew-Zunger LDA correlation")
+def c_pz(scale_factor: float = 1.0) -> Functional:
+    """Create Perdew-Zunger LDA correlation functional."""
+    return Functional(
+        name="Perdew-Zunger LDA correlation",
+        has_correlation=True,
+        scale_factor=scale_factor,
+        _apply=torch.jit.script(SpinUnpolarized(SpinInterpolate1, _C_PZ)),
+        _apply_spin=torch.jit.script(SpinPolarized(SpinInterpolate2, _C_PZ)),
+    )
 
 
-class C_VWN(Functional):
-    """Vosko-Wilk-Nusair LDA correlation functional."""
+def c_pw(high_precision: bool, scale_factor: float = 1.0) -> Functional:
+    """Create Perdew-Wang LDA correlation functional.
+    Here, `high_precision` controls whether parameters are at the
+    full precision (if True) as used within the PBE GGA, or at the
+    original precision (if False) as in the original PW-LDA paper."""
+    stiffness_scale = (
+        0.0  # use the default full precision
+        if high_precision
+        else 1.0 / 1.709921  # limit to single precision
+    )
+    return Functional(
+        name="Perdew-Zunger LDA correlation",
+        has_correlation=True,
+        scale_factor=scale_factor,
+        _apply=torch.jit.script(
+            SpinUnpolarized(SpinInterpolate1, _C_PW, high_precision)
+        ),
+        _apply_spin=torch.jit.script(
+            SpinPolarized(SpinInterpolate3, _C_PW, stiffness_scale, high_precision)
+        ),
+    )
 
-    def __init__(self, scale_factor: float = 1.0) -> None:
-        super().__init__(
-            has_correlation=True,
-            scale_factor=scale_factor,
-            _apply=torch.jit.script(SpinUnpolarized(SpinInterpolate1, _C_VWN)),
-            _apply_spin=torch.jit.script(SpinPolarized(SpinInterpolate3, _C_VWN)),
-        )
-        self.report("Vosko-Wilk-Nusair LDA correlation")
+
+def c_vwn(scale_factor: float = 1.0) -> Functional:
+    """Create Vosko-Wilk-Nusair LDA correlation functional."""
+    return Functional(
+        name="Vosko-Wilk-Nusair LDA correlation",
+        has_correlation=True,
+        scale_factor=scale_factor,
+        _apply=torch.jit.script(SpinUnpolarized(SpinInterpolate1, _C_VWN)),
+        _apply_spin=torch.jit.script(SpinPolarized(SpinInterpolate3, _C_VWN)),
+    )
 
 
-class XC_Teter(Functional):
-    """Teter LSDA functional."""
-
-    def __init__(self, scale_factor: float = 1.0) -> None:
-        super().__init__(
-            has_exchange=True,
-            has_correlation=True,
-            scale_factor=scale_factor,
-            _apply=torch.jit.script(SpinUnpolarized(_XC_TeterUnpolarized)),
-            _apply_spin=torch.jit.script(SpinPolarized(_XC_TeterPolarized)),
-        )
-        self.report("Teter93 LSD exchange+correlation")
+def xc_teter(scale_factor: float = 1.0) -> Functional:
+    """Create Teter LSDA functional."""
+    return Functional(
+        name="Teter93 LSD exchange+correlation",
+        has_exchange=True,
+        has_correlation=True,
+        scale_factor=scale_factor,
+        _apply=torch.jit.script(SpinUnpolarized(_XC_TeterUnpolarized)),
+        _apply_spin=torch.jit.script(SpinPolarized(_XC_TeterPolarized)),
+    )
 
 
 # ----- Internal exchange/kinetic implementations -----

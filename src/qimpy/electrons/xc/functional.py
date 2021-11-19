@@ -40,16 +40,20 @@ class Functional:
     has_kinetic: bool = False  #: Whether functional includes kinetic energy
     has_energy: bool = True  #: Whether functional has meaningful total energy
     scale_factor: float = 1.0  #: Scale factor in energy and potential
+    name: str = ""  #: Optional name of functional used for reporting initialization
     _apply: Optional[FunctionalApply] = None  #: Internal callable to evaluate XC
     _apply_spin: Optional[
         FunctionalApply
     ] = None  #: If provided, override _apply for spin-polarized case
 
-    def report(self, name: str) -> None:
-        scale_str = (
-            "" if (self.scale_factor == 1.0) else f" (scaled by {self.scale_factor})"
-        )
-        qp.log.info(f"  {name} functional{scale_str}.")
+    def __post_init__(self) -> None:
+        if self.name:
+            scale_str = (
+                ""
+                if (self.scale_factor == 1.0)
+                else f" (scaled by {self.scale_factor})"
+            )
+            qp.log.info(f"  {self.name} functional{scale_str}.")
 
     def __call__(
         self,

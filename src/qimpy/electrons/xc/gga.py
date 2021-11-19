@@ -1,6 +1,6 @@
 """Internal GGA implementations."""
 # List exported symbols for doc generation
-__all__ = ["X_PBE", "C_PBE"]
+__all__ = ["x_pbe", "c_pbe"]
 
 from .functional import Functional
 from .lda import get_rs, _C_PW, SpinInterpolate1, SpinInterpolate3
@@ -8,31 +8,27 @@ import numpy as np
 import torch
 
 
-class X_PBE(Functional):
-    """PBE/PBEsol exchange."""
-
-    def __init__(self, sol: bool, scale_factor: float = 1.0) -> None:
-        super().__init__(
-            has_exchange=True,
-            needs_sigma=True,
-            scale_factor=scale_factor,
-            _apply=torch.jit.script(SpinScaled(_X_PBE, sol)),
-        )
-        self.report(f'PBE{"sol" if sol else ""} GGA exchange')
+def x_pbe(sol: bool, scale_factor: float = 1.0) -> Functional:
+    """Create PBE/PBEsol exchange functional."""
+    return Functional(
+        name=f'PBE{"sol" if sol else ""} GGA exchange',
+        has_exchange=True,
+        needs_sigma=True,
+        scale_factor=scale_factor,
+        _apply=torch.jit.script(SpinScaled(_X_PBE, sol)),
+    )
 
 
-class C_PBE(Functional):
-    """PBE/PBEsol correlation."""
-
-    def __init__(self, sol: bool, scale_factor: float = 1.0) -> None:
-        super().__init__(
-            has_correlation=True,
-            needs_sigma=True,
-            scale_factor=scale_factor,
-            _apply=torch.jit.script(SpinUnpolarized(_C_PBE, SpinInterpolate1, sol)),
-            _apply_spin=torch.jit.script(SpinPolarized(_C_PBE, SpinInterpolate3, sol)),
-        )
-        self.report(f'PBE{"sol" if sol else ""} GGA correlation')
+def c_pbe(sol: bool, scale_factor: float = 1.0) -> Functional:
+    """Create PBE/PBEsol correlation functional."""
+    return Functional(
+        name=f'PBE{"sol" if sol else ""} GGA correlation',
+        has_correlation=True,
+        needs_sigma=True,
+        scale_factor=scale_factor,
+        _apply=torch.jit.script(SpinUnpolarized(_C_PBE, SpinInterpolate1, sol)),
+        _apply_spin=torch.jit.script(SpinPolarized(_C_PBE, SpinInterpolate3, sol)),
+    )
 
 
 # ----- Internal exchange/kinetic implementations -----
