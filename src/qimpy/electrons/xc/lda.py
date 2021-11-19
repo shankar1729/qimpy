@@ -297,7 +297,7 @@ class _C_PW(torch.nn.Module):
     beta3: torch.jit.Final[float]
     beta4: torch.jit.Final[float]
 
-    def __init__(self, spin_mode: str, high_precision: bool):
+    def __init__(self, spin_mode: str, high_precision: bool = True):
         super().__init__()
         # Select A based on precision setting (and store 2A):
         self.A2 = 2.0 * {

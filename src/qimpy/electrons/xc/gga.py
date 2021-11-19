@@ -1,27 +1,58 @@
 """Internal GGA implementations."""
 # List exported symbols for doc generation
-__all__ = ["SpinScaled", "SpinInterpolated", "X_PBE", "C_PBE"]
+__all__ = ["X_PBE", "C_PBE"]
 
 from .functional import Functional
-from .lda import C_PW
+from .lda import get_rs, _C_PW, SpinInterpolate1, SpinInterpolate3
 import numpy as np
 import torch
-from abc import abstractmethod
 
 
-class SpinScaled(Functional):
-    """Abstract base class of spin-scaled (exchange, KE) functionals."""
+class X_PBE(Functional):
+    """PBE/PBEsol exchange."""
 
-    def __init__(self, **kwargs) -> None:
-        super().__init__(needs_sigma=True, **kwargs)
+    def __init__(self, sol: bool, scale_factor: float = 1.0) -> None:
+        super().__init__(
+            has_exchange=True,
+            needs_sigma=True,
+            scale_factor=scale_factor,
+            _apply=torch.jit.script(SpinScaled(_X_PBE, sol)),
+        )
+        self.report(f'PBE{"sol" if sol else ""} GGA exchange')
 
-    def __call__(
+
+class C_PBE(Functional):
+    """PBE/PBEsol correlation."""
+
+    def __init__(self, sol: bool, scale_factor: float = 1.0) -> None:
+        super().__init__(
+            has_correlation=True,
+            needs_sigma=True,
+            scale_factor=scale_factor,
+            _apply=torch.jit.script(SpinUnpolarized(_C_PBE, SpinInterpolate1, sol)),
+            _apply_spin=torch.jit.script(SpinPolarized(_C_PBE, SpinInterpolate3, sol)),
+        )
+        self.report(f'PBE{"sol" if sol else ""} GGA correlation')
+
+
+# ----- Internal exchange/kinetic implementations -----
+
+
+class SpinScaled(torch.nn.Module):
+    """Common wrapper for spin-scaled (exchange-like) GGA functionals."""
+
+    def __init__(self, Compute: type, *args) -> None:
+        super().__init__()
+        self.compute = Compute(*args)
+
+    def forward(
         self,
         n: torch.Tensor,
         sigma: torch.Tensor,
         lap: torch.Tensor,
         tau: torch.Tensor,
         requires_grad: bool,
+        scale_factor: float,
     ) -> float:
         n_spins = n.shape[0]
         n.requires_grad_(requires_grad)
@@ -29,79 +60,97 @@ class SpinScaled(Functional):
         rs = ((n_spins * 4.0 * np.pi / 3.0) * n) ** (-1.0 / 3)  # rs for each spin
         s2 = ((18.0 * np.pi) ** (-2.0 / 3)) * sigma[::2] * (rs / n).square()
         e = self.compute(rs, s2)
-        E = (e * n).sum() * self.scale_factor
+        E = (e * n).sum() * scale_factor
         if requires_grad:
             E.backward()  # updates n.grad and sigma.grad
         return E.item()
 
-    @abstractmethod
-    def compute(self, rs: torch.Tensor, s2: torch.Tensor) -> torch.Tensor:
-        """Compute energy (per-particle) of spin-scaled functional."""
+
+def get_e_slater(rs: torch.Tensor) -> torch.Tensor:
+    """Compute per-particle slater exchange energy."""
+    return (-0.75 * ((1.5 / np.pi) ** (2.0 / 3))) / rs
 
 
-class X_PBE(SpinScaled):
-    """PBE/PBEsol exchange."""
+class _X_PBE(torch.nn.Module):
+    """Internal JIT-friendly implementation of PBE/PBEsol exchange."""
 
-    __slots__ = ("sol",)
-    sol: bool  # PBEsol if True; PBE otherwise
+    mu: torch.jit.Final[float]
 
-    def __init__(self, sol: bool, scale_factor: float = 1.0) -> None:
-        super().__init__(
-            has_exchange=True,
-            scale_factor=scale_factor,
-        )
-        self.report(f'PBE{"sol" if sol else ""} GGA exchange')
-        self.sol = sol
+    def __init__(self, sol: bool) -> None:
+        super().__init__()
+        self.mu = 10.0 / 81 if sol else 0.2195149727645171
 
-    def compute(self, rs: torch.Tensor, s2: torch.Tensor) -> torch.Tensor:
+    def forward(self, rs: torch.Tensor, s2: torch.Tensor) -> torch.Tensor:
         kappa = 0.804
-        mu_by_kappa = (10.0 / 81 if self.sol else 0.2195149727645171) / kappa
-        eSlater = (-0.75 * ((1.5 / np.pi) ** (2.0 / 3))) / rs
-        F = (1.0 + kappa) - kappa / (1.0 + mu_by_kappa * s2)  # GGA enhancement
-        return eSlater * F
+        F = (1.0 + kappa) - kappa / (1.0 + (self.mu / kappa) * s2)  # GGA enhancement
+        return F * get_e_slater(rs)
 
 
-class SpinInterpolated(Functional):
-    """Abstract base class of spin-interpolated (correlation) functionals."""
+# ----- Internal correlation implementations -----
 
-    def __init__(self, **kwargs) -> None:
-        super().__init__(needs_sigma=True, **kwargs)
 
-    def __call__(
+class SpinUnpolarized(torch.nn.Module):
+    """Unpolarized GGA correlation wrapper."""
+
+    def __init__(self, Get_ec: type, *args) -> None:
+        super().__init__()
+        self.get_ec = Get_ec(*args)
+
+    def forward(
         self,
         n: torch.Tensor,
         sigma: torch.Tensor,
         lap: torch.Tensor,
         tau: torch.Tensor,
         requires_grad: bool,
+        scale_factor: float,
     ) -> float:
-        n_spins = n.shape[0]
         n.requires_grad_(requires_grad)
         sigma.requires_grad_(requires_grad)
         # Compute dimensionless parameters of correlation functionals:
-        n_tot = n.sum(dim=0)
-        rs = ((4.0 * np.pi / 3.0) * n_tot) ** (-1.0 / 3)
-        if n_spins == 2:
-            zeta = (n[0] - n[1]) / n_tot
-            g = 0.5 * ((1.0 + zeta) ** (2.0 / 3) + (1.0 - zeta) ** (2.0 / 3))
-            sigma_tot = sigma[0] + 2 * sigma[1] + sigma[2]
-        else:
-            zeta = torch.zeros(1, dtype=n.dtype, device=n.device)
-            g = torch.ones(1, dtype=n.dtype, device=n.device)
-            sigma_tot = sigma[0]
-        t2 = ((np.pi / 96) ** (2.0 / 3)) * sigma_tot * rs / (g * n_tot).square()
-        # Compute per-particle energy and total:
-        e = self.compute(rs, zeta, g, t2)
-        E = (e * n_tot).sum() * self.scale_factor
+        n_tot = n[0]
+        rs = get_rs(n_tot)
+        zeta = torch.zeros_like(rs)
+        g = torch.ones_like(rs)
+        sigma_tot = sigma[0]
+        t2 = ((np.pi / 96) ** (2.0 / 3)) * sigma_tot * rs / n_tot.square()
+        # Compute energy:
+        E = (n_tot * self.get_ec(rs, zeta, g, t2)).sum() * scale_factor
         if requires_grad:
             E.backward()  # updates n.grad and sigma.grad
         return E.item()
 
-    @abstractmethod
-    def compute(
-        self, rs: torch.Tensor, zeta: torch.Tensor, g: torch.Tensor, t2: torch.Tensor
-    ) -> torch.Tensor:
-        """Compute energy (per-particle) of spin-interpolated functional."""
+
+class SpinPolarized(torch.nn.Module):
+    """Polarized GGA correlation wrapper."""
+
+    def __init__(self, Get_ec: type, *args) -> None:
+        super().__init__()
+        self.get_ec = Get_ec(*args)
+
+    def forward(
+        self,
+        n: torch.Tensor,
+        sigma: torch.Tensor,
+        lap: torch.Tensor,
+        tau: torch.Tensor,
+        requires_grad: bool,
+        scale_factor: float,
+    ) -> float:
+        n.requires_grad_(requires_grad)
+        sigma.requires_grad_(requires_grad)
+        # Compute dimensionless parameters of correlation functionals:
+        n_tot = n[0] + n[1]
+        rs = get_rs(n_tot)
+        zeta = (n[0] - n[1]) / n_tot
+        g = 0.5 * ((1.0 + zeta) ** (2.0 / 3) + (1.0 - zeta) ** (2.0 / 3))
+        sigma_tot = sigma[0] + 2 * sigma[1] + sigma[2]
+        t2 = ((np.pi / 96) ** (2.0 / 3)) * sigma_tot * rs / (g * n_tot).square()
+        # Compute per-particle energy and total:
+        E = (n_tot * self.get_ec(rs, zeta, g, t2)).sum() * scale_factor
+        if requires_grad:
+            E.backward()  # updates n.grad and sigma.grad
+        return E.item()
 
 
 def PW91_H0(
@@ -118,26 +167,20 @@ def PW91_H0(
     return gamma * g3 * (1.0 + beta_by_gamma * t2 * frac).log()
 
 
-class C_PBE(SpinInterpolated):
-    """PBE/PBEsol correlation."""
+class _C_PBE(torch.nn.Module):
+    """Internal JIT-friendly implementation of PBE/PBEsol correlation."""
 
-    __slots__ = ("sol", "_pw")
-    sol: bool  #: PBEsol if True; PBE otherwise
-    _pw: C_PW  #: PW LDA correlation evaluator
+    beta: torch.jit.Final[float]
+    gamma: torch.jit.Final[float]
 
-    def __init__(self, sol: bool, scale_factor: float = 1.0) -> None:
-        super().__init__(
-            has_correlation=True,
-            scale_factor=scale_factor,
-        )
-        self.report(f'PBE{"sol" if sol else ""} GGA correlation')
-        self.sol = sol
-        self._pw = C_PW(high_precision=True, helper=True)
+    def __init__(self, SpinInterpolate: type, sol: bool):
+        super().__init__()
+        self.ec_pw = SpinInterpolate(_C_PW)
+        self.beta = 0.046 if sol else 0.06672455060314922
+        self.gamma = (1.0 - np.log(2.0)) / (np.pi ** 2)
 
-    def compute(
+    def forward(
         self, rs: torch.Tensor, zeta: torch.Tensor, g: torch.Tensor, t2: torch.Tensor
     ) -> torch.Tensor:
-        beta = 0.046 if self.sol else 0.06672455060314922
-        gamma = (1.0 - np.log(2.0)) / (np.pi ** 2)
-        ec_unif = self._pw.get_ec(rs, zeta)  # underlying LDA correlation
-        return ec_unif + PW91_H0(gamma, beta, g ** 3, t2, ec_unif)
+        ec_unif = self.ec_pw(rs, zeta)  # underlying LDA correlation
+        return ec_unif + PW91_H0(self.gamma, self.beta, g ** 3, t2, ec_unif)
