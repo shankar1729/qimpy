@@ -130,7 +130,7 @@ class Wavefunction:
     def _proj_invalidate(self) -> None:
         """Invalidate cached projections."""
         self._proj = None
-        self._proj_version = 0
+        self._proj_version = -1
 
     def _proj_is_valid(self) -> bool:
         """Check whether cached projections are still valid."""
