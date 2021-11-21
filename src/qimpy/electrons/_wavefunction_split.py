@@ -115,10 +115,10 @@ if __name__ == "__main__":
     )
 
     qp.log.info("\n--- Checking Wavefunction.split* ---")
-    n_bands = 37  # deliberately prime!
+    n_bands = 317  # deliberately prime!
     b_random_start = 8
     b_random_stop = 21  # randomize only a range of bands for testing
-    n_repeat = 50  # number of times to repeat split for benchmarking
+    n_repeat = 10  # number of times to repeat split for benchmarking
 
     # Test random wavefunction created basis-split to band-split and back:
     Cg = qp.electrons.Wavefunction(system.electrons.basis, n_bands=n_bands)
