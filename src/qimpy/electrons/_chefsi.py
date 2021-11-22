@@ -109,6 +109,7 @@ class CheFSI(Davidson):
             b_up = KEmax + PEmax  # Upper end of filter suppression
             b_lo = el.eig.max(dim=2)[0]  # Lower end of filter suppression
             a_lo = el.eig.min(dim=2)[0]  # Point that sets filter scaling
+            b_shape = a_lo.shape + (1, 1, 1)  # for broadcasting with wavefunctions
 
             # Seperate converged eigenstates to 'C0', if any:
             if n_eigs_done:
@@ -116,9 +117,9 @@ class CheFSI(Davidson):
                 HC0, HC = HC[:, :, :n_eigs_done], HC[:, :, n_eigs_done:]
 
             # Apply scaled Chebyshev filter:
-            b_diff = 0.5 * (b_up - b_lo).view(1, -1, 1, 1, 1)
-            b_mid = 0.5 * (b_lo + b_up).view(1, -1, 1, 1, 1)
-            sigma = b_diff / (b_mid - a_lo.view(1, -1, 1, 1, 1))
+            b_diff = 0.5 * (b_up - b_lo).view(b_shape)
+            b_mid = 0.5 * (b_lo + b_up).view(b_shape)
+            sigma = b_diff / (b_mid - a_lo.view(b_shape))
             tau = 2 / sigma
             Y = (HC - b_mid * el.C) * (sigma / b_diff)
             del HC
