@@ -3,27 +3,10 @@ import qimpy as qp
 import torch
 from ._wavefunction_init import _randomize, _randomize_selected, _RandomizeSelected
 from ._wavefunction_split import _split_bands, _split_basis
-from ._wavefunction_ops import (
-    _norm,
-    _band_norm,
-    _band_ke,
-    _band_spin,
-    _dot,
-    _dot_O,
-    _overlap,
-    _matmul,
-    _orthonormalize,
-    _mul,
-    _imul,
-    _add,
-    _iadd,
-    _sub,
-    _isub,
-    _getitem,
-    _setitem,
-    _cat,
-    _constrain,
-)
+from ._wavefunction_arithmetic import _mul, _imul, _add, _iadd, _sub, _isub
+from ._wavefunction_bandwise import _band_norm, _band_ke, _band_spin, _constrain
+from ._wavefunction_slice import _getitem, _setitem, _cat
+from ._wavefunction_dot import _norm, _dot, _dot_O, _overlap, _matmul, _orthonormalize
 from typing import Callable, Optional, Union
 
 
