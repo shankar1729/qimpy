@@ -15,6 +15,7 @@ class BasisReal:
         "iz0_mine_local",
         "iz0_mine_conj",
         "nz0_prev",
+        "Gweight",
         "Gweight_mine",
     )
     basis: qp.electrons.Basis
@@ -24,6 +25,7 @@ class BasisReal:
     iz0_mine_local: torch.Tensor  #: Local Gz = 0 indices on current process
     iz0_mine_conj: torch.Tensor  #: Global conjugates of `iz0_mine_local`
     nz0_prev: np.ndarray  #: Number of Gz = 0 entries before this process
+    Gweight: torch.Tensor  #: Weight of all plane waves
     Gweight_mine: torch.Tensor  #: Weight of local plane waves
 
     def __init__(self, basis: qp.electrons.Basis):
@@ -62,11 +64,11 @@ class BasisReal:
         self.iz0_mine_conj = self.iz0_conj[mine]
         self.nz0_prev = np.cumsum([0] + rc.comm_b.allgather(len(mine)))
 
-        # Weight by element for overlaps (only for this process portion):
-        iGz_mine = iGz[div.i_start : div.i_stop]
-        self.Gweight_mine = torch.zeros(div.n_each, device=rc.device)
-        self.Gweight_mine[: div.n_mine] = torch.where(iGz_mine == 0, 1.0, 2.0)
-        Gweight_sum = qp.utils.globalreduce.sum(self.Gweight_mine, rc.comm_b)
+        # Weight by element for overlaps:
+        self.Gweight = torch.where(iGz == 0, 1.0, 2.0)
+        self.Gweight[basis.n_max :] = 0.0  # padded elements
+        self.Gweight_mine = self.Gweight[div.i_start : div.i_stop]
+        Gweight_sum = self.Gweight.sum()
         qp.log.info(f"real basis weight sum: {Gweight_sum:g}")
 
     def symmetrize(self, coeff: torch.Tensor) -> None:

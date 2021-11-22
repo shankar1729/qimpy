@@ -3,7 +3,7 @@ import qimpy as qp
 import torch
 
 
-def update(self, system: qp.System) -> None:
+def update(self: qp.ions.Ions, system: qp.System) -> None:
     """Update ionic potentials, projectors and energy components.
     The grids used for the potentials are derived from system,
     and the energy components are stored within system.E.
@@ -54,11 +54,16 @@ def update(self, system: qp.System) -> None:
 
     # Update pseudopotential matrix and projectors:
     self._collect_ps_matrix(system.electrons.n_spinor)
-    self.beta = self._get_projectors(system.electrons.basis)
+    if system.electrons.need_full_projectors:
+        self.beta_full = self._get_projectors(system.electrons.basis, full_basis=True)
+        self.beta = self.beta_full[..., system.electrons.basis.mine]
+    else:
+        self.beta = self._get_projectors(system.electrons.basis)
+        self.beta_full = None
     self.beta_version += 1  # will auto-invalidate cached projections
 
 
-def _collect_ps_matrix(self, n_spinor: int) -> None:
+def _collect_ps_matrix(self: qp.ions.Ions, n_spinor: int) -> None:
     """Collect pseudopotential matrices across species and atoms.
     Initializes `D_all`."""
     n_proj = self.n_projectors * n_spinor

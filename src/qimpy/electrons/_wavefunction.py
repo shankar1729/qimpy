@@ -106,7 +106,11 @@ class Wavefunction:
             return self._proj
         else:
             ions = self.basis.ions
-            self._proj = ions.beta ^ self
+            if self.band_division:
+                assert ions.beta_full is not None
+                self._proj = ions.beta_full ^ self
+            else:
+                self._proj = ions.beta ^ self
             self._proj_version = ions.beta_version
             return self._proj
 

@@ -30,6 +30,7 @@ class Ions(qp.TreeNode):
         "Vloc_tilde",
         "n_core_tilde",
         "beta",
+        "beta_full",
         "beta_version",
         "D_all",
     )
@@ -48,7 +49,8 @@ class Ions(qp.TreeNode):
     rho_tilde: qp.grid.FieldH  #: ionic charge density (uses coulomb.ion_width)
     Vloc_tilde: qp.grid.FieldH  #: local potential due to ions (including from rho)
     n_core_tilde: qp.grid.FieldH  #: partial core electronic density (for XC)
-    beta: qp.electrons.Wavefunction  #: pseudopotential projectors
+    beta: qp.electrons.Wavefunction  #: pseudopotential projectors (split-basis only)
+    beta_full: Optional[qp.electrons.Wavefunction]  #: full-basis version of `beta`
     beta_version: int  #: version of `beta` to invalidate cached projections
     D_all: torch.Tensor  #: nonlocal pseudopotential matrix (all atoms)
 

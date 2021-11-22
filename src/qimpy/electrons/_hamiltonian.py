@@ -12,5 +12,6 @@ def _hamiltonian(
     HC += basis.apply_potential(self.n_tilde.grad, C)
     # Nonlocal ps:
     beta_C = C.proj
-    HC += ions.beta @ (ions.D_all @ beta_C)
+    beta = ions.beta_full if C.band_division else ions.beta
+    HC += beta @ (ions.D_all @ beta_C)
     return HC

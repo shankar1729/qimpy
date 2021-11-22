@@ -48,7 +48,8 @@ def _dot(
         return NotImplemented
     basis = self.basis
     assert basis is other.basis
-    assert not self.band_division
+    assert self.coeff.shape[-1] == other.coeff.shape[-1]
+    full_basis = self.coeff.shape[-1] == basis.n_tot
     watch = qp.utils.StopWatch("Wavefunction.dot", basis.rc)
     # Determine spinor handling:
     spinorial1 = self.coeff.shape[-2] == 2
@@ -61,7 +62,10 @@ def _dot(
     # Prepare left operand:
     C1 = (
         (
-            self.coeff * basis.real.Gweight_mine.view(1, 1, 1, 1, -1)
+            self.coeff
+            * (basis.real.Gweight if full_basis else basis.real.Gweight_mine).view(
+                1, 1, 1, 1, -1
+            )
             if basis.real_wavefunctions
             else self.coeff
         )
@@ -74,7 +78,7 @@ def _dot(
     result = C1 @ C2
     if basis.real_wavefunctions:
         result.imag *= 0.0  # due to implicit +h.c. terms in C1 and C2
-    if basis.division.n_procs > 1:
+    if (basis.division.n_procs > 1) and (not full_basis):
         basis.rc.comm_b.Allreduce(
             qp.MPI.IN_PLACE, qp.utils.BufferView(result), op=qp.MPI.SUM
         )

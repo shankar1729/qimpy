@@ -320,6 +320,13 @@ class Electrons(qp.TreeNode):
         """Number of electron density / magnetization components in `n`."""
         return (4 if self.spinorial else 2) if self.spin_polarized else 1
 
+    @property
+    def need_full_projectors(self) -> bool:
+        """Whether full-basis projectors are necessary."""
+        return isinstance(self.diagonalize, qp.electrons.CheFSI) and (
+            self.basis.division.n_procs > 1
+        )
+
     def initialize_fixed_hamiltonian(self, system: qp.System) -> None:
         """Load density/potential from checkpoint for fixed-H calculation"""
         assert self.fixed_H
