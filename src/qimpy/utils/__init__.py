@@ -27,6 +27,7 @@ __all__ = [
     "MinimizeState",
     "TaskDivision",
     "TaskDivisionCustom",
+    "get_block_slices",
     "BufferView",
     "Checkpoint",
     "CpPath",
@@ -52,6 +53,6 @@ from ._gradable import Gradable
 from ._optimizable import Optimizable, ConvergenceCheck, MatrixArray, Waitable
 from ._pulay import Pulay
 from ._minimize import Minimize, MinimizeState
-from ._taskdivision import TaskDivision, TaskDivisionCustom
+from ._taskdivision import TaskDivision, TaskDivisionCustom, get_block_slices
 from ._bufferview import BufferView
 from ._checkpoint import Checkpoint, CpPath

@@ -1,7 +1,7 @@
 import numpy as np
 import qimpy as qp
 import torch
-from typing import Optional
+from typing import Optional, List
 
 
 class TaskDivision:
@@ -90,3 +90,14 @@ class TaskDivisionCustom(TaskDivision):
     def whose(self, i: int) -> int:
         """Return process index i_proc responsible for task i"""
         return int(np.searchsorted(self.n_prev, i, side="right"))
+
+
+def get_block_slices(n_tot: int, block_size: int) -> List[slice]:
+    """Split `n_tot` tasks into blocks of size `block_size`.
+    Returns a list of slices for each block.
+    All blocks will have equal size (equal to `block_size`),
+    except for blocks at the end that run out of tasks."""
+    starts = np.arange(0, n_tot, block_size)
+    slices = [slice(start, stop) for start, stop in zip(starts[:-1], starts[1:])]
+    slices.append(slice(starts[-1], n_tot))  # add final block (possibly smaller)
+    return slices
