@@ -96,8 +96,11 @@ def get_block_slices(n_tot: int, block_size: int) -> List[slice]:
     """Split `n_tot` tasks into blocks of size `block_size`.
     Returns a list of slices for each block.
     All blocks will have equal size (equal to `block_size`),
-    except for blocks at the end that run out of tasks."""
-    starts = np.arange(0, n_tot, block_size)
-    slices = [slice(start, stop) for start, stop in zip(starts[:-1], starts[1:])]
-    slices.append(slice(starts[-1], n_tot))  # add final block (possibly smaller)
-    return slices
+    except the last one that may be smaller."""
+    if n_tot:
+        starts = np.arange(0, n_tot, block_size)
+        slices = [slice(start, stop) for start, stop in zip(starts[:-1], starts[1:])]
+        slices.append(slice(starts[-1], n_tot))  # add final block (possibly smaller)
+        return slices
+    else:
+        return []

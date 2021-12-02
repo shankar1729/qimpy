@@ -59,33 +59,26 @@ def _apply_potential(
 
     # Apply potential with blocked FFTs:
     fft_block_size = self.get_fft_block_size(n_spins * nk, n_bands_mine)
-    n_blocks = qp.utils.ceildiv(n_bands_mine, fft_block_size)
-    b_start = 0
-    b_stop = fft_block_size
-    b_size = fft_block_size
+    fft_block_slices = qp.utils.get_block_slices(n_bands_mine, fft_block_size)
     Cb = torch.zeros(
         (n_spins, nk, fft_block_size, n_spinor, fft_nG),
         dtype=coeff.dtype,
         device=coeff.device,
     )  # FFT buffer
 
-    for iBlock in range(n_blocks):
-        if b_stop > n_bands_mine:
-            b_stop = n_bands_mine
-            b_size = b_stop - b_start
+    for fft_block_slice in fft_block_slices:
+        b_size = fft_block_slice.stop - fft_block_slice.start
+        if b_size < fft_block_size:
             Cb = Cb[:, :, :b_size]
         # Expand -> ifft -> multiply V -> fft -> reduce back (on block)
-        Cb[index] = coeff[:, :, b_start:b_stop].permute(1, 4, 0, 2, 3)
+        Cb[index] = coeff[:, :, fft_block_slice].permute(1, 4, 0, 2, 3)
         VCb = self.grid.ifft(Cb.view((n_spins, nk, b_size, n_spinor) + shapeG))
         if spin_dm_mode:
             VCb = torch.einsum("uvxyz, skbvxyz -> skbuxyz", Vdata, VCb)
         else:
             VCb *= Vdata
         VCb = self.grid.fft(VCb).flatten(-3)
-        coeff[:, :, b_start:b_stop] = VCb[index].permute(2, 0, 3, 4, 1)
-        # Advance to next block of data:
-        b_start = b_stop
-        b_stop += b_size
+        coeff[:, :, fft_block_slice] = VCb[index].permute(2, 0, 3, 4, 1)
 
     VC.constrain()  # project out spurious entries (padding and real symmetry)
 
@@ -137,10 +130,7 @@ def _collect_density(
 
     # Collect density with blocked FFTs:
     fft_block_size = self.get_fft_block_size(n_spins * nk, n_bands_mine)
-    n_blocks = qp.utils.ceildiv(n_bands_mine, fft_block_size)
-    b_start = 0
-    b_stop = fft_block_size
-    b_size = fft_block_size
+    fft_block_slices = qp.utils.get_block_slices(n_bands_mine, fft_block_size)
     Cb = torch.zeros(
         (n_spins, nk, fft_block_size, n_spinor, fft_nG),
         dtype=coeff.dtype,
@@ -153,15 +143,14 @@ def _collect_density(
         rho_dn_up = torch.zeros(
             self.grid.shapeR_mine, dtype=coeff.dtype, device=coeff.device
         )
-    for iBlock in range(n_blocks):
-        if b_stop > n_bands_mine:
-            b_stop = n_bands_mine
-            b_size = b_stop - b_start
+    for fft_block_slice in fft_block_slices:
+        b_size = fft_block_slice.stop - fft_block_slice.start
+        if b_size < fft_block_size:
             Cb = Cb[:, :, :b_size]
         # Expand -> ifft -> collect | |^2
-        Cb[index] = coeff[:, :, b_start:b_stop].permute(1, 4, 0, 2, 3)
+        Cb[index] = coeff[:, :, fft_block_slice].permute(1, 4, 0, 2, 3)
         ICb = self.grid.ifft(Cb.view((n_spins, nk, b_size, n_spinor) + shapeG))
-        prefac_cur = prefac[:, :, b_start:b_stop]
+        prefac_cur = prefac[:, :, fft_block_slice]
         if need_Mvec:
             qp.utils.accum_norm_(prefac_cur, ICb, out=rho_diag, start_dim=0)
             qp.utils.accum_prod_(
@@ -173,9 +162,6 @@ def _collect_density(
             )
         else:
             qp.utils.accum_norm_(prefac_cur, ICb, out=rho_diag, start_dim=1)
-        # Advance to next block of data:
-        b_start = b_stop
-        b_stop += b_size
 
     # Convert density matrix components to dneisty, magnetization:
     n_densities = 4 if need_Mvec else n_spins
