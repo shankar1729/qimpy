@@ -19,6 +19,7 @@ def _apply_potential(
     self: qp.electrons.Basis, V: qp.grid.FieldH, C: qp.electrons.Wavefunction
 ) -> qp.electrons.Wavefunction:
     "Apply potential `V` to wavefunction `C`"
+    watch = qp.utils.StopWatch("Basis.apply_potential", self.rc)
     Vdata_in = (~(V.to(self.grid))).data  # change to real space on basis grid
     n_densities = Vdata_in.shape[0]
     spin_dm_mode = n_densities == 4  # spin density-matrix mode
@@ -45,12 +46,11 @@ def _apply_potential(
     # Move wavefunctions to band-split, basis-together position:
     need_move = (self.rc.n_procs_b > 1) and (C.band_division is None)
     VC = (
-        C.split_bands() if need_move else C.clone()  # C with all G-vectors local
+        C.split_bands().wait() if need_move else C.clone()  # C with all G-vectors local
     )  # copy, since V applied in place below
     coeff = VC.coeff
 
     # Determine FFT type and dimensions:
-    watch = qp.utils.StopWatch("Basis.apply_potential", self.rc)
     shapeG = self.grid.shapeH if self.real_wavefunctions else self.grid.shape
     fft_nG = int(np.prod(shapeG))  # total reciprocal space points in FFT grid
     n_spins, nk, n_bands_mine, n_spinor = coeff.shape[:-1]
@@ -88,10 +88,12 @@ def _apply_potential(
         b_stop += b_size
 
     VC.constrain()  # project out spurious entries (padding and real symmetry)
-    watch.stop()
 
     # Restore V*C to the same configuration (basis or band-split) as C:
-    return VC.split_basis() if need_move else VC
+    if need_move:
+        VC = VC.split_basis().wait()
+    watch.stop()
+    return VC
 
 
 def _collect_density(
@@ -111,8 +113,9 @@ def _collect_density(
     while (Mx +/- i My)/2 yield the :math:`\rho_{\uparrow\downarrow}` and
     :math:`\rho_{\downarrow\uparrow}` components of the spin density matrix.
     """
+    watch = qp.utils.StopWatch("Basis.collect_density", self.rc)
     assert f.shape == C.coeff.shape[:3]
-    C = C.split_bands()  # bring all G-vectors of each band together
+    C = C.split_bands().wait()  # bring all G-vectors of each band together
     coeff = C.coeff
     if need_Mvec:
         assert coeff.shape[-2] == 2  # must be spinorial
@@ -121,7 +124,6 @@ def _collect_density(
     prefac = f * (self.w_sk / self.lattice.volume)
 
     # Determine FFT type and dimensions:
-    watch = qp.utils.StopWatch("Basis.collect_density", self.rc)
     shapeG = self.grid.shapeH if self.real_wavefunctions else self.grid.shape
     fft_nG = int(np.prod(shapeG))  # total reciprocal space points in FFT grid
     n_spins, nk, n_bands_mine, n_spinor = coeff.shape[:-1]

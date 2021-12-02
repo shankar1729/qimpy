@@ -206,6 +206,7 @@ class Wavefunction:
         _randomize(self, seed, b_start, b_stop)
 
     # Function types for checking imported methods:
+    UnaryOpAsync = Callable[["Wavefunction"], qp.utils.Waitable["Wavefunction"]]
     UnaryOp = Callable[["Wavefunction"], "Wavefunction"]
     UnaryOpT = Callable[["Wavefunction"], torch.Tensor]
     UnaryOpS = Callable[["Wavefunction"], float]
@@ -215,8 +216,8 @@ class Wavefunction:
 
     randomize.__doc__ = _randomize.__doc__  # randomize stub'd above
     randomize_selected: _RandomizeSelected = _randomize_selected
-    split_bands: UnaryOp = _split_bands
-    split_basis: UnaryOp = _split_basis
+    split_bands: UnaryOpAsync = _split_bands
+    split_basis: UnaryOpAsync = _split_basis
     norm: UnaryOpS = _norm
     band_norm: UnaryOpT = _band_norm
     band_ke: UnaryOpT = _band_ke

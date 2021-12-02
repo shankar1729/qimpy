@@ -123,8 +123,8 @@ class CheFSI(Davidson):
             tau = 2 / sigma
             Y = (HC - b_mid * el.C) * (sigma / b_diff)
             del HC
-            Y = Y.split_bands()  # start of operations in band-split mode
-            el.C = el.C.split_bands()
+            Y = Y.split_bands().wait()  # start of operations in band-split mode
+            el.C = el.C.split_bands().wait()
             for i_filter in range(self.filter_order - 2):
                 sigma_new = 1 / (tau - sigma)
                 HY = el.hamiltonian(Y)
@@ -139,8 +139,8 @@ class CheFSI(Davidson):
             del Yt, HY, HC, el.C
             # Note that Y is the highest order of the filter above
             # Return to basis-split mode here
-            HC = el.hamiltonian(Y).split_basis()
-            el.C = Y.split_basis()
+            HC = el.hamiltonian(Y).split_basis().wait()
+            el.C = Y.split_basis().wait()
             del Y
 
             # Rejoin converged eigenstates, if any:
