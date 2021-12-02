@@ -21,6 +21,7 @@ __all__ = [
     "Optimizable",
     "ConvergenceCheck",
     "MatrixArray",
+    "Waitable",
     "Pulay",
     "Minimize",
     "MinimizeState",
@@ -48,7 +49,7 @@ from ._log import log_config
 from ._runconfig import RunConfig
 from ._stopwatch import StopWatch
 from ._gradable import Gradable
-from ._optimizable import Optimizable, ConvergenceCheck, MatrixArray
+from ._optimizable import Optimizable, ConvergenceCheck, MatrixArray, Waitable
 from ._pulay import Pulay
 from ._minimize import Minimize, MinimizeState
 from ._taskdivision import TaskDivision, TaskDivisionCustom

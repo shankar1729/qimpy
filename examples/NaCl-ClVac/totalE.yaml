@@ -34,4 +34,4 @@ electrons:
     mix-density: no  # mix potential instead
 
 checkpoint: null  # disable reading checkpoint
-checkpoint-out: NaCl-ClVac.h5  # but still create it
+#checkpoint-out: NaCl-ClVac.h5  # but still create it
