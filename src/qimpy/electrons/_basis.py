@@ -33,6 +33,7 @@ class Basis(qp.TreeNode):
         "n_ideal",
         "fft_index",
         "fft_block_size",
+        "mpi_block_size",
         "pad_index",
         "pad_index_mine",
         "division",
@@ -60,6 +61,7 @@ class Basis(qp.TreeNode):
     n_ideal: float  #: Ideal `n_avg` based on `ke_cutoff` G-sphere volume
     fft_index: torch.Tensor  #: Index of each plane wave in reciprocal grid
     fft_block_size: int  #: Number of bands to FFT together
+    mpi_block_size: int  #: Number of bands to MPI transfer together
     PadIndex = Tuple[
         slice, torch.Tensor, slice, slice, torch.Tensor
     ]  #: Indexing datatype for `pad_index` and `pad_index_mine`
@@ -88,6 +90,7 @@ class Basis(qp.TreeNode):
         real_wavefunctions: bool = False,
         grid: Optional[Union[qp.grid.Grid, dict]] = None,
         fft_block_size: int = 0,
+        mpi_block_size: int = 0,
     ) -> None:
         """Initialize plane-wave basis with `ke_cutoff`.
 
@@ -124,6 +127,15 @@ class Basis(qp.TreeNode):
             better occupancy of GPUs or high-core-count CPUs.
             The default of 0 auto-selects the block size based on the number
             of bands and k-points being processed by each process.
+        mpi_block_size
+            :yaml:`Number of wavefunction bands to MPI transfer simultaneously.`
+            Lower numbers may allow better overlap between computation and transfers,
+            which is beneficial if MPI implementation supports asynchronous progress
+            and/or CUDA streams are used to compute asynrchronously.
+            Higher numbers mitigate MPI latency, but may require more memory.
+            This number is automatically rounded up to nearest multiple of
+            `fft_block_size * rc.n_procs_b`. The default of 0 selects the block size
+            based on the number of bands and k-points being processed by each process.
         """
         super().__init__()
         self.rc = rc
@@ -133,6 +145,7 @@ class Basis(qp.TreeNode):
         self.n_spins = n_spins
         self.n_spinor = n_spinor
         self.fft_block_size = int(fft_block_size)
+        self.mpi_block_size = int(mpi_block_size)
 
         # Select subset of k-points relevant on this process:
         k_mine = slice(kpoints.division.i_start, kpoints.division.i_stop)
@@ -251,16 +264,39 @@ class Basis(qp.TreeNode):
         ).sum(dim=-1)
 
     def get_fft_block_size(self, n_batch: int, n_bands: int) -> int:
-        """Number of FFTs to perform together. Equals `fft_block_size`, if
-        that is non-zero, and uses a heuristic based on batch dimension
-        and number of bands, if manually specified."""
+        """Number of FFTs to perform together. Equals `fft_block_size`, if that is
+        non-zero, and uses a heuristic based on batch dimension and number of bands."""
         if self.fft_block_size:
             return self.fft_block_size
         else:
             if not (n_batch and n_bands):
                 return 1  # Irrelevant since no FFTs to perform anyway
-            # TODO: better heuristics on how much data to FFT at once:
+            # TODO: better heuristics on how much data to FFT at once
             min_data = 16_000_000 if self.rc.use_cuda else 100_000
             min_block = qp.utils.ceildiv(min_data, n_batch * np.prod(self.grid.shape))
             max_block = qp.utils.ceildiv(n_bands, 16)  # based on memory limit
             return min(min_block, max_block)
+
+    def get_mpi_block_size(
+        self, n_batch: int, n_bands: int, fft_block_size: int
+    ) -> int:
+        """Number of bands to MPI transfer together for `collect_density` and
+        `apply_potential`. Uses `mpi_block_size`, if that is non-zero, and uses a
+        heuristic based on batch dimension and number of bands. The final number is
+        coerced to a multiple of `fft_block_size * n_procs_b` or rounded up to
+        `n_bands`, if it is already close to that limit."""
+        if self.mpi_block_size:
+            mpi_block_size = self.mpi_block_size
+        else:
+            if not (n_batch and n_bands):
+                return 1  # Irrelevant since nothing to transfer anyway
+            # TODO: better heuristics on how much data to MPI-transfer at once
+            min_data = 200_000  # TODO: incorporate MPI latency info somehow
+            mpi_block_size = qp.utils.ceildiv(min_data, n_batch * self.division.n_each)
+        # Enforce multiple of fft_block_size * n_procs_b:
+        divisor = fft_block_size * self.division.n_procs
+        mpi_block_size = qp.utils.ceildiv(mpi_block_size, divisor) * divisor
+        # Round up to n_bands if not enough blocks:
+        if mpi_block_size * 2 > n_bands:
+            mpi_block_size = n_bands  # no gain in working with <= 2 blocks
+        return mpi_block_size

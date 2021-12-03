@@ -48,7 +48,11 @@ def _apply_potential(
     need_move = (self.rc.n_procs_b > 1) and (C.band_division is None)
     if need_move:
         # Transfer and compute in blocks to allow communication-compute overlap:
-        mpi_block_size = apply_potential_kernel.fft_block_size * self.rc.n_procs_b
+        mpi_block_size = self.get_mpi_block_size(
+            n_batch=np.prod(C.coeff.shape[:2]),
+            n_bands=C.n_bands(),
+            fft_block_size=apply_potential_kernel.fft_block_size,
+        )
         mpi_block_slices = qp.utils.get_block_slices(C.n_bands(), mpi_block_size)
         VC = C.zeros_like()
 
