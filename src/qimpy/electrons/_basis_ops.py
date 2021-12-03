@@ -47,10 +47,46 @@ def _apply_potential(
     # Apply potential, moving data between processes as needed:
     need_move = (self.rc.n_procs_b > 1) and (C.band_division is None)
     if need_move:
-        VC = C.split_bands().wait()
-        apply_potential_kernel(VC)
-        VC = VC.split_basis().wait()
+        # Transfer and compute in blocks to allow communication-compute overlap:
+        mpi_block_size = apply_potential_kernel.fft_block_size * self.rc.n_procs_b
+        mpi_block_slices = qp.utils.get_block_slices(C.n_bands(), mpi_block_size)
+        VC = C.zeros_like()
+
+        # Prepare first input block ('g' indicates G-vectors of basis together):
+        Cg = C[:, :, mpi_block_slices[0]].split_bands().wait()
+        VCg: qp.electrons.Wavefunction  # created at end of first iteration below
+
+        for mpi_block_slice_prev, mpi_block_slice_next in zip(
+            (None, *mpi_block_slices[:-1]), (*mpi_block_slices[1:], None)
+        ):
+
+            # Start communication of previous output block:
+            if mpi_block_slice_prev:
+                VC_prev = VCg.split_basis()
+
+            # Start communication of next input block:
+            if mpi_block_slice_next:  # get started on next block
+                Cg_next = C[:, :, mpi_block_slice_next].split_bands()
+
+            # Start compute:
+            apply_potential_kernel(Cg)
+
+            # Finish communication of previous output block:
+            if mpi_block_slice_prev:
+                VC[:, :, mpi_block_slice_prev] = VC_prev.wait()
+
+            # Finish communication of next input block:
+            if mpi_block_slice_next:
+                Cg = Cg_next.wait()
+
+            # Finish compute:
+            VCg = apply_potential_kernel.wait()
+
+        # Finish final output block:
+        VC[:, :, mpi_block_slices[-1]] = VCg.split_basis().wait()
+
     else:
+        # Basis together already => no transfers needed
         VC = C.clone()
         apply_potential_kernel(VC)
 
@@ -118,9 +154,10 @@ class _ApplyPotentialKernel:
             VCb = self.grid.fft(VCb).flatten(-3)
             C.coeff[:, :, fft_block_slice] = VCb[self.index].permute(2, 0, 3, 4, 1)
         C.constrain()  # project out spurious entries (padding and real symmetry)
+        self.result = C  # return in wait() when above is asynchronous
 
-    def wait(self) -> None:
-        pass
+    def wait(self) -> qp.electrons.Wavefunction:
+        return self.result
 
 
 def _collect_density(
