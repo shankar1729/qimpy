@@ -42,51 +42,85 @@ def _apply_potential(
         Vdata[1, 0, 0, 0] = Vdata_in[0] - Vdata_in[1]
     else:  # n_densities == 1:
         Vdata = Vdata_in[:, None, None, None]  # broadcast for spin
+    apply_potential_kernel = _ApplyPotentialKernel(C, spin_dm_mode, Vdata)
 
-    # Move wavefunctions to band-split, basis-together position:
+    # Apply potential, moving data between processes as needed:
     need_move = (self.rc.n_procs_b > 1) and (C.band_division is None)
-    VC = (
-        C.split_bands().wait() if need_move else C.clone()  # C with all G-vectors local
-    )  # copy, since V applied in place below
-    coeff = VC.coeff
-
-    # Determine FFT type and dimensions:
-    shapeG = self.grid.shapeH if self.real_wavefunctions else self.grid.shape
-    fft_nG = int(np.prod(shapeG))  # total reciprocal space points in FFT grid
-    n_spins, nk, n_bands_mine, n_spinor = coeff.shape[:-1]
-    ik = torch.arange(nk, device=coeff.device)[:, None]
-    index = (slice(None), ik, slice(None), slice(None), self.fft_index)
-
-    # Apply potential with blocked FFTs:
-    fft_block_size = self.get_fft_block_size(n_spins * nk, n_bands_mine)
-    fft_block_slices = qp.utils.get_block_slices(n_bands_mine, fft_block_size)
-    Cb = torch.zeros(
-        (n_spins, nk, fft_block_size, n_spinor, fft_nG),
-        dtype=coeff.dtype,
-        device=coeff.device,
-    )  # FFT buffer
-
-    for fft_block_slice in fft_block_slices:
-        b_size = fft_block_slice.stop - fft_block_slice.start
-        if b_size < fft_block_size:
-            Cb = Cb[:, :, :b_size]
-        # Expand -> ifft -> multiply V -> fft -> reduce back (on block)
-        Cb[index] = coeff[:, :, fft_block_slice].permute(1, 4, 0, 2, 3)
-        VCb = self.grid.ifft(Cb.view((n_spins, nk, b_size, n_spinor) + shapeG))
-        if spin_dm_mode:
-            VCb = torch.einsum("uvxyz, skbvxyz -> skbuxyz", Vdata, VCb)
-        else:
-            VCb *= Vdata
-        VCb = self.grid.fft(VCb).flatten(-3)
-        coeff[:, :, fft_block_slice] = VCb[index].permute(2, 0, 3, 4, 1)
-
-    VC.constrain()  # project out spurious entries (padding and real symmetry)
-
-    # Restore V*C to the same configuration (basis or band-split) as C:
     if need_move:
+        VC = C.split_bands().wait()
+        apply_potential_kernel(VC)
         VC = VC.split_basis().wait()
+    else:
+        VC = C.clone()
+        apply_potential_kernel(VC)
+
     watch.stop()
     return VC
+
+
+class _ApplyPotentialKernel:
+    """Internal compute kernel of Basis.apply_potential."""
+
+    def __init__(
+        self,
+        C_tot: qp.electrons.Wavefunction,
+        spin_dm_mode: bool,
+        Vdata: torch.Tensor,
+    ) -> None:
+        """Initialize parameters given overall wavefunction `C` to be worked with.
+        C is used only for determining sizes and is not stored.
+        Subsequently, __call__ can be used with slices of C.
+        """
+        basis = C_tot.basis
+        self.spin_dm_mode = spin_dm_mode
+        self.Vdata = Vdata
+
+        # Determine FFT type and dimensions:
+        self.grid = basis.grid
+        coeff = C_tot.coeff
+        shapeG = self.grid.shapeH if basis.real_wavefunctions else self.grid.shape
+        n_spins, nk, _, n_spinor, _ = coeff.shape
+        ik = torch.arange(nk, device=coeff.device)[:, None]
+        self.index = (slice(None), ik, slice(None), slice(None), basis.fft_index)
+
+        # Initialize FFT buffer
+        n_bands_mine_tot = (
+            C_tot.n_bands()
+            if C_tot.band_division
+            else qp.utils.ceildiv(C_tot.n_bands(), basis.division.n_procs)
+        )
+        self.fft_block_size = basis.get_fft_block_size(n_spins * nk, n_bands_mine_tot)
+        self.Cb = torch.zeros(
+            (n_spins, nk, self.fft_block_size, n_spinor, int(np.prod(shapeG))),
+            dtype=coeff.dtype,
+            device=coeff.device,
+        )
+        self.fft_shape = (n_spins, nk, self.fft_block_size, n_spinor) + shapeG
+
+    def __call__(self, C: qp.electrons.Wavefunction) -> None:
+        """Apply potential to C in-place. C must be in bands-divided mode.
+        Note that C could have a subset of bands of C_tot passed to __init__."""
+        fft_block_slices = qp.utils.get_block_slices(C.n_bands(), self.fft_block_size)
+        for fft_block_slice in fft_block_slices:
+            b_size = fft_block_slice.stop - fft_block_slice.start
+            if b_size < self.fft_block_size:
+                Cb = self.Cb[:, :, :b_size]
+                fft_shape = self.fft_shape[:2] + (b_size,) + self.fft_shape[3:]
+            else:
+                Cb, fft_shape = self.Cb, self.fft_shape
+            # Expand -> ifft -> multiply V -> fft -> reduce back (on block)
+            Cb[self.index] = C.coeff[:, :, fft_block_slice].permute(1, 4, 0, 2, 3)
+            VCb = self.grid.ifft(Cb.view(fft_shape))
+            if self.spin_dm_mode:
+                VCb = torch.einsum("uvxyz, skbvxyz -> skbuxyz", self.Vdata, VCb)
+            else:
+                VCb *= self.Vdata
+            VCb = self.grid.fft(VCb).flatten(-3)
+            C.coeff[:, :, fft_block_slice] = VCb[self.index].permute(2, 0, 3, 4, 1)
+        C.constrain()  # project out spurious entries (padding and real symmetry)
+
+    def wait(self) -> None:
+        pass
 
 
 def _collect_density(
