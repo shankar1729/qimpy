@@ -2,6 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
+from typing import Optional
 
 
 def _apply_ke(
@@ -98,26 +99,15 @@ def _apply_potential(
     return VC
 
 
-class _ApplyPotentialKernel:
-    """Internal compute kernel of Basis.apply_potential."""
+class _KernelCommon:
+    """Common functionality between _ApplyPotentialKernel and _CollectDensityKernel."""
 
-    def __init__(
-        self,
-        C_tot: qp.electrons.Wavefunction,
-        spin_dm_mode: bool,
-        Vdata: torch.Tensor,
-    ) -> None:
-        """Initialize parameters given overall wavefunction `C` to be worked with.
-        C is used only for determining sizes and is not stored.
-        Subsequently, __call__ can be used with slices of C.
-        """
-        basis = C_tot.basis
-        self.spin_dm_mode = spin_dm_mode
-        self.Vdata = Vdata
-
+    def __init__(self, C_tot: qp.electrons.Wavefunction) -> None:
+        """Prepare FFT buffers based on a sample wavefunction `C_tot`."""
         # Determine FFT type and dimensions:
-        self.grid = basis.grid
+        basis = C_tot.basis
         coeff = C_tot.coeff
+        self.grid = basis.grid
         shapeG = self.grid.shapeH if basis.real_wavefunctions else self.grid.shape
         n_spins, nk, _, n_spinor, _ = coeff.shape
         ik = torch.arange(nk, device=coeff.device)[:, None]
@@ -130,12 +120,43 @@ class _ApplyPotentialKernel:
             else qp.utils.ceildiv(C_tot.n_bands(), basis.division.n_procs)
         )
         self.fft_block_size = basis.get_fft_block_size(n_spins * nk, n_bands_mine_tot)
+        self.fft_shape = (n_spins, nk, self.fft_block_size, n_spinor) + shapeG
         self.Cb = torch.zeros(
             (n_spins, nk, self.fft_block_size, n_spinor, int(np.prod(shapeG))),
             dtype=coeff.dtype,
             device=coeff.device,
         )
-        self.fft_shape = (n_spins, nk, self.fft_block_size, n_spinor) + shapeG
+
+    def expand_ifft(self, coeff: torch.Tensor, block_slice: slice) -> torch.Tensor:
+        """Expand and ifft `block_slice` of wavefunction coefficients `coeff`."""
+        # Get slice of fft buffer and shape suitable for block_slice:
+        b_size = block_slice.stop - block_slice.start
+        if b_size < self.fft_block_size:
+            Cb = self.Cb[:, :, :b_size]
+            fft_shape = self.fft_shape[:2] + (b_size,) + self.fft_shape[3:]
+        else:
+            Cb, fft_shape = self.Cb, self.fft_shape
+        # Expand slice of coeff into Cb and ifft:
+        Cb[self.index] = coeff[:, :, block_slice].permute(1, 4, 0, 2, 3)
+        return self.grid.ifft(Cb.view(fft_shape))
+
+
+class _ApplyPotentialKernel(_KernelCommon):
+    """Internal compute kernel of Basis.apply_potential."""
+
+    def __init__(
+        self,
+        C_tot: qp.electrons.Wavefunction,
+        spin_dm_mode: bool,
+        Vdata: torch.Tensor,
+    ) -> None:
+        """Initialize parameters given overall wavefunction `C_tot` to be worked with.
+        C_tot is used only for determining sizes and is not stored.
+        Subsequently, __call__ can be used with slices of C_tot.
+        """
+        super().__init__(C_tot)
+        self.spin_dm_mode = spin_dm_mode
+        self.Vdata = Vdata
 
     def __call__(self, C: qp.electrons.Wavefunction) -> None:
         """Apply potential to C in-place. C must be in bands-divided mode.
@@ -143,15 +164,8 @@ class _ApplyPotentialKernel:
         fft_block_slices = qp.utils.get_block_slices(C.n_bands(), self.fft_block_size)
         with torch.cuda.stream(self.grid.rc.compute_stream):
             for fft_block_slice in fft_block_slices:
-                b_size = fft_block_slice.stop - fft_block_slice.start
-                if b_size < self.fft_block_size:
-                    Cb = self.Cb[:, :, :b_size]
-                    fft_shape = self.fft_shape[:2] + (b_size,) + self.fft_shape[3:]
-                else:
-                    Cb, fft_shape = self.Cb, self.fft_shape
                 # Expand -> ifft -> multiply V -> fft -> reduce back (on block)
-                Cb[self.index] = C.coeff[:, :, fft_block_slice].permute(1, 4, 0, 2, 3)
-                VCb = self.grid.ifft(Cb.view(fft_shape))
+                VCb = self.expand_ifft(C.coeff, fft_block_slice)
                 if self.spin_dm_mode:
                     VCb = torch.einsum("uvxyz, skbvxyz -> skbuxyz", self.Vdata, VCb)
                 else:
@@ -194,61 +208,34 @@ def _collect_density(
     if C.band_division is not None:
         f = f[:, :, C.band_division.i_start : C.band_division.i_stop]
     prefac = f * (self.w_sk / self.lattice.volume)
-
-    # Determine FFT type and dimensions:
-    shapeG = self.grid.shapeH if self.real_wavefunctions else self.grid.shape
-    fft_nG = int(np.prod(shapeG))  # total reciprocal space points in FFT grid
-    n_spins, nk, n_bands_mine, n_spinor = coeff.shape[:-1]
-    ik = torch.arange(nk, device=coeff.device)[:, None]
-    index = (slice(None), ik, slice(None), slice(None), self.fft_index)
+    n_spins, _, _, n_spinor, _ = C.coeff.shape
     if not need_Mvec:
         # Make fillings prefactor broadcast with spinor (summed over below):
         prefac = prefac[..., None]
         if n_spinor > 1:
             prefac = prefac.tile((1, 1, 1, n_spinor))
 
-    # Collect density with blocked FFTs:
-    fft_block_size = self.get_fft_block_size(n_spins * nk, n_bands_mine)
-    fft_block_slices = qp.utils.get_block_slices(n_bands_mine, fft_block_size)
-    Cb = torch.zeros(
-        (n_spins, nk, fft_block_size, n_spinor, fft_nG),
-        dtype=coeff.dtype,
-        device=coeff.device,
-    )  # FFT buffer
+    # Prepare outputs:
     rho_diag = torch.zeros(
         (2 if need_Mvec else n_spins,) + self.grid.shapeR_mine, device=coeff.device
     )
-    if need_Mvec:
-        rho_dn_up = torch.zeros(
-            self.grid.shapeR_mine, dtype=coeff.dtype, device=coeff.device
-        )
-    for fft_block_slice in fft_block_slices:
-        b_size = fft_block_slice.stop - fft_block_slice.start
-        if b_size < fft_block_size:
-            Cb = Cb[:, :, :b_size]
-        # Expand -> ifft -> collect | |^2
-        Cb[index] = coeff[:, :, fft_block_slice].permute(1, 4, 0, 2, 3)
-        ICb = self.grid.ifft(Cb.view((n_spins, nk, b_size, n_spinor) + shapeG))
-        prefac_cur = prefac[:, :, fft_block_slice]
-        if need_Mvec:
-            qp.utils.accum_norm_(prefac_cur, ICb, out=rho_diag, start_dim=0)
-            qp.utils.accum_prod_(
-                prefac_cur,
-                ICb[:, :, :, 1],
-                ICb[:, :, :, 0].conj(),
-                out=rho_dn_up,
-                start_dim=0,
-            )
-        else:
-            qp.utils.accum_norm_(prefac_cur, ICb, out=rho_diag, start_dim=1)
+    rho_dn_up = (
+        torch.zeros(self.grid.shapeR_mine, dtype=coeff.dtype, device=coeff.device)
+        if need_Mvec
+        else None
+    )
 
-    # Convert density matrix components to dneisty, magnetization:
+    # Collect density (or spin density matrix):
+    collect_density_kernel = _CollectDensityKernel(C, rho_diag, rho_dn_up)
+    collect_density_kernel(C, prefac)
+
+    # Convert density matrix components to density, magnetization:
     n_densities = 4 if need_Mvec else n_spins
     density = qp.grid.FieldR(self.grid, shape_batch=(n_densities,))
     density.data[0] = rho_diag.sum(dim=0)  # n_tot
     if n_densities >= 2:
         density.data[-1] = rho_diag[0] - rho_diag[1]  # Mz
-    if need_Mvec:
+    if rho_dn_up:
         density.data[1] = 2.0 * rho_dn_up.real  # Mx
         density.data[2] = 2.0 * rho_dn_up.imag  # My
 
@@ -259,3 +246,43 @@ def _collect_density(
         )
     watch.stop()
     return density
+
+
+class _CollectDensityKernel(_KernelCommon):
+    """Internal compute kernel of Basis.collect_density."""
+
+    def __init__(
+        self,
+        C_tot: qp.electrons.Wavefunction,
+        rho_diag: torch.Tensor,
+        rho_dn_up: Optional[torch.Tensor],
+    ) -> None:
+        """Initialize parameters given overall wavefunction `C_tot` to be worked with.
+        C_tot is used only for determining sizes and is not stored.
+        Subsequently, __call__ can be used with slices of C_tot.
+        """
+        super().__init__(C_tot)
+        self.rho_diag = rho_diag
+        self.rho_dn_up = rho_dn_up
+
+    def __call__(self, C: qp.electrons.Wavefunction, prefac: torch.Tensor) -> None:
+        """Collect density from wave-function `C` with prefactors `prefac`
+        (related to fillings). C must be in bands-divided mode.
+        Note that C could have a subset of bands of C_tot passed to __init__."""
+        fft_block_slices = qp.utils.get_block_slices(C.n_bands(), self.fft_block_size)
+        with torch.cuda.stream(self.grid.rc.compute_stream):
+            for fft_block_slice in fft_block_slices:
+                # Expand -> ifft -> collect | |^2
+                ICb = self.expand_ifft(C.coeff, fft_block_slice)
+                prefac_cur = prefac[:, :, fft_block_slice]
+                if self.rho_dn_up:  # vector-magnetization mode
+                    qp.utils.accum_norm_(prefac_cur, ICb, self.rho_diag, start_dim=0)
+                    qp.utils.accum_prod_(
+                        prefac_cur,
+                        ICb[:, :, :, 1],
+                        ICb[:, :, :, 0].conj(),
+                        self.rho_dn_up,
+                        start_dim=0,
+                    )
+                else:
+                    qp.utils.accum_norm_(prefac_cur, ICb, self.rho_diag, start_dim=1)
