@@ -137,26 +137,30 @@ class _ApplyPotentialKernel:
         """Apply potential to C in-place. C must be in bands-divided mode.
         Note that C could have a subset of bands of C_tot passed to __init__."""
         fft_block_slices = qp.utils.get_block_slices(C.n_bands(), self.fft_block_size)
-        for fft_block_slice in fft_block_slices:
-            b_size = fft_block_slice.stop - fft_block_slice.start
-            if b_size < self.fft_block_size:
-                Cb = self.Cb[:, :, :b_size]
-                fft_shape = self.fft_shape[:2] + (b_size,) + self.fft_shape[3:]
-            else:
-                Cb, fft_shape = self.Cb, self.fft_shape
-            # Expand -> ifft -> multiply V -> fft -> reduce back (on block)
-            Cb[self.index] = C.coeff[:, :, fft_block_slice].permute(1, 4, 0, 2, 3)
-            VCb = self.grid.ifft(Cb.view(fft_shape))
-            if self.spin_dm_mode:
-                VCb = torch.einsum("uvxyz, skbvxyz -> skbuxyz", self.Vdata, VCb)
-            else:
-                VCb *= self.Vdata
-            VCb = self.grid.fft(VCb).flatten(-3)
-            C.coeff[:, :, fft_block_slice] = VCb[self.index].permute(2, 0, 3, 4, 1)
-        C.constrain()  # project out spurious entries (padding and real symmetry)
+        with torch.cuda.stream(self.grid.rc.compute_stream):
+            for fft_block_slice in fft_block_slices:
+                b_size = fft_block_slice.stop - fft_block_slice.start
+                if b_size < self.fft_block_size:
+                    Cb = self.Cb[:, :, :b_size]
+                    fft_shape = self.fft_shape[:2] + (b_size,) + self.fft_shape[3:]
+                else:
+                    Cb, fft_shape = self.Cb, self.fft_shape
+                # Expand -> ifft -> multiply V -> fft -> reduce back (on block)
+                Cb[self.index] = C.coeff[:, :, fft_block_slice].permute(1, 4, 0, 2, 3)
+                VCb = self.grid.ifft(Cb.view(fft_shape))
+                if self.spin_dm_mode:
+                    VCb = torch.einsum("uvxyz, skbvxyz -> skbuxyz", self.Vdata, VCb)
+                else:
+                    VCb *= self.Vdata
+                VCb = self.grid.fft(VCb).flatten(-3)
+                C.coeff[:, :, fft_block_slice] = VCb[self.index].permute(2, 0, 3, 4, 1)
+            C.constrain()  # project out spurious entries (padding and real symmetry)
         self.result = C  # return in wait() when above is asynchronous
 
     def wait(self) -> qp.electrons.Wavefunction:
+        # Wait for completion (if running in separate stream):
+        if self.grid.rc.compute_stream is not None:
+            torch.cuda.current_stream().wait_stream(self.grid.rc.compute_stream)
         return self.result
 
 

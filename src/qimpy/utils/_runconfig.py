@@ -37,6 +37,7 @@ class RunConfig:
     cpu: torch.device  #: CPU torch device
     device: torch.device  #: Preferred torch device for calculation (CPU / GPU)
     use_cuda: bool  #: Whether `device` is a CUDA GPU
+    compute_stream: Optional[torch.cuda.Stream]  #: Asynchronous CUDA compute stream
 
     def __init__(
         self,
@@ -123,11 +124,14 @@ class RunConfig:
             n_gpus = 0.0
 
         # Initialize torch:
+        self.compute_stream = None
         self.cpu = torch.device("cpu")
         if torch.cuda.is_available():
             self.device = torch.device("cuda:0")
             self.use_cuda = True
             torch.cuda.device(self.device)
+            if os.environ.get("QIMPY_COMPUTE_STREAM", "1") in {"1", "yes"}:
+                self.compute_stream = torch.cuda.Stream(device=self.device)
         else:
             self.device = self.cpu
             self.use_cuda = False
