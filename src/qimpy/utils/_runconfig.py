@@ -132,6 +132,9 @@ class RunConfig:
             torch.cuda.device(self.device)
             if os.environ.get("QIMPY_COMPUTE_STREAM", "1") in {"1", "yes"}:
                 self.compute_stream = torch.cuda.Stream(device=self.device)
+                qp.log.info("Async compute stream enabled for GPU operations.")
+            else:
+                qp.log.info("Async compute stream disabled for GPU operations.")
         else:
             self.device = self.cpu
             self.use_cuda = False

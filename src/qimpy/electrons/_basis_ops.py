@@ -46,15 +46,9 @@ def _apply_potential(
     apply_potential_kernel = _ApplyPotentialKernel(C, spin_dm_mode, Vdata)
 
     # Apply potential, moving data between processes as needed:
-    need_move = (self.rc.n_procs_b > 1) and (C.band_division is None)
-    if need_move:
+    if apply_potential_kernel.need_move:
         # Transfer and compute in blocks to allow communication-compute overlap:
-        mpi_block_size = self.get_mpi_block_size(
-            n_batch=np.prod(C.coeff.shape[:2]),
-            n_bands=C.n_bands(),
-            fft_block_size=apply_potential_kernel.fft_block_size,
-        )
-        mpi_block_slices = qp.utils.get_block_slices(C.n_bands(), mpi_block_size)
+        mpi_block_slices = apply_potential_kernel.mpi_block_slices
         VC = C.zeros_like()
 
         # Prepare first input block ('g' indicates G-vectors of basis together):
@@ -103,7 +97,6 @@ class _KernelCommon:
     """Common functionality between _ApplyPotentialKernel and _CollectDensityKernel."""
 
     def __init__(self, C_tot: qp.electrons.Wavefunction) -> None:
-        """Prepare FFT buffers based on a sample wavefunction `C_tot`."""
         # Determine FFT type and dimensions:
         basis = C_tot.basis
         coeff = C_tot.coeff
@@ -126,6 +119,15 @@ class _KernelCommon:
             dtype=coeff.dtype,
             device=coeff.device,
         )
+
+        # Initialize MPI blocks (if needed):
+        self.need_move = (basis.rc.n_procs_b > 1) and (C_tot.band_division is None)
+        if self.need_move:
+            n_bands = C_tot.n_bands()
+            mpi_block_size = basis.get_mpi_block_size(
+                np.prod(coeff.shape[:2]), n_bands, self.fft_block_size
+            )
+            self.mpi_block_slices = qp.utils.get_block_slices(n_bands, mpi_block_size)
 
     def expand_ifft(self, coeff: torch.Tensor, block_slice: slice) -> torch.Tensor:
         """Expand and ifft `block_slice` of wavefunction coefficients `coeff`."""
@@ -201,33 +203,54 @@ def _collect_density(
     """
     watch = qp.utils.StopWatch("Basis.collect_density", self.rc)
     assert f.shape == C.coeff.shape[:3]
-    C = C.split_bands().wait()  # bring all G-vectors of each band together
-    coeff = C.coeff
-    if need_Mvec:
-        assert coeff.shape[-2] == 2  # must be spinorial
-    if C.band_division is not None:
-        f = f[:, :, C.band_division.i_start : C.band_division.i_stop]
-    prefac = f * (self.w_sk / self.lattice.volume)
     n_spins, _, _, n_spinor, _ = C.coeff.shape
+    if need_Mvec:
+        assert n_spinor == 2
+    prefac = f * (self.w_sk / self.lattice.volume)
     if not need_Mvec:
         # Make fillings prefactor broadcast with spinor (summed over below):
         prefac = prefac[..., None]
         if n_spinor > 1:
             prefac = prefac.tile((1, 1, 1, n_spinor))
 
-    # Prepare outputs:
+    # Prepare outputs and compute kernrl:
     rho_diag = torch.zeros(
-        (2 if need_Mvec else n_spins,) + self.grid.shapeR_mine, device=coeff.device
+        (2 if need_Mvec else n_spins,) + self.grid.shapeR_mine, device=C.coeff.device
     )
     rho_dn_up = (
-        torch.zeros(self.grid.shapeR_mine, dtype=coeff.dtype, device=coeff.device)
+        torch.zeros(self.grid.shapeR_mine, dtype=C.coeff.dtype, device=C.coeff.device)
         if need_Mvec
         else None
     )
-
-    # Collect density (or spin density matrix):
     collect_density_kernel = _CollectDensityKernel(C, rho_diag, rho_dn_up)
-    collect_density_kernel(C, prefac)
+
+    # Collect density, moving data between processes as needed:
+    if collect_density_kernel.need_move:
+        # Transfer and compute in blocks to allow communication-compute overlap:
+        mpi_block_slices = collect_density_kernel.mpi_block_slices
+
+        # Prepare first input block ('g' indicates G-vectors of basis together):
+        Cg = C[:, :, mpi_block_slices[0]].split_bands().wait()
+        prefac_cur = prefac[:, :, mpi_block_slices[0]]
+
+        for mpi_block_slice_next in (*mpi_block_slices[1:], None):
+
+            # Start communication of next input block:
+            if mpi_block_slice_next:  # get started on next block
+                Cg_next = C[:, :, mpi_block_slice_next].split_bands()
+
+            # Start compute:
+            collect_density_kernel(Cg, prefac_cur)
+
+            # Finish communication of next input block:
+            if mpi_block_slice_next:
+                Cg = Cg_next.wait()
+                prefac_cur = prefac[:, :, mpi_block_slice_next]
+
+            # Finish compute:
+            collect_density_kernel.wait()
+    else:
+        collect_density_kernel(C, prefac)
 
     # Convert density matrix components to density, magnetization:
     n_densities = 4 if need_Mvec else n_spins
@@ -271,10 +294,15 @@ class _CollectDensityKernel(_KernelCommon):
         Note that C could have a subset of bands of C_tot passed to __init__."""
         fft_block_slices = qp.utils.get_block_slices(C.n_bands(), self.fft_block_size)
         with torch.cuda.stream(self.grid.rc.compute_stream):
+            prefac_mine = (
+                prefac[:, :, C.band_division.i_start : C.band_division.i_stop]
+                if C.band_division
+                else prefac
+            )
             for fft_block_slice in fft_block_slices:
                 # Expand -> ifft -> collect | |^2
                 ICb = self.expand_ifft(C.coeff, fft_block_slice)
-                prefac_cur = prefac[:, :, fft_block_slice]
+                prefac_cur = prefac_mine[:, :, fft_block_slice]
                 if self.rho_dn_up:  # vector-magnetization mode
                     qp.utils.accum_norm_(prefac_cur, ICb, self.rho_diag, start_dim=0)
                     qp.utils.accum_prod_(
@@ -286,3 +314,8 @@ class _CollectDensityKernel(_KernelCommon):
                     )
                 else:
                     qp.utils.accum_norm_(prefac_cur, ICb, self.rho_diag, start_dim=1)
+
+    def wait(self) -> None:
+        # Wait for completion (if running in separate stream):
+        if self.grid.rc.compute_stream is not None:
+            torch.cuda.current_stream().wait_stream(self.grid.rc.compute_stream)

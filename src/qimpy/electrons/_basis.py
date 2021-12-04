@@ -291,8 +291,8 @@ class Basis(qp.TreeNode):
             if not (n_batch and n_bands):
                 return 1  # Irrelevant since nothing to transfer anyway
             # TODO: better heuristics on how much data to MPI-transfer at once
-            min_data = 200_000  # TODO: incorporate MPI latency info somehow
-            mpi_block_size = qp.utils.ceildiv(min_data, n_batch * self.division.n_each)
+            min_data = 2_000_000  # TODO: incorporate MPI latency info somehow
+            mpi_block_size = qp.utils.ceildiv(min_data, n_batch * self.n_tot)
         # Enforce multiple of fft_block_size * n_procs_b:
         divisor = fft_block_size * self.division.n_procs
         mpi_block_size = qp.utils.ceildiv(mpi_block_size, divisor) * divisor
