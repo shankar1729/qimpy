@@ -89,6 +89,7 @@ def _apply_potential(
         VC = C.clone()
         apply_potential_kernel(VC)
 
+    VC.constrain()  # project out spurious entries (padding and real symmetry)
     watch.stop()
     return VC
 
@@ -174,7 +175,6 @@ class _ApplyPotentialKernel(_KernelCommon):
                     VCb *= self.Vdata
                 VCb = self.grid.fft(VCb).flatten(-3)
                 C.coeff[:, :, fft_block_slice] = VCb[self.index].permute(2, 0, 3, 4, 1)
-            C.constrain()  # project out spurious entries (padding and real symmetry)
         self.result = C  # return in wait() when above is asynchronous
 
     def wait(self) -> qp.electrons.Wavefunction:
