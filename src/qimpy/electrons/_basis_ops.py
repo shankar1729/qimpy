@@ -212,6 +212,7 @@ def _collect_density(
         prefac = prefac[..., None]
         if n_spinor > 1:
             prefac = prefac.tile((1, 1, 1, n_spinor))
+    prefac = prefac.cpu()  # accum_prod / accum_norm use prefac on cpu
 
     # Prepare outputs and compute kernrl:
     rho_diag = torch.zeros(
