@@ -267,7 +267,7 @@ class Basis(qp.TreeNode):
         """Number of FFTs to perform together. Equals `fft_block_size`, if that is
         non-zero, and uses a heuristic based on batch dimension and number of bands."""
         if self.fft_block_size:
-            return self.fft_block_size
+            block_size = self.fft_block_size
         else:
             if not (n_batch and n_bands):
                 return 1  # Irrelevant since no FFTs to perform anyway
@@ -275,7 +275,12 @@ class Basis(qp.TreeNode):
             min_data = 16_000_000 if self.rc.use_cuda else 100_000
             min_block = qp.utils.ceildiv(min_data, n_batch * np.prod(self.grid.shape))
             max_block = qp.utils.ceildiv(n_bands, 16)  # based on memory limit
-            return min(min_block, max_block)
+            block_size = min(min_block, max_block)
+        # Report selected block-size once:
+        if not Basis._fft_block_size_reported:
+            qp.log.info(f"Selected block-size for band FFT: {block_size}")
+            Basis._fft_block_size_reported = True
+        return block_size
 
     def get_mpi_block_size(
         self, n_batch: int, n_bands: int, fft_block_size: int
@@ -299,4 +304,11 @@ class Basis(qp.TreeNode):
         # Round up to n_bands if not enough blocks:
         if mpi_block_size * 2 > n_bands:
             mpi_block_size = n_bands  # no gain in working with <= 2 blocks
+        # Report selected block-size once:
+        if not Basis._mpi_block_size_reported:
+            qp.log.info(f"Selected block-size for band MPI: {mpi_block_size}")
+            Basis._mpi_block_size_reported = True
         return mpi_block_size
+
+    _fft_block_size_reported = False  #: Make sure FFT block size reported once
+    _mpi_block_size_reported = False  #: Make sure MPI block size reported once
