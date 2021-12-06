@@ -258,6 +258,16 @@ class RunConfig:
             self.process_grid[dim] = n_procs_dim
             self._setup_process_grid()
 
+    def compute_stream_wait_current(self):
+        """Make `compute_stream` (if used) wait on current stream."""
+        if self.compute_stream is not None:
+            self.compute_stream.wait_stream(torch.cuda.current_stream())
+
+    def current_stream_wait_compute(self):
+        """Make current stream wait on `compute_stream` (if used)."""
+        if self.compute_stream is not None:
+            torch.cuda.current_stream().wait_stream(self.compute_stream)
+
     def clock(self):
         """Time in seconds since start of this run."""
         return time.time() - self.t_start

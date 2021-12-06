@@ -87,7 +87,7 @@ def _apply_potential(
     else:
         # Basis together already => no transfers needed
         VC = C.clone()
-        apply_potential_kernel(VC)
+        apply_potential_kernel(VC).wait()
 
     VC.constrain()  # project out spurious entries (padding and real symmetry)
     watch.stop()
@@ -161,10 +161,13 @@ class _ApplyPotentialKernel(_KernelCommon):
         self.spin_dm_mode = spin_dm_mode
         self.Vdata = Vdata
 
-    def __call__(self, C: qp.electrons.Wavefunction) -> None:
+    def __call__(
+        self, C: qp.electrons.Wavefunction
+    ) -> qp.utils.Waitable[qp.electrons.Wavefunction]:
         """Apply potential to C in-place. C must be in bands-divided mode.
         Note that C could have a subset of bands of C_tot passed to __init__."""
         fft_block_slices = qp.utils.get_block_slices(C.n_bands(), self.fft_block_size)
+        self.grid.rc.compute_stream_wait_current()
         with torch.cuda.stream(self.grid.rc.compute_stream):
             for fft_block_slice in fft_block_slices:
                 # Expand -> ifft -> multiply V -> fft -> reduce back (on block)
@@ -176,11 +179,11 @@ class _ApplyPotentialKernel(_KernelCommon):
                 VCb = self.grid.fft(VCb).flatten(-3)
                 C.coeff[:, :, fft_block_slice] = VCb[self.index].permute(2, 0, 3, 4, 1)
         self.result = C  # return in wait() when above is asynchronous
+        return self  # so that the output is Waitable
 
     def wait(self) -> qp.electrons.Wavefunction:
-        # Wait for completion (if running in separate stream):
-        if self.grid.rc.compute_stream is not None:
-            torch.cuda.current_stream().wait_stream(self.grid.rc.compute_stream)
+        """Wait for completion (if running in separate stream)."""
+        self.grid.rc.current_stream_wait_compute()
         return self.result
 
 
@@ -251,7 +254,7 @@ def _collect_density(
             # Finish compute:
             collect_density_kernel.wait()
     else:
-        collect_density_kernel(C, prefac)
+        collect_density_kernel(C, prefac).wait()
 
     # Convert density matrix components to density, magnetization:
     n_densities = 4 if need_Mvec else n_spins
@@ -289,11 +292,14 @@ class _CollectDensityKernel(_KernelCommon):
         self.rho_diag = rho_diag
         self.rho_dn_up = rho_dn_up
 
-    def __call__(self, C: qp.electrons.Wavefunction, prefac: torch.Tensor) -> None:
+    def __call__(
+        self, C: qp.electrons.Wavefunction, prefac: torch.Tensor
+    ) -> qp.utils.Waitable[None]:
         """Collect density from wave-function `C` with prefactors `prefac`
         (related to fillings). C must be in bands-divided mode.
         Note that C could have a subset of bands of C_tot passed to __init__."""
         fft_block_slices = qp.utils.get_block_slices(C.n_bands(), self.fft_block_size)
+        self.grid.rc.compute_stream_wait_current()
         with torch.cuda.stream(self.grid.rc.compute_stream):
             prefac_mine = (
                 prefac[:, :, C.band_division.i_start : C.band_division.i_stop]
@@ -315,8 +321,8 @@ class _CollectDensityKernel(_KernelCommon):
                     )
                 else:
                     qp.utils.accum_norm_(prefac_cur, ICb, self.rho_diag, start_dim=1)
+        return self  # so that the output is Waitable
 
     def wait(self) -> None:
-        # Wait for completion (if running in separate stream):
-        if self.grid.rc.compute_stream is not None:
-            torch.cuda.current_stream().wait_stream(self.grid.rc.compute_stream)
+        """Wait for completion (if running in separate stream)."""
+        self.grid.rc.current_stream_wait_compute()
