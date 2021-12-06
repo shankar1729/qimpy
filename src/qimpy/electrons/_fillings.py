@@ -310,6 +310,7 @@ class Fillings(qp.TreeNode):
             return
 
         assert self._smearing_func is not None
+        watch = qp.utils.StopWatch("Fillings.update", self.rc)
         el = self.electrons
         w_sk = el.basis.w_sk
         eig = el.eig[..., : self.n_bands]  # don't include extra bands in f
@@ -444,6 +445,7 @@ class Fillings(qp.TreeNode):
             f"  FillingsUpdate:  mu: {self.mu:.9f}"
             f"  n_electrons: {n_electrons:.6f}{M_str}"
         )
+        watch.stop()
 
     def _save_checkpoint(self, cp_path: qp.utils.CpPath) -> List[str]:
         self.write_band_scalars(cp_path.relative("f"), self.f)
