@@ -98,6 +98,8 @@ class RadialFunction:
         for l_i in range(0, l_max + 1):
             sel = torch.where(l == l_i)[0]
             f_tilde[sel] = (f[sel] * (r ** (2 * l_i)) * wr) @ jl_by_Grl[l_i]
+        if f_tilde.is_cuda:
+            torch.cuda.current_stream().synchronize()
         comm.Allreduce(
             qp.MPI.IN_PLACE, qp.utils.BufferView(f_tilde), op=qp.MPI.SUM
         )  # collect over r that was split above

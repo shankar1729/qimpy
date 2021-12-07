@@ -268,6 +268,11 @@ class RunConfig:
         if self.compute_stream is not None:
             torch.cuda.current_stream().wait_stream(self.compute_stream)
 
+    def current_stream_synchronize(self):
+        """Wait for all tasks in current CUDA stream to complete."""
+        if self.use_cuda:
+            torch.cuda.current_stream().synchronize()
+
     def clock(self):
         """Time in seconds since start of this run."""
         return time.time() - self.t_start

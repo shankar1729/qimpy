@@ -93,6 +93,7 @@ class BasisReal:
             prod_rest = np.prod(coeff.shape[:-1])  # number in all other dims
             recvcounts = np.diff(self.nz0_prev) * prod_rest
             offsets = self.nz0_prev[:-1] * prod_rest
+            basis.rc.current_stream_synchronize()
             basis.rc.comm_b.Allgatherv(
                 (qp.utils.BufferView(coeff_z0_mine), sendcount, 0, mpi_type),
                 (qp.utils.BufferView(coeff_z0), recvcounts, offsets, mpi_type),

@@ -70,6 +70,7 @@ class RandomFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
         E_x = torch.zeros_like(self.x0.data.flatten())
         for i_M, M in enumerate(self.M):
             v = M @ (self.x - self.x0).data.flatten()  # partial results, full array
+            self.rc.current_stream_synchronize()
             self.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(v), qp.MPI.SUM)
             v_norm_sq = (v ** 2).sum().item()
             E += v_norm_sq ** (i_M + 1) * self.grid.dV

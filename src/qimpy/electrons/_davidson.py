@@ -115,6 +115,7 @@ class Davidson(qp.TreeNode):
         # Find low-norm bands:
         if self.rc.n_procs_b > 1:
             # guard against machine-precision differences between procs
+            self.rc.current_stream_synchronize()
             self.rc.comm_b.Bcast(qp.utils.BufferView(norm))
         low_norm = norm < self._norm_cut
         i_spin, i_k, i_band = torch.where(low_norm)

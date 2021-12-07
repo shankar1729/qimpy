@@ -17,6 +17,7 @@ def _band_norms(self: qp.electrons.Wavefunction, mode: str) -> torch.Tensor:
         else coeff_sq.sum(dim=(-2, -1))
     )
     if basis.division.n_procs > 1:
+        basis.rc.current_stream_synchronize()
         basis.rc.comm_b.Allreduce(
             qp.MPI.IN_PLACE, qp.utils.BufferView(result), op=qp.MPI.SUM
         )
@@ -49,6 +50,7 @@ def _band_spin(self: qp.electrons.Wavefunction) -> torch.Tensor:
         else torch.einsum("skbxg, skbyg -> skbxy", coeff, coeff.conj())
     )
     if basis.division.n_procs > 1:
+        basis.rc.current_stream_synchronize()
         basis.rc.comm_b.Allreduce(
             qp.MPI.IN_PLACE, qp.utils.BufferView(rho_s), op=qp.MPI.SUM
         )

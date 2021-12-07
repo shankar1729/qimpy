@@ -37,6 +37,7 @@ def _split_bands(
         dtype=send_coeff.dtype,
         device=send_coeff.device,
     )
+    basis.rc.current_stream_synchronize()
     request = basis.rc.comm_b.Ialltoallv(
         (qp.utils.BufferView(send_coeff), send_counts, send_offset, mpi_type),
         (qp.utils.BufferView(recv_coeff), recv_counts, recv_offset, mpi_type),
@@ -105,6 +106,7 @@ def _split_basis(
         dtype=send_coeff.dtype,
         device=send_coeff.device,
     )
+    basis.rc.current_stream_synchronize()
     request = basis.rc.comm_b.Ialltoallv(
         (qp.utils.BufferView(send_coeff), send_counts, send_offset, mpi_type),
         (qp.utils.BufferView(recv_coeff), recv_counts, recv_offset, mpi_type),

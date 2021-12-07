@@ -143,6 +143,7 @@ class Field(qp.utils.Gradable[FieldType]):
         # Collect over MPI if needed:
         if self.grid.comm is not None:
             result = result.contiguous()
+            self.grid.rc.current_stream_synchronize()
             self.grid.comm.Allreduce(
                 qp.MPI.IN_PLACE, qp.utils.BufferView(result), qp.MPI.SUM
             )

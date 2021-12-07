@@ -140,6 +140,7 @@ class FieldSymmetrizer:
             send_offsets = self.send_prev[:-1] * n_batch
             recv_counts = np.diff(self.recv_prev) * n_batch
             recv_offsets = self.recv_prev[:-1] * n_batch
+            grid.rc.current_stream_synchronize()
             grid.comm.Alltoallv(
                 (qp.utils.BufferView(src_data), send_counts, send_offsets, mpi_type),
                 (qp.utils.BufferView(dest_data), recv_counts, recv_offsets, mpi_type),
@@ -166,6 +167,7 @@ class FieldSymmetrizer:
             assert grid.comm is not None
             # Rerrange data and send to process that holds grid point:
             dest_data = v_orbits.flatten(1).T[self.recv_index].contiguous()
+            grid.rc.current_stream_synchronize()
             grid.comm.Alltoallv(
                 (qp.utils.BufferView(dest_data), recv_counts, recv_offsets, mpi_type),
                 (qp.utils.BufferView(src_data), send_counts, send_offsets, mpi_type),

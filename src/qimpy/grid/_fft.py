@@ -181,6 +181,7 @@ def parallel_transform(
     recv_prev = out_prev * (np.prod(shape_out[:2]) * n_batch)
     v_tmp = torch.zeros(recv_prev[-1], dtype=v_tilde.dtype, device=v_tilde.device)
     mpi_type = rc.mpi_type[v_tilde.dtype]
+    rc.current_stream_synchronize()
     comm.Alltoallv(
         (BufferView(v_tilde), np.diff(send_prev), send_prev[:-1], mpi_type),
         (BufferView(v_tmp), np.diff(recv_prev), recv_prev[:-1], mpi_type),
@@ -431,6 +432,7 @@ if __name__ == "__main__":
         of each Grid.fft routine against each other"""
         # Create test data:
         v_ref = torch.randn(n_batch + shape_in, dtype=dtype_in, device=rc.device)
+        rc.current_stream_synchronize()
         rc.comm.Bcast(BufferView(v_ref), 0)
         n_repeats = 2 + int(1e8 / np.prod(n_batch + shape))
         for i_repeat in range(n_repeats):

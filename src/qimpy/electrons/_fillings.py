@@ -362,6 +362,7 @@ class Fillings(qp.TreeNode):
                 dim=(2, 3, 4)
             )
             # Collect across MPI and make consistent to machine precision:
+            self.rc.current_stream_synchronize()
             for tensor in (NM, NM_mu_B):
                 self.rc.comm_k.Allreduce(
                     qp.MPI.IN_PLACE, qp.utils.BufferView(tensor), qp.MPI.SUM

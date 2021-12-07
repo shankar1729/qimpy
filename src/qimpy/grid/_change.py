@@ -33,6 +33,7 @@ def gather(
         (split_in.n_tot,) + sendbuf.shape[1:], dtype=v.dtype, device=v.device
     )
     recv_prev = split_in.n_prev * prod_rest
+    rc.current_stream_synchronize()
     comm.Allgatherv(
         (qp.utils.BufferView(sendbuf), split_in.n_mine * prod_rest, 0, mpi_type),
         (qp.utils.BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1], mpi_type),
@@ -69,6 +70,7 @@ def redistribute(
     recvbuf = torch.empty(
         (split_out.n_mine,) + sendbuf.shape[1:], dtype=v.dtype, device=v.device
     )
+    rc.current_stream_synchronize()
     comm.Alltoallv(
         (qp.utils.BufferView(sendbuf), np.diff(send_prev), send_prev[:-1], mpi_type),
         (qp.utils.BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1], mpi_type),
@@ -210,12 +212,14 @@ def _change_recip(v: FieldTypeRecip, grid_out: qp.grid.Grid) -> FieldTypeRecip:
                         if whose_pos != split_in.i_proc:
                             assert grid_in.comm is not None
                             neg_slice = neg_slice.contiguous()
+                            grid_in.rc.current_stream_synchronize()
                             grid_in.comm.Send(qp.utils.BufferView(neg_slice), whose_pos)
                     elif whose_pos == split_in.i_proc:
                         neg_slice = torch.zeros(
                             data.shape[:-1], dtype=data.dtype, device=data.device
                         )
                         assert grid_in.comm is not None
+                        grid_in.rc.current_stream_synchronize()
                         grid_in.comm.Recv(qp.utils.BufferView(neg_slice), whose_neg)
                     # Negative Nyquist slice is now on proc with positive one
                 neg_start += 1  # can only have + Nyquist freq in output

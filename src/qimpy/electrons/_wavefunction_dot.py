@@ -79,6 +79,7 @@ def _dot(
     if basis.real_wavefunctions:
         result.imag *= 0.0  # due to implicit +h.c. terms in C1 and C2
     if (basis.division.n_procs > 1) and (not full_basis):
+        basis.rc.current_stream_synchronize()
         basis.rc.comm_b.Allreduce(
             qp.MPI.IN_PLACE, qp.utils.BufferView(result), op=qp.MPI.SUM
         )
