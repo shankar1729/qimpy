@@ -173,7 +173,7 @@ class Davidson(qp.TreeNode):
                 f" min(n_basis)/2 = {el.basis.n_min//2} in Davidson"
             )
         HC = el.hamiltonian(el.C)
-        el.eig, V = torch.linalg.eigh(el.C ^ HC)  # subspace eigs
+        el.eig, V = torch.linalg.eigh((el.C ^ HC).wait())  # subspace eigs
         el.deig_max = np.inf  # don't know eig accuracy yet
         el.C = el.C @ V  # switch to eigen-basis
         HC = HC @ V  # switch to eigen-basis
@@ -200,9 +200,9 @@ class Davidson(qp.TreeNode):
 
             # Expansion subspace overlaps:
             C_OC = torch.eye(n_bands_cur, device=V.device)[None, None]
-            C_OCexp = el.C.dot_O(Cexp)
+            C_OCexp = el.C.dot_O(Cexp).wait()
             Cexp_OC = qp.utils.dagger(C_OCexp)
-            Cexp_OCexp = Cexp.dot_O(Cexp)
+            Cexp_OCexp = Cexp.dot_O(Cexp).wait()
             dims_new = (n_spins, nk_mine, n_bands_new, n_bands_new)
             C_OC_new = torch.zeros(dims_new, device=V.device, dtype=V.dtype)
             C_OC_new[:, :, :n_bands_cur, :n_bands_cur] += C_OC
@@ -213,9 +213,9 @@ class Davidson(qp.TreeNode):
             # Expansion subspace Hamiltonian:
             HCexp = el.hamiltonian(Cexp)
             C_HC = torch.diag_embed(el.eig)
-            C_HCexp = el.C ^ HCexp
+            C_HCexp = (el.C ^ HCexp).wait()
             Cexp_HC = qp.utils.dagger(C_HCexp)
-            Cexp_HCexp = Cexp ^ HCexp
+            Cexp_HCexp = (Cexp ^ HCexp).wait()
             C_HC_new = torch.zeros(dims_new, device=V.device, dtype=V.dtype)
             C_HC_new[:, :, :n_bands_cur, :n_bands_cur] = C_HC
             C_HC_new[:, :, :n_bands_cur, n_bands_cur:] = C_HCexp

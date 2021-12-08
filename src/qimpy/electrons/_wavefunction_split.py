@@ -192,7 +192,7 @@ if __name__ == "__main__":
     for i_repeat in range(n_repeat):
         Cg.randomize()
         Cg = Cg.orthonormalize()
-    Cg_overlap = Cg.dot_O(Cg)
+    Cg_overlap = Cg.dot_O(Cg).wait()
     expected_overlap = torch.eye(Cg_overlap.shape[-1], device=Cg.coeff.device)[
         None, None
     ]

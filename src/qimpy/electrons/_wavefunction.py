@@ -108,9 +108,9 @@ class Wavefunction:
             ions = self.basis.ions
             if self.band_division:
                 assert ions.beta_full is not None
-                self._proj = ions.beta_full ^ self
+                self._proj = (ions.beta_full ^ self).wait()
             else:
-                self._proj = ions.beta ^ self
+                self._proj = (ions.beta ^ self).wait()
             self._proj_version = ions.beta_version
             return self._proj
 
@@ -211,7 +211,9 @@ class Wavefunction:
     UnaryOpT = Callable[["Wavefunction"], torch.Tensor]
     UnaryOpS = Callable[["Wavefunction"], float]
     BinaryOp = Callable[["Wavefunction", "Wavefunction"], "Wavefunction"]
-    BinaryOpT = Callable[["Wavefunction", "Wavefunction"], torch.Tensor]
+    BinaryOpAsyncT = Callable[
+        ["Wavefunction", "Wavefunction"], qp.utils.Waitable[torch.Tensor]
+    ]  # binary operation that returns a tensor asynchronously
     ScaleOp = Callable[["Wavefunction", Union[float, torch.Tensor]], "Wavefunction"]
 
     randomize.__doc__ = _randomize.__doc__  # randomize stub'd above
@@ -222,9 +224,9 @@ class Wavefunction:
     band_norm: UnaryOpT = _band_norm
     band_ke: UnaryOpT = _band_ke
     band_spin: UnaryOpT = _band_spin
-    dot_O: BinaryOpT = _dot_O  # dot product through overlap operator
-    dot: BinaryOpT = _dot  # bare dot product
-    __xor__: BinaryOpT = _dot  # convenient shorthand C1 ^ C2 for dot product
+    dot_O: BinaryOpAsyncT = _dot_O  # dot product through overlap operator
+    dot: BinaryOpAsyncT = _dot  # bare dot product
+    __xor__: BinaryOpAsyncT = _dot  # convenient shorthand C1 ^ C2 for dot product
     overlap: UnaryOp = _overlap  # apply overlap operator to wavefunction
     matmul = _matmul  # transform by a matrix in band space
     __matmul__ = _matmul  # shorthand C @ M for matmul

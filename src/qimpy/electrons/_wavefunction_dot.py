@@ -15,7 +15,7 @@ def _norm(self: qp.electrons.Wavefunction) -> float:
 
 def _dot(
     self: qp.electrons.Wavefunction, other: qp.electrons.Wavefunction
-) -> torch.Tensor:
+) -> qp.utils.Waitable[torch.Tensor]:
     """Inner (dot) product of `self` with `other`.
     For convenience, this can also be invoked as `self` ^ `other`.
     Note that this means xor(`self`, `other`) also computes wavefunction dot
@@ -78,40 +78,8 @@ def _dot(
     # Prepare right operand:
     C2 = other.coeff.flatten(*flatten).transpose(-2, -1)  # last dim now band2
 
-    # Compute local inner product and reduce:
-    need_reduce = (basis.division.n_procs > 1) and (not full_basis)
-    if need_reduce:
-        # Calculate and reduce in blocks to overlap compute and communication:
-        n_spins, nk_mine = torch.broadcast_shapes(C1.shape[:2], C2.shape[:2])
-        n_bands1, n_bands2 = C1.shape[2], C2.shape[-1]
-        result_shape = (n_spins, nk_mine, n_bands1, n_bands2)
-        result = torch.zeros(result_shape, dtype=C1.dtype, device=C1.device)
-        mpi_block_size = basis.get_mpi_block_size(n_spins * nk_mine, n_bands1, 0)
-        mpi_block_slices = qp.utils.get_block_slices(n_bands1, mpi_block_size)
-        # Compute first block:
-        result_cur = C1[:, :, mpi_block_slices[0]] @ C2
-        for mpi_block_slice, mpi_block_slice_next in zip(
-            mpi_block_slices, (*mpi_block_slices[1:], None)
-        ):
-            # Start reducing previous block:
-            basis.rc.current_stream_synchronize()
-            reduction_op = qp.utils.Iallreduce_in_place(
-                basis.rc.comm_b, result_cur, op=qp.MPI.SUM
-            )
-            # Start computing next block:
-            if mpi_block_slice_next:
-                with torch.cuda.stream(basis.rc.compute_stream):
-                    result_next = C1[:, :, mpi_block_slice_next] @ C2
-            # Finish reducing previous block:
-            reduction_op.wait()
-            result[:, :, mpi_block_slice] = result_cur
-            # Finish computing next block:
-            if mpi_block_slice_next:
-                basis.rc.current_stream_wait_compute()
-                result_cur = result_next
-    else:
-        result = C1 @ C2
-
+    # Compute local inner product:
+    result = C1 @ C2
     if basis.real_wavefunctions:
         result.imag *= 0.0  # due to implicit +h.c. terms in C1 and C2
 
@@ -128,13 +96,19 @@ def _dot(
             new_shape = (n_spins, nk_mine, n_bands1 * 2, n_bands2 // 2)
         # In both cases, move length 2 dim to the other of last two dims:
         result = result.view(split_shape).transpose(-2, -1).reshape(new_shape)
+
+    # Reduce asynchronously if needed:
     watch.stop()
-    return result
+    need_reduce = (basis.division.n_procs > 1) and (not full_basis)
+    if need_reduce:
+        return qp.utils.Iallreduce_in_place(basis.rc.comm_b, result, op=qp.MPI.SUM)
+    else:
+        return qp.utils.Waitless(result)  # Result available now
 
 
 def _dot_O(
     self: qp.electrons.Wavefunction, other: qp.electrons.Wavefunction
-) -> torch.Tensor:
+) -> qp.utils.Waitable[torch.Tensor]:
     """Dot product of `self` with O(`other`).
     Here, the overlap operator O is identity for norm-conserving
     pseudopotentials, but includes augmentation for ultrasoft
@@ -224,4 +198,4 @@ def _orthonormalize(self: qp.electrons.Wavefunction) -> qp.electrons.Wavefunctio
     This internally uses Gram-Schmidt scheme using a Cholesky decomposition,
     which is not differentiable. Use a symmetric orthonormalization scheme
     using :meth:`qimpy.utils.ortho_matrix` for a differentiable scheme."""
-    return self @ qp.utils.ortho_matrix(self.dot_O(self), use_cholesky=True)
+    return self @ qp.utils.ortho_matrix(self.dot_O(self).wait(), use_cholesky=True)

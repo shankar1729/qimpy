@@ -53,8 +53,8 @@ class LCAO(Minimize[MatrixArray]):
             el.n_tilde = system.ions.get_atomic_density(system.grid, el.fillings.M)
             el.tau_tilde = qp.grid.FieldH(system.grid, shape_batch=(0,))  # TODO
             el.update_potential(system)
-        C_OC = el.C.dot_O(el.C)
-        C_HC = el.C ^ el.hamiltonian(el.C)
+        C_OC = el.C.dot_O(el.C).wait()
+        C_HC = (el.C ^ el.hamiltonian(el.C)).wait()
         el.eig, V = qp.utils.eighg(C_HC, C_OC)
         el.C = el.C @ V  # Set to eigenvectors
         if (el.fillings.smearing is None) or el.fixed_H:
@@ -87,7 +87,7 @@ class LCAO(Minimize[MatrixArray]):
         state.energy = system.energy
         if energy_only:
             return
-        C_HC = el.C ^ el.hamiltonian(el.C)
+        C_HC = (el.C ^ el.hamiltonian(el.C)).wait()
         # Compute fillings constraint gradients:
         dH_sub = C_HC - el.eig.diag_embed()  # difference in Hamiltonian
         dH_sub_diag = dH_sub.diagonal(dim1=-2, dim2=-1).real
