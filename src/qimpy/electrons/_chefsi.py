@@ -91,7 +91,7 @@ class CheFSI(Davidson):
         else:
             # Initialize subspace:
             HC = el.hamiltonian(el.C)
-            el.eig, V = torch.linalg.eigh(el.C ^ HC)  # subspace eigs
+            el.eig, V = torch.linalg.eigh((el.C ^ HC).wait())  # subspace eigs
             el.deig_max = np.inf  # don't know eig accuracy yet
             el.C = el.C @ V  # switch to eigen-basis
             HC = HC @ V  # switch to eigen-basis
