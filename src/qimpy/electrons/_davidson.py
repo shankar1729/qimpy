@@ -196,44 +196,47 @@ class Davidson(qp.TreeNode):
             self._regularize(Cexp, norm_exp, self._i_iter)
             Cexp *= 1.0 / norm_exp[..., None, None]
             Cexp.constrain()
-            n_bands_new = n_bands_cur + Cexp.n_bands()
+            n_bands_exp = Cexp.n_bands()
+            n_bands_new = n_bands_cur + n_bands_exp
+
+            # Combine current and expansion subspace:
+            Cnew = el.C.cat(Cexp, clear=True)  # this clears el.C and Cexp memory
+            Cexp = Cnew[:, :, n_bands_cur:]  # re-set to a view of the concatenation
 
             # Expansion subspace overlaps:
             C_OC = torch.eye(n_bands_cur, device=V.device)[None, None]
-            C_OCexp = el.C.dot_O(Cexp).wait()
-            Cexp_OC = qp.utils.dagger(C_OCexp)
-            Cexp_OCexp = Cexp.dot_O(Cexp).wait()
+            Cnew_OCexp = Cnew.dot_O(Cexp).wait()
+            C_OCexp, Cexp_OCexp = Cnew_OCexp.split((n_bands_cur, n_bands_exp), dim=2)
             dims_new = (n_spins, nk_mine, n_bands_new, n_bands_new)
             C_OC_new = torch.zeros(dims_new, device=V.device, dtype=V.dtype)
-            C_OC_new[:, :, :n_bands_cur, :n_bands_cur] += C_OC
+            C_OC_new[:, :, :n_bands_cur, :n_bands_cur] += C_OC  # add to broadcast
             C_OC_new[:, :, :n_bands_cur, n_bands_cur:] = C_OCexp
-            C_OC_new[:, :, n_bands_cur:, :n_bands_cur] = Cexp_OC
+            C_OC_new[:, :, n_bands_cur:, :n_bands_cur] = qp.utils.dagger(C_OCexp)
             C_OC_new[:, :, n_bands_cur:, n_bands_cur:] = Cexp_OCexp
 
             # Expansion subspace Hamiltonian:
             HCexp = el.hamiltonian(Cexp)
+            del Cexp
             C_HC = torch.diag_embed(el.eig)
-            C_HCexp = (el.C ^ HCexp).wait()
-            Cexp_HC = qp.utils.dagger(C_HCexp)
-            Cexp_HCexp = (Cexp ^ HCexp).wait()
+            Cnew_HCexp = (Cnew ^ HCexp).wait()
+            C_HCexp, Cexp_HCexp = Cnew_HCexp.split((n_bands_cur, n_bands_exp), dim=2)
             C_HC_new = torch.zeros(dims_new, device=V.device, dtype=V.dtype)
             C_HC_new[:, :, :n_bands_cur, :n_bands_cur] = C_HC
             C_HC_new[:, :, :n_bands_cur, n_bands_cur:] = C_HCexp
-            C_HC_new[:, :, n_bands_cur:, :n_bands_cur] = Cexp_HC
+            C_HC_new[:, :, n_bands_cur:, :n_bands_cur] = qp.utils.dagger(C_HCexp)
             C_HC_new[:, :, n_bands_cur:, n_bands_cur:] = Cexp_HCexp
 
             # Solve expanded subspace generalized eigenvalue problem:
             watch = qp.utils.StopWatch("Davidson.eighg", self.rc)
             eig_new, V_new = qp.utils.eighg(C_HC_new, C_OC_new)
             n_bands_next = min(n_bands_new, n_bands_max)  # number to retain
-            Vcur = V_new[:, :, :n_bands_cur, :n_bands_next]  # cur -> next C
-            Vexp = V_new[:, :, n_bands_cur:, :n_bands_next]  # exp -> next C
+            V_new = V_new[..., :n_bands_next]  # drop extra bands
+            Vcur, Vexp = V_new.split((n_bands_cur, n_bands_exp), dim=2)
             watch.stop()
 
-            # Update C to optimum n_bands_next subspace from [C, Cexp]:
-            el.C = el.C @ Vcur
-            el.C += Cexp @ Vexp
-            del Cexp
+            # Update C and HC to optimum n_bands_next subspace from Cnew:
+            el.C = Cnew @ V_new
+            del Cnew
             HC = HC @ Vcur
             HC += HCexp @ Vexp
             del HCexp
