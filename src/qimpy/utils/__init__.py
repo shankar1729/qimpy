@@ -30,6 +30,7 @@ __all__ = [
     "TaskDivisionCustom",
     "get_block_slices",
     "BufferView",
+    "Iallreduce_in_place",
     "Checkpoint",
     "CpPath",
 ]
@@ -57,4 +58,5 @@ from ._pulay import Pulay
 from ._minimize import Minimize, MinimizeState
 from ._taskdivision import TaskDivision, TaskDivisionCustom, get_block_slices
 from ._bufferview import BufferView
+from ._async_reduce import Iallreduce_in_place
 from ._checkpoint import Checkpoint, CpPath

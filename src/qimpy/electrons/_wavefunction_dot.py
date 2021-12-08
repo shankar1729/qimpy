@@ -51,6 +51,7 @@ def _dot(
     assert self.coeff.shape[-1] == other.coeff.shape[-1]
     full_basis = self.coeff.shape[-1] == basis.n_tot
     watch = qp.utils.StopWatch("Wavefunction.dot", basis.rc)
+
     # Determine spinor handling:
     spinorial1 = self.coeff.shape[-2] == 2
     spinorial2 = other.coeff.shape[-2] == 2
@@ -59,6 +60,7 @@ def _dot(
         if (spinorial1 == spinorial2)
         else (-3, -2)
     )  # merge band and spinor when only one spinorial
+
     # Prepare left operand:
     C1 = (
         (
@@ -72,17 +74,47 @@ def _dot(
         .flatten(*flatten)
         .conj()
     )
+
     # Prepare right operand:
     C2 = other.coeff.flatten(*flatten).transpose(-2, -1)  # last dim now band2
+
     # Compute local inner product and reduce:
-    result = C1 @ C2
+    need_reduce = (basis.division.n_procs > 1) and (not full_basis)
+    if need_reduce:
+        # Calculate and reduce in blocks to overlap compute and communication:
+        n_spins, nk_mine = torch.broadcast_shapes(C1.shape[:2], C2.shape[:2])
+        n_bands1, n_bands2 = C1.shape[2], C2.shape[-1]
+        result_shape = (n_spins, nk_mine, n_bands1, n_bands2)
+        result = torch.zeros(result_shape, dtype=C1.dtype, device=C1.device)
+        mpi_block_size = basis.get_mpi_block_size(n_spins * nk_mine, n_bands1, 0)
+        mpi_block_slices = qp.utils.get_block_slices(n_bands1, mpi_block_size)
+        # Compute first block:
+        result_cur = C1[:, :, mpi_block_slices[0]] @ C2
+        for mpi_block_slice, mpi_block_slice_next in zip(
+            mpi_block_slices, (*mpi_block_slices[1:], None)
+        ):
+            # Start reducing previous block:
+            basis.rc.current_stream_synchronize()
+            reduction_op = qp.utils.Iallreduce_in_place(
+                basis.rc.comm_b, result_cur, op=qp.MPI.SUM
+            )
+            # Start computing next block:
+            if mpi_block_slice_next:
+                with torch.cuda.stream(basis.rc.compute_stream):
+                    result_next = C1[:, :, mpi_block_slice_next] @ C2
+            # Finish reducing previous block:
+            reduction_op.wait()
+            result[:, :, mpi_block_slice] = result_cur
+            # Finish computing next block:
+            if mpi_block_slice_next:
+                basis.rc.current_stream_wait_compute()
+                result_cur = result_next
+    else:
+        result = C1 @ C2
+
     if basis.real_wavefunctions:
         result.imag *= 0.0  # due to implicit +h.c. terms in C1 and C2
-    if (basis.division.n_procs > 1) and (not full_basis):
-        basis.rc.current_stream_synchronize()
-        basis.rc.comm_b.Allreduce(
-            qp.MPI.IN_PLACE, qp.utils.BufferView(result), op=qp.MPI.SUM
-        )
+
     # Handle one-sided spinorial projections:
     if spinorial1 != spinorial2:
         n_spins, nk_mine, n_bands1, n_bands2 = result.shape

@@ -289,7 +289,9 @@ class Basis(qp.TreeNode):
         `apply_potential`. Uses `mpi_block_size`, if that is non-zero, and uses a
         heuristic based on batch dimension and number of bands. The final number is
         coerced to a multiple of `fft_block_size * n_procs_b` or rounded up to
-        `n_bands`, if it is already close to that limit."""
+        `n_bands`, if it is already close to that limit. With `fft_block_size` = 0,
+        the block size for non-FFT MPI operations on bands eg. overlap is returned.
+        """
         if self.mpi_block_size:
             mpi_block_size = self.mpi_block_size
         else:
@@ -299,16 +301,19 @@ class Basis(qp.TreeNode):
             min_data = 2_000_000  # TODO: incorporate MPI latency info somehow
             mpi_block_size = qp.utils.ceildiv(min_data, n_batch * self.n_tot)
         # Enforce multiple of fft_block_size * n_procs_b:
-        divisor = fft_block_size * self.division.n_procs
-        mpi_block_size = qp.utils.ceildiv(mpi_block_size, divisor) * divisor
+        if fft_block_size:
+            divisor = fft_block_size * self.division.n_procs
+            mpi_block_size = qp.utils.ceildiv(mpi_block_size, divisor) * divisor
         # Round up to n_bands if not enough blocks:
         if mpi_block_size * 2 > n_bands:
             mpi_block_size = n_bands  # no gain in working with <= 2 blocks
-        # Report selected block-size once:
-        if not Basis._mpi_block_size_reported:
-            qp.log.info(f"Selected block-size for band MPI: {mpi_block_size}")
-            Basis._mpi_block_size_reported = True
+        # Report selected block-size once for each mode:
+        i_type = 0 if fft_block_size else 1
+        if not Basis._mpi_block_size_reported[i_type]:
+            type_name = "band" if fft_block_size else "overlap"
+            qp.log.info(f"Selected block-size for {type_name} MPI: {mpi_block_size}")
+            Basis._mpi_block_size_reported[i_type] = True
         return mpi_block_size
 
     _fft_block_size_reported = False  #: Make sure FFT block size reported once
-    _mpi_block_size_reported = False  #: Make sure MPI block size reported once
+    _mpi_block_size_reported = [False] * 2  #: Make sure MPI block sizes reported once
