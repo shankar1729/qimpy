@@ -2,6 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
+from dataclasses import dataclass
 from typing import Optional, Tuple
 
 
@@ -155,8 +156,6 @@ class Davidson(qp.TreeNode):
         Also available as :meth:`__call__` to make `Davidson` callable.
         """
         el = self.electrons
-        n_spins = el.n_spins
-        nk_mine = el.kpoints.division.n_mine
         n_bands = el.fillings.n_bands
         n_bands_max = n_bands + el.fillings.n_bands_extra
         helper = type(self) != Davidson
@@ -205,34 +204,19 @@ class Davidson(qp.TreeNode):
 
             # Expansion subspace overlaps:
             C_OC = torch.eye(n_bands_cur, device=V.device)[None, None]
-            Cnew_OCexp = Cnew.dot_O(Cexp).wait()
-            C_OCexp, Cexp_OCexp = Cnew_OCexp.split((n_bands_cur, n_bands_exp), dim=2)
-            dims_new = (n_spins, nk_mine, n_bands_new, n_bands_new)
-            C_OC_new = torch.zeros(dims_new, device=V.device, dtype=V.dtype)
-            C_OC_new[:, :, :n_bands_cur, :n_bands_cur] += C_OC  # add to broadcast
-            C_OC_new[:, :, :n_bands_cur, n_bands_cur:] = C_OCexp
-            C_OC_new[:, :, n_bands_cur:, :n_bands_cur] = qp.utils.dagger(C_OCexp)
-            C_OC_new[:, :, n_bands_cur:, n_bands_cur:] = Cexp_OCexp
+            C_OC_new = TileExpansion(C_OC, Cnew.dot_O(Cexp))
 
             # Expansion subspace Hamiltonian:
             HCexp = el.hamiltonian(Cexp)
             del Cexp
             C_HC = torch.diag_embed(el.eig)
-            Cnew_HCexp = (Cnew ^ HCexp).wait()
-            C_HCexp, Cexp_HCexp = Cnew_HCexp.split((n_bands_cur, n_bands_exp), dim=2)
-            C_HC_new = torch.zeros(dims_new, device=V.device, dtype=V.dtype)
-            C_HC_new[:, :, :n_bands_cur, :n_bands_cur] = C_HC
-            C_HC_new[:, :, :n_bands_cur, n_bands_cur:] = C_HCexp
-            C_HC_new[:, :, n_bands_cur:, :n_bands_cur] = qp.utils.dagger(C_HCexp)
-            C_HC_new[:, :, n_bands_cur:, n_bands_cur:] = Cexp_HCexp
+            C_HC_new = TileExpansion(C_HC, Cnew ^ HCexp)
 
             # Solve expanded subspace generalized eigenvalue problem:
-            watch = qp.utils.StopWatch("Davidson.eighg", self.rc)
-            eig_new, V_new = qp.utils.eighg(C_HC_new, C_OC_new)
+            eig_new, V_new = qp.utils.eighg(C_HC_new, C_OC_new.wait(), self.rc)
             n_bands_next = min(n_bands_new, n_bands_max)  # number to retain
             V_new = V_new[..., :n_bands_next]  # drop extra bands
             Vcur, Vexp = V_new.split((n_bands_cur, n_bands_exp), dim=2)
-            watch.stop()
 
             # Update C and HC to optimum n_bands_next subspace from Cnew:
             el.C = Cnew @ V_new
@@ -261,3 +245,31 @@ class Davidson(qp.TreeNode):
             self._HC = HC  # continue efficiently with another algorithm
 
     diagonalize = __call__
+
+
+@dataclass
+class TileExpansion:
+    """Helper class to tile current and expansion subspace matrices for Davidson.
+    Implements Waitable protocol to support delayed evaluation."""
+
+    C_XC: torch.Tensor  #: C^X(C) for operator X (typically O or H)
+    Cnew_XCexp: qp.utils.Waitable[
+        torch.Tensor
+    ]  #: future result of Cnew^X(Cexp), where Cnew = cat(C, Cexp)
+
+    def wait(self) -> torch.Tensor:
+        n_spins, nk_mine, n_bands_cur, _ = self.C_XC.shape
+        Cnew_XCexp = self.Cnew_XCexp.wait()
+        n_bands_new = Cnew_XCexp.shape[2]
+        n_bands_exp = n_bands_new - n_bands_cur
+        C_XCexp, Cexp_XCexp = Cnew_XCexp.split((n_bands_cur, n_bands_exp), dim=2)
+        result = torch.zeros(
+            (n_spins, nk_mine, n_bands_new, n_bands_new),
+            device=C_XCexp.device,
+            dtype=C_XCexp.dtype,
+        )
+        result[:, :, :n_bands_cur, :n_bands_cur] += self.C_XC  # add to broadcast
+        result[:, :, :n_bands_cur, n_bands_cur:] = C_XCexp
+        result[:, :, n_bands_cur:, :n_bands_cur] = qp.utils.dagger(C_XCexp)
+        result[:, :, n_bands_cur:, n_bands_cur:] = Cexp_XCexp
+        return result

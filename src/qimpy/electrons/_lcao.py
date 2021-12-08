@@ -54,8 +54,8 @@ class LCAO(Minimize[MatrixArray]):
             el.tau_tilde = qp.grid.FieldH(system.grid, shape_batch=(0,))  # TODO
             el.update_potential(system)
         C_OC = el.C.dot_O(el.C).wait()
-        C_HC = (el.C ^ el.hamiltonian(el.C)).wait()
-        el.eig, V = qp.utils.eighg(C_HC, C_OC)
+        C_HC = el.C ^ el.hamiltonian(el.C)
+        el.eig, V = qp.utils.eighg(C_HC, C_OC, self.rc)
         el.C = el.C @ V  # Set to eigenvectors
         if (el.fillings.smearing is None) or el.fixed_H:
             return

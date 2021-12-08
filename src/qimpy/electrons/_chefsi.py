@@ -151,7 +151,7 @@ class CheFSI(Davidson):
 
             # Subspace orthonormalization and diagonalization:
             eig_prev = el.eig
-            el.eig, V = qp.utils.eighg((el.C ^ HC).wait(), el.C.dot_O(el.C).wait())
+            el.eig, V = qp.utils.eighg(el.C ^ HC, el.C.dot_O(el.C).wait(), self.rc)
             el.C = el.C @ V
             HC = HC @ V
 
