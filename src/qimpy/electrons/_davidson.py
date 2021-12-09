@@ -164,6 +164,7 @@ class Davidson(qp.TreeNode):
         )
         n_iterations = n_iterations if n_iterations else self.n_iterations
         eig_threshold = eig_threshold if eig_threshold else self.eig_threshold
+        n_eigs_target = el.fillings.n_bands_min if inner_loop else n_bands
 
         # Initialize subspace:
         if 2 * n_bands_max >= el.basis.n_min:
@@ -229,7 +230,7 @@ class Davidson(qp.TreeNode):
 
             # Test convergence and report:
             el.deig_max, n_eigs_done = self._check_deig(deig, eig_threshold)
-            converged = n_eigs_done == n_bands
+            converged = n_eigs_done >= n_eigs_target
             converge_failed = (self._i_iter == n_iterations) and (
                 not (helper or converged)
             )
