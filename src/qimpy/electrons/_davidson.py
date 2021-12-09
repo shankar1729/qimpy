@@ -258,10 +258,9 @@ class TileExpansion:
     ]  #: future result of Cnew^X(Cexp), where Cnew = cat(C, Cexp)
 
     def wait(self) -> torch.Tensor:
-        n_spins, nk_mine, n_bands_cur, _ = self.C_XC.shape
         Cnew_XCexp = self.Cnew_XCexp.wait()
-        n_bands_new = Cnew_XCexp.shape[2]
-        n_bands_exp = n_bands_new - n_bands_cur
+        n_spins, nk_mine, n_bands_new, n_bands_exp = Cnew_XCexp.shape
+        n_bands_cur = n_bands_new - n_bands_exp
         C_XCexp, Cexp_XCexp = Cnew_XCexp.split((n_bands_cur, n_bands_exp), dim=2)
         result = torch.zeros(
             (n_spins, nk_mine, n_bands_new, n_bands_new),
