@@ -53,8 +53,12 @@ if __name__ == "__main__":
     if i_proc == 0:
 
         # Set terminal size (used by argparse) if unreasonable:
-        if os.get_terminal_size().columns < 80:
-            os.environ["COLUMNS"] = "80"
+        columns_min = 80
+        try:
+            if os.get_terminal_size().columns < columns_min:
+                os.environ["COLUMNS"] = str(columns_min)
+        except OSError:
+            os.environ["COLUMNS"] = str(columns_min)
 
         # Modify ArgumentParser to not exit:
         class ArgumentParser(argparse.ArgumentParser):
