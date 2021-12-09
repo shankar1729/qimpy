@@ -90,8 +90,6 @@ class MatrixArray:
     def overlap(self, other: "MatrixArray") -> float:
         """Global overlap collected over `comm`. For complex arrays,
         real and imaginary components are treated as independent."""
-        result = self.M.flatten().vdot(other.M.flatten())
-        return self.comm.allreduce(
-            float(result.real.item() if result.is_complex() else result.item()),
-            op=qp.MPI.SUM,
-        )
+        M1 = torch.view_as_real(self.M) if self.M.is_complex() else self.M
+        M2 = torch.view_as_real(other.M) if other.M.is_complex() else other.M
+        return qp.utils.globalreduce.sum(M1 * M2, self.comm)
