@@ -29,7 +29,7 @@ class StopWatch:
         self.use_cuda = rc.use_cuda
         self.name = name
         if self.use_cuda:
-            torch.cuda.nvtx.mark(f"start({name})")
+            torch.cuda.nvtx.range_push(name)
             self.t_start = torch.cuda.Event(enable_timing=True)
             self.t_start.record()
         else:
@@ -41,7 +41,7 @@ class StopWatch:
             if self.use_cuda:
                 t_stop = torch.cuda.Event(enable_timing=True)
                 t_stop.record()
-                torch.cuda.nvtx.mark(f"stop({self.name})")
+                torch.cuda.nvtx.range_pop()
                 self._cuda_events.append([self.name, self.t_start, t_stop])
                 if len(self._cuda_events) > 100:
                     self._process_cuda_events()
