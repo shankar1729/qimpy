@@ -1,6 +1,6 @@
 """Shared utility functions and classes"""
 # List exported symbols for doc generation
-__all__ = [
+__all__ = (
     "prime_factorization",
     "fft_suitable",
     "ceildiv",
@@ -16,6 +16,7 @@ __all__ = [
     "yaml",
     "log_config",
     "RunConfig",
+    "ProcessGrid",
     "StopWatch",
     "Gradable",
     "Optimizable",
@@ -33,7 +34,7 @@ __all__ = [
     "Iallreduce_in_place",
     "Checkpoint",
     "CpPath",
-]
+)
 
 from ._math import (
     prime_factorization,
@@ -50,6 +51,7 @@ from ._math import (
 from . import dict, globalreduce, yaml
 from ._log import log_config
 from ._runconfig import RunConfig
+from ._process_grid import ProcessGrid
 from ._stopwatch import StopWatch
 from ._gradable import Gradable
 from ._optimizable import Optimizable, ConvergenceCheck, MatrixArray
