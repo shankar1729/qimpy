@@ -3,6 +3,9 @@ import numpy as np
 from typing import Optional, Sequence
 
 
+IMBALANCE_THRESHOLD = 20.0  #: max cpu time% waste tolerated in process grid dimension
+
+
 class ProcessGrid:
     """Process grid of `shape` dimensions over communicator `comm`.
     Any -1 entries in `shape` are undetermined and will be resolved after the
@@ -54,25 +57,16 @@ class ProcessGrid:
             return  # Shape already known for this dimension
 
         # Dimension undetermined: set it based on n_tasks
-        def get_imbalance():
-            """Compute cpu time% wasted in splitting n_tasks over n_procs_dim"""
-            n_tasks_each = qp.utils.ceildiv(n_tasks, n_procs_dim)
-            return 100.0 * (1.0 - n_tasks / (n_tasks_each * n_procs_dim))
-
-        imbalance_threshold = 20.0  # max cpu time% waste to tolerate
         prod_known = self.shape[self.shape != -1].prod()
-        n_procs_dim = self.n_procs // prod_known  # max possible value
-        imbalance = get_imbalance()
-        if imbalance > imbalance_threshold:
-            # Drop primes factors starting from smallest till balanced:
-            factors = qp.utils.prime_factorization(n_procs_dim)
-            for factor in factors:
-                n_procs_dim //= factor
-                imbalance = get_imbalance()
-                if imbalance <= imbalance_threshold:
-                    break
-        assert imbalance <= imbalance_threshold
-        self.shape[dim] = n_procs_dim
+        prod_unknown = self.n_procs // prod_known
+        n_procs_dim = np.arange(1, prod_unknown + 1, dtype=int)  # shape[dim] candidates
+        n_procs_dim = n_procs_dim[self.n_procs % n_procs_dim == 0]  # must be a factor
+        # --- filter by imbalance:
+        n_tasks_each = qp.utils.ceildiv(n_tasks, n_procs_dim)  # for each candidate
+        imbalance = 100.0 * (1.0 - n_tasks / (n_tasks_each * n_procs_dim))
+        n_procs_dim = n_procs_dim[imbalance < IMBALANCE_THRESHOLD]
+        # --- pick largest candidate
+        self.shape[dim] = n_procs_dim[-1]
         self._check_report()
 
     def _check_report(self) -> None:
