@@ -7,9 +7,7 @@ import torch
 def _norm(self: qp.electrons.Wavefunction) -> float:
     """Return overall norm of wavefunctions"""
     return np.sqrt(
-        qp.utils.globalreduce.sum(
-            qp.utils.abs_squared(self.coeff), self.basis.rc.comm_kb
-        )
+        qp.utils.globalreduce.sum(qp.utils.abs_squared(self.coeff), self.basis.comm)
     )
 
 
@@ -101,7 +99,7 @@ def _dot(
     watch.stop()
     need_reduce = (basis.division.n_procs > 1) and (not full_basis)
     if need_reduce:
-        return qp.utils.Iallreduce_in_place(basis.rc.comm_b, result, op=qp.MPI.SUM)
+        return qp.utils.Iallreduce_in_place(basis.comm, result, op=qp.MPI.SUM)
     else:
         return qp.utils.Waitless(result)  # Result available now
 

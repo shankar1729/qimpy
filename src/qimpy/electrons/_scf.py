@@ -149,7 +149,7 @@ class SCF(qp.utils.Pulay[qp.grid.FieldH]):
         # Compute eigenvalue difference for extra convergence threshold:
         eig_cur = electrons.eig[..., : electrons.fillings.n_bands]
         deig = (eig_cur - eig_prev).abs()
-        deig_max = qp.utils.globalreduce.max(deig, self.rc.comm_kb)
+        deig_max = qp.utils.globalreduce.max(deig, electrons.comm)
         return [deig_max]
 
     @property

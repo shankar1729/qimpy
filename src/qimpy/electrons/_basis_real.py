@@ -62,7 +62,7 @@ class BasisReal:
         )[0]
         self.iz0_mine_local = self.iz0[mine] - div.i_start
         self.iz0_mine_conj = self.iz0_conj[mine]
-        self.nz0_prev = np.cumsum([0] + rc.comm_b.allgather(len(mine)))
+        self.nz0_prev = np.cumsum([0] + basis.comm.allgather(len(mine)))
 
         # Weight by element for overlaps:
         self.Gweight = torch.where(iGz == 0, 1.0, 2.0)
@@ -94,7 +94,7 @@ class BasisReal:
             recvcounts = np.diff(self.nz0_prev) * prod_rest
             offsets = self.nz0_prev[:-1] * prod_rest
             basis.rc.current_stream_synchronize()
-            basis.rc.comm_b.Allgatherv(
+            basis.comm.Allgatherv(
                 (qp.utils.BufferView(coeff_z0_mine), sendcount, 0, mpi_type),
                 (qp.utils.BufferView(coeff_z0), recvcounts, offsets, mpi_type),
             )
@@ -107,8 +107,8 @@ class BasisReal:
 
         # Set the symmetrized coefficients:
         if is_split:
-            z0_start = self.nz0_prev[basis.rc.i_proc_b]
-            z0_stop = self.nz0_prev[basis.rc.i_proc_b + 1]
+            z0_start = self.nz0_prev[basis.division.i_proc]
+            z0_stop = self.nz0_prev[basis.division.i_proc + 1]
             coeff[..., self.iz0_mine_local] = coeff_z0[..., z0_start:z0_stop]
         else:
             coeff[..., self.iz0] = coeff_z0

@@ -9,8 +9,9 @@ class Kpoints(qp.TreeNode):
     """Set of k-points in Brillouin zone.
     The underlying :class:`TaskDivision` splits k-points over `rc.comm_k`."""
 
-    __slots__ = ("rc", "k", "wk", "division")
+    __slots__ = ("rc", "comm", "k", "wk", "division")
     rc: qp.utils.RunConfig
+    comm: qp.MPI.Comm  #: Communicator for k-point division
     k: torch.Tensor  #: Array of k-points (N x 3)
     wk: torch.Tensor  #: Integration weights for each k (adds to 1)
     division: qp.utils.TaskDivision  #: Division of k-points across `rc.comm_k`
@@ -19,6 +20,7 @@ class Kpoints(qp.TreeNode):
         self,
         *,
         rc: qp.utils.RunConfig,
+        process_grid: qp.utils.ProcessGrid,
         k: torch.Tensor,
         wk: torch.Tensor,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
@@ -33,9 +35,13 @@ class Kpoints(qp.TreeNode):
         assert abs(wk.sum() - 1.0) < 1e-14
 
         # Initialize process grid dimension (if -1) and split k-points:
-        rc.provide_n_tasks(1, k.shape[0])
+        process_grid.provide_n_tasks("k", k.shape[0])
+        self.comm = process_grid.get_comm("k")
         self.division = qp.utils.TaskDivision(
-            n_tot=k.shape[0], n_procs=rc.n_procs_k, i_proc=rc.i_proc_k, name="k-point"
+            n_tot=k.shape[0],
+            n_procs=self.comm.size,
+            i_proc=self.comm.rank,
+            name="k-point",
         )
 
 
@@ -52,6 +58,7 @@ class Kmesh(Kpoints):
         self,
         *,
         rc: qp.utils.RunConfig,
+        process_grid: qp.utils.ProcessGrid,
         symmetries: qp.symmetries.Symmetries,
         lattice: qp.lattice.Lattice,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
@@ -178,7 +185,9 @@ class Kmesh(Kpoints):
             qp.log.info("Note: used k-inversion (conjugation) symmetry")
 
         # Initialize base class:
-        super().__init__(rc=rc, k=k, wk=wk, checkpoint_in=checkpoint_in)
+        super().__init__(
+            rc=rc, process_grid=process_grid, k=k, wk=wk, checkpoint_in=checkpoint_in
+        )
 
 
 class Kpath(Kpoints):
@@ -189,6 +198,7 @@ class Kpath(Kpoints):
         self,
         *,
         rc: qp.utils.RunConfig,
+        process_grid: qp.utils.ProcessGrid,
         lattice: qp.lattice.Lattice,
         dk: float,
         points: list,
@@ -247,27 +257,29 @@ class Kpath(Kpoints):
         )
 
         # Initialize base class:
-        super().__init__(rc=rc, k=k, wk=wk, checkpoint_in=checkpoint_in)
+        super().__init__(
+            rc=rc, process_grid=process_grid, k=k, wk=wk, checkpoint_in=checkpoint_in
+        )
 
     def plot(self, electrons: qp.electrons.Electrons, filename: str) -> None:
         """Save band structure plot for `electrons` to `filename`."""
-        if self.rc.i_proc_b:
+        if electrons.basis.division.i_proc:
             return  # only head of each basis group needed below
 
         # Get the energies to head process:
         n_spins = electrons.n_spins
         n_bands = electrons.fillings.n_bands
         eig = np.array(electrons.eig[..., :n_bands].to(self.rc.cpu))
-        if self.rc.i_proc_k:
-            self.rc.comm_k.Send(eig, 0)
+        if self.division.i_proc:
+            self.comm.Send(eig, 0)
             return  # only overall head needs to plot
         else:
             eig_all = np.zeros((n_spins, self.division.n_tot, n_bands))
             eig_all[:, : self.division.n_mine] = eig
-            for i_proc in range(1, self.rc.n_procs_k):
+            for i_proc in range(1, self.division.n_procs):
                 i_start = self.division.n_prev[i_proc]
                 i_stop = self.division.n_prev[i_proc + 1]
-                self.rc.comm_k.Recv(eig_all[:, i_start:i_stop], i_proc)
+                self.comm.Recv(eig_all[:, i_start:i_stop], i_proc)
 
         # Check for semi-core gap (only among occupied bands):
         n_occupied_bands = int(

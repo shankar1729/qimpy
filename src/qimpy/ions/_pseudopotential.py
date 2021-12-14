@@ -78,10 +78,11 @@ class Pseudopotential:
         self.pqn_beta = qp.ions.PseudoQuantumNumbers(self.beta.l, self.j_beta)
         self.pqn_psi = qp.ions.PseudoQuantumNumbers(self.psi.l, self.j_psi)
 
-    def update(self, Gmax: float, ion_width: float) -> None:
+    def update(self, Gmax: float, ion_width: float, comm: qp.MPI.Comm) -> None:
         """Update to support calculation of G upto `Gmax`.
         Along with radial function transformations, also update the range
-        separation of Vloc to be consistent with specified ion_width.
+        separation of Vloc to be consistent with specified `ion_width`.
+        Parallelize transformations of radial functions over `comm`.
         """
         # Update ion width if necessary:
         if ion_width != self.ion_width:
@@ -94,9 +95,7 @@ class Pseudopotential:
             )
             if Gmax <= self.Gmax:
                 # Not a global Gmax update, transform Vloc separately:
-                qp.ions.RadialFunction.transform(
-                    [self.Vloc], Gmax, self.rc.comm_kb, self.element
-                )
+                qp.ions.RadialFunction.transform([self.Vloc], Gmax, comm, self.element)
             self.ion_width = ion_width
 
         # Update radial transforms if necessary:
@@ -104,9 +103,7 @@ class Pseudopotential:
             transform_list = [self.rho_atom, self.Vloc, self.beta, self.psi]
             if hasattr(self, "n_core"):
                 transform_list.append(self.n_core)
-            qp.ions.RadialFunction.transform(
-                transform_list, Gmax, self.rc.comm_kb, self.element
-            )
+            qp.ions.RadialFunction.transform(transform_list, Gmax, comm, self.element)
             self.Gmax = Gmax
 
     @property

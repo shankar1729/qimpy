@@ -1,7 +1,7 @@
 from __future__ import annotations
 import qimpy as qp
 import numpy as np
-from typing import Union, Optional, Dict, List, Any
+from typing import Union, Optional, Dict, List, Any, Sequence
 
 
 class System(qp.TreeNode):
@@ -18,6 +18,7 @@ class System(qp.TreeNode):
         "energy",
         "checkpoint_in",
         "checkpoint_out",
+        "process_grid",
     )
     rc: qp.utils.RunConfig  #: Current run configuration
     lattice: qp.lattice.Lattice  #: Lattice vectors / unit cell definition
@@ -29,6 +30,7 @@ class System(qp.TreeNode):
     energy: qp.Energy  #: Energy components
     checkpoint_in: qp.utils.CpPath  #: Input checkpoint
     checkpoint_out: Optional[str]  #: Filename for output checkpoint
+    process_grid: qp.utils.ProcessGrid  #: Process grid for parallelization
 
     def __init__(
         self,
@@ -41,6 +43,7 @@ class System(qp.TreeNode):
         grid: Union[qp.grid.Grid, dict, None] = None,
         checkpoint: Optional[str] = None,
         checkpoint_out: Optional[str] = None,
+        process_grid_shape: Optional[Sequence[int]] = None,
     ):
         """Compose a System to calculate from its pieces. Each piece
         could be provided as an object or a dictionary of parameters
@@ -66,6 +69,7 @@ class System(qp.TreeNode):
         """
         super().__init__()
         self.rc = rc
+        self.process_grid = qp.utils.ProcessGrid(rc.comm, "rkb", process_grid_shape)
         # Set in and out checkpoints:
         try:
             checkpoint_in = qp.utils.CpPath(
@@ -87,7 +91,14 @@ class System(qp.TreeNode):
         # TODO: similarly account for applied electric fields
 
         self.add_child("lattice", qp.lattice.Lattice, lattice, checkpoint_in, rc=rc)
-        self.add_child("ions", qp.ions.Ions, ions, checkpoint_in, rc=rc)
+        self.add_child(
+            "ions",
+            qp.ions.Ions,
+            ions,
+            checkpoint_in,
+            rc=rc,
+            process_grid=self.process_grid,
+        )
         self.add_child(
             "symmetries",
             qp.symmetries.Symmetries,
@@ -104,6 +115,7 @@ class System(qp.TreeNode):
             electrons,
             checkpoint_in,
             rc=rc,
+            process_grid=self.process_grid,
             lattice=self.lattice,
             ions=self.ions,
             symmetries=self.symmetries,
@@ -118,7 +130,7 @@ class System(qp.TreeNode):
             rc=rc,
             lattice=self.lattice,
             symmetries=self.symmetries,
-            comm=rc.comm_kb,  # Parallel
+            comm=self.electrons.comm,  # Parallel
             ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff,
         )
         self.coulomb = qp.grid.Coulomb(self.grid, self.ions.n_ions)

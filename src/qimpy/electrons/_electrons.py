@@ -11,6 +11,7 @@ class Electrons(qp.TreeNode):
 
     __slots__ = (
         "rc",
+        "comm",
         "kpoints",
         "spin_polarized",
         "spinorial",
@@ -33,6 +34,7 @@ class Electrons(qp.TreeNode):
         "tau_tilde",
     )
     rc: qp.utils.RunConfig
+    comm: qp.MPI.Comm  #: Overall electronic communicator (k-points and bands/basis)
     kpoints: qp.electrons.Kpoints  #: Set of kpoints (mesh or path)
     spin_polarized: bool  #: Whether calculation is spin-polarized
     spinorial: bool  #: Whether calculation is relativistic / spinorial
@@ -60,6 +62,7 @@ class Electrons(qp.TreeNode):
         self,
         *,
         rc: qp.utils.RunConfig,
+        process_grid: qp.utils.ProcessGrid,
         lattice: qp.lattice.Lattice,
         ions: qp.ions.Ions,
         symmetries: qp.symmetries.Symmetries,
@@ -158,6 +161,7 @@ class Electrons(qp.TreeNode):
                 checkpoint_in,
                 attr_version_name="k-mesh",
                 rc=rc,
+                process_grid=process_grid,
                 symmetries=symmetries,
                 lattice=lattice,
             )
@@ -169,8 +173,10 @@ class Electrons(qp.TreeNode):
                 checkpoint_in,
                 attr_version_name="k-path",
                 rc=rc,
+                process_grid=process_grid,
                 lattice=lattice,
             )
+        self.comm = process_grid.get_comm("kb")
 
         # Initialize spin:
         self.spin_polarized = spin_polarized
@@ -202,6 +208,7 @@ class Electrons(qp.TreeNode):
             basis,
             checkpoint_in,
             rc=rc,
+            process_grid=process_grid,
             lattice=lattice,
             ions=ions,
             symmetries=symmetries,
@@ -246,7 +253,9 @@ class Electrons(qp.TreeNode):
                 raise ValueError("lcao must be False or LCAO parameters")
             self.lcao = None
         else:
-            self.add_child("lcao", qp.electrons.LCAO, lcao, checkpoint_in, rc=rc)
+            self.add_child(
+                "lcao", qp.electrons.LCAO, lcao, checkpoint_in, rc=rc, comm=self.comm
+            )
 
         # Initialize diagonalizer:
         n_options = np.count_nonzero([(d is not None) for d in (davidson, chefsi)])
@@ -278,7 +287,7 @@ class Electrons(qp.TreeNode):
 
         # Initialize SCF:
         self.add_child(
-            "scf", qp.electrons.SCF, scf, checkpoint_in, rc=rc, comm=rc.comm_kb
+            "scf", qp.electrons.SCF, scf, checkpoint_in, rc=rc, comm=self.comm
         )
 
     def initialize_wavefunctions(self, system: qp.System) -> None:
@@ -391,7 +400,8 @@ class Electrons(qp.TreeNode):
         self.update_potential(system, requires_grad)
         f = self.fillings.f
         system.energy["KE"] = qp.utils.globalreduce.sum(
-            self.C.band_ke()[:, :, : f.shape[2]] * self.basis.w_sk * f, self.rc.comm_k
+            self.C.band_ke()[:, :, : f.shape[2]] * self.basis.w_sk * f,
+            self.kpoints.comm,
         )
         # Nonlocal projector:
         beta_C = self.C.proj[..., : self.fillings.n_bands]
@@ -401,7 +411,7 @@ class Electrons(qp.TreeNode):
                 * self.basis.w_sk
                 * f
             ).real,
-            self.rc.comm_k,
+            self.kpoints.comm,
         )
 
     def run(self, system: qp.System) -> None:

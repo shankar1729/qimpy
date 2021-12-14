@@ -13,6 +13,8 @@ class Basis(qp.TreeNode):
 
     __slots__ = (
         "rc",
+        "comm",
+        "comm_kb",
         "lattice",
         "ions",
         "kpoints",
@@ -41,6 +43,8 @@ class Basis(qp.TreeNode):
         "real",
     )
     rc: qp.utils.RunConfig
+    comm: qp.MPI.Comm  #: Basis/bands communicator
+    comm_kb: qp.MPI.Comm  #: Overall k-points and basis/bands communicator
     lattice: qp.lattice.Lattice  #: Lattice vectors of unit cell
     ions: qp.ions.Ions  #: Ionic system: implicit in basis for ultrasoft / PAW
     kpoints: qp.electrons.Kpoints  #: Corresponding k-point set
@@ -79,6 +83,7 @@ class Basis(qp.TreeNode):
         self,
         *,
         rc: qp.utils.RunConfig,
+        process_grid: qp.utils.ProcessGrid,
         lattice: qp.lattice.Lattice,
         ions: qp.ions.Ions,
         symmetries: qp.symmetries.Symmetries,
@@ -134,11 +139,13 @@ class Basis(qp.TreeNode):
             and/or CUDA streams are used to compute asynrchronously.
             Higher numbers mitigate MPI latency, but may require more memory.
             This number is automatically rounded up to nearest multiple of
-            `fft_block_size * rc.n_procs_b`. The default of 0 selects the block size
+            `fft_block_size * comm.size`. The default of 0 selects the block size
             based on the number of bands and k-points being processed by each process.
         """
         super().__init__()
         self.rc = rc
+        self.comm = process_grid.get_comm("b")
+        self.comm_kb = process_grid.get_comm("kb")
         self.lattice = lattice
         self.ions = ions
         self.kpoints = kpoints
@@ -189,10 +196,11 @@ class Basis(qp.TreeNode):
         within_cutoff = self.get_ke() < ke_cutoff  # mask of which iG to keep
         # --- determine statistics of basis count across all k:
         self.n = within_cutoff.count_nonzero(dim=1)
-        self.n_min = qp.utils.globalreduce.min(self.n, rc.comm_k)
-        self.n_max = qp.utils.globalreduce.max(self.n, rc.comm_k)
-        self.n_tot = qp.utils.ceildiv(self.n_max, rc.n_procs_b) * rc.n_procs_b
-        self.n_avg = qp.utils.globalreduce.sum(self.n * self.wk, rc.comm_k)
+        self.n_min = qp.utils.globalreduce.min(self.n, kpoints.comm)
+        self.n_max = qp.utils.globalreduce.max(self.n, kpoints.comm)
+        n_procs_b = self.comm.size
+        self.n_tot = qp.utils.ceildiv(self.n_max, n_procs_b) * n_procs_b
+        self.n_avg = qp.utils.globalreduce.sum(self.n * self.wk, kpoints.comm)
         self.n_ideal = ((2.0 * ke_cutoff) ** 1.5) * lattice.volume / (6 * np.pi ** 2)
         qp.log.info(
             f"n_basis:  min: {self.n_min}  max: {self.n_max}"
@@ -224,8 +232,8 @@ class Basis(qp.TreeNode):
         # Divide basis on comm_b:
         div = qp.utils.TaskDivision(
             n_tot=self.n_tot,
-            n_procs=rc.n_procs_b,
-            i_proc=rc.i_proc_b,
+            n_procs=n_procs_b,
+            i_proc=self.comm.rank,
             name="padded basis",
         )
         self.division = div
@@ -288,7 +296,7 @@ class Basis(qp.TreeNode):
         """Number of bands to MPI transfer together for `collect_density` and
         `apply_potential`. Uses `mpi_block_size`, if that is non-zero, and uses a
         heuristic based on batch dimension and number of bands. The final number is
-        coerced to a multiple of `fft_block_size * n_procs_b` or rounded up to
+        coerced to a multiple of `fft_block_size * comm.size` or rounded up to
         `n_bands`, if it is already close to that limit."""
         if self.mpi_block_size:
             mpi_block_size = self.mpi_block_size
@@ -298,7 +306,7 @@ class Basis(qp.TreeNode):
             # TODO: better heuristics on how much data to MPI-transfer at once
             min_data = 2_000_000  # TODO: incorporate MPI latency info somehow
             mpi_block_size = qp.utils.ceildiv(min_data, n_batch * self.n_tot)
-        # Enforce multiple of fft_block_size * n_procs_b:
+        # Enforce multiple of fft_block_size * comm.size:
         divisor = fft_block_size * self.division.n_procs
         mpi_block_size = qp.utils.ceildiv(mpi_block_size, divisor) * divisor
         # Round up to n_bands if not enough blocks:

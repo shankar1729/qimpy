@@ -64,6 +64,7 @@ class Ions(qp.TreeNode):
         self,
         *,
         rc: qp.utils.RunConfig,
+        process_grid: qp.utils.ProcessGrid,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         coordinates: Optional[List] = None,
         pseudopotentials: Optional[Union[str, List[str]]] = None,
@@ -207,7 +208,7 @@ class Ions(qp.TreeNode):
 
         # Initialize / check replica process grid dimension:
         n_replicas = 1  # this will eventually change for NEB / phonon DFPT
-        rc.provide_n_tasks(0, n_replicas)
+        process_grid.provide_n_tasks("r", n_replicas)
 
     def report(self) -> None:
         """Report ionic positions and attributes"""

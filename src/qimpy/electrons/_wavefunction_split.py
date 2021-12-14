@@ -38,7 +38,7 @@ def _split_bands(
         device=send_coeff.device,
     )
     basis.rc.current_stream_synchronize()
-    request = basis.rc.comm_b.Ialltoallv(
+    request = basis.comm.Ialltoallv(
         (qp.utils.BufferView(send_coeff), send_counts, send_offset, mpi_type),
         (qp.utils.BufferView(recv_coeff), recv_counts, recv_offset, mpi_type),
     )
@@ -107,7 +107,7 @@ def _split_basis(
         device=send_coeff.device,
     )
     basis.rc.current_stream_synchronize()
-    request = basis.rc.comm_b.Ialltoallv(
+    request = basis.comm.Ialltoallv(
         (qp.utils.BufferView(send_coeff), send_counts, send_offset, mpi_type),
         (qp.utils.BufferView(recv_coeff), recv_counts, recv_offset, mpi_type),
     )
@@ -142,7 +142,7 @@ if __name__ == "__main__":
 
     # Create a system to test with:
     qp.utils.log_config()
-    rc = qp.utils.RunConfig(process_grid=(1, 1, -1))  # ensure basis-split
+    rc = qp.utils.RunConfig()
     if rc.n_procs == 1:
         raise ValueError("Wavefunction split test requires > 1 processes.")
     system = qp.System(
@@ -152,6 +152,7 @@ if __name__ == "__main__":
             "k-mesh": {"size": [4, 4, 3]},
             "basis": {"real-wavefunctions": False},
         },
+        process_grid_shape=(1, 1, -1),  # ensure basis-split
     )
 
     qp.log.info("\n--- Checking Wavefunction.split* ---")
@@ -163,7 +164,7 @@ if __name__ == "__main__":
     # Test random wavefunction created basis-split to band-split and back:
     Cg = qp.electrons.Wavefunction(system.electrons.basis, n_bands=n_bands)
     Cg.randomize(b_start=b_random_start, b_stop=b_random_stop)
-    rc.comm_b.Barrier()  # for mroe reliable timing below
+    Cg.basis.comm.Barrier()  # for more reliable timing below
     for i_repeat in range(n_repeat):
         Cgb = Cg.split_bands().wait()
         Cgbg = Cgb.split_basis().wait()
@@ -175,7 +176,7 @@ if __name__ == "__main__":
         system.electrons.basis, band_division=Cgb.band_division
     )
     Cb.randomize(b_start=b_random_start, b_stop=b_random_stop)
-    rc.comm_b.Barrier()  # for more reliable timing below
+    Cb.basis.comm.Barrier()  # for more reliable timing below
     for i_repeat in range(n_repeat):
         Cbg = Cb.split_basis().wait()
         Cbgb = Cbg.split_bands().wait()

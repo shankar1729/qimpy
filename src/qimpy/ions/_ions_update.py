@@ -37,7 +37,7 @@ def update(self: qp.ions.Ions, system: qp.System) -> None:
     Gmax = system.grid.get_Gmax()
     ion_width = system.coulomb.ion_width
     for i_type, ps in enumerate(self.pseudopotentials):
-        ps.update(Gmax, ion_width)
+        ps.update(Gmax, ion_width, system.electrons.comm)
         SF[i_type] = (
             self.translation_phase(iG, self.slices[i_type]).sum(dim=-1) * inv_volume
         )

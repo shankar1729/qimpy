@@ -99,7 +99,7 @@ class CheFSI(Davidson):
             self._report(inner_loop=inner_loop)
 
         KEmax = el.basis.ke_cutoff  # upper bound on KE
-        PEmax = qp.utils.globalreduce.max((~el.n_tilde.grad).data, self.rc.comm_kb)
+        PEmax = qp.utils.globalreduce.max((~el.n_tilde.grad).data, el.comm)
         n_eigs_done = 0
 
         # Subspace iteration loop:

@@ -114,10 +114,10 @@ class Davidson(qp.TreeNode):
         """Regularize low-norm bands of C by randomizing them,
         using seed based on current iteration number i_iter"""
         # Find low-norm bands:
-        if self.rc.n_procs_b > 1:
+        if C.basis.division.n_procs > 1:
             # guard against machine-precision differences between procs
             self.rc.current_stream_synchronize()
-            self.rc.comm_b.Bcast(qp.utils.BufferView(norm))
+            C.basis.comm.Bcast(qp.utils.BufferView(norm))
         low_norm = norm < self._norm_cut
         i_spin, i_k, i_band = torch.where(low_norm)
         if not len(i_spin):
@@ -131,7 +131,8 @@ class Davidson(qp.TreeNode):
         electrons = self.electrons
         n_bands = electrons.fillings.n_bands
         return qp.utils.globalreduce.sum(
-            electrons.basis.w_sk * electrons.eig[..., :n_bands], self.rc.comm_k
+            electrons.basis.w_sk * electrons.eig[..., :n_bands],
+            electrons.kpoints.comm,
         )
 
     def _check_deig(
@@ -140,11 +141,11 @@ class Davidson(qp.TreeNode):
         """Return maximum change in eigenvalues and how many
         eigenvalues are converged at all spin and k"""
         n_bands = self.electrons.fillings.n_bands
-        deig_max = qp.utils.globalreduce.max(deig[..., :n_bands], self.rc.comm_kb)
+        deig_max = qp.utils.globalreduce.max(deig[..., :n_bands], self.electrons.comm)
         pending = torch.where(
             (deig[..., :n_bands] > eig_threshold).flatten(0, 1).any(dim=0)
         )[0]
-        n_eigs_done = self.rc.comm_kb.allreduce(
+        n_eigs_done = self.electrons.comm.allreduce(
             pending[0].item() if len(pending) else n_bands, qp.MPI.MIN
         )
         return deig_max, n_eigs_done

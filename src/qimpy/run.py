@@ -175,7 +175,7 @@ if __name__ == "__main__":
     qp.log.info("*" * 15 + " QimPy " + qp.__version__ + " " + "*" * 15)
 
     # Set up run configuration
-    rc = qp.utils.RunConfig(cores=args.cores, process_grid=args.process_grid)
+    rc = qp.utils.RunConfig(cores=args.cores)
 
     # Load input parameters from YAML file:
     input_dict = qp.utils.dict.key_cleanup(qp.utils.yaml.load(args.input_file))
@@ -185,7 +185,7 @@ if __name__ == "__main__":
     qp.log.info(f"\n# Processed input:\n{qp.utils.yaml.dump(input_dict)}")
 
     # Initialize system with input parameters:
-    system = qp.System(rc=rc, **input_dict)
+    system = qp.System(rc=rc, process_grid_shape=args.process_grid, **input_dict)
 
     # Dry-run bypass:
     if args.dry_run:

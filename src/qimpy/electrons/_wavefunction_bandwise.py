@@ -18,7 +18,7 @@ def _band_norms(self: qp.electrons.Wavefunction, mode: str) -> torch.Tensor:
     )
     if basis.division.n_procs > 1:
         basis.rc.current_stream_synchronize()
-        basis.rc.comm_b.Allreduce(
+        basis.comm.Allreduce(
             qp.MPI.IN_PLACE, qp.utils.BufferView(result), op=qp.MPI.SUM
         )
     return result if (mode == "ke") else result.sqrt()
@@ -51,9 +51,7 @@ def _band_spin(self: qp.electrons.Wavefunction) -> torch.Tensor:
     )
     if basis.division.n_procs > 1:
         basis.rc.current_stream_synchronize()
-        basis.rc.comm_b.Allreduce(
-            qp.MPI.IN_PLACE, qp.utils.BufferView(rho_s), op=qp.MPI.SUM
-        )
+        basis.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(rho_s), op=qp.MPI.SUM)
     # Convert to spin vector:
     result = torch.zeros((3,) + coeff.shape[:3], device=coeff.device)
     result[0] = 2.0 * rho_s[..., 1, 0].real  # Sx

@@ -391,6 +391,7 @@ if __name__ == "__main__":
     qp.utils.log_config()
     qp.log.info("*" * 15 + " QimPy " + qp.__version__ + " " + "*" * 15)
     rc = qp.utils.RunConfig()
+    process_grid = qp.utils.ProcessGrid(rc.comm, "rkb")
 
     # Get dimensions from input:
     import sys
@@ -405,7 +406,9 @@ if __name__ == "__main__":
     lattice = qp.lattice.Lattice(
         rc=rc, system="triclinic", a=2.1, b=2.2, c=2.3, alpha=75, beta=80, gamma=85
     )  # pick one with no symmetries
-    ions = qp.ions.Ions(rc=rc, pseudopotentials=[], coordinates=[])
+    ions = qp.ions.Ions(
+        rc=rc, process_grid=process_grid, pseudopotentials=[], coordinates=[]
+    )
     symmetries = qp.symmetries.Symmetries(rc=rc, lattice=lattice, ions=ions)
 
     # Create grids with and without parallelization:

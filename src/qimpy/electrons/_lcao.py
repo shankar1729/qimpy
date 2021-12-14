@@ -16,6 +16,7 @@ class LCAO(Minimize[MatrixArray]):
         self,
         *,
         rc: qp.utils.RunConfig,
+        comm: qp.MPI.Comm,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         n_iterations: int = 30,
         energy_threshold: float = 1e-6,
@@ -36,7 +37,7 @@ class LCAO(Minimize[MatrixArray]):
         """
         super().__init__(
             rc=rc,
-            comm=rc.comm_kb,
+            comm=comm,
             name="LCAO",
             checkpoint_in=checkpoint_in,
             method="cg",
@@ -95,10 +96,10 @@ class LCAO(Minimize[MatrixArray]):
         E_mu_num = (wf_eig * dH_sub_diag).sum(dim=(1, 2))
         E_mu_den = wf_eig.sum(dim=(1, 2))  # TODO: make this more general:
         self.rc.current_stream_synchronize()
-        self.rc.comm_k.Allreduce(
+        el.kpoints.comm.Allreduce(
             qp.MPI.IN_PLACE, qp.utils.BufferView(E_mu_num), qp.MPI.SUM
         )
-        self.rc.comm_k.Allreduce(
+        el.kpoints.comm.Allreduce(
             qp.MPI.IN_PLACE, qp.utils.BufferView(E_mu_den), qp.MPI.SUM
         )
         E_mu_den.clamp_(max=-1e-20)  # avoid 0/0 in large-gap corner cases
@@ -123,6 +124,6 @@ class LCAO(Minimize[MatrixArray]):
         E_H_aux = self._rot_prev @ E_H_aux @ dagger_rot_prev
         K_E_H_aux = self._rot_prev @ K_E_H_aux @ dagger_rot_prev
         # Store gradients:
-        state.gradient = MatrixArray(M=E_H_aux, comm=self.rc.comm_k)
-        state.K_gradient = MatrixArray(M=K_E_H_aux, comm=self.rc.comm_k)
+        state.gradient = MatrixArray(M=E_H_aux, comm=el.kpoints.comm)
+        state.K_gradient = MatrixArray(M=K_E_H_aux, comm=el.kpoints.comm)
         state.extra = [np.sqrt(state.gradient.overlap(state.gradient))]

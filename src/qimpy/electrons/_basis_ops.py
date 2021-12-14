@@ -122,7 +122,7 @@ class _KernelCommon:
         )
 
         # Initialize MPI blocks (if needed):
-        self.need_move = (basis.rc.n_procs_b > 1) and (C_tot.band_division is None)
+        self.need_move = (basis.division.n_procs > 1) and (C_tot.band_division is None)
         if self.need_move:
             n_bands = C_tot.n_bands()
             mpi_block_size = basis.get_mpi_block_size(
@@ -267,9 +267,9 @@ def _collect_density(
         density.data[2] = 2.0 * rho_dn_up.imag  # My
 
     # Collect over MPI:
-    if self.rc.n_procs_kb > 1:
+    if self.comm_kb.size > 1:
         self.rc.current_stream_synchronize()
-        self.rc.comm_kb.Allreduce(
+        self.comm_kb.Allreduce(
             qp.MPI.IN_PLACE, qp.utils.BufferView(density.data), qp.MPI.SUM
         )
     watch.stop()

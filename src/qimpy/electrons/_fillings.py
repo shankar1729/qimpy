@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import collections
 from scipy import optimize
-from typing import Optional, Dict, Union, Callable, List, Sequence
+from typing import Optional, Dict, Union, Callable, Tuple, List, Sequence
 
 
 SmearingResults = collections.namedtuple("SmearingResults", ["f", "f_eig", "S"])
@@ -318,7 +318,7 @@ class Fillings(qp.TreeNode):
         # Guess chemical potential from eigenvalues if needed:
         if np.isnan(self.mu):
             n_full = int(np.floor(self.n_electrons / (el.w_spin * el.n_spins)))
-            self.mu = qp.utils.globalreduce.min(eig[:, :, n_full], self.rc.comm_kb)
+            self.mu = qp.utils.globalreduce.min(eig[:, :, n_full], el.comm)
 
         # Weights that generate number / magnetization and their targets:
         if el.spin_polarized:
@@ -344,15 +344,16 @@ class Fillings(qp.TreeNode):
             NM_target = np.array([self.n_electrons])
             mu_B = np.array([self.mu])
             i_free = np.where([not self.mu_constrain])[0]
-        results = {}  # populated with NM and S by compute_NM
+        results: Dict[str, torch.Tensor] = {}  # populated with NM and S by compute_NM
 
-        def compute_NM(params):
+        def compute_NM(params: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
             """Compute electron number and magnetization from eigenvalues.
             Here params are the entries in mu_B that are being optimized.
             Return error in corresponding NM entries, and its gradient
             with respect to the mu_B being optimized.
             Also store NM, f and entropy in `results` of outer scope.
             """
+            assert self._smearing_func is not None
             mu_B[i_free] = params
             mu_B_t = torch.tensor(mu_B).to(self.rc.device)
             mu_eff = (mu_B_t.view(-1, 1, 1, 1) * w_NM).sum(dim=0)
@@ -364,10 +365,10 @@ class Fillings(qp.TreeNode):
             # Collect across MPI and make consistent to machine precision:
             self.rc.current_stream_synchronize()
             for tensor in (NM, NM_mu_B):
-                self.rc.comm_k.Allreduce(
+                el.kpoints.comm.Allreduce(
                     qp.MPI.IN_PLACE, qp.utils.BufferView(tensor), qp.MPI.SUM
                 )
-                self.rc.comm_kb.Bcast(qp.utils.BufferView(tensor))
+                el.comm.Bcast(qp.utils.BufferView(tensor))
             self.f = f
             self.f_eig = f_eig
             results["NM"] = NM
@@ -384,7 +385,7 @@ class Fillings(qp.TreeNode):
             # Only mu is free: use a stable bracketing algorithm
             # --- Find a bracketing interval:
             def root_func1d(mu: float) -> float:
-                return compute_NM([mu])[0]
+                return compute_NM(np.full(1, mu))[0][0]
 
             def expand_range(sign: int) -> float:
                 mu_limit = self.mu
@@ -401,7 +402,7 @@ class Fillings(qp.TreeNode):
         else:  # B is free: use a quasi-Newton method
             # Find mu and/or B to match N and/or M as appropriate:
             # --- start with a larger sigma and reduce down for stability:
-            eig_diff_max = qp.utils.globalreduce.max(eig.diff(dim=-1), self.rc.comm_k)
+            eig_diff_max = qp.utils.globalreduce.max(eig.diff(dim=-1), el.kpoints.comm)
             sigma_cur = max(self.sigma, min(0.1, eig_diff_max))
             final_step = False
             while not final_step:
@@ -424,7 +425,7 @@ class Fillings(qp.TreeNode):
 
         # Update fillings and entropy accordingly:
         energy["-TS"] = (-0.5 * self.sigma) * qp.utils.globalreduce.sum(
-            w_sk * results["S"], self.rc.comm_k
+            w_sk * results["S"], el.kpoints.comm
         )
         # --- update n_electrons or mu, depending on which is free
         n_electrons = results["NM"][0].item()
@@ -465,7 +466,7 @@ class Fillings(qp.TreeNode):
         dset = checkpoint.create_dataset(
             path, shape=shape, dtype=self.rc.np_type[v.dtype]
         )
-        if self.rc.i_proc_b == 0:
+        if el.basis.division.i_proc == 0:
             checkpoint.write_slice(dset, offset, v[:, :, : self.n_bands])
 
     def read_band_scalars(self, cp_path: qp.utils.CpPath, v: torch.Tensor) -> int:
