@@ -11,6 +11,7 @@ def _norm(self: qp.electrons.Wavefunction) -> float:
     )
 
 
+@qp.utils.stopwatch(name="Wavefunction.dot")
 def _dot(
     self: qp.electrons.Wavefunction, other: qp.electrons.Wavefunction
 ) -> qp.utils.Waitable[torch.Tensor]:
@@ -48,7 +49,6 @@ def _dot(
     assert basis is other.basis
     assert self.coeff.shape[-1] == other.coeff.shape[-1]
     full_basis = self.coeff.shape[-1] == basis.n_tot
-    watch = qp.utils.StopWatch("Wavefunction.dot")
 
     # Determine spinor handling:
     spinorial1 = self.coeff.shape[-2] == 2
@@ -96,7 +96,6 @@ def _dot(
         result = result.view(split_shape).transpose(-2, -1).reshape(new_shape)
 
     # Reduce asynchronously if needed:
-    watch.stop()
     need_reduce = (basis.division.n_procs > 1) and (not full_basis)
     if need_reduce:
         return qp.utils.Iallreduce_in_place(basis.comm, result, op=qp.MPI.SUM)
@@ -131,6 +130,7 @@ def _overlap(self: qp.electrons.Wavefunction) -> qp.electrons.Wavefunction:
     return self  # TODO: augment overlap here when adding ultrasoft / PAW
 
 
+@qp.utils.stopwatch(name="Wavefunction.matmul")
 def _matmul(
     self: qp.electrons.Wavefunction, mat: torch.Tensor
 ) -> qp.electrons.Wavefunction:
@@ -159,7 +159,6 @@ def _matmul(
     """
     if not isinstance(mat, torch.Tensor):
         return NotImplemented
-    watch = qp.utils.StopWatch("Wavefunction.matmul")
     # Prepare spinor handling:
     n_bands_in, n_spinor_in, n_basis = self.coeff.shape[-3:]
     n_bands_out = mat.shape[-1]
@@ -187,7 +186,6 @@ def _matmul(
     if self._proj_is_valid() and (n_spinor_in == n_spinor_out):
         assert self._proj is not None
         result._proj = self._proj @ mat
-    watch.stop()
     return result
 
 

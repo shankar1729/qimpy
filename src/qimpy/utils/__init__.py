@@ -18,6 +18,7 @@ __all__ = (
     "fmt",
     "ProcessGrid",
     "StopWatch",
+    "stopwatch",
     "Gradable",
     "Optimizable",
     "ConvergenceCheck",
@@ -51,7 +52,7 @@ from ._math import (
 from . import dict, globalreduce, yaml
 from ._log import log_config, fmt
 from ._process_grid import ProcessGrid
-from ._stopwatch import StopWatch
+from ._stopwatch import StopWatch, stopwatch
 from ._gradable import Gradable
 from ._optimizable import Optimizable, ConvergenceCheck, MatrixArray
 from ._waitable import Waitable, Waitless

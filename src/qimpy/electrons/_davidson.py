@@ -91,18 +91,16 @@ class Davidson(qp.TreeNode):
         if converge_failed and (not inner_loop):
             qp.log.info(f"{line_prefix}: Failed to converge")
 
-    def _precondition(
+    @qp.utils.stopwatch
+    def precondition(
         self, Cerr: qp.electrons.Wavefunction, KEref: torch.Tensor
     ) -> qp.electrons.Wavefunction:
         """Inverse-kinetic preconditioner on the Cerr in eigenpairs,
         using the per-band kinetic energy KEref"""
-        watch = qp.utils.StopWatch("Davidson.precondition")
         basis = self.electrons.basis
         x = basis.get_ke(basis.mine)[None, :, None, None, :] / KEref[..., None, None]
         x += torch.exp(-x)  # don't modify x ~ 0
-        result = Cerr / x
-        watch.stop()
-        return result
+        return Cerr / x
 
     def _regularize(
         self, C: qp.electrons.Wavefunction, norm: torch.Tensor, i_iter: int
@@ -188,7 +186,7 @@ class Davidson(qp.TreeNode):
             HC_sel = HC[:, :, n_eigs_done:] if n_eigs_done else HC
             # --- compute subspace expansion
             KEref = C_sel.band_ke()  # reference KE for preconditioning
-            Cexp = self._precondition(HC_sel - C_sel.overlap() * eig_sel, KEref)
+            Cexp = self.precondition(HC_sel - C_sel.overlap() * eig_sel, KEref)
             norm_exp = Cexp.band_norm()
             self._regularize(Cexp, norm_exp, self._i_iter)
             Cexp *= 1.0 / norm_exp[..., None, None]

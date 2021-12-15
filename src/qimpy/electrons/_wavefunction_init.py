@@ -21,6 +21,7 @@ def _randn(x: torch.Tensor) -> torch.Tensor:
     )  # Phase
 
 
+@qp.utils.stopwatch(name="Wavefunction.randomize")
 def _randomize(
     self: qp.electrons.Wavefunction,
     seed: int = 0,
@@ -43,7 +44,6 @@ def _randomize(
         Stopping band index (global index if MPI-split over bands)
     """
     basis = self.basis
-    watch = qp.utils.StopWatch("Wavefunction.randomize")
 
     # Range of bands and basis to operate on:
     if self.band_division is None:
@@ -120,7 +120,6 @@ def _randomize(
     # Bandwidth limit:
     ke = basis.get_ke(slice(basis_start, basis_stop))[None, :, None, None, :]
     coeff_cur *= 1.0 / (1.0 + ((4.0 / 3) * ke) ** 6)  # damp-out high-KE coefficients
-    watch.stop()
 
 
 _RandomizeSelected = Callable[
@@ -128,6 +127,7 @@ _RandomizeSelected = Callable[
 ]
 
 
+@qp.utils.stopwatch(name="Wavefunction.randomize_sel")
 def _randomize_selected(
     self: qp.electrons.Wavefunction,
     i_spin: torch.Tensor,
@@ -143,7 +143,6 @@ def _randomize_selected(
     assert self.band_division is None
     basis = self.basis
     n_bands = self.n_bands()
-    watch = qp.utils.StopWatch("Wavefunction.randomize_sel")
 
     # Initialize random number state based on global coeff index and seed:
     def init_state(basis_index: torch.Tensor) -> torch.Tensor:
@@ -189,4 +188,3 @@ def _randomize_selected(
     # Bandwidth limit:
     ke = basis.get_ke(basis.mine)[i_k, None, :]
     self.coeff[(i_spin, i_k, i_band)] *= 1.0 / (1.0 + ((4.0 / 3) * ke) ** 6)
-    watch.stop()

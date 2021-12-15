@@ -114,10 +114,10 @@ class FieldSymmetrizer:
         self.phase_conj[:, :, 1][is_conj] *= -1
         qp.log.info(f"Initialized field symmetrization in {len(index)} orbits")
 
+    @qp.utils.stopwatch(name="FieldH.symmetrize")
     def __call__(self, v: qp.grid.FieldH) -> None:
         """Symmetrize field `v` in-place."""
         grid = self.grid
-        watch = qp.utils.StopWatch("FieldH.symmetrize")
         assert v.grid == grid
         n_batch = int(np.prod(v.data.shape[:-3]))
         n_grid = int(np.prod(grid.shapeH_mine))
@@ -181,7 +181,6 @@ class FieldSymmetrizer:
         # Account for multiple accumulated rotations of same grid point:
         v_data *= self.inv_multiplicity[None]
         v.data = v_data.view(v.data.shape)
-        watch.stop()
 
 
 def _bmm(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:

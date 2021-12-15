@@ -5,22 +5,21 @@ import torch
 from typing import Optional
 
 
+@qp.utils.stopwatch(name="Basis.apply_ke")
 def _apply_ke(
     self: qp.electrons.Basis, C: qp.electrons.Wavefunction
 ) -> qp.electrons.Wavefunction:
     "Apply kinetic energy (KE) operator to wavefunction `C`"
-    watch = qp.utils.StopWatch("Basis.apply_ke")
     basis_slice = slice(None) if C.band_division else self.mine
     coeff = C.coeff * self.get_ke(basis_slice)[None, :, None, None, :]
-    watch.stop()
     return qp.electrons.Wavefunction(self, coeff=coeff, band_division=C.band_division)
 
 
+@qp.utils.stopwatch(name="Basis.apply_potential")
 def _apply_potential(
     self: qp.electrons.Basis, V: qp.grid.FieldH, C: qp.electrons.Wavefunction
 ) -> qp.electrons.Wavefunction:
     "Apply potential `V` to wavefunction `C`"
-    watch = qp.utils.StopWatch("Basis.apply_potential")
     Vdata_in = (~(V.to(self.grid))).data  # change to real space on basis grid
     n_densities = Vdata_in.shape[0]
     spin_dm_mode = n_densities == 4  # spin density-matrix mode
@@ -90,7 +89,6 @@ def _apply_potential(
         apply_potential_kernel(VC).wait()
 
     VC.constrain()  # project out spurious entries (padding and real symmetry)
-    watch.stop()
     return VC
 
 
@@ -187,6 +185,7 @@ class _ApplyPotentialKernel(_KernelCommon):
         return self.result
 
 
+@qp.utils.stopwatch(name="Basis.collect_density")
 def _collect_density(
     self: qp.electrons.Basis,
     C: qp.electrons.Wavefunction,
@@ -204,7 +203,6 @@ def _collect_density(
     while (Mx +/- i My)/2 yield the :math:`\rho_{\uparrow\downarrow}` and
     :math:`\rho_{\downarrow\uparrow}` components of the spin density matrix.
     """
-    watch = qp.utils.StopWatch("Basis.collect_density")
     assert f.shape == C.coeff.shape[:3]
     n_spins, _, _, n_spinor, _ = C.coeff.shape
     if need_Mvec:
@@ -272,7 +270,6 @@ def _collect_density(
         self.comm_kb.Allreduce(
             qp.MPI.IN_PLACE, qp.utils.BufferView(density.data), qp.MPI.SUM
         )
-    watch.stop()
     return density
 
 

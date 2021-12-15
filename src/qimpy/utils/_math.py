@@ -2,6 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
+from ._stopwatch import stopwatch
 from typing import List, Tuple, TypeVar
 
 
@@ -169,6 +170,7 @@ def ortho_matrix(O: torch.Tensor, use_cholesky: bool = True) -> torch.Tensor:
         return V @ ((1.0 / torch.sqrt(lbda))[..., None] * dagger(V))
 
 
+@stopwatch
 def eighg(
     H: qp.utils.Waitable[torch.Tensor],
     O: torch.Tensor,
@@ -197,7 +199,6 @@ def eighg(
     V : torch.Tensor
         Eigenvectors (same shape as H and O)
     """
-    watch = qp.utils.StopWatch("eighg")
     # Start orthogonoalization:
     qp.rc.compute_stream_wait_current()
     with torch.cuda.stream(qp.rc.compute_stream):
@@ -209,5 +210,4 @@ def eighg(
     # Diagonalize:
     E, V = torch.linalg.eigh(dagger(U) @ (Hresult @ U))
     V = U @ V  # transform eigenvectors back to original basis
-    watch.stop()
     return E, V

@@ -2,6 +2,7 @@ import time
 import torch
 import qimpy as qp
 import numpy as np
+import functools
 from typing import ClassVar, Dict, List, Tuple, Union
 
 
@@ -86,3 +87,25 @@ class StopWatch:
             f'StopWatch: {"Total":30s}    {"-"*25} {n_calls_total:5d}'
             f" calls, {t_total:10.6f} s total"
         )
+
+
+def stopwatch(_func=None, *, name=None):
+    """Decorator to wrap `StopWatch` around call to function.
+    Without arguments, decorator `@stopwatch` uses `__qualname__` of the function
+    for `StopWatch.name`. To override this, use the decorator with a keyword-argument
+    name i.e. `@stopwatch(name=function_name)`."""
+
+    def stopwatch_named(func):
+        @functools.wraps(func)
+        def stopwatch_wrapper(*args, **kwargs):
+            watch = StopWatch(func.__qualname__ if (name is None) else name)
+            result = func(*args, **kwargs)
+            watch.stop()
+            return result
+
+        return stopwatch_wrapper
+
+    if _func is None:
+        return stopwatch_named
+    else:
+        return stopwatch_named(_func)
