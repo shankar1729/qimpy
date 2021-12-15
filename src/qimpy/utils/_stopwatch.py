@@ -8,10 +8,11 @@ from typing import ClassVar, Dict, List, Tuple, Union
 
 class StopWatch:
     """Simple profiling utility for blocks of code / functions.
-    To use, create a StopWatch associated with a name at the start of
-    the code block or function being profiled, and call stop() at the
-    end of that block. The class collects together statistics of
-    execution time by name, which can be logged using print_stats()."""
+    To use, create a StopWatch associated with a name at the start of the code
+    block or function being profiled, and call stop() at the end of that block.
+    For timing entire functions, use decorator `stopwatch` instead for convenience.
+    Use `print_stats` at the end of the run to log statistics of execution times
+    of each named code block or function."""
 
     __slots__ = ["name", "t_start"]
     name: str  #: name of code block
