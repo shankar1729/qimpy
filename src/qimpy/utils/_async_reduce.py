@@ -24,7 +24,7 @@ class Iallreduce_in_place:
     def __init__(self, comm: qp.MPI.Comm, buf: torch.Tensor, op: qp.MPI.Op) -> None:
         # Check if real async supported (or need to fake it):
         self.async_supported = is_async_reduce_supported(buf.is_cuda)
-        self.local_reduce = (op is qp.MPI.SUM) and (buf.dtype is torch.complex128)
+        self.local_reduce = op is qp.MPI.SUM  # could optimize other Ops when needed
         self.local_reduce_op = torch.sum
         self.buf = buf
         if self.async_supported:
@@ -43,7 +43,7 @@ class Iallreduce_in_place:
             send_offset = division.n_prev[:-1]
             recv_counts = division.n_mine
             recv_offset = np.arange(n_procs) * recv_counts
-            mpi_type = qp.MPI.DOUBLE_COMPLEX  # TODO: need rc to do this properly
+            mpi_type = qp.rc.mpi_type[buf.dtype]
             # Initiate MPI transpose:
             self.buf_t = torch.empty(
                 (n_procs, division.n_mine), dtype=buf.dtype, device=buf.device
