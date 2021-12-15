@@ -267,9 +267,7 @@ def _collect_density(
     # Collect over MPI:
     if self.comm_kb.size > 1:
         qp.rc.current_stream_synchronize()
-        self.comm_kb.Allreduce(
-            qp.MPI.IN_PLACE, qp.utils.BufferView(density.data), qp.MPI.SUM
-        )
+        qp.utils.Iallreduce_in_place(self.comm_kb, density.data, qp.MPI.SUM).wait()
     return density
 
 
