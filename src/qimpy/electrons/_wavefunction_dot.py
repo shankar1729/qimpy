@@ -48,7 +48,7 @@ def _dot(
     assert basis is other.basis
     assert self.coeff.shape[-1] == other.coeff.shape[-1]
     full_basis = self.coeff.shape[-1] == basis.n_tot
-    watch = qp.utils.StopWatch("Wavefunction.dot", basis.rc)
+    watch = qp.utils.StopWatch("Wavefunction.dot")
 
     # Determine spinor handling:
     spinorial1 = self.coeff.shape[-2] == 2
@@ -159,7 +159,7 @@ def _matmul(
     """
     if not isinstance(mat, torch.Tensor):
         return NotImplemented
-    watch = qp.utils.StopWatch("Wavefunction.matmul", self.basis.rc)
+    watch = qp.utils.StopWatch("Wavefunction.matmul")
     # Prepare spinor handling:
     n_bands_in, n_spinor_in, n_basis = self.coeff.shape[-3:]
     n_bands_out = mat.shape[-1]

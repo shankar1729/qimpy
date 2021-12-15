@@ -33,7 +33,6 @@ class SCF(qp.utils.Pulay[qp.grid.FieldH]):
     def __init__(
         self,
         *,
-        rc: qp.utils.RunConfig,
         comm: qp.MPI.Comm,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         n_iterations: int = 50,
@@ -104,7 +103,6 @@ class SCF(qp.utils.Pulay[qp.grid.FieldH]):
         self.eig_threshold = float(eig_threshold)
         self.mix_density = mix_density
         super().__init__(
-            rc=rc,
             comm=comm,
             name="SCF",
             checkpoint_in=checkpoint_in,

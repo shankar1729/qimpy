@@ -227,20 +227,17 @@ class _FunctionalLibxc:
 class FunctionalsLibxc(Functional):
     """Evaluate one or more functionals from Libxc together."""
 
-    __slots__ = ("rc", "_functionals")
-    rc: qp.utils.RunConfig
+    __slots__ = "_functionals"
     _functionals: List[_FunctionalLibxc]  #: Individual Libxc functionals
 
     def __init__(
         self,
-        rc: qp.utils.RunConfig,
         spin_polarized: bool,
         libxc_names: Dict[str, float],
     ) -> None:
         """Initialize from Libxc names with scale factors for each."""
         assert LIBXC_AVAILABLE
         spin_str = "polarized" if spin_polarized else "unpolarized"
-        self.rc = rc
         self._functionals = [
             _FunctionalLibxc(spin_str, name, scale_factor)
             for name, scale_factor in libxc_names.items()
@@ -258,14 +255,14 @@ class FunctionalsLibxc(Functional):
 
     def to_xc(self, v: torch.Tensor) -> np.ndarray:
         """Convert data array from internal to XC form."""
-        return v.to(self.rc.cpu).flatten(1).T.contiguous().numpy()
+        return v.to(qp.rc.cpu).flatten(1).T.contiguous().numpy()
 
     def from_xc(self, v: np.ndarray, v_ref: torch.Tensor) -> torch.Tensor:
         """Convert data array from XC to internal form.
         `v_ref` provides the reference shape for the output."""
         in_shape = v_ref.shape[1:] + v_ref.shape[:1]  # spin dim last in XC
         out = torch.from_numpy(v).contiguous().view(in_shape)
-        return out.permute(3, 0, 1, 2).to(self.rc.device)  # spin first now
+        return out.permute(3, 0, 1, 2).to(qp.rc.device)  # spin first now
 
     def __call__(
         self,

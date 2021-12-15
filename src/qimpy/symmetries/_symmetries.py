@@ -14,7 +14,6 @@ class Symmetries(qp.TreeNode):
     symmetrize properties such as positions, forces and densities."""
 
     __slots__ = (
-        "rc",
         "lattice",
         "ions",
         "tolerance",
@@ -25,7 +24,6 @@ class Symmetries(qp.TreeNode):
         "i_id",
         "i_inv",
     )
-    rc: qp.utils.RunConfig  #: Current run configuration
     lattice: qp.lattice.Lattice  #: Corresponding lattice vectors
     ions: qp.ions.Ions  #: Corresponding ionic geometry
     tolerance: float  #: Relative error threshold in detecting symmetries
@@ -44,7 +42,6 @@ class Symmetries(qp.TreeNode):
     def __init__(
         self,
         *,
-        rc: qp.utils.RunConfig,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         lattice: qp.lattice.Lattice,
         ions: qp.ions.Ions,
@@ -59,7 +56,6 @@ class Symmetries(qp.TreeNode):
             :yaml:`Threshold for detecting symmetries.`
         """
         super().__init__()
-        self.rc = rc
         self.lattice = lattice
         self.ions = ions
         self.tolerance = tolerance
@@ -77,7 +73,7 @@ class Symmetries(qp.TreeNode):
             lattice.Rbasis
         )  # Cartesian axes
         for axis_name, axis_np in axes.items():
-            axis = torch.from_numpy(axis_np).to(rc.device)
+            axis = torch.from_numpy(axis_np).to(qp.rc.device)
             sel = torch.where((sym_axis @ axis - axis).norm(dim=-1) < tolerance)[0]
             lattice_sym = lattice_sym[sel]
             sym_axis = sym_axis[sel]
@@ -94,9 +90,9 @@ class Symmetries(qp.TreeNode):
         for i_sym in range(self.n_sym):
             sym_str = "- ["
             for row in range(3):
-                sym_str += rc.fmt(self.rot[i_sym, row].to(torch.int)) + ", "
-            qp.log.info(sym_str + rc.fmt(self.trans[i_sym]) + "]")
-        qp.log.debug("Ion map:\n" + rc.fmt(self.ion_map))
+                sym_str += qp.utils.fmt(self.rot[i_sym, row].to(torch.int)) + ", "
+            qp.log.info(sym_str + qp.utils.fmt(self.trans[i_sym]) + "]")
+        qp.log.debug("Ion map:\n" + qp.utils.fmt(self.ion_map))
 
         # Enforce symmetries exactly on lattice:
         qp.log.info("Enforcing symmetries:")
@@ -111,7 +107,7 @@ class Symmetries(qp.TreeNode):
 
         # Identify location of special entries:
         # --- identity
-        id = torch.eye(3, device=rc.device)  # identity matrix
+        id = torch.eye(3, device=qp.rc.device)  # identity matrix
         id_diff = ((self.rot - id) ** 2).sum(dim=(1, 2)) + (self.trans ** 2).sum(dim=1)
         self.i_id = int(id_diff.argmin().item())
         if id_diff[self.i_id] > tolerance ** 2:

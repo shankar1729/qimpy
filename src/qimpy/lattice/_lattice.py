@@ -16,7 +16,6 @@ class Lattice(qp.TreeNode):
     def __init__(
         self,
         *,
-        rc: qp.utils.RunConfig,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         system: Optional[str] = None,
         modification: Optional[str] = None,
@@ -108,13 +107,15 @@ class Lattice(qp.TreeNode):
             scale_vector = torch.tensor(scale).flatten()
             assert len(scale_vector) in (1, 3)
             self.Rbasis = scale_vector[None, :] * self.Rbasis
-        qp.log.info("Rbasis (real-space basis in columns):\n" + rc.fmt(self.Rbasis))
-        self.Rbasis = self.Rbasis.to(rc.device)
+        qp.log.info(
+            f"Rbasis (real-space basis in columns):\n{qp.utils.fmt(self.Rbasis)}"
+        )
+        self.Rbasis = self.Rbasis.to(qp.rc.device)
 
         # Compute reciprocal lattice vectors:
         self.Gbasis = (2 * np.pi) * torch.linalg.inv(self.Rbasis.T)
         qp.log.info(
-            "Gbasis (reciprocal-space basis in columns):\n" + rc.fmt(self.Gbasis)
+            "Gbasis (reciprocal-space basis in columns):\n{qp.utils.fmt(self.Gbasis)}"
         )
 
         # Compute unit cell volume:

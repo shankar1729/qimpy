@@ -15,7 +15,7 @@ __all__ = (
     "globalreduce",
     "yaml",
     "log_config",
-    "RunConfig",
+    "fmt",
     "ProcessGrid",
     "StopWatch",
     "Gradable",
@@ -49,8 +49,7 @@ from ._math import (
     eighg,
 )
 from . import dict, globalreduce, yaml
-from ._log import log_config
-from ._runconfig import RunConfig
+from ._log import log_config, fmt
 from ._process_grid import ProcessGrid
 from ._stopwatch import StopWatch
 from ._gradable import Gradable

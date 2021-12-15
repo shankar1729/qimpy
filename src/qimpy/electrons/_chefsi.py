@@ -16,7 +16,6 @@ class CheFSI(Davidson):
     def __init__(
         self,
         *,
-        rc: qp.utils.RunConfig,
         electrons: qp.electrons.Electrons,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         n_iterations: int = 100,
@@ -49,7 +48,6 @@ class CheFSI(Davidson):
             that creates a reasonable starting point for CheFSI.
         """
         super().__init__(
-            rc=rc,
             electrons=electrons,
             checkpoint_in=checkpoint_in,
             n_iterations=n_iterations,
@@ -151,7 +149,7 @@ class CheFSI(Davidson):
 
             # Subspace orthonormalization and diagonalization:
             eig_prev = el.eig
-            el.eig, V = qp.utils.eighg(el.C ^ HC, el.C.dot_O(el.C).wait(), self.rc)
+            el.eig, V = qp.utils.eighg(el.C ^ HC, el.C.dot_O(el.C).wait())
             el.C = el.C @ V
             HC = HC @ V
 

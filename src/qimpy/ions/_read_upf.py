@@ -5,9 +5,7 @@ import numpy as np
 import torch
 
 
-def _read_upf(
-    self: qp.ions.Pseudopotential, filename: str, rc: qp.utils.RunConfig
-) -> None:
+def _read_upf(self: qp.ions.Pseudopotential, filename: str) -> None:
     """Read a UPF pseudopotential.
     Note that only norm-conserving UPF files are currently supported.
 
@@ -15,8 +13,6 @@ def _read_upf(
     ----------
     filename : str
         Full path to the UPF file to read.
-    rc : qimpy.utils.RunConfig
-        Current run configuration.
     """
     qp.log.info(f"\nReading '{filename}':")
     upf = ET.fromstring(open(filename, "r").read().replace("&", "&amp;"))
@@ -89,9 +85,11 @@ def _read_upf(
             r = np.fromstring(entry.text, sep=" ")
             if not r[0]:  # avoid divide by 0 below
                 r[0] = 1e-3 * r[1]
-            self.r = torch.tensor(r, device=rc.device)
+            self.r = torch.tensor(r, device=qp.rc.device)
         elif entry.tag == "PP_RAB":
-            self.dr = torch.tensor(np.fromstring(entry.text, sep=" "), device=rc.device)
+            self.dr = torch.tensor(
+                np.fromstring(entry.text, sep=" "), device=qp.rc.device
+            )
         else:
             qp.log.info(f"  NOTE: ignored section '{entry.tag}'")
     assert r is not None
@@ -133,12 +131,13 @@ def _read_upf(
                     # Get descreened 'D' matrix of pseudopotential:
                     if n_beta:
                         self.D = torch.tensor(
-                            np.fromstring(entry.text, sep=" ") * 0.5, device=rc.device
+                            np.fromstring(entry.text, sep=" ") * 0.5,
+                            device=qp.rc.device,
                         ).reshape(n_beta, n_beta)
                         # Note: 0.5 above converts from Ry to Eh
                     else:
                         # np.fromstring misbehaves for an empty string
-                        self.D = torch.zeros((0, 0), device=rc.device)
+                        self.D = torch.zeros((0, 0), device=qp.rc.device)
                 else:
                     qp.log.info(f"  NOTE: ignored section '{entry.tag}'")
             # Create projector radial function:
@@ -205,8 +204,8 @@ def _read_upf(
                     j_psi[i_psi] = entry.attrib["jchi"]
                 else:
                     qp.log.info(f"  NOTE: ignored section '{entry.tag}'")
-            self.j_beta = torch.tensor(j_beta, device=rc.device)
-            self.j_psi = torch.tensor(j_psi, device=rc.device)
+            self.j_beta = torch.tensor(j_beta, device=qp.rc.device)
+            self.j_psi = torch.tensor(j_psi, device=qp.rc.device)
         else:
             qp.log.info(f"  NOTE: ignored section '{section.tag}'")
 
@@ -222,7 +221,7 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
     qp.utils.log_config()
-    rc = qp.utils.RunConfig()
+    qp.rc.init()
 
     psPath = "/home/shankar/DFT/Pseudopotentials/PSlib"
     psNames = [
@@ -234,16 +233,16 @@ if __name__ == "__main__":
     for psName in psNames:
 
         # Read pseudopotential:
-        ps = qp.ions.Pseudopotential(psPath + "/" + psName, rc)
+        ps = qp.ions.Pseudopotential(psPath + "/" + psName)
 
         # Plot local potential and densities:
-        r = ps.r.to(rc.cpu)
+        r = ps.r.to(qp.rc.cpu)
         plt.figure()
         plt.title(psName + " density/potential")
-        plt.plot(r, ps.rho_atom.f.to(rc.cpu)[0], label=r"$\rho_{\mathrm{atom}}(r)$")
+        plt.plot(r, ps.rho_atom.f.to(qp.rc.cpu)[0], label=r"$\rho_{\mathrm{atom}}(r)$")
         if hasattr(ps, "nCore"):
-            plt.plot(r, ps.n_core.f.to(rc.cpu)[0], label=r"$n_{\mathrm{core}}(r)$")
-        plt.plot(r, r * ps.Vloc.f.to(rc.cpu)[0], label=r"$r V_{\mathrm{loc}}(r)$")
+            plt.plot(r, ps.n_core.f.to(qp.rc.cpu)[0], label=r"$n_{\mathrm{core}}(r)$")
+        plt.plot(r, r * ps.Vloc.f.to(qp.rc.cpu)[0], label=r"$r V_{\mathrm{loc}}(r)$")
         plt.xlabel(r"$r$")
         plt.xlim(0, 10.0)
         plt.legend()
@@ -251,7 +250,7 @@ if __name__ == "__main__":
         # Plot projectors:
         plt.figure()
         plt.title(psName + " projectors")
-        for i, beta_i in enumerate(ps.beta.f.to(rc.cpu)):
+        for i, beta_i in enumerate(ps.beta.f.to(qp.rc.cpu)):
             l_i = int(ps.beta.l[i].item())
             plt.plot(r, beta_i, label=r"$\beta_" + "spdf"[l_i] + f"(r)/r^{l_i}$")
         plt.xlabel(r"$r$")
@@ -261,7 +260,7 @@ if __name__ == "__main__":
         # Plot projectors:
         plt.figure()
         plt.title(psName + " orbitals")
-        for i, psi_i in enumerate(ps.psi.f.to(rc.cpu)):
+        for i, psi_i in enumerate(ps.psi.f.to(qp.rc.cpu)):
             l_i = int(ps.psi.l[i].item())
             plt.plot(r, psi_i, label=r"$\psi_" + "spdf"[l_i] + f"(r)/r^{l_i}$")
         plt.xlabel(r"$r$")

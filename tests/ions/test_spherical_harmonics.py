@@ -7,26 +7,26 @@ import torch
 import pytest
 
 
-def get_r_ylm(rc: qp.utils.RunConfig) -> Tuple[torch.Tensor, torch.Tensor]:
+def get_r_ylm() -> Tuple[torch.Tensor, torch.Tensor]:
     """Get test data for all the harmonics tests."""
     torch.manual_seed(0)
-    r = torch.randn(10, 10000, 3, device=rc.device)
+    r = torch.randn(10, 10000, 3, device=qp.rc.device)
     ylm = sh.get_harmonics(sh.L_MAX, r)
     return r, ylm
 
 
 @pytest.fixture(scope="module")
-def r_ylm(rc: qp.utils.RunConfig) -> Tuple[torch.Tensor, torch.Tensor]:
-    return get_r_ylm(rc)
+def r_ylm() -> Tuple[torch.Tensor, torch.Tensor]:
+    return get_r_ylm()
 
 
 @pytest.mark.mpi_skip
-def test_ylm(r_ylm: Tuple[torch.Tensor, torch.Tensor], rc: qp.utils.RunConfig) -> None:
+def test_ylm(r_ylm: Tuple[torch.Tensor, torch.Tensor]) -> None:
     qp.log.info("Testing spherical harmonics:")
     r, ylm = r_ylm
     rel_err_all = []
-    ylm_ref = torch.from_numpy(get_harmonics_ref(sh.L_MAX, r.to(rc.cpu).numpy())).to(
-        rc.device
+    ylm_ref = torch.from_numpy(get_harmonics_ref(sh.L_MAX, r.to(qp.rc.cpu).numpy())).to(
+        qp.rc.device
     )
     for l in range(sh.L_MAX + 1):
         l_slice = slice(l ** 2, (l + 1) ** 2)
@@ -40,14 +40,12 @@ def test_ylm(r_ylm: Tuple[torch.Tensor, torch.Tensor], rc: qp.utils.RunConfig) -
 
 
 @pytest.mark.mpi_skip
-def test_ylm_prod(
-    r_ylm: Tuple[torch.Tensor, torch.Tensor], rc: qp.utils.RunConfig
-) -> None:
+def test_ylm_prod(r_ylm: Tuple[torch.Tensor, torch.Tensor]) -> None:
     qp.log.info("Testing product coefficients:")
     r, ylm = r_ylm
     r_sq = (r ** 2).sum(dim=-1)
     if not sh._YLM_PROD:
-        sh._initialize_device(rc.device)
+        sh._initialize_device(qp.rc.device)
     rel_err_all = []
     dl_shape = (-1,) + (1,) * len(r_sq.shape)  # bcast with r_sq[None]
     for l1 in range(sh.L_MAX_HLF + 1):
@@ -81,11 +79,11 @@ def test_ylm_prod(
 def main():
     """Run test with verbose log."""
     qp.utils.log_config()
-    rc = qp.utils.RunConfig()
-    assert rc.n_procs == 1
-    r, ylm = get_r_ylm(rc)
-    test_ylm((r, ylm), rc)
-    test_ylm_prod((r, ylm), rc)
+    qp.rc.init()
+    assert qp.rc.n_procs == 1
+    r, ylm = get_r_ylm()
+    test_ylm((r, ylm))
+    test_ylm_prod((r, ylm))
 
 
 if __name__ == "__main__":

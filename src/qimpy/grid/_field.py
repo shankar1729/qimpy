@@ -63,7 +63,7 @@ class Field(qp.utils.Gradable[FieldType]):
         if data is None:
             # Initialize to zero:
             self.data = torch.zeros(
-                tuple(shape_batch) + shape_grid_mine, dtype=dtype, device=grid.rc.device
+                tuple(shape_batch) + shape_grid_mine, dtype=dtype, device=qp.rc.device
             )
         else:
             # Initialize to provided data:
@@ -143,7 +143,7 @@ class Field(qp.utils.Gradable[FieldType]):
         # Collect over MPI if needed:
         if self.grid.comm is not None:
             result = result.contiguous()
-            self.grid.rc.current_stream_synchronize()
+            qp.rc.current_stream_synchronize()
             self.grid.comm.Allreduce(
                 qp.MPI.IN_PLACE, qp.utils.BufferView(result), qp.MPI.SUM
             )
@@ -256,11 +256,11 @@ class Field(qp.utils.Gradable[FieldType]):
         assert checkpoint is not None
         shape_batch = self.data.shape[:-3]
         dtype: torch.dtype = self.data.dtype
-        dtype_np = self.grid.rc.np_type[dtype]
+        dtype_np = qp.rc.np_type[dtype]
         shape = shape_batch + self.shape_grid()  # global dimensions
         offset = (0,) * len(shape_batch) + self.offset_grid_mine()
         if dtype.is_complex:
-            dset = checkpoint.create_dataset_complex(path, shape=shape, dtype=dtype_np)
+            dset = checkpoint.create_dataset_complex(path, shape=shape, dtype=dtype)
             checkpoint.write_slice_complex(dset, offset, self.data)
         else:
             dset = checkpoint.create_dataset(path, shape=shape, dtype=dtype_np)

@@ -42,7 +42,6 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         energy: float = 1e-4  #: Dimensionless minimum energy reduction in step
         gradient: float = 0.9  #: Required reduction of projected gradient
 
-    rc: qp.utils.RunConfig
     comm: qp.MPI.Comm  #: Communicator over which algorithm operates in unison
     name: str  #: Name of algorithm instance used in reporting eg. 'Ionic'
     n_iterations: int  #: Maximum number of iterations
@@ -63,7 +62,6 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
     def __init__(
         self,
         *,
-        rc: qp.utils.RunConfig,
         checkpoint_in: qp.utils.CpPath,
         comm: qp.MPI.Comm,
         name: str,
@@ -79,7 +77,6 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
     ) -> None:
         """Initialize minimization algorithm parameters."""
         super().__init__()
-        self.rc = rc
         self.comm = comm
         self.name = name
         self.n_iterations = n_iterations

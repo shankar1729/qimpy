@@ -13,7 +13,6 @@ class Grid(qp.TreeNode):
     """
 
     __slots__ = (
-        "rc",
         "lattice",
         "symmetries",
         "_field_symmetrizer",
@@ -38,7 +37,6 @@ class Grid(qp.TreeNode):
         "_indices_rfft",
         "_indices_irfft",
     )
-    rc: qp.utils.RunConfig
     lattice: qp.lattice.Lattice
     symmetries: qp.symmetries.Symmetries
     _field_symmetrizer: Optional[qp.symmetries.FieldSymmetrizer]
@@ -69,7 +67,6 @@ class Grid(qp.TreeNode):
     def __init__(
         self,
         *,
-        rc: qp.utils.RunConfig,
         lattice: qp.lattice.Lattice,
         symmetries: qp.symmetries.Symmetries,
         comm: Optional[qp.MPI.Comm],
@@ -106,7 +103,6 @@ class Grid(qp.TreeNode):
             Highest precedence, and if specified, will supercede `ke_cutoff`.
         """
         super().__init__()
-        self.rc = rc
         self.lattice = lattice
         self.symmetries = symmetries
         self._field_symmetrizer = None
@@ -217,7 +213,7 @@ class Grid(qp.TreeNode):
         iG_box = torch.tensor(
             np.array([[+1, +1, +1], [+1, +1, -1], [+1, -1, +1], [+1, -1, -1]])
             * (np.array(self.shape) // 2)[None, :],
-            device=self.rc.device,
+            device=qp.rc.device,
             dtype=torch.double,
         )
         return (iG_box @ self.lattice.Gbasis.T).norm(dim=1).max().item()

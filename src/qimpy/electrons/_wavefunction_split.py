@@ -31,13 +31,13 @@ def _split_bands(
     send_offset = band_division.n_prev[:-1] * n_per_band
     recv_counts = band_division.n_mine * n_per_band
     recv_offset = np.arange(band_division.n_procs) * recv_counts
-    mpi_type = basis.rc.mpi_type[send_coeff.dtype]
+    mpi_type = qp.rc.mpi_type[send_coeff.dtype]
     recv_coeff = torch.zeros(
         (band_division.n_procs, band_division.n_mine) + send_coeff.shape[1:],
         dtype=send_coeff.dtype,
         device=send_coeff.device,
     )
-    basis.rc.current_stream_synchronize()
+    qp.rc.current_stream_synchronize()
     request = basis.comm.Ialltoallv(
         (qp.utils.BufferView(send_coeff), send_counts, send_offset, mpi_type),
         (qp.utils.BufferView(recv_coeff), recv_counts, recv_offset, mpi_type),
@@ -100,13 +100,13 @@ def _split_basis(
     send_offset = np.arange(band_division.n_procs) * send_counts
     recv_counts = np.diff(band_division.n_prev) * n_per_band
     recv_offset = band_division.n_prev[:-1] * n_per_band
-    mpi_type = basis.rc.mpi_type[send_coeff.dtype]
+    mpi_type = qp.rc.mpi_type[send_coeff.dtype]
     recv_coeff = torch.zeros(
         (band_division.n_tot,) + send_coeff.shape[2:],
         dtype=send_coeff.dtype,
         device=send_coeff.device,
     )
-    basis.rc.current_stream_synchronize()
+    qp.rc.current_stream_synchronize()
     request = basis.comm.Ialltoallv(
         (qp.utils.BufferView(send_coeff), send_counts, send_offset, mpi_type),
         (qp.utils.BufferView(recv_coeff), recv_counts, recv_offset, mpi_type),
@@ -142,11 +142,10 @@ if __name__ == "__main__":
 
     # Create a system to test with:
     qp.utils.log_config()
-    rc = qp.utils.RunConfig()
-    if rc.n_procs == 1:
+    qp.rc.init()
+    if qp.rc.n_procs == 1:
         raise ValueError("Wavefunction split test requires > 1 processes.")
     system = qp.System(
-        rc=rc,
         lattice={"system": "hexagonal", "a": 9.0, "c": 12.0},
         electrons={
             "k-mesh": {"size": [4, 4, 3]},
@@ -199,7 +198,7 @@ if __name__ == "__main__":
     ]
     ortho_err = (Cg_overlap - expected_overlap).norm().item()
     qp.log.info(f"Orthonormality error: {ortho_err:.3e}")
-    qp.log.info("Norm(band)[selected]:\n" + rc.fmt(Cg.band_norm()[0, :, :5]))
-    qp.log.info("Norm(ke)[selected]:\n" + rc.fmt(Cg.band_ke()[0, :, :5]))
+    qp.log.info(f"Norm(band)[selected]:\n{qp.utils.fmt(Cg.band_norm()[0, :, :5])}")
+    qp.log.info(f"Norm(ke)[selected]:\n{qp.utils.fmt(Cg.band_ke()[0, :, :5])}")
 
     qp.utils.StopWatch.print_stats()

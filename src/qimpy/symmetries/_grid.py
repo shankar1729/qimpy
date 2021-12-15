@@ -16,7 +16,7 @@ def _check_grid_shape(self: qp.symmetries.Symmetries, shape: Sequence[int]) -> N
     """
 
     # Compute rotation matrix in mesh coordinates
-    S = torch.tensor(shape, dtype=torch.double, device=self.rc.device)
+    S = torch.tensor(shape, dtype=torch.double, device=qp.rc.device)
     rot_mesh = S.view(1, 3, 1) * self.rot * (1.0 / S).view(1, 1, 3)
 
     # Commensurate => matrix should still be an integer:
@@ -35,7 +35,7 @@ def _get_grid_shape(
     """Smallest symmetric, FFT-suitable shape >= shape_min."""
 
     # Determine constraints on S due to symmetries:
-    rot = self.rot.to(dtype=torch.int, device=self.rc.cpu).numpy()
+    rot = self.rot.to(dtype=torch.int, device=qp.rc.cpu).numpy()
     ratios = np.gcd.reduce(rot, axis=0)
 
     # Recursive function to set grid shapes compatible with one dimension

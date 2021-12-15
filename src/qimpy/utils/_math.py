@@ -172,7 +172,6 @@ def ortho_matrix(O: torch.Tensor, use_cholesky: bool = True) -> torch.Tensor:
 def eighg(
     H: qp.utils.Waitable[torch.Tensor],
     O: torch.Tensor,
-    rc: qp.utils.RunConfig,
     use_cholesky: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Solve Hermitian generalized eigenvalue problem.
@@ -188,8 +187,6 @@ def eighg(
     O
         Corresponding overlap (metric) matrices, with same size as H.
         Must additionally be positive-definite.
-    rc
-        Current run configuration, used for the compute stream and for timing.
     use_cholesky
         See :meth:`qimpy.utils.ortho_matrix`
 
@@ -200,15 +197,15 @@ def eighg(
     V : torch.Tensor
         Eigenvectors (same shape as H and O)
     """
-    watch = qp.utils.StopWatch("eighg", rc)
+    watch = qp.utils.StopWatch("eighg")
     # Start orthogonoalization:
-    rc.compute_stream_wait_current()
-    with torch.cuda.stream(rc.compute_stream):
+    qp.rc.compute_stream_wait_current()
+    with torch.cuda.stream(qp.rc.compute_stream):
         U = ortho_matrix(O, use_cholesky)
     # Finish pending communication on H (if any)
     Hresult = H.wait()
     # Finish orthogonalization:
-    rc.current_stream_wait_compute()
+    qp.rc.current_stream_wait_compute()
     # Diagonalize:
     E, V = torch.linalg.eigh(dagger(U) @ (Hresult @ U))
     V = U @ V  # transform eigenvectors back to original basis

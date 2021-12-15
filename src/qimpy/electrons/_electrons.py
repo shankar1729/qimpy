@@ -10,7 +10,6 @@ class Electrons(qp.TreeNode):
     """Electronic subsystem"""
 
     __slots__ = (
-        "rc",
         "comm",
         "kpoints",
         "spin_polarized",
@@ -33,7 +32,6 @@ class Electrons(qp.TreeNode):
         "n_tilde",
         "tau_tilde",
     )
-    rc: qp.utils.RunConfig
     comm: qp.MPI.Comm  #: Overall electronic communicator (k-points and bands/basis)
     kpoints: qp.electrons.Kpoints  #: Set of kpoints (mesh or path)
     spin_polarized: bool  #: Whether calculation is spin-polarized
@@ -61,7 +59,6 @@ class Electrons(qp.TreeNode):
     def __init__(
         self,
         *,
-        rc: qp.utils.RunConfig,
         process_grid: qp.utils.ProcessGrid,
         lattice: qp.lattice.Lattice,
         ions: qp.ions.Ions,
@@ -144,7 +141,6 @@ class Electrons(qp.TreeNode):
             :yaml:`Self-consistent field (SCF) iteration parameters.`
         """
         super().__init__()
-        self.rc = rc
         qp.log.info("\n--- Initializing Electrons ---")
 
         # Initialize k-points:
@@ -160,7 +156,6 @@ class Electrons(qp.TreeNode):
                 k_mesh,
                 checkpoint_in,
                 attr_version_name="k-mesh",
-                rc=rc,
                 process_grid=process_grid,
                 symmetries=symmetries,
                 lattice=lattice,
@@ -172,7 +167,6 @@ class Electrons(qp.TreeNode):
                 k_path,
                 checkpoint_in,
                 attr_version_name="k-path",
-                rc=rc,
                 process_grid=process_grid,
                 lattice=lattice,
             )
@@ -196,7 +190,6 @@ class Electrons(qp.TreeNode):
             qp.electrons.Fillings,
             fillings,
             checkpoint_in,
-            rc=rc,
             ions=ions,
             electrons=self,
         )
@@ -207,7 +200,6 @@ class Electrons(qp.TreeNode):
             qp.electrons.Basis,
             basis,
             checkpoint_in,
-            rc=rc,
             process_grid=process_grid,
             lattice=lattice,
             ions=ions,
@@ -223,7 +215,6 @@ class Electrons(qp.TreeNode):
             qp.electrons.xc.XC,
             xc,
             checkpoint_in,
-            rc=rc,
             spin_polarized=spin_polarized,
         )
 
@@ -234,7 +225,7 @@ class Electrons(qp.TreeNode):
             qp.log.info("Loading wavefunctions C")
             self._n_bands_done = self.C.read(cp_C)
         self.eig = torch.zeros(
-            self.C.coeff.shape[:3], dtype=torch.double, device=rc.device
+            self.C.coeff.shape[:3], dtype=torch.double, device=qp.rc.device
         )
         self.deig_max = np.nan  # eigenvalues completely wrong
         if cp_eig := checkpoint_in.member("eig"):
@@ -254,7 +245,7 @@ class Electrons(qp.TreeNode):
             self.lcao = None
         else:
             self.add_child(
-                "lcao", qp.electrons.LCAO, lcao, checkpoint_in, rc=rc, comm=self.comm
+                "lcao", qp.electrons.LCAO, lcao, checkpoint_in, comm=self.comm
             )
 
         # Initialize diagonalizer:
@@ -270,7 +261,6 @@ class Electrons(qp.TreeNode):
                 davidson,
                 checkpoint_in,
                 attr_version_name="davidson",
-                rc=rc,
                 electrons=self,
             )
         if chefsi is not None:
@@ -280,15 +270,12 @@ class Electrons(qp.TreeNode):
                 chefsi,
                 checkpoint_in,
                 attr_version_name="chefsi",
-                rc=rc,
                 electrons=self,
             )
         qp.log.info("\nDiagonalization: " + repr(self.diagonalize))
 
         # Initialize SCF:
-        self.add_child(
-            "scf", qp.electrons.SCF, scf, checkpoint_in, rc=rc, comm=self.comm
-        )
+        self.add_child("scf", qp.electrons.SCF, scf, checkpoint_in, comm=self.comm)
 
     def initialize_wavefunctions(self, system: qp.System) -> None:
         """Initialize wavefunctions to LCAO / random (if not from checkpoint).
@@ -340,7 +327,7 @@ class Electrons(qp.TreeNode):
         """Load density/potential from checkpoint for fixed-H calculation"""
         assert self.fixed_H
         cp_H = qp.utils.CpPath(
-            checkpoint=qp.utils.Checkpoint(self.fixed_H, rc=self.rc), path="/electrons"
+            checkpoint=qp.utils.Checkpoint(self.fixed_H), path="/electrons"
         )
         # Read n and V_ks (n.grad) in real space from checkpoint:
         n_densities = self.n_densities

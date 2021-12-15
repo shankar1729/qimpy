@@ -12,8 +12,7 @@ N_CUT = 1e-16  # Regularization threshold for densities
 class XC(qp.TreeNode):
     """Exchange-correlation functional."""
 
-    __slots__ = ("rc", "_functionals", "need_sigma", "need_lap", "need_tau")
-    rc: qp.utils.RunConfig
+    __slots__ = ("_functionals", "need_sigma", "need_lap", "need_tau")
     _functionals: List[Functional]  #: list of functionals that add up to XC
     need_sigma: bool  #: whether overall functional needs gradient
     need_lap: bool  #: whether overall functional needs laplacian
@@ -22,7 +21,6 @@ class XC(qp.TreeNode):
     def __init__(
         self,
         *,
-        rc: qp.utils.RunConfig,
         spin_polarized: bool,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         functional: Union[str, List[str]] = "gga-pbe",
@@ -55,7 +53,6 @@ class XC(qp.TreeNode):
             correlation to add up to 1.
         """
         super().__init__()
-        self.rc = rc
         qp.log.info("\nInitializing XC:")
         if isinstance(functional, str):
             functional = functional.split(" ")
@@ -77,9 +74,7 @@ class XC(qp.TreeNode):
                     libxc_names.setdefault(func, 0.0)
                     libxc_names[func] += 1.0
         if libxc_names:
-            self._functionals.append(
-                FunctionalsLibxc(self.rc, spin_polarized, libxc_names)
-            )
+            self._functionals.append(FunctionalsLibxc(spin_polarized, libxc_names))
 
         # Collect overall needs:
         self.need_sigma = any(func.needs_sigma for func in self._functionals)
@@ -94,7 +89,7 @@ class XC(qp.TreeNode):
         within the corresponding `grad` attributes if `required_grad` is True.
         Presently, either both gradients or no gradients should be requested."""
         grid = n_tilde.grid
-        watch = qp.utils.StopWatch("xc.prepare", grid.rc)
+        watch = qp.utils.StopWatch("xc.prepare")
         n_in = (~n_tilde).data
         n_densities = n_in.shape[0]
 
@@ -157,7 +152,7 @@ class XC(qp.TreeNode):
         watch.stop()
 
         # Evaluate functionals:
-        watch = qp.utils.StopWatch("xc.functional", grid.rc)
+        watch = qp.utils.StopWatch("xc.functional")
         requires_grad = n_tilde.requires_grad
         assert requires_grad == tau_tilde.requires_grad  # compute all or no gradients
         if requires_grad:
@@ -205,7 +200,7 @@ class XC(qp.TreeNode):
                 x_in.grad[1] = x_diff_grad
 
         if requires_grad:
-            watch = qp.utils.StopWatch("xc.propagate_grad", grid.rc)
+            watch = qp.utils.StopWatch("xc.propagate_grad")
             n.grad[clamp_sel] = 0.0  # account for any clamping
             from_magnetization_grad(n, n_in)
             # --- contributions from GGA gradients:

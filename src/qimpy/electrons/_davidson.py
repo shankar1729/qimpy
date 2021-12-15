@@ -10,7 +10,6 @@ class Davidson(qp.TreeNode):
     """Davidson diagonalization of Hamiltonian in `electrons`."""
 
     __slots__ = (
-        "rc",
         "electrons",
         "n_iterations",
         "eig_threshold",
@@ -19,7 +18,6 @@ class Davidson(qp.TreeNode):
         "_i_iter",
         "_HC",
     )
-    rc: qp.utils.RunConfig
     electrons: qp.electrons.Electrons  #: Electronic system to diagonalize
     n_iterations: int  #: Number of diagonalization iterations
     eig_threshold: float  #: Eigenvalue convergence threshold (in :math:`E_h`)
@@ -31,7 +29,6 @@ class Davidson(qp.TreeNode):
     def __init__(
         self,
         *,
-        rc: qp.utils.RunConfig,
         electrons: qp.electrons.Electrons,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         n_iterations: int = 100,
@@ -54,7 +51,6 @@ class Davidson(qp.TreeNode):
             this when diagonalizing in an inner loop.
         """
         super().__init__()
-        self.rc = rc
         self.electrons = electrons
         self.n_iterations = n_iterations
         self.eig_threshold = eig_threshold
@@ -88,7 +84,7 @@ class Davidson(qp.TreeNode):
             line += f"  deig_max: {self.electrons.deig_max:.2e}"
         if n_eigs_done:
             line += f"  n_eigs_done: {n_eigs_done}"
-        line += f"  t[s]: {self.rc.clock():.2f}"
+        line += f"  t[s]: {qp.rc.clock():.2f}"
         qp.log.info(line)
         if converged and (not inner_loop):
             qp.log.info(f"{line_prefix}: Converged")
@@ -100,7 +96,7 @@ class Davidson(qp.TreeNode):
     ) -> qp.electrons.Wavefunction:
         """Inverse-kinetic preconditioner on the Cerr in eigenpairs,
         using the per-band kinetic energy KEref"""
-        watch = qp.utils.StopWatch("Davidson.precondition", self.rc)
+        watch = qp.utils.StopWatch("Davidson.precondition")
         basis = self.electrons.basis
         x = basis.get_ke(basis.mine)[None, :, None, None, :] / KEref[..., None, None]
         x += torch.exp(-x)  # don't modify x ~ 0
@@ -116,7 +112,7 @@ class Davidson(qp.TreeNode):
         # Find low-norm bands:
         if C.basis.division.n_procs > 1:
             # guard against machine-precision differences between procs
-            self.rc.current_stream_synchronize()
+            qp.rc.current_stream_synchronize()
             C.basis.comm.Bcast(qp.utils.BufferView(norm))
         low_norm = norm < self._norm_cut
         i_spin, i_k, i_band = torch.where(low_norm)
@@ -215,7 +211,7 @@ class Davidson(qp.TreeNode):
             C_HC_new = TileExpansion(C_HC, Cnew ^ HCexp)
 
             # Solve expanded subspace generalized eigenvalue problem:
-            eig_new, V_new = qp.utils.eighg(C_HC_new, C_OC_new.wait(), self.rc)
+            eig_new, V_new = qp.utils.eighg(C_HC_new, C_OC_new.wait())
             n_bands_next = min(n_bands_new, n_bands_max)  # number to retain
             V_new = V_new[..., :n_bands_next]  # drop extra bands
             Vcur, Vexp = V_new.split((n_bands_cur, n_bands_exp), dim=2)

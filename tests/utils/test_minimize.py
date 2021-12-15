@@ -16,14 +16,12 @@ class RandomFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
 
     def __init__(
         self,
-        rc: qp.utils.RunConfig,
         n_dim: int,
         method: str,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
     ):
         super().__init__(
-            rc=rc,
-            comm=rc.comm,
+            comm=qp.rc.comm,
             checkpoint_in=checkpoint_in,
             name="TestMinimize",
             n_iterations=100,
@@ -31,15 +29,17 @@ class RandomFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
             extra_thresholds={"|grad|": 1e-8},
             method=method,
         )
-        lattice = qp.lattice.Lattice(rc=rc, system="Orthorhombic", a=10.0, b=1.0, c=1.0)
-        ions = qp.ions.Ions(rc=rc, pseudopotentials=[], coordinates=[])
-        symmetries = qp.symmetries.Symmetries(rc=rc, lattice=lattice, ions=ions)
+        process_grid = qp.utils.ProcessGrid(self.comm, "rkb")
+        lattice = qp.lattice.Lattice(system="Orthorhombic", a=10.0, b=1.0, c=1.0)
+        ions = qp.ions.Ions(
+            pseudopotentials=[], coordinates=[], process_grid=process_grid
+        )
+        symmetries = qp.symmetries.Symmetries(lattice=lattice, ions=ions)
         grid = qp.grid.Grid(
-            rc=rc,
             lattice=lattice,
             symmetries=symmetries,
             shape=(n_dim, 1, 1),
-            comm=self.rc.comm,
+            comm=qp.rc.comm,
         )
         self.grid = grid
         self.i0slice = slice(grid.split0.i_start, grid.split0.i_stop)
@@ -47,7 +47,7 @@ class RandomFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
             self.i0slice.start,
             self.i0slice.stop,
             dtype=torch.float64,
-            device=self.rc.device,
+            device=qp.rc.device,
         )
         self.x0 = qp.grid.FieldR(grid, data=x0.view(grid.shapeR_mine))
         self.E0 = -5.0
@@ -56,10 +56,10 @@ class RandomFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
         M_all = []  # full matrices
         self.M = []  # process-divided matrix
         for i_M in range(2):
-            M_all.append(torch.randn((n_dim, n_dim), device=self.rc.device))
+            M_all.append(torch.randn((n_dim, n_dim), device=qp.rc.device))
             self.M.append(M_all[-1][:, self.i0slice])
         # Preconditioner (inexact inverse):
-        Kreg = 0.1 * (M_all[0] ** 2).sum() * torch.eye(n_dim, device=self.rc.device)
+        Kreg = 0.1 * (M_all[0] ** 2).sum() * torch.eye(n_dim, device=qp.rc.device)
         self.K = torch.linalg.inv(Kreg + M_all[0].T @ M_all[0])[:, self.i0slice]
 
     def step(self, direction: qp.grid.FieldR, step_size: float) -> None:
@@ -70,7 +70,7 @@ class RandomFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
         E_x = torch.zeros_like(self.x0.data.flatten())
         for i_M, M in enumerate(self.M):
             v = M @ (self.x - self.x0).data.flatten()  # partial results, full array
-            self.rc.current_stream_synchronize()
+            qp.rc.current_stream_synchronize()
             self.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(v), qp.MPI.SUM)
             v_norm_sq = (v ** 2).sum().item()
             E += v_norm_sq ** (i_M + 1) * self.grid.dV
@@ -90,15 +90,15 @@ class RandomFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
             state.extra = [state.gradient.norm()]
 
     def random_direction(self) -> qp.grid.FieldR:
-        data = torch.randn(self.grid.shape, device=self.rc.device)
+        data = torch.randn(self.grid.shape, device=qp.rc.device)
         return qp.grid.FieldR(self.grid, data=data[self.i0slice])
 
 
 @pytest.mark.parametrize("n_dim, method", [(10, "cg"), (100, "cg"), (100, "l-bfgs")])
-def test_minimize(n_dim: int, method: str, rc: qp.utils.RunConfig):
+def test_minimize(n_dim: int, method: str):
     n_dim = 100
     method = "cg"
-    rf = RandomFunction(rc=rc, n_dim=n_dim, method=method)
+    rf = RandomFunction(n_dim=n_dim, method=method)
     E = float(rf.minimize())
     assert abs(E - rf.E0) < (n_dim * rf.energy_threshold)
 
@@ -106,8 +106,8 @@ def test_minimize(n_dim: int, method: str, rc: qp.utils.RunConfig):
 def main():
     """Manually run a test with full output"""
     qp.utils.log_config()
-    rc = qp.utils.RunConfig()
-    rf = RandomFunction(rc=rc, n_dim=100, method="cg")
+    qp.rc.init()
+    rf = RandomFunction(n_dim=100, method="cg")
     rf.finite_difference_test(rf.random_direction())
     rf.minimize()
 

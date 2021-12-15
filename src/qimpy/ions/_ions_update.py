@@ -68,7 +68,7 @@ def _collect_ps_matrix(self: qp.ions.Ions, n_spinor: int) -> None:
     Initializes `D_all`."""
     n_proj = self.n_projectors * n_spinor
     self.D_all = torch.zeros(
-        (n_proj, n_proj), device=self.rc.device, dtype=torch.complex128
+        (n_proj, n_proj), device=qp.rc.device, dtype=torch.complex128
     )
     i_proj_start = 0
     for i_ps, ps in enumerate(self.pseudopotentials):

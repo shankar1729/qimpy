@@ -6,13 +6,13 @@ from scipy.special import spherical_jn
 
 
 @pytest.mark.mpi_skip
-def test_jl(rc, plt=None):
+def test_jl(plt=None):
     x = np.logspace(-3, 3, 6000)
     l_max = 6
     jl_ref = [spherical_jn(l, x) / (x ** l) for l in range(l_max + 1)]
     jl_test = qp.ions.spherical_bessel.jl_by_xl(
-        l_max, torch.tensor(x, device=rc.device)
-    ).to(rc.cpu)
+        l_max, torch.tensor(x, device=qp.rc.device)
+    ).to(qp.rc.cpu)
     err_mean_all = 0.0
     err_max_all = 0.0
     for l in range(l_max + 1):
@@ -35,8 +35,8 @@ def main():
     import matplotlib.pyplot as plt
 
     qp.utils.log_config()
-    rc = qp.utils.RunConfig()
-    test_jl(rc, plt)
+    qp.rc.init()
+    test_jl(plt)
     plt.xscale("log")
     plt.legend()
     plt.show()

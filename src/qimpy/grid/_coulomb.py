@@ -28,7 +28,7 @@ class Coulomb:
             Number of point charges to optimize Ewald sums for.
         """
         self.grid = grid
-        rc = grid.rc
+        rc = qp.rc
         lattice = grid.lattice
 
         # Determine ionic width from maximum grid spacing

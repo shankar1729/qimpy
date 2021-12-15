@@ -8,7 +8,6 @@ class System(qp.TreeNode):
     """Overall system to calculate within QimPy"""
 
     __slots__ = (
-        "rc",
         "lattice",
         "ions",
         "symmetries",
@@ -20,7 +19,6 @@ class System(qp.TreeNode):
         "checkpoint_out",
         "process_grid",
     )
-    rc: qp.utils.RunConfig  #: Current run configuration
     lattice: qp.lattice.Lattice  #: Lattice vectors / unit cell definition
     ions: qp.ions.Ions  #: Ionic positions and pseudopotentials
     symmetries: qp.symmetries.Symmetries  #: Point and space group symmetries
@@ -35,7 +33,6 @@ class System(qp.TreeNode):
     def __init__(
         self,
         *,
-        rc: qp.utils.RunConfig,
         lattice: Union[qp.lattice.Lattice, dict],
         ions: Union[qp.ions.Ions, dict, None] = None,
         symmetries: Union[qp.symmetries.Symmetries, dict, None] = None,
@@ -43,6 +40,7 @@ class System(qp.TreeNode):
         grid: Union[qp.grid.Grid, dict, None] = None,
         checkpoint: Optional[str] = None,
         checkpoint_out: Optional[str] = None,
+        comm: Optional[qp.MPI.Comm] = None,
         process_grid_shape: Optional[Sequence[int]] = None,
     ):
         """Compose a System to calculate from its pieces. Each piece
@@ -66,17 +64,24 @@ class System(qp.TreeNode):
         checkpoint_out
             :yaml:`Checkpoint file to write.`
             Defaults to `checkpoint` if unspecified.
-        """
+        comm
+            Overall communicator for system. Defaults to `qimpy.rc.comm` if unspecified.
+        process_grid_shape
+            Parallelization dimensions over replicas, k-points and bands/basis, used
+            to initialize a `qimpy.utils.ProcessGrid`. Dimensions that are -1 will be
+            auto-determined based on number of tasks available to split along them.
+            Default: all process grid dimensions are auto-determined."""
         super().__init__()
-        self.rc = rc
-        self.process_grid = qp.utils.ProcessGrid(rc.comm, "rkb", process_grid_shape)
+        self.process_grid = qp.utils.ProcessGrid(
+            comm if comm else qp.rc.comm, "rkb", process_grid_shape
+        )
         # Set in and out checkpoints:
         try:
             checkpoint_in = qp.utils.CpPath(
                 checkpoint=(
                     None
                     if (checkpoint is None)
-                    else qp.utils.Checkpoint(checkpoint, rc=rc, mode="r")
+                    else qp.utils.Checkpoint(checkpoint, mode="r")
                 )
             )
         except OSError:  # Raised by h5py when file not readable
@@ -90,21 +95,15 @@ class System(qp.TreeNode):
         _add_axis(axes, "magnetic field", electrons, ["fillings", "B"])
         # TODO: similarly account for applied electric fields
 
-        self.add_child("lattice", qp.lattice.Lattice, lattice, checkpoint_in, rc=rc)
+        self.add_child("lattice", qp.lattice.Lattice, lattice, checkpoint_in)
         self.add_child(
-            "ions",
-            qp.ions.Ions,
-            ions,
-            checkpoint_in,
-            rc=rc,
-            process_grid=self.process_grid,
+            "ions", qp.ions.Ions, ions, checkpoint_in, process_grid=self.process_grid
         )
         self.add_child(
             "symmetries",
             qp.symmetries.Symmetries,
             symmetries,
             checkpoint_in,
-            rc=rc,
             lattice=self.lattice,
             ions=self.ions,
             axes=axes,
@@ -114,7 +113,6 @@ class System(qp.TreeNode):
             qp.electrons.Electrons,
             electrons,
             checkpoint_in,
-            rc=rc,
             process_grid=self.process_grid,
             lattice=self.lattice,
             ions=self.ions,
@@ -127,7 +125,6 @@ class System(qp.TreeNode):
             qp.grid.Grid,
             grid,
             checkpoint_in,
-            rc=rc,
             lattice=self.lattice,
             symmetries=self.symmetries,
             comm=self.electrons.comm,  # Parallel
@@ -139,7 +136,7 @@ class System(qp.TreeNode):
         self.energy = qp.Energy()
         self.ions.update(self)
 
-        qp.log.info(f"\nInitialization completed at t[s]: {rc.clock():.2f}\n")
+        qp.log.info(f"\nInitialization completed at t[s]: {qp.rc.clock():.2f}\n")
 
     def run(self) -> None:
         """Run any actions specified in the input."""
@@ -149,9 +146,7 @@ class System(qp.TreeNode):
         if self.checkpoint_out:
             self.save_checkpoint(
                 qp.utils.CpPath(
-                    checkpoint=qp.utils.Checkpoint(
-                        self.checkpoint_out, rc=self.rc, mode="w"
-                    )
+                    checkpoint=qp.utils.Checkpoint(self.checkpoint_out, mode="w")
                 )
             )
 

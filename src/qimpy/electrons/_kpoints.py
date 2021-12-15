@@ -6,20 +6,17 @@ from typing import Union, Sequence, Tuple
 
 
 class Kpoints(qp.TreeNode):
-    """Set of k-points in Brillouin zone.
-    The underlying :class:`TaskDivision` splits k-points over `rc.comm_k`."""
+    """Set of k-points in Brillouin zone."""
 
-    __slots__ = ("rc", "comm", "k", "wk", "division")
-    rc: qp.utils.RunConfig
+    __slots__ = ("comm", "k", "wk", "division")
     comm: qp.MPI.Comm  #: Communicator for k-point division
     k: torch.Tensor  #: Array of k-points (N x 3)
     wk: torch.Tensor  #: Integration weights for each k (adds to 1)
-    division: qp.utils.TaskDivision  #: Division of k-points across `rc.comm_k`
+    division: qp.utils.TaskDivision  #: Division of k-points across `comm`
 
     def __init__(
         self,
         *,
-        rc: qp.utils.RunConfig,
         process_grid: qp.utils.ProcessGrid,
         k: torch.Tensor,
         wk: torch.Tensor,
@@ -29,7 +26,6 @@ class Kpoints(qp.TreeNode):
         be used only by derived classes :class:`Kmesh` or :class:`Kpath`.
         """
         super().__init__()
-        self.rc = rc
         self.k = k
         self.wk = wk
         assert abs(wk.sum() - 1.0) < 1e-14
@@ -57,7 +53,6 @@ class Kmesh(Kpoints):
     def __init__(
         self,
         *,
-        rc: qp.utils.RunConfig,
         process_grid: qp.utils.ProcessGrid,
         symmetries: qp.symmetries.Symmetries,
         lattice: qp.lattice.Lattice,
@@ -127,7 +122,7 @@ class Kmesh(Kpoints):
 
         # Create full mesh:
         grids1d = [
-            (offset[i] + torch.arange(size[i], device=rc.device)) / size[i]
+            (offset[i] + torch.arange(size[i], device=qp.rc.device)) / size[i]
             for i in range(3)
         ]
         mesh = torch.stack(torch.meshgrid(*tuple(grids1d), indexing="ij")).view(3, -1).T
@@ -137,11 +132,11 @@ class Kmesh(Kpoints):
         def mesh_map(k: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
             # Sizes and dimensions on torch:
             assert isinstance(size, np.ndarray)
-            size_i = torch.tensor(size, dtype=torch.int, device=rc.device)
+            size_i = torch.tensor(size, dtype=torch.int, device=qp.rc.device)
             size_f = size_i.to(torch.double)  # need as both int and float
-            offset_f = torch.tensor(offset, device=rc.device)
+            offset_f = torch.tensor(offset, device=qp.rc.device)
             stride_i = torch.tensor(
-                [size[1] * size[2], size[2], 1], dtype=torch.int, device=rc.device
+                [size[1] * size[2], size[2], 1], dtype=torch.int, device=qp.rc.device
             )
             not_found_index = size.prod()
             # Compute mesh coordinates:
@@ -186,7 +181,7 @@ class Kmesh(Kpoints):
 
         # Initialize base class:
         super().__init__(
-            rc=rc, process_grid=process_grid, k=k, wk=wk, checkpoint_in=checkpoint_in
+            process_grid=process_grid, k=k, wk=wk, checkpoint_in=checkpoint_in
         )
 
 
@@ -197,7 +192,6 @@ class Kpath(Kpoints):
     def __init__(
         self,
         *,
-        rc: qp.utils.RunConfig,
         process_grid: qp.utils.ProcessGrid,
         lattice: qp.lattice.Lattice,
         dk: float,
@@ -226,7 +220,7 @@ class Kpath(Kpoints):
         dk = float(dk)
         labels = [(point[3] if (len(point) > 3) else "") for point in points]
         kverts = torch.tensor(
-            [point[:3] for point in points], dtype=torch.double, device=rc.device
+            [point[:3] for point in points], dtype=torch.double, device=qp.rc.device
         )
         qp.log.info(
             f"Creating k-path with dk = {dk:g} connecting"
@@ -243,14 +237,14 @@ class Kpath(Kpoints):
         distances = torch.sqrt(((dkverts @ lattice.Gbasis.T) ** 2).sum(dim=1))
         for i, distance in enumerate(distances):
             nk = int(torch.ceil(distance / dk).item())  # for this segment
-            t = torch.arange(1, nk + 1, device=rc.device) / nk
+            t = torch.arange(1, nk + 1, device=qp.rc.device) / nk
             k_list.append(kverts[i] + t[:, None] * dkverts[i])
             nk_tot += nk
             self.labels[nk_tot - 1] = labels[i + 1]  # label at end of segment
-            k_length.append((distance_tot + distance * t).to(rc.cpu).numpy())
+            k_length.append((distance_tot + distance * t).to(qp.rc.cpu).numpy())
             distance_tot += distance
         k = torch.cat(k_list)
-        wk = torch.full((nk_tot,), 1.0 / nk_tot, device=rc.device)
+        wk = torch.full((nk_tot,), 1.0 / nk_tot, device=qp.rc.device)
         self.k_length = np.concatenate(k_length)  # cumulative length on path
         qp.log.info(
             f"Created {nk_tot} k-points on k-path of" f" length {distance_tot:g}"
@@ -258,7 +252,7 @@ class Kpath(Kpoints):
 
         # Initialize base class:
         super().__init__(
-            rc=rc, process_grid=process_grid, k=k, wk=wk, checkpoint_in=checkpoint_in
+            process_grid=process_grid, k=k, wk=wk, checkpoint_in=checkpoint_in
         )
 
     def plot(self, electrons: qp.electrons.Electrons, filename: str) -> None:
@@ -269,7 +263,7 @@ class Kpath(Kpoints):
         # Get the energies to head process:
         n_spins = electrons.n_spins
         n_bands = electrons.fillings.n_bands
-        eig = np.array(electrons.eig[..., :n_bands].to(self.rc.cpu))
+        eig = np.array(electrons.eig[..., :n_bands].to(qp.rc.cpu))
         if self.division.i_proc:
             self.comm.Send(eig, 0)
             return  # only overall head needs to plot

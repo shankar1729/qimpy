@@ -24,7 +24,7 @@ def _get_space_group(
          maps to after each symmetry operation."""
 
     # Special case of no ions:
-    device = ions.rc.device
+    device = qp.rc.device
     n_ions = ions.n_ions
     if not n_ions:
         # space group = point group:

@@ -1,5 +1,7 @@
 import qimpy as qp
+import numpy as np
 import logging
+import torch
 import sys
 from typing import Optional
 
@@ -68,3 +70,13 @@ def log_config(
         qp.log.setLevel(logging.DEBUG if verbose else logging.INFO)
     else:
         qp.log.setLevel(logging.WARNING)
+
+
+def fmt(tensor: torch.Tensor, **kwargs) -> str:
+    """Standardized conversion of torch tensors for logging.
+    Keyword arguments are forwarded to `numpy.array2string`."""
+    # Set some defaults in formatter:
+    kwargs.setdefault("precision", 8)
+    kwargs.setdefault("suppress_small", True)
+    kwargs.setdefault("separator", ", ")
+    return np.array2string(tensor.to(qp.rc.cpu).numpy(), **kwargs)

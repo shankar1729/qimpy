@@ -37,7 +37,7 @@ def _init_grid_fft(self: qp.grid.Grid) -> None:
         qp.log.info(f"  local real-fft shape: {self.shapeH_mine}")
     # Create 1D grids for real and reciprocal spaces:
     # --- global versions first
-    iv1D = tuple(torch.arange(s, device=self.rc.device) for s in self.shape)
+    iv1D = tuple(torch.arange(s, device=qp.rc.device) for s in self.shape)
     iG1D = tuple(
         torch.where(iv <= self.shape[dim] // 2, iv, iv - self.shape[dim])
         for dim, iv in enumerate(iv1D)
@@ -99,10 +99,10 @@ def _init_grid_fft(self: qp.grid.Grid) -> None:
         index_1 = torch.tensor(
             S1 * (i_in - in_prev[src_proc])[None, None, None, :]
             + i1[None, None, :, None]
-        ).to(self.rc.device)
+        ).to(qp.rc.device)
         # --- coefficient of i_batch
         index_i_batch = torch.tensor(S1 * in_counts[None, None, None, src_proc]).to(
-            self.rc.device
+            qp.rc.device
         )
         # --- coefficient of n_batch
         index_n_batch = torch.tensor(
@@ -112,7 +112,7 @@ def _init_grid_fft(self: qp.grid.Grid) -> None:
                 * S1
                 * in_counts[None, None, None, src_proc]
             )
-        ).to(self.rc.device)
+        ).to(qp.rc.device)
         return index_1, index_i_batch, index_n_batch
 
     # Pre-calculate these arrays for each of the transforms:
@@ -123,7 +123,6 @@ def _init_grid_fft(self: qp.grid.Grid) -> None:
 
 
 def parallel_transform(
-    rc: qp.utils.RunConfig,
     comm: qp.MPI.Comm,
     v: torch.Tensor,
     shape_in: Tuple[int, ...],
@@ -146,8 +145,6 @@ def parallel_transform(
 
     Parameters
     ----------
-    rc
-        Current run configuration
     comm
         Communicator that this transform is split on
     v
@@ -180,8 +177,8 @@ def parallel_transform(
     send_prev = in_prev * v_tilde.shape[1]
     recv_prev = out_prev * (np.prod(shape_out[:2]) * n_batch)
     v_tmp = torch.zeros(recv_prev[-1], dtype=v_tilde.dtype, device=v_tilde.device)
-    mpi_type = rc.mpi_type[v_tilde.dtype]
-    rc.current_stream_synchronize()
+    mpi_type = qp.rc.mpi_type[v_tilde.dtype]
+    qp.rc.current_stream_synchronize()
     comm.Alltoallv(
         (BufferView(v_tilde), np.diff(send_prev), send_prev[:-1], mpi_type),
         (BufferView(v_tmp), np.diff(recv_prev), recv_prev[:-1], mpi_type),
@@ -228,7 +225,6 @@ def _fft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
             return torch.fft.fftn(v, s=self.shape, norm="forward")
         assert self.comm is not None
         return parallel_transform(
-            self.rc,
             self.comm,
             v,
             self.shapeR_mine,
@@ -253,7 +249,6 @@ def _fft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
         assert v.dtype.is_floating_point
         assert self.comm is not None
         return parallel_transform(
-            self.rc,
             self.comm,
             v,
             self.shapeR_mine,
@@ -303,7 +298,6 @@ def _ifft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
             return torch.fft.ifftn(v, s=self.shape, norm="forward")
         assert self.comm is not None
         return parallel_transform(
-            self.rc,
             self.comm,
             v.swapaxes(-1, -3),
             self.shapeG_mine[::-1],
@@ -329,7 +323,6 @@ def _ifft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
         assert self.comm is not None
         shapeR_mine_complex = (self.split0.n_mine, self.shape[1], self.shapeH[2])
         return parallel_transform(
-            self.rc,
             self.comm,
             v.swapaxes(-1, -3),
             self.shapeH_mine[::-1],
@@ -390,8 +383,8 @@ def safe_irfft(v: torch.Tensor) -> torch.Tensor:
 if __name__ == "__main__":
     qp.utils.log_config()
     qp.log.info("*" * 15 + " QimPy " + qp.__version__ + " " + "*" * 15)
-    rc = qp.utils.RunConfig()
-    process_grid = qp.utils.ProcessGrid(rc.comm, "rkb")
+    qp.rc.init()
+    process_grid = qp.utils.ProcessGrid(qp.rc.comm, "rkb")
 
     # Get dimensions from input:
     import sys
@@ -404,19 +397,17 @@ if __name__ == "__main__":
 
     # Prerequisites for creating grid:
     lattice = qp.lattice.Lattice(
-        rc=rc, system="triclinic", a=2.1, b=2.2, c=2.3, alpha=75, beta=80, gamma=85
+        system="triclinic", a=2.1, b=2.2, c=2.3, alpha=75, beta=80, gamma=85
     )  # pick one with no symmetries
-    ions = qp.ions.Ions(
-        rc=rc, process_grid=process_grid, pseudopotentials=[], coordinates=[]
-    )
-    symmetries = qp.symmetries.Symmetries(rc=rc, lattice=lattice, ions=ions)
+    ions = qp.ions.Ions(process_grid=process_grid, pseudopotentials=[], coordinates=[])
+    symmetries = qp.symmetries.Symmetries(lattice=lattice, ions=ions)
 
     # Create grids with and without parallelization:
     grid_par = qp.grid.Grid(
-        rc=rc, lattice=lattice, symmetries=symmetries, shape=shape, comm=rc.comm
+        lattice=lattice, symmetries=symmetries, shape=shape, comm=qp.rc.comm
     )  # parallel version
     grid_seq = qp.grid.Grid(
-        rc=rc, lattice=lattice, symmetries=symmetries, shape=shape, comm=None
+        lattice=lattice, symmetries=symmetries, shape=shape, comm=None
     )  # sequential version
 
     def test(
@@ -434,14 +425,14 @@ if __name__ == "__main__":
         """Helper function to test parallel and sequential versions
         of each Grid.fft routine against each other"""
         # Create test data:
-        v_ref = torch.randn(n_batch + shape_in, dtype=dtype_in, device=rc.device)
-        rc.current_stream_synchronize()
-        rc.comm.Bcast(BufferView(v_ref), 0)
+        v_ref = torch.randn(n_batch + shape_in, dtype=dtype_in, device=qp.rc.device)
+        qp.rc.current_stream_synchronize()
+        qp.rc.comm.Bcast(BufferView(v_ref), 0)
         n_repeats = 2 + int(1e8 / np.prod(n_batch + shape))
         for i_repeat in range(n_repeats):
             # --- transform locally:
             if i_repeat:
-                watch = qp.utils.StopWatch(name + "(seq)", rc)
+                watch = qp.utils.StopWatch(name + "(seq)")
             v_tld = seq_func(v_ref)
             if i_repeat:
                 watch.stop()
@@ -453,9 +444,9 @@ if __name__ == "__main__":
                 v = v_ref[..., in_start:in_stop, :, :].contiguous()
                 v_tld_ref = v_tld[..., out_start:out_stop].contiguous()
             # --- transform with MPI version:
-            rc.comm.Barrier()  # for accurate timing
+            qp.rc.comm.Barrier()  # for accurate timing
             if i_repeat:
-                watch = qp.utils.StopWatch(name + "(par)", rc)
+                watch = qp.utils.StopWatch(name + "(par)")
             v_tld = par_func(v)
             if i_repeat:
                 watch.stop()
@@ -467,7 +458,7 @@ if __name__ == "__main__":
                         (torch.abs(v_tld_ref) ** 2).sum().item(),
                     ]
                 )
-                rc.comm.Allreduce(qp.MPI.IN_PLACE, errors)
+                qp.rc.comm.Allreduce(qp.MPI.IN_PLACE, errors)
                 rmse = np.sqrt(errors[0] / errors[1])
                 qp.log.info(f"{name} RMSE: {rmse:.2e}")
 

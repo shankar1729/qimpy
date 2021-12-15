@@ -15,7 +15,6 @@ class LCAO(Minimize[MatrixArray]):
     def __init__(
         self,
         *,
-        rc: qp.utils.RunConfig,
         comm: qp.MPI.Comm,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         n_iterations: int = 30,
@@ -36,7 +35,6 @@ class LCAO(Minimize[MatrixArray]):
             falls below this threshold.
         """
         super().__init__(
-            rc=rc,
             comm=comm,
             name="LCAO",
             checkpoint_in=checkpoint_in,
@@ -56,7 +54,7 @@ class LCAO(Minimize[MatrixArray]):
             el.update_potential(system)
         C_OC = el.C.dot_O(el.C).wait()
         C_HC = el.C ^ el.hamiltonian(el.C)
-        el.eig, V = qp.utils.eighg(C_HC, C_OC, self.rc)
+        el.eig, V = qp.utils.eighg(C_HC, C_OC)
         el.C = el.C @ V  # Set to eigenvectors
         if (el.fillings.smearing is None) or el.fixed_H:
             return
@@ -95,7 +93,7 @@ class LCAO(Minimize[MatrixArray]):
         wf_eig = el.basis.w_sk * el.fillings.f_eig
         E_mu_num = (wf_eig * dH_sub_diag).sum(dim=(1, 2))
         E_mu_den = wf_eig.sum(dim=(1, 2))  # TODO: make this more general:
-        self.rc.current_stream_synchronize()
+        qp.rc.current_stream_synchronize()
         el.kpoints.comm.Allreduce(
             qp.MPI.IN_PLACE, qp.utils.BufferView(E_mu_num), qp.MPI.SUM
         )
@@ -109,7 +107,7 @@ class LCAO(Minimize[MatrixArray]):
             E_mu = E_mu_num.sum() / E_mu_den.sum()  # only total N constrained
         E_mu = E_mu.view(-1, 1, 1, 1)
         E_f = dH_sub - (
-            torch.eye(el.fillings.n_bands, device=self.rc.device)[None, None] * E_mu
+            torch.eye(el.fillings.n_bands, device=qp.rc.device)[None, None] * E_mu
         )
         # Compute auxiliary hamiltonian gradient:
         delta_f = el.fillings.f[..., None] - el.fillings.f[:, :, None, :]

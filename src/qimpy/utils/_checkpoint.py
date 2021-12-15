@@ -9,15 +9,11 @@ from typing import Tuple, Any, Optional, NamedTuple
 class Checkpoint(h5py.File):
     """Helper for checkpoint load/save from HDF5 files."""
 
-    __slots__ = ("rc", "writable")
-    rc: qp.utils.RunConfig  #: Current run configuration
+    __slots__ = "writable"
     writable: bool  #: Whether file has been opened for writing
 
-    def __init__(
-        self, filename: str, *, rc: qp.utils.RunConfig, mode: str = "r"
-    ) -> None:
-        super().__init__(filename, mode, driver="mpio", comm=rc.comm)
-        self.rc = rc
+    def __init__(self, filename: str, *, mode: str = "r") -> None:
+        super().__init__(filename, mode, driver="mpio", comm=qp.rc.comm)
         self.writable = not mode.startswith("r")
         mode_name = "writing:" if self.writable else "reading"
         qp.log.info(f"Opened checkpoint file '{filename}' for {mode_name}")
@@ -38,21 +34,21 @@ class Checkpoint(h5py.File):
         index = tuple(
             slice(offset[i], offset[i] + s_i) for i, s_i in enumerate(data.shape)
         )
-        dset[index] = data.to(self.rc.cpu).numpy()
+        dset[index] = data.to(qp.rc.cpu).numpy()
 
     def read_slice(
         self, dset: Any, offset: Tuple[int, ...], size: Tuple[int, ...]
     ) -> torch.Tensor:
         """Read a slice of data from data set `dset` in file,
         starting at `offset` and of length `size` in each dimension.
-        Returns data on CPU or GPU as specified by `rc.device`.
+        Returns data on CPU or GPU as specified by `qimpy.rc.device`.
         """
         assert len(offset) == len(dset.shape)
         assert len(offset) == len(size)
         index = tuple(
             slice(offset[i], offset[i] + size[i]) for i, s_i in enumerate(dset.shape)
         )
-        return torch.from_numpy(dset[index]).to(self.rc.device)
+        return torch.from_numpy(dset[index]).to(qp.rc.device)
 
     def create_dataset_complex(
         self, path: str, shape: Tuple[int, ...], dtype: torch.dtype = torch.complex128

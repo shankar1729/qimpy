@@ -2,7 +2,7 @@
 # List exported symbols for doc generation
 __all__ = [
     "MPI",
-    "System",
+    "rc",
     "TreeNode",
     "Energy",
     "utils",
@@ -11,11 +11,13 @@ __all__ = [
     "symmetries",
     "grid",
     "electrons",
+    "System",
     "log",
 ]
 
 # Module import definition
 from mpi4py import MPI
+from . import rc
 from ._tree import TreeNode
 from ._energy import Energy
 from . import utils

@@ -12,7 +12,6 @@ class Pseudopotential:
     Currently supports norm-conserving pseudopotentials."""
 
     __slots__ = (
-        "rc",
         "element",
         "atomic_number",
         "is_paw",
@@ -35,7 +34,6 @@ class Pseudopotential:
         "pqn_beta",
         "pqn_psi",
     )
-    rc: qp.utils.RunConfig
     element: str  #: Chemical symbol of element
     atomic_number: int  #: Atomic number of element
     is_paw: bool  #: Whether this is a PAW pseudopotential
@@ -62,7 +60,7 @@ class Pseudopotential:
     # Methods defined out of class:
     read_upf = _read_upf
 
-    def __init__(self, filename: str, rc: qp.utils.RunConfig) -> None:
+    def __init__(self, filename: str) -> None:
         """Read pseudopotential from file.
 
         Parameters
@@ -71,9 +69,8 @@ class Pseudopotential:
             File to read pseudopotential from.
             Currently, only norm-conserving UPF files are supported.
         """
-        self.rc = rc
         assert filename[-4:].lower() == ".upf"
-        self.read_upf(filename, rc)
+        self.read_upf(filename)
         self.Gmax = 0.0  # reciprocal space versions not yet initialized
         self.pqn_beta = qp.ions.PseudoQuantumNumbers(self.beta.l, self.j_beta)
         self.pqn_psi = qp.ions.PseudoQuantumNumbers(self.psi.l, self.j_psi)

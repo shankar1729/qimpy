@@ -43,7 +43,7 @@ def _randomize(
         Stopping band index (global index if MPI-split over bands)
     """
     basis = self.basis
-    watch = qp.utils.StopWatch("Wavefunction.randomize", basis.rc)
+    watch = qp.utils.StopWatch("Wavefunction.randomize")
 
     # Range of bands and basis to operate on:
     if self.band_division is None:
@@ -143,7 +143,7 @@ def _randomize_selected(
     assert self.band_division is None
     basis = self.basis
     n_bands = self.n_bands()
-    watch = qp.utils.StopWatch("Wavefunction.randomize_sel", basis.rc)
+    watch = qp.utils.StopWatch("Wavefunction.randomize_sel")
 
     # Initialize random number state based on global coeff index and seed:
     def init_state(basis_index: torch.Tensor) -> torch.Tensor:

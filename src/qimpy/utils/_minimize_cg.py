@@ -140,7 +140,7 @@ def _check_convergence(
         line += f"  {check_name:s}: {value_str}"
         if check.check(value):
             converged.append(check_name)
-    line += f"  t[s]: {self.rc.clock():.2f}"
+    line += f"  t[s]: {qp.rc.clock():.2f}"
     qp.log.info(line)
 
     # Stopping criteria:

@@ -2,7 +2,6 @@ import time
 import torch
 import qimpy as qp
 import numpy as np
-from ._runconfig import RunConfig
 from typing import ClassVar, Dict, List, Tuple, Union
 
 
@@ -13,9 +12,8 @@ class StopWatch:
     end of that block. The class collects together statistics of
     execution time by name, which can be logged using print_stats()."""
 
-    __slots__ = ["name", "use_cuda", "t_start"]
+    __slots__ = ["name", "t_start"]
     name: str  #: name of code block
-    use_cuda: bool  #: whether profiling is for a GPU device
     t_start: Union[float, torch.cuda.Event]  #: start time of current event
 
     #: timing statistics: list of durations by name
@@ -24,11 +22,10 @@ class StopWatch:
     #: CUDA events for asynchronous timing on GPUs
     _cuda_events: ClassVar[List[Tuple[str, torch.cuda.Event, torch.cuda.Event]]] = []
 
-    def __init__(self, name: str, rc: RunConfig):
+    def __init__(self, name: str):
         """Start profiling a block of code named `name`."""
-        self.use_cuda = rc.use_cuda
         self.name = name
-        if self.use_cuda:
+        if qp.rc.use_cuda:
             torch.cuda.nvtx.range_push(name)
             self.t_start = torch.cuda.Event(enable_timing=True)
             self.t_start.record()
@@ -38,7 +35,7 @@ class StopWatch:
     def stop(self):
         """Stop this watch and collect statistics on it."""
         if self.t_start:
-            if self.use_cuda:
+            if qp.rc.use_cuda:
                 t_stop = torch.cuda.Event(enable_timing=True)
                 t_stop.record()
                 torch.cuda.nvtx.range_pop()

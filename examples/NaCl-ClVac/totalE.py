@@ -5,12 +5,11 @@ import qimpy as qp
 
 qp.utils.log_config()  # default set up to log from MPI head alone
 qp.log.info("Using QimPy " + qp.__version__)
-rc = qp.utils.RunConfig()
+qp.rc.init()
 
 # Create lattice object explicitly (eg. shared between two systems)
 n_sup = 2  # number of unit cells in each dimension
 lattice = qp.lattice.Lattice(
-    rc=rc,
     modification="face-centered",
     system="cubic",
     a=10.74,  # bohrs, for unit cell
@@ -29,7 +28,6 @@ coordinates.extend(
 )  # omit Cl at (0,0,0)
 
 system = qp.System(
-    rc=rc,
     lattice=lattice,
     ions={
         "pseudopotentials": os.path.join(ps_path, "$ID_ONCV_PBE.upf"),
@@ -42,5 +40,5 @@ system = qp.System(
 )
 system.run()
 
-rc.report_end()
+qp.rc.report_end()
 qp.utils.StopWatch.print_stats()

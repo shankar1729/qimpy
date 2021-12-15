@@ -17,7 +17,6 @@ class Fillings(qp.TreeNode):
     """Electron occupation factors (smearing)"""
 
     __slots__ = (
-        "rc",
         "electrons",
         "n_electrons",
         "n_bands_min",
@@ -34,7 +33,6 @@ class Fillings(qp.TreeNode):
         "f_eig",
         "_smearing_func",
     )
-    rc: qp.utils.RunConfig
     electrons: qp.electrons.Electrons
     n_electrons: float  #: Number of electrons
     n_bands_min: int  #: Minimum number of bands to accomodate `n_electrons`
@@ -54,7 +52,6 @@ class Fillings(qp.TreeNode):
     def __init__(
         self,
         *,
-        rc: qp.utils.RunConfig,
         ions: qp.ions.Ions,
         electrons: qp.electrons.Electrons,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
@@ -132,7 +129,6 @@ class Fillings(qp.TreeNode):
             * An integer explicitly sets the number of extra bands
         """
         super().__init__()
-        self.rc = rc
         self.electrons = electrons
 
         # Magnetic field and magnetization mode:
@@ -147,7 +143,7 @@ class Fillings(qp.TreeNode):
                         f"{x_name} only allowed for" f" spin-polarized calculations"
                     )
                 x_arr = torch.tensor(
-                    x, device=self.rc.device, dtype=torch.double
+                    x, device=qp.rc.device, dtype=torch.double
                 ).flatten()
                 if x_len != len(x_arr):
                     prefix = "" if electrons.spinorial else "non-"
@@ -157,7 +153,7 @@ class Fillings(qp.TreeNode):
                     )
                 return x_arr
             else:
-                return torch.zeros(x_len, device=self.rc.device)
+                return torch.zeros(x_len, device=qp.rc.device)
 
         self.B = check_magnetic(B, "B")
         self.M = check_magnetic(M, "M")
@@ -201,9 +197,9 @@ class Fillings(qp.TreeNode):
         qp.log.info(f"mu: initial: {self.mu}" f"  constrained: {self.mu_constrain}")
         if electrons.spin_polarized:
             qp.log.info(
-                f"M: initial: {self.rc.fmt(self.M)}"
+                f"M: initial: {qp.utils.fmt(self.M)}"
                 f"  constrained: {self.M_constrain}"
-                f"  B: {self.rc.fmt(self.B)}"
+                f"  B: {qp.utils.fmt(self.B)}"
             )
 
         self._initialize_n_bands(ions, n_bands, n_bands_extra)
@@ -267,7 +263,7 @@ class Fillings(qp.TreeNode):
         el = self.electrons
         k_division = el.kpoints.division
         self.f = torch.zeros(
-            (el.n_spins, k_division.n_mine, self.n_bands), device=self.rc.device
+            (el.n_spins, k_division.n_mine, self.n_bands), device=qp.rc.device
         )
         if cp_f := checkpoint_in.member("f"):
             qp.log.info("Loading fillings f")
@@ -310,7 +306,7 @@ class Fillings(qp.TreeNode):
             return
 
         assert self._smearing_func is not None
-        watch = qp.utils.StopWatch("Fillings.update", self.rc)
+        watch = qp.utils.StopWatch("Fillings.update")
         el = self.electrons
         w_sk = el.basis.w_sk
         eig = el.eig[..., : self.n_bands]  # don't include extra bands in f
@@ -332,15 +328,15 @@ class Fillings(qp.TreeNode):
                 )
                 M_len = 3
             else:
-                w_NM = torch.tensor([[1, 1], [1, -1]], device=self.rc.device).view(
+                w_NM = torch.tensor([[1, 1], [1, -1]], device=qp.rc.device).view(
                     2, 2, 1, 1
                 )
                 M_len = 1
-            NM_target = np.concatenate(([self.n_electrons], self.M.to(self.rc.cpu)))
-            mu_B = np.concatenate(([self.mu], self.B.to(self.rc.cpu)))
+            NM_target = np.concatenate(([self.n_electrons], self.M.to(qp.rc.cpu)))
+            mu_B = np.concatenate(([self.mu], self.B.to(qp.rc.cpu)))
             i_free = np.where([not self.mu_constrain] + [self.M_constrain] * M_len)[0]
         else:
-            w_NM = torch.ones((1, 1, 1, 1), device=self.rc.device)
+            w_NM = torch.ones((1, 1, 1, 1), device=qp.rc.device)
             NM_target = np.array([self.n_electrons])
             mu_B = np.array([self.mu])
             i_free = np.where([not self.mu_constrain])[0]
@@ -355,7 +351,7 @@ class Fillings(qp.TreeNode):
             """
             assert self._smearing_func is not None
             mu_B[i_free] = params
-            mu_B_t = torch.tensor(mu_B).to(self.rc.device)
+            mu_B_t = torch.tensor(mu_B).to(qp.rc.device)
             mu_eff = (mu_B_t.view(-1, 1, 1, 1) * w_NM).sum(dim=0)
             f, f_eig, S = self._smearing_func(eig, mu_eff, sigma_cur)
             NM = (w_NM * (w_sk * f)).sum(dim=(1, 2, 3))
@@ -363,7 +359,7 @@ class Fillings(qp.TreeNode):
                 dim=(2, 3, 4)
             )
             # Collect across MPI and make consistent to machine precision:
-            self.rc.current_stream_synchronize()
+            qp.rc.current_stream_synchronize()
             for tensor in (NM, NM_mu_B):
                 el.kpoints.comm.Allreduce(
                     qp.MPI.IN_PLACE, qp.utils.BufferView(tensor), qp.MPI.SUM
@@ -374,8 +370,8 @@ class Fillings(qp.TreeNode):
             results["NM"] = NM
             results["S"] = S
             # Compute errors:
-            NM_err = NM.to(self.rc.cpu).numpy() - NM_target
-            NM_err_mu_B = NM_mu_B.to(self.rc.cpu).numpy()
+            NM_err = NM.to(qp.rc.cpu).numpy() - NM_target
+            NM_err_mu_B = NM_mu_B.to(qp.rc.cpu).numpy()
             return NM_err[i_free], NM_err_mu_B[i_free][:, i_free]
 
         if len(i_free) == 0:
@@ -437,10 +433,10 @@ class Fillings(qp.TreeNode):
         if el.spin_polarized:
             M = results["NM"][1:]
             if self.M_constrain:
-                self.B = torch.from_numpy(mu_B[1:]).to(self.rc.device)
+                self.B = torch.from_numpy(mu_B[1:]).to(qp.rc.device)
             else:
                 self.M = M
-            M_str = f'  M: {self.rc.fmt(M, floatmode="fixed", precision=5)}'
+            M_str = f'  M: {qp.utils.fmt(M, floatmode="fixed", precision=5)}'
         else:
             M_str = ""
         qp.log.info(
@@ -464,7 +460,7 @@ class Fillings(qp.TreeNode):
         shape = (el.n_spins, k_division.n_tot, self.n_bands)
         offset = (0, k_division.i_start, 0)
         dset = checkpoint.create_dataset(
-            path, shape=shape, dtype=self.rc.np_type[v.dtype]
+            path, shape=shape, dtype=qp.rc.np_type[v.dtype]
         )
         if el.basis.division.i_proc == 0:
             checkpoint.write_slice(dset, offset, v[:, :, : self.n_bands])

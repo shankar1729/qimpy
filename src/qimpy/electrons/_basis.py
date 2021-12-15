@@ -12,7 +12,6 @@ class Basis(qp.TreeNode):
     :class:`qimpy.utils.TaskDivision` splits plane waves over `rc.comm_b`"""
 
     __slots__ = (
-        "rc",
         "comm",
         "comm_kb",
         "lattice",
@@ -42,7 +41,6 @@ class Basis(qp.TreeNode):
         "mine",
         "real",
     )
-    rc: qp.utils.RunConfig
     comm: qp.MPI.Comm  #: Basis/bands communicator
     comm_kb: qp.MPI.Comm  #: Overall k-points and basis/bands communicator
     lattice: qp.lattice.Lattice  #: Lattice vectors of unit cell
@@ -82,7 +80,6 @@ class Basis(qp.TreeNode):
     def __init__(
         self,
         *,
-        rc: qp.utils.RunConfig,
         process_grid: qp.utils.ProcessGrid,
         lattice: qp.lattice.Lattice,
         ions: qp.ions.Ions,
@@ -143,7 +140,6 @@ class Basis(qp.TreeNode):
             based on the number of bands and k-points being processed by each process.
         """
         super().__init__()
-        self.rc = rc
         self.comm = process_grid.get_comm("b")
         self.comm_kb = process_grid.get_comm("kb")
         self.lattice = lattice
@@ -182,7 +178,6 @@ class Basis(qp.TreeNode):
             qp.grid.Grid,
             grid,
             checkpoint_in,
-            rc=rc,
             lattice=lattice,
             symmetries=symmetries,
             comm=None,  # Never parallel
@@ -209,7 +204,7 @@ class Basis(qp.TreeNode):
         # --- create indices from basis set to FFT grid:
         n_fft = self.iG.shape[0]  # number of points on FFT grid
         assert self.n_tot <= n_fft  # make sure padding doesn't exceed grid
-        fft_range = torch.arange(n_fft, device=self.rc.device)
+        fft_range = torch.arange(n_fft, device=qp.rc.device)
         self.fft_index = (
             torch.where(within_cutoff, 0, n_fft) + fft_range[None, :]
         ).argsort(  # ke<cutoff to front
@@ -280,7 +275,7 @@ class Basis(qp.TreeNode):
             if not (n_batch and n_bands):
                 return 1  # Irrelevant since no FFTs to perform anyway
             # TODO: better heuristics on how much data to FFT at once
-            min_data = 16_000_000 if self.rc.use_cuda else 100_000
+            min_data = 16_000_000 if qp.rc.use_cuda else 100_000
             min_block = qp.utils.ceildiv(min_data, n_batch * np.prod(self.grid.shape))
             max_block = qp.utils.ceildiv(n_bands, 16)  # based on memory limit
             block_size = min(min_block, max_block)

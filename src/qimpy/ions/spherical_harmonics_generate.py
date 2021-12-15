@@ -155,8 +155,8 @@ def generate_harmonic_coefficients(l_max_hlf: int) -> None:
 
 
 def main():
-    rc = qp.utils.RunConfig()
-    assert rc.n_procs == 1  # no MPI
+    qp.rc.init()
+    assert qp.rc.n_procs == 1  # no MPI
     qp.utils.log_config()  # after rc to suppress header messages
     generate_harmonic_coefficients(l_max_hlf=3)
 

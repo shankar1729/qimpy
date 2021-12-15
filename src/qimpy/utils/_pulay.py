@@ -17,7 +17,6 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
     """
 
     __slots__ = (
-        "rc",
         "comm",
         "name",
         "n_iterations",
@@ -30,7 +29,6 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
         "_residuals",
         "_overlaps",
     )
-    rc: qp.utils.RunConfig
     comm: qp.MPI.Comm  #: Communicator over which algorithm operates in unison
     name: str  #: Name of algorithm instance used in reporting eg. 'SCF'.
     n_iterations: int  #: Maximum number of iterations
@@ -52,7 +50,6 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
     def __init__(
         self,
         *,
-        rc: qp.utils.RunConfig,
         checkpoint_in: qp.utils.CpPath,
         comm: qp.MPI.Comm,
         name: str,
@@ -65,7 +62,6 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
     ) -> None:
         """Initialize Pulay algorithm parameters."""
         super().__init__()
-        self.rc = rc
         self.comm = comm
         self.name = name
         self.n_iterations = n_iterations
@@ -172,7 +168,7 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
                 line += f"  {check_name:s}: {value_str}"
                 if check.check(value):
                     converged.append(check_name)
-            line += f"  t[s]: {self.rc.clock():.2f}"
+            line += f"  t[s]: {qp.rc.clock():.2f}"
             qp.log.info(line)
             # --- optional reporting:
             self.report(i_iter)

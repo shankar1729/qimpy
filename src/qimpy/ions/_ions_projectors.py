@@ -30,7 +30,7 @@ def _get_projectors(
     proj = torch.empty(
         (1, nk_mine, n_proj_tot, 1, n_basis),
         dtype=torch.complex128,
-        device=self.rc.device,
+        device=qp.rc.device,
     )
     if not n_proj_tot:  # no ions or all local pseudopotentials
         return qp.electrons.Wavefunction(basis, coeff=proj)

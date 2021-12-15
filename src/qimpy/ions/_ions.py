@@ -14,7 +14,6 @@ class Ions(qp.TreeNode):
     """Ionic system: ionic geometry and pseudopotentials."""
 
     __slots__ = (
-        "rc",
         "n_ions",
         "n_types",
         "symbols",
@@ -34,7 +33,6 @@ class Ions(qp.TreeNode):
         "beta_version",
         "D_all",
     )
-    rc: qp.utils.RunConfig  #: current run configuration
     n_ions: int  #: number of ions
     n_types: int  #: number of distinct ion types
     n_ions_type: List[int]  #: number of ions of each type
@@ -63,7 +61,6 @@ class Ions(qp.TreeNode):
     def __init__(
         self,
         *,
-        rc: qp.utils.RunConfig,
         process_grid: qp.utils.ProcessGrid,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         coordinates: Optional[List] = None,
@@ -95,7 +92,6 @@ class Ions(qp.TreeNode):
             each element takes precedence.
         """
         super().__init__()
-        self.rc = rc
         qp.log.info("\n--- Initializing Ions ---")
 
         # Read ionic coordinates:
@@ -144,8 +140,8 @@ class Ions(qp.TreeNode):
             raise ValueError("coordinates must group ions of same type together")
 
         # Convert to tensors before storing in class object:
-        self.positions = torch.tensor(positions, device=rc.device)
-        self.types = torch.tensor(types, device=rc.device, dtype=torch.long)
+        self.positions = torch.tensor(positions, device=qp.rc.device)
+        self.types = torch.tensor(types, device=qp.rc.device, dtype=torch.long)
         # --- Fill in missing magnetizations (if any specified):
         M_lengths = set(
             [(len(M) if isinstance(M, list) else 1) for M in M_initial if M]
@@ -158,7 +154,7 @@ class Ions(qp.TreeNode):
             M_default = [0.0, 0.0, 0.0] if (M_length == 3) else 0.0
             self.M_initial = torch.tensor(
                 [(M if M else M_default) for M in M_initial],
-                device=rc.device,
+                device=qp.rc.device,
                 dtype=torch.double,
             )
         else:
@@ -196,13 +192,15 @@ class Ions(qp.TreeNode):
                     break
             # Read pseudopotential file:
             if fname:
-                self.pseudopotentials.append(qp.ions.Pseudopotential(fname, rc))
+                self.pseudopotentials.append(qp.ions.Pseudopotential(fname))
             else:
                 raise ValueError(f"no pseudopotential found for {symbol}")
         self.beta_version = 0
 
         # Calculate total ionic charge (needed for number of electrons):
-        self.Z = torch.tensor([ps.Z for ps in self.pseudopotentials], device=rc.device)
+        self.Z = torch.tensor(
+            [ps.Z for ps in self.pseudopotentials], device=qp.rc.device
+        )
         self.Z_tot = self.Z[self.types].sum().item()
         qp.log.info(f"\nTotal ion charge, Z_tot: {self.Z_tot:g}")
 
@@ -214,10 +212,10 @@ class Ions(qp.TreeNode):
         """Report ionic positions and attributes"""
         qp.log.info(f"{self.n_ions} total ions of {self.n_types} types;" " positions:")
         # Fetch to CPU for reporting:
-        positions = self.positions.to(self.rc.cpu).numpy()
-        types = self.types.to(self.rc.cpu).numpy()
+        positions = self.positions.to(qp.rc.cpu).numpy()
+        types = self.types.to(qp.rc.cpu).numpy()
         M_initial = (
-            None if (self.M_initial is None) else self.M_initial.to(self.rc.cpu).numpy()
+            None if (self.M_initial is None) else self.M_initial.to(qp.rc.cpu).numpy()
         )
         for i_ion, position in enumerate(positions):
             # Generate attribute string:

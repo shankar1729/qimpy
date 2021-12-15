@@ -9,7 +9,7 @@ def _apply_ke(
     self: qp.electrons.Basis, C: qp.electrons.Wavefunction
 ) -> qp.electrons.Wavefunction:
     "Apply kinetic energy (KE) operator to wavefunction `C`"
-    watch = qp.utils.StopWatch("Basis.apply_ke", self.rc)
+    watch = qp.utils.StopWatch("Basis.apply_ke")
     basis_slice = slice(None) if C.band_division else self.mine
     coeff = C.coeff * self.get_ke(basis_slice)[None, :, None, None, :]
     watch.stop()
@@ -20,14 +20,14 @@ def _apply_potential(
     self: qp.electrons.Basis, V: qp.grid.FieldH, C: qp.electrons.Wavefunction
 ) -> qp.electrons.Wavefunction:
     "Apply potential `V` to wavefunction `C`"
-    watch = qp.utils.StopWatch("Basis.apply_potential", self.rc)
+    watch = qp.utils.StopWatch("Basis.apply_potential")
     Vdata_in = (~(V.to(self.grid))).data  # change to real space on basis grid
     n_densities = Vdata_in.shape[0]
     spin_dm_mode = n_densities == 4  # spin density-matrix mode
     if spin_dm_mode:
         assert C.coeff.shape[-2] == 2  # must be spinorial
         Vdata = torch.empty(
-            (2, 2) + Vdata_in.shape[1:], dtype=C.coeff.dtype, device=self.rc.device
+            (2, 2) + Vdata_in.shape[1:], dtype=C.coeff.dtype, device=qp.rc.device
         )
         Vdata[0, 0] = Vdata_in[0] + Vdata_in[3]
         Vdata[1, 1] = Vdata_in[0] - Vdata_in[3]
@@ -37,7 +37,7 @@ def _apply_potential(
         Vdata = torch.empty(
             (2, 1, 1, 1) + Vdata_in.shape[1:],
             dtype=Vdata_in.dtype,
-            device=self.rc.device,
+            device=qp.rc.device,
         )
         Vdata[0, 0, 0, 0] = Vdata_in[0] + Vdata_in[1]
         Vdata[1, 0, 0, 0] = Vdata_in[0] - Vdata_in[1]
@@ -167,8 +167,8 @@ class _ApplyPotentialKernel(_KernelCommon):
         """Apply potential to C in-place. C must be in bands-divided mode.
         Note that C could have a subset of bands of C_tot passed to __init__."""
         fft_block_slices = qp.utils.get_block_slices(C.n_bands(), self.fft_block_size)
-        self.grid.rc.compute_stream_wait_current()
-        with torch.cuda.stream(self.grid.rc.compute_stream):
+        qp.rc.compute_stream_wait_current()
+        with torch.cuda.stream(qp.rc.compute_stream):
             for fft_block_slice in fft_block_slices:
                 # Expand -> ifft -> multiply V -> fft -> reduce back (on block)
                 VCb = self.expand_ifft(C.coeff, fft_block_slice)
@@ -183,7 +183,7 @@ class _ApplyPotentialKernel(_KernelCommon):
 
     def wait(self) -> qp.electrons.Wavefunction:
         """Wait for completion (if running in separate stream)."""
-        self.grid.rc.current_stream_wait_compute()
+        qp.rc.current_stream_wait_compute()
         return self.result
 
 
@@ -204,7 +204,7 @@ def _collect_density(
     while (Mx +/- i My)/2 yield the :math:`\rho_{\uparrow\downarrow}` and
     :math:`\rho_{\downarrow\uparrow}` components of the spin density matrix.
     """
-    watch = qp.utils.StopWatch("Basis.collect_density", self.rc)
+    watch = qp.utils.StopWatch("Basis.collect_density")
     assert f.shape == C.coeff.shape[:3]
     n_spins, _, _, n_spinor, _ = C.coeff.shape
     if need_Mvec:
@@ -268,7 +268,7 @@ def _collect_density(
 
     # Collect over MPI:
     if self.comm_kb.size > 1:
-        self.rc.current_stream_synchronize()
+        qp.rc.current_stream_synchronize()
         self.comm_kb.Allreduce(
             qp.MPI.IN_PLACE, qp.utils.BufferView(density.data), qp.MPI.SUM
         )
@@ -300,8 +300,8 @@ class _CollectDensityKernel(_KernelCommon):
         (related to fillings). C must be in bands-divided mode.
         Note that C could have a subset of bands of C_tot passed to __init__."""
         fft_block_slices = qp.utils.get_block_slices(C.n_bands(), self.fft_block_size)
-        self.grid.rc.compute_stream_wait_current()
-        with torch.cuda.stream(self.grid.rc.compute_stream):
+        qp.rc.compute_stream_wait_current()
+        with torch.cuda.stream(qp.rc.compute_stream):
             prefac_mine = (
                 prefac[:, :, C.band_division.i_start : C.band_division.i_stop]
                 if C.band_division
@@ -326,4 +326,4 @@ class _CollectDensityKernel(_KernelCommon):
 
     def wait(self) -> None:
         """Wait for completion (if running in separate stream)."""
-        self.grid.rc.current_stream_wait_compute()
+        qp.rc.current_stream_wait_compute()

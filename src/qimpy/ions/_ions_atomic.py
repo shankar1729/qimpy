@@ -17,7 +17,7 @@ def get_atomic_orbitals(
         psi_s = torch.empty(
             (n_spins, nk_mine, n_psi_tot, n_spinor, n_basis_each),
             dtype=torch.complex128,
-            device=self.rc.device,
+            device=qp.rc.device,
         )
         i_proj_start = 0
         i_psi_start = 0

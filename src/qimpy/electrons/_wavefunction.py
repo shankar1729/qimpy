@@ -84,13 +84,13 @@ class Wavefunction:
             self.coeff = torch.zeros(
                 (n_spins, nk_mine, n_bands, n_spinor, n_basis),
                 dtype=torch.cdouble,
-                device=basis.rc.device,
+                device=qp.rc.device,
             )
             # Projections of zero wavefunctions are always zero:
             self._proj = torch.zeros(
                 (n_spins, nk_mine, basis.ions.n_projectors, n_bands),
                 dtype=torch.cdouble,
-                device=basis.rc.device,
+                device=qp.rc.device,
             )
             self._proj_version = basis.ions.beta_version
         else:

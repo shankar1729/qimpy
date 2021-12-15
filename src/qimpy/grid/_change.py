@@ -18,7 +18,6 @@ def gather(
     v: torch.Tensor,
     split_in: qp.utils.TaskDivision,
     comm: qp.MPI.Comm,
-    rc: qp.utils.RunConfig,
     dim: int,
 ) -> torch.Tensor:
     """Return the contents of v, changed from split based on split_in on
@@ -27,13 +26,13 @@ def gather(
     # Bring split dimension to outermost (if necessary):
     sendbuf = (v.swapaxes(0, dim) if dim else v).contiguous()
     prod_rest = np.prod(sendbuf.shape[1:])  # number in all but the split dim
-    mpi_type = rc.mpi_type[v.dtype]
+    mpi_type = qp.rc.mpi_type[v.dtype]
     # Gather pieces from each process to all:
     recvbuf = torch.empty(
         (split_in.n_tot,) + sendbuf.shape[1:], dtype=v.dtype, device=v.device
     )
     recv_prev = split_in.n_prev * prod_rest
-    rc.current_stream_synchronize()
+    qp.rc.current_stream_synchronize()
     comm.Allgatherv(
         (qp.utils.BufferView(sendbuf), split_in.n_mine * prod_rest, 0, mpi_type),
         (qp.utils.BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1], mpi_type),
@@ -47,7 +46,6 @@ def redistribute(
     split_in: qp.utils.TaskDivision,
     split_out: qp.utils.TaskDivision,
     comm: qp.MPI.Comm,
-    rc: qp.utils.RunConfig,
     dim: int,
 ) -> torch.Tensor:
     """Return the contents of v, changed from split based on split_in to split
@@ -55,7 +53,7 @@ def redistribute(
     # Bring split dimension to outermost (if necessary):
     sendbuf = (v.swapaxes(0, dim) if dim else v).contiguous()
     prod_rest = np.prod(sendbuf.shape[1:])  # number in all but the split dim
-    mpi_type = rc.mpi_type[v.dtype]
+    mpi_type = qp.rc.mpi_type[v.dtype]
     # Determine destinations of my input pieces:
     send_prev = (
         np.maximum(np.minimum(split_out.n_prev, split_in.i_stop), split_in.i_start)
@@ -70,7 +68,7 @@ def redistribute(
     recvbuf = torch.empty(
         (split_out.n_mine,) + sendbuf.shape[1:], dtype=v.dtype, device=v.device
     )
-    rc.current_stream_synchronize()
+    qp.rc.current_stream_synchronize()
     comm.Alltoallv(
         (qp.utils.BufferView(sendbuf), np.diff(send_prev), send_prev[:-1], mpi_type),
         (qp.utils.BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1], mpi_type),
@@ -85,7 +83,6 @@ def fix_split(
     comm_in: Optional[qp.MPI.Comm],
     split_out: qp.utils.TaskDivision,
     comm_out: Optional[qp.MPI.Comm],
-    rc: qp.utils.RunConfig,
     dim: int,
 ) -> torch.Tensor:
     """Fix how v is split along dimension dim, from split_in on comm_in
@@ -100,10 +97,10 @@ def fix_split(
             return scatter(v, split_out, dim)
     else:
         if comm_out is None:
-            return gather(v, split_in, comm_in, rc, dim)
+            return gather(v, split_in, comm_in, dim)
         else:
             assert comm_in is comm_out
-            return redistribute(v, split_in, split_out, comm_in, rc, dim)
+            return redistribute(v, split_in, split_out, comm_in, dim)
 
 
 FieldTypeReal = TypeVar("FieldTypeReal", "qp.grid.FieldR", "qp.grid.FieldC")
@@ -111,23 +108,17 @@ FieldTypeRecip = TypeVar("FieldTypeRecip", "qp.grid.FieldH", "qp.grid.FieldG")
 
 
 def _change_real(v: FieldTypeReal, grid_out: qp.grid.Grid) -> FieldTypeReal:
-    """Switch real-space field to grid_out"""
+    """Switch real-space field to grid_out."""
     grid_in = v.grid
     assert grid_in.shape == grid_out.shape
     data_out = fix_split(
-        v.data,
-        grid_in.split0,
-        grid_in.comm,
-        grid_out.split0,
-        grid_out.comm,
-        grid_in.rc,
-        -3,
+        v.data, grid_in.split0, grid_in.comm, grid_out.split0, grid_out.comm, -3
     )
     return v.__class__(grid_out, data=data_out)
 
 
 def _change_recip(v: FieldTypeRecip, grid_out: qp.grid.Grid) -> FieldTypeRecip:
-    """Switch reciprocal-space field to grid_out"""
+    """Switch reciprocal-space field to grid_out."""
     grid_in = v.grid
     is_half = v.__class__ is qp.grid.FieldH
     if is_half:
@@ -212,14 +203,14 @@ def _change_recip(v: FieldTypeRecip, grid_out: qp.grid.Grid) -> FieldTypeRecip:
                         if whose_pos != split_in.i_proc:
                             assert grid_in.comm is not None
                             neg_slice = neg_slice.contiguous()
-                            grid_in.rc.current_stream_synchronize()
+                            qp.rc.current_stream_synchronize()
                             grid_in.comm.Send(qp.utils.BufferView(neg_slice), whose_pos)
                     elif whose_pos == split_in.i_proc:
                         neg_slice = torch.zeros(
                             data.shape[:-1], dtype=data.dtype, device=data.device
                         )
                         assert grid_in.comm is not None
-                        grid_in.rc.current_stream_synchronize()
+                        qp.rc.current_stream_synchronize()
                         grid_in.comm.Recv(qp.utils.BufferView(neg_slice), whose_neg)
                     # Negative Nyquist slice is now on proc with positive one
                 neg_start += 1  # can only have + Nyquist freq in output
@@ -246,25 +237,21 @@ def _change_recip(v: FieldTypeRecip, grid_out: qp.grid.Grid) -> FieldTypeRecip:
         data_out = data
 
     # Rearrange data as needed:
-    data_out = fix_split(
-        data_out, split_in, grid_in.comm, split_out, grid_out.comm, grid_in.rc, -1
-    )
+    data_out = fix_split(data_out, split_in, grid_in.comm, split_out, grid_out.comm, -1)
     return v.__class__(grid_out, data=data_out)
 
 
-if __name__ == "__main__":
+def main() -> None:
     qp.utils.log_config()
     qp.log.info("*" * 15 + " QimPy " + qp.__version__ + " " + "*" * 15)
-    rc = qp.utils.RunConfig()
-    process_grid = qp.utils.ProcessGrid(rc.comm, "rkb")
+    qp.rc.init()
+    process_grid = qp.utils.ProcessGrid(qp.rc.comm, "rkb")
     # Prepare a grid for testing:
     lattice = qp.lattice.Lattice(
-        rc=rc, system="triclinic", a=2.1, b=2.2, c=2.3, alpha=75, beta=80, gamma=85
+        system="triclinic", a=2.1, b=2.2, c=2.3, alpha=75, beta=80, gamma=85
     )  # pick one with no symmetries
-    ions = qp.ions.Ions(
-        rc=rc, process_grid=process_grid, pseudopotentials=[], coordinates=[]
-    )
-    symmetries = qp.symmetries.Symmetries(rc=rc, lattice=lattice, ions=ions)
+    ions = qp.ions.Ions(process_grid=process_grid, pseudopotentials=[], coordinates=[])
+    symmetries = qp.symmetries.Symmetries(lattice=lattice, ions=ions)
 
     # MPI-reproducible grid for testing:
     def get_ref_field(cls, grid):
@@ -281,7 +268,7 @@ if __name__ == "__main__":
             offsets[-3] = grid.split0.i_start
         # Make each entry unique:
         for i_dim, offset in enumerate(offsets):
-            cur_offset = torch.arange(shape_mine[i_dim], device=grid.rc.device) + offset
+            cur_offset = torch.arange(shape_mine[i_dim], device=qp.rc.device) + offset
             stride = np.prod(shape_full[i_dim + 1 :])
             bcast_shape = [1] * len(shape_full)
             bcast_shape[i_dim] = -1
@@ -291,11 +278,11 @@ if __name__ == "__main__":
     # Make parallel and sequential grids of given shape:
     def make_grid(shape, comm):
         return qp.grid.Grid(
-            rc=rc, lattice=lattice, symmetries=symmetries, shape=shape, comm=comm
+            lattice=lattice, symmetries=symmetries, shape=shape, comm=comm
         )
 
     def make_grids(shape):
-        grid_p = make_grid(shape, rc.comm)  # parallel
+        grid_p = make_grid(shape, qp.rc.comm)  # parallel
         grid_s = make_grid(shape, None)  # sequential
         return grid_p, grid_s
 
@@ -317,7 +304,7 @@ if __name__ == "__main__":
     grid2p, grid2s = make_grids((3, 6, 8))
 
     def summary(v):
-        return rc.fmt(v.data.real[0, 0])
+        return qp.utils.fmt(v.data.real[0, 0])
 
     for cls in (qp.grid.FieldH, qp.grid.FieldG):
         name = cls.__qualname__
@@ -344,7 +331,7 @@ if __name__ == "__main__":
 
     qp.log.info("\n--- Visual inspection of Fourier resampling ---")
     # Do this sequentially, as MPI equivalence tested above already
-    if rc.is_head:
+    if qp.rc.is_head:
         import matplotlib.pyplot as plt
 
         grid1 = make_grid((36, 40, 48), None)
@@ -352,10 +339,10 @@ if __name__ == "__main__":
 
         def get_test_field(grid: qp.grid.Grid):
             """A highly oscillatory and non-trivial function to test resampling"""
-            x = grid.get_mesh("R") / torch.tensor(grid.shape, device=rc.device)
-            k1 = (2 * np.pi) * torch.tensor([2, 4, 5], device=rc.device)
-            k2 = (2 * np.pi) * torch.tensor([6, 1, 3], device=rc.device)
-            x_plot = x[0, 0, :, 2].to(rc.cpu)
+            x = grid.get_mesh("R") / torch.tensor(grid.shape, device=qp.rc.device)
+            k1 = (2 * np.pi) * torch.tensor([2, 4, 5], device=qp.rc.device)
+            k2 = (2 * np.pi) * torch.tensor([6, 1, 3], device=qp.rc.device)
+            x_plot = x[0, 0, :, 2].to(qp.rc.cpu)
             return x_plot, qp.grid.FieldR(
                 grid, data=torch.exp(torch.cos(x @ k1) + torch.sin(x @ k2))
             )
@@ -366,7 +353,7 @@ if __name__ == "__main__":
         v21 = ~((~v2).to(grid1))
 
         def get_plot_slice(v):
-            return v.data[0, 0].to(rc.cpu)
+            return v.data[0, 0].to(qp.rc.cpu)
 
         plt.plot(x1, get_plot_slice(v1), "r", label="Created on 1")
         plt.plot(x1, get_plot_slice(v21), "r+", label=r"Sampled 2$\to$1")
@@ -375,3 +362,7 @@ if __name__ == "__main__":
         plt.legend()
         plt.show()
     qp.utils.StopWatch.print_stats()
+
+
+if __name__ == "__main__":
+    main()
