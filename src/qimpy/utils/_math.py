@@ -162,7 +162,9 @@ def ortho_matrix(O: torch.Tensor, use_cholesky: bool = True) -> torch.Tensor:
             (1,) * (len(O.shape) - 2) + O.shape[-2:]
         )
         return dagger(
-            torch.triangular_solve(identity, torch.linalg.cholesky(O), upper=False)[0]
+            torch.linalg.solve_triangular(
+                torch.linalg.cholesky(O), identity, upper=False
+            )
         )
     else:
         # Symmetric orthonormalization matrix:

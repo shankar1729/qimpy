@@ -205,7 +205,7 @@ class Grid(qp.TreeNode):
             shape_mine is the relevant local dimensions of requested space
         """
         mesh1D = self._mesh1D_mine[space]
-        iG = torch.stack(torch.meshgrid(*mesh1D)).to(torch.double)
+        iG = torch.stack(torch.meshgrid(*mesh1D, indexing="ij")).to(torch.double)
         return 1j * torch.tensordot(self.lattice.Gbasis, iG, dims=1)
 
     def get_Gmax(self) -> float:
