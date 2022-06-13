@@ -3,6 +3,7 @@ lattice:
   a: 20.  # bohrs
 
 ions:
+  compute-stress: yes
   pseudopotentials:
     - ../../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
   coordinates:

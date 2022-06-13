@@ -2,7 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Tuple
+from typing import Optional
 
 
 class Coulomb:
@@ -127,9 +127,13 @@ class Coulomb:
         return result
 
     def ewald(
-        self, positions: torch.Tensor, Z: torch.Tensor, compute_stress: bool = False
-    ) -> Tuple[float, torch.Tensor, torch.Tensor]:
-        """Compute Ewald energy, forces and optionally stress.
+        self,
+        positions: torch.Tensor,
+        Z: torch.Tensor,
+        E_pos: Optional[torch.Tensor] = None,
+        E_RRT: Optional[torch.Tensor] = None,
+    ) -> float:
+        """Compute Ewald energy, and optionally accumulate forces and stress.
 
         Parameters
         ----------
@@ -137,8 +141,10 @@ class Coulomb:
             Positions (fractional coordinates) of point charges
         Z
             Charges of each point charge
-        compute_stress
-            If True, compute stress for the final output (undefined otherwise)
+        E_pos
+            If specified, accumulate fractional forces.
+        E_RRT
+            If specified, accumulate lattice gradient (stress * vol).
         """
         sigma = self.sigma
         sigmaSq = sigma ** 2
@@ -151,7 +157,8 @@ class Coulomb:
         E_Gzero = 0.5 * ((4 * np.pi) * (-0.5 * sigmaSq * (Ztot ** 2)) / lattice.volume)
         E_self = 0.5 * (-ZsqTot * eta * (2.0 / np.sqrt(np.pi)))
         E = E_Gzero + E_self
-        E_RRT = -E_Gzero * torch.eye(3, device=Z.device)
+        if E_RRT is not None:
+            E_RRT -= E_Gzero * torch.eye(3, device=Z.device)
 
         # Real-space sum:
         rCut = 1e-6  # cutoff to detect self-term
@@ -168,10 +175,11 @@ class Coulomb:
             r ** 2
         )  # -(dE/dr)/r
         E += 0.5 * Eterm.sum()
-        E_pos = ((rVec @ lattice.Rbasis) * minus_E_r_by_r[..., None]).sum(
-            dim=(1, 2)
-        )  # forces
-        if compute_stress:
+        if E_pos is not None:
+            E_pos += ((rVec @ lattice.Rbasis) * minus_E_r_by_r[..., None]).sum(
+                dim=(1, 2)
+            )
+        if E_RRT is not None:
             E_RRT -= 0.5 * torch.einsum(
                 "rij, rija, rijb -> ab", minus_E_r_by_r, rVec, rVec
             )
@@ -184,12 +192,13 @@ class Coulomb:
         Eterm = (4 * np.pi / lattice.volume) * torch.exp((-0.5 * sigmaSq) * Gsq) / Gsq
         Erecip = 0.5 * (Eterm @ (SfZ.abs() ** 2))
         E += Erecip
-        E_pos -= (
-            (2 * np.pi)
-            * (((Eterm * SfZ).conj()[:, None] * Sf).imag * Z[None, :]).T
-            @ self.iG
-        )
-        if compute_stress:
+        if E_pos is not None:
+            E_pos -= (
+                (2 * np.pi)
+                * (((Eterm * SfZ).conj()[:, None] * Sf).imag * Z[None, :]).T
+                @ self.iG
+            )
+        if E_RRT is not None:
             E_RRT += 0.5 * torch.einsum(
                 "g, ga, gb -> ab",
                 (SfZ.abs() ** 2) * Eterm * (sigmaSq + 2.0 / Gsq),
@@ -197,8 +206,7 @@ class Coulomb:
                 G,
             )
             E_RRT -= Erecip * torch.eye(3, device=Z.device)
-
-        return E, E_pos, E_RRT
+        return E
 
 
 if __name__ == "__main__":

@@ -1,12 +1,14 @@
 from __future__ import annotations
 import qimpy as qp
 import torch
+from .quintic_spline import Interpolator
+from typing import Optional
 
 
 def update(self: qp.ions.Ions, system: qp.System) -> None:
     """Update ionic potentials, projectors and energy components.
-    The grids used for the potentials are derived from system,
-    and the energy components are stored within system.E.
+    The grids used for the potentials are derived from `system`,
+    and the energy components are stored within `system.E`.
     """
     grid = system.grid
     n_densities = system.electrons.n_densities
@@ -17,12 +19,9 @@ def update(self: qp.ions.Ions, system: qp.System) -> None:
     )
     if not self.n_ions:
         return  # no contributions below if no ions!
-    system.energy["Eewald"] = system.coulomb.ewald(self.positions, self.Z[self.types])[
-        0
-    ]
-    # Update ionic densities and potentials:
-    from .quintic_spline import Interpolator
+    system.energy["Eewald"] = system.coulomb.ewald(self.positions, self.Z[self.types])
 
+    # Update ionic densities and potentials:
     iG = grid.get_mesh("H").to(torch.double)  # half-space
     Gsq = ((iG @ grid.lattice.Gbasis.T) ** 2).sum(dim=-1)
     G = Gsq.sqrt()
@@ -61,6 +60,26 @@ def update(self: qp.ions.Ions, system: qp.System) -> None:
         self.beta = self._get_projectors(system.electrons.basis)
         self.beta_full = None
     self.beta_version += 1  # will auto-invalidate cached projections
+
+
+def update_grad(self: qp.ions.Ions, system: qp.System) -> None:
+    """Update ionic gradients in `self.forces`, and optionally in `self.stress`,
+    depending on `self.compute_stress`.
+    Assumes Hellman-Feynman theorem, i.e., electronic system must be converged.
+    The corresponding energy components are stored within `system.E`.
+    """
+    E_pos = torch.zeros_like(self.forces)  # fractional forces
+    E_RRT: Optional[torch.Tensor] = (
+        torch.zeros_like(self.stress) if self.compute_stress else None
+    )  # lattice derivative of energy (stress * vol)
+
+    # Pair potential contributions:
+    system.coulomb.ewald(self.positions, self.Z[self.types], E_pos, E_RRT)
+
+    # Store in Cartesian form:
+    self.forces = E_pos @ torch.linalg.inv(system.lattice.Rbasis)
+    if E_RRT is not None:
+        self.stress = E_RRT / system.lattice.volume
 
 
 def _collect_ps_matrix(self: qp.ions.Ions, n_spinor: int) -> None:
