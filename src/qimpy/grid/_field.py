@@ -135,11 +135,10 @@ class Field(qp.utils.Gradable[FieldType]):
         else:
             result = (data1 * data2).sum(dim=(-3, -2, -1))
         # Volume factor:
-        result *= (
-            self.grid.lattice.volume  # recip. space integration weight
-            if isinstance(self, (FieldG, FieldH))
-            else self.grid.dV
-        )  # real space integration weight
+        if isinstance(self, (FieldG, FieldH)):
+            result *= self.grid.lattice.volume  # reciprocal space integration weight
+        else:
+            result *= self.grid.dV  # real space integration weight
         # Collect over MPI if needed:
         if self.grid.comm is not None:
             result = result.contiguous()

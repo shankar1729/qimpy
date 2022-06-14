@@ -1,5 +1,6 @@
 from __future__ import annotations
 import qimpy as qp
+import numpy as np
 import torch
 from .quintic_spline import Interpolator
 from typing import Optional, Tuple
@@ -57,64 +58,94 @@ def update_grad(self: qp.ions.Ions, system: qp.System) -> None:
         self.stress = E_RRT / system.lattice.volume
 
 
-def update_local(self: qp.ions.Ions, system: qp.System) -> None:
+def update_local(ions: qp.ions.Ions, system: qp.System) -> None:
     """Update ionic densities and potentials."""
-    Ginterp, SF, Vloc_coeff, n_core_coeff, ion_gauss = get_local_coeff(self, system)
-    self.Vloc_tilde.data = (SF * Ginterp(Vloc_coeff)).sum(dim=0)
-    self.n_core_tilde.data[0] = (SF * Ginterp(n_core_coeff)).sum(dim=0)
-    self.rho_tilde.data = (-self.Z.view(-1, 1, 1, 1) * SF).sum(dim=0) * ion_gauss
-    self.Vloc_tilde += system.coulomb(self.rho_tilde, correct_G0_width=True)
+    Ginterp, iG, Vloc_coeff, n_core_coeff, ion_gauss = get_local_coeff(ions, system)
+    SF = get_structure_factor(ions, system.grid, iG)
+    ions.Vloc_tilde.data = (SF * Ginterp(Vloc_coeff)).sum(dim=0)
+    ions.n_core_tilde.data[0] = (SF * Ginterp(n_core_coeff)).sum(dim=0)
+    ions.rho_tilde.data = (-ions.Z.view(-1, 1, 1, 1) * SF).sum(dim=0) * ion_gauss
+    # Add long-range part of local potential from ionic charge:
+    ions.Vloc_tilde += system.coulomb(ions.rho_tilde, correct_G0_width=True)
 
 
 def update_local_grad(
-    self: qp.ions.Ions,
+    ions: qp.ions.Ions,
     system: qp.System,
     E_pos: torch.Tensor,
     E_RRT: Optional[torch.Tensor],
 ) -> None:
     """Accumulate local-pseudopotential force / stress contributions."""
     # Compute gradient with respect to ionic potentials / charges:
-    self.rho_tilde.requires_grad_(True)
-    self.Vloc_tilde.requires_grad_(True)
-    self.n_core_tilde.requires_grad_(True)
+    ions.rho_tilde.requires_grad_(True)
+    ions.Vloc_tilde.requires_grad_(True)
+    ions.n_core_tilde.requires_grad_(True)
     system.electrons.update_potential(system, True)
+    # Propagate long-range local-potential gradient to ionic charge gradient:
+    ions.rho_tilde.grad += system.coulomb(ions.Vloc_tilde.grad, correct_G0_width=True)
+    # Propagate to structure factor gradient:
+    Ginterp, iG, Vloc_coeff, n_core_coeff, ion_gauss = get_local_coeff(ions, system)
+    SF_grad = Ginterp(Vloc_coeff) * ions.Vloc_tilde.grad.data
+    SF_grad += Ginterp(n_core_coeff) * ions.n_core_tilde.grad.data[0]
+    SF_grad -= (ions.rho_tilde.grad.data * ion_gauss) * ions.Z.view(-1, 1, 1, 1)
+    # Propagate to ionic gradient:
+    accumulate_structure_factor_forces(ions, system.grid, iG, SF_grad, E_pos)
 
 
 def get_local_coeff(
-    self: qp.ions.Ions, system: qp.System
+    ions: qp.ions.Ions, system: qp.System
 ) -> Tuple[Interpolator, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Get interpolator, structure factor and radial coefficients,
+    """Get interpolator and radial coefficients,
     shared between `update_local` and `update_local_grad`.
     """
     # Prepare interpolator for grid:
     grid = system.grid
     iG = grid.get_mesh("H").to(torch.double)  # half-space
     Gsq = ((iG @ grid.lattice.Gbasis.T) ** 2).sum(dim=-1)
-    G = Gsq.sqrt()
-    Ginterp = Interpolator(G, qp.ions.RadialFunction.DG)
+    Ginterp = Interpolator(Gsq.sqrt(), qp.ions.RadialFunction.DG)
 
     # Collect structure factor and radial coefficients:
-    SF = torch.empty(
-        (self.n_types,) + G.shape, dtype=torch.cdouble, device=G.device
-    )  # structure factor by species
     Vloc_coeff = []
     n_core_coeff = []
     Gmax = grid.get_Gmax()
     ion_width = system.coulomb.ion_width
-    inv_volume = 1.0 / grid.lattice.volume
-    for i_type, ps in enumerate(self.pseudopotentials):
+    for i_type, ps in enumerate(ions.pseudopotentials):
         ps.update(Gmax, ion_width, system.electrons.comm)
-        SF[i_type] = (
-            self.translation_phase(iG, self.slices[i_type]).sum(dim=-1) * inv_volume
-        )
         Vloc_coeff.append(ps.Vloc.f_tilde_coeff)
         n_core_coeff.append(ps.n_core.f_tilde_coeff)
     ion_gauss = torch.exp((-0.5 * (ion_width ** 2)) * Gsq)
-    return Ginterp, SF, torch.hstack(Vloc_coeff), torch.hstack(n_core_coeff), ion_gauss
+    return Ginterp, iG, torch.hstack(Vloc_coeff), torch.hstack(n_core_coeff), ion_gauss
+
+
+def get_structure_factor(
+    ions: qp.ions.Ions, grid: qp.grid.Grid, iG: torch.Tensor
+) -> torch.Tensor:
+    """Compute structure factor."""
+    return torch.stack(
+        [
+            ions.translation_phase(iG, slice_i).sum(dim=-1) / grid.lattice.volume
+            for slice_i in ions.slices
+        ]
+    )
+
+
+def accumulate_structure_factor_forces(
+    ions: qp.ions.Ions,
+    grid: qp.grid.Grid,
+    iG: torch.Tensor,
+    SF_grad: torch.Tensor,
+    E_pos: torch.Tensor,
+) -> None:
+    """Propagate structure factor gradient to forces."""
+    d_by_dpos = iG.permute(3, 0, 1, 2)[None] * (-2j * np.pi / grid.lattice.volume)
+    for slice_i, SF_grad_i in zip(ions.slices, SF_grad):
+        phase_bcast = ions.translation_phase(iG, slice_i).permute(3, 0, 1, 2)[:, None]
+        dphase_by_dpos = qp.grid.FieldH(grid, data=d_by_dpos * phase_bcast)
+        E_pos[slice_i] -= qp.grid.FieldH(grid, data=SF_grad_i) ^ dphase_by_dpos
 
 
 def update_nonlocal_grad(
-    self: qp.ions.Ions,
+    ions: qp.ions.Ions,
     system: qp.System,
     E_pos: torch.Tensor,
     E_RRT: Optional[torch.Tensor],
