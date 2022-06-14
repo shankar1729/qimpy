@@ -79,4 +79,4 @@ def fmt(tensor: torch.Tensor, **kwargs) -> str:
     kwargs.setdefault("precision", 8)
     kwargs.setdefault("suppress_small", True)
     kwargs.setdefault("separator", ", ")
-    return np.array2string(tensor.to(qp.rc.cpu).numpy(), **kwargs)
+    return np.array2string(tensor.detach().to(qp.rc.cpu).numpy(), **kwargs)

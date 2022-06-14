@@ -2,7 +2,6 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Optional
 
 
 class Coulomb:
@@ -130,10 +129,12 @@ class Coulomb:
         self,
         positions: torch.Tensor,
         Z: torch.Tensor,
-        E_pos: Optional[torch.Tensor] = None,
-        E_RRT: Optional[torch.Tensor] = None,
     ) -> float:
-        """Compute Ewald energy, and optionally accumulate forces and stress.
+        """Compute Ewald energy, and optionally accumulate gradients.
+        Each gradient contribution is accumulated to a `grad` attribute,
+        only if the corresponding `requires_grad` is enabled.
+        Force contributions are collected in `positions.grad`.
+        Stress contributions are collected in `self.grid.lattice.grad`.
 
         Parameters
         ----------
@@ -141,10 +142,6 @@ class Coulomb:
             Positions (fractional coordinates) of point charges
         Z
             Charges of each point charge
-        E_pos
-            If specified, accumulate fractional forces.
-        E_RRT
-            If specified, accumulate lattice gradient (stress * vol).
         """
         sigma = self.sigma
         sigmaSq = sigma ** 2
@@ -157,8 +154,8 @@ class Coulomb:
         E_Gzero = 0.5 * ((4 * np.pi) * (-0.5 * sigmaSq * (Ztot ** 2)) / lattice.volume)
         E_self = 0.5 * (-ZsqTot * eta * (2.0 / np.sqrt(np.pi)))
         E = E_Gzero + E_self
-        if E_RRT is not None:
-            E_RRT -= E_Gzero * torch.eye(3, device=Z.device)
+        if lattice.requires_grad:
+            lattice.grad -= E_Gzero * torch.eye(3, device=Z.device)
 
         # Real-space sum:
         rCut = 1e-6  # cutoff to detect self-term
@@ -175,12 +172,12 @@ class Coulomb:
             r ** 2
         )  # -(dE/dr)/r
         E += 0.5 * Eterm.sum()
-        if E_pos is not None:
-            E_pos += ((rVec @ lattice.Rbasis) * minus_E_r_by_r[..., None]).sum(
+        if positions.requires_grad:
+            positions.grad -= ((rVec @ lattice.Rbasis) * minus_E_r_by_r[..., None]).sum(
                 dim=(1, 2)
             )
-        if E_RRT is not None:
-            E_RRT -= 0.5 * torch.einsum(
+        if lattice.requires_grad:
+            lattice.grad -= 0.5 * torch.einsum(
                 "rij, rija, rijb -> ab", minus_E_r_by_r, rVec, rVec
             )
 
@@ -192,20 +189,20 @@ class Coulomb:
         Eterm = (4 * np.pi / lattice.volume) * torch.exp((-0.5 * sigmaSq) * Gsq) / Gsq
         Erecip = 0.5 * (Eterm @ (SfZ.abs() ** 2))
         E += Erecip
-        if E_pos is not None:
-            E_pos -= (
+        if positions.requires_grad:
+            positions.grad += (
                 (2 * np.pi)
                 * (((Eterm * SfZ).conj()[:, None] * Sf).imag * Z[None, :]).T
                 @ self.iG
             )
-        if E_RRT is not None:
-            E_RRT += 0.5 * torch.einsum(
+        if lattice.requires_grad:
+            lattice.grad += 0.5 * torch.einsum(
                 "g, ga, gb -> ab",
                 (SfZ.abs() ** 2) * Eterm * (sigmaSq + 2.0 / Gsq),
                 G,
                 G,
             )
-            E_RRT -= Erecip * torch.eye(3, device=Z.device)
+            lattice.grad -= Erecip * torch.eye(3, device=Z.device)
         return E
 
 

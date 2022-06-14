@@ -15,12 +15,16 @@ class Gradable(ABC, Generic[GradientType]):
         """Return whether gradient with respect to this object is needed."""
         return self._requires_grad
 
-    def requires_grad_(self, requires_grad: bool = True) -> None:
-        """Set whether gradient with respect to this object is needed."""
+    def requires_grad_(self, requires_grad: bool = True, clear: bool = False) -> None:
+        """Set whether gradient with respect to this object is needed.
+        If `clear`, also clear previous gradient / set to zero as needed.
+        """
         self._requires_grad = requires_grad
-        self.__dict__.pop("grad", None)  # remove previous gradient (if any)
-        if requires_grad:
-            self.grad = self.zeros_like()  # prepare new zero'd gradient
+        if clear:
+            if requires_grad:
+                self.grad = self.zeros_like()  # prepare new zero'd gradient
+            else:
+                self.__dict__.pop("grad", None)  # remove previous gradient (if any)
 
     def __init__(self) -> None:
         self._requires_grad = False

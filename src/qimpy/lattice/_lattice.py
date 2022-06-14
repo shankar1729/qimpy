@@ -8,10 +8,22 @@ from typing import Optional, Union, Sequence
 class Lattice(qp.TreeNode):
     """Real and reciprocal space lattice vectors"""
 
-    __slots__ = ("Rbasis", "Gbasis", "volume")
+    __slots__ = (
+        "Rbasis",
+        "Gbasis",
+        "volume",
+        "compute_stress",
+        "grad",
+        "_requires_grad",
+    )
     Rbasis: torch.Tensor  #: Real-space lattice vectors (in columns)
     Gbasis: torch.Tensor  #: Reciprocal-space lattice vectors (in columns)
     volume: float  #: Unit cell volume
+
+    # Gradient / stress:
+    compute_stress: bool  #: Whether to compute and report stress
+    grad: torch.Tensor  #: Lattice gradient of energy := dE/dRbasis @ Rbasis.T
+    _requires_grad: bool  #: Internal flag to control collection of lattice gradients
 
     def __init__(
         self,
@@ -29,6 +41,7 @@ class Lattice(qp.TreeNode):
         vector2: Optional[Sequence[float]] = None,
         vector3: Optional[Sequence[float]] = None,
         scale: Optional[Union[float, Sequence[float]]] = None,
+        compute_stress: bool = False,
     ) -> None:
         """Initialize from lattice vectors or lengths and angles.
         Either specify a lattice `system` and optional `modification`,
@@ -81,6 +94,11 @@ class Lattice(qp.TreeNode):
             :yaml:`Scale factor for lattice vectors.` Either a single number
             that uniformly scales all lattice vectors or separate factor
             :math:`[s_1, s_2, s_3]` for each lattice vector. boo
+        compute_stress
+            :yaml:`Whether to compute and report stress.`
+            Enable to report stress regardless of lattice optimization.
+            Note that when lattice optimization is enabled, this input
+            is overridden and stresses are always computed.
         """
         super().__init__()
         qp.log.info("\n--- Initializing Lattice ---")
@@ -107,20 +125,14 @@ class Lattice(qp.TreeNode):
             scale_vector = torch.tensor(scale).flatten()
             assert len(scale_vector) in (1, 3)
             self.Rbasis = scale_vector[None, :] * self.Rbasis
-        qp.log.info(
-            f"Rbasis (real-space basis in columns):\n{qp.utils.fmt(self.Rbasis)}"
-        )
+
+        # Compute dependent quantities:
         self.Rbasis = self.Rbasis.to(qp.rc.device)
-
-        # Compute reciprocal lattice vectors:
         self.Gbasis = (2 * np.pi) * torch.linalg.inv(self.Rbasis.T)
-        qp.log.info(
-            "Gbasis (reciprocal-space basis in columns):\n{qp.utils.fmt(self.Gbasis)}"
-        )
-
-        # Compute unit cell volume:
         self.volume = abs(torch.linalg.det(self.Rbasis).item())
-        qp.log.info(f"Unit cell volume: {self.volume}")
+        self.compute_stress = compute_stress
+        self.requires_grad_(False, clear=True)  # initialize gradient
+        self.report(report_grad=False)
 
     def update(self, Rbasis: torch.Tensor) -> None:
         """Update lattice vectors and dependent quantities"""
@@ -137,3 +149,36 @@ class Lattice(qp.TreeNode):
         self.Rbasis = Rbasis
         self.Gbasis = Gbasis
         self.volume = volume
+
+    def report(self, report_grad: bool) -> None:
+        """Report lattice vectors, and optionally stress if `report_grad`."""
+        qp.log.info(
+            f"Rbasis (real-space basis in columns):\n{qp.utils.fmt(self.Rbasis)}\n"
+            f"Gbasis (reciprocal-space basis in columns):\n{qp.utils.fmt(self.Gbasis)}"
+            f"\nUnit cell volume: {self.volume}"
+        )
+        if report_grad and self.compute_stress:
+            qp.log.info(f"Stress:\n{qp.utils.fmt(self.stress)}")
+
+    @property
+    def stress(self) -> torch.Tensor:
+        """Cartesian stress tensor [in Eh/a0^3] (3 x 3).
+        Converted from `grad`, which should already have been calculated.
+        """
+        return self.grad / self.volume
+
+    @property
+    def requires_grad(self) -> bool:
+        """Return whether gradient with respect to this object is needed."""
+        return self._requires_grad
+
+    def requires_grad_(self, requires_grad: bool = True, clear: bool = False) -> None:
+        """Set whether gradient with respect to this object is needed..
+        If `clear`, also clear previous gradient / set to zero as needed.
+        """
+        self._requires_grad = requires_grad
+        if clear:
+            if requires_grad:
+                self.grad = torch.zeros_like(self.Rbasis)
+            else:
+                self.grad = torch.full_like(self.Rbasis, np.nan)

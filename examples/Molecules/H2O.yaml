@@ -1,9 +1,9 @@
 lattice:
   system: cubic
   a: 20.  # bohrs
+  compute-stress: yes
 
 ions:
-  compute-stress: yes
   pseudopotentials:
     - ../../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
   coordinates:

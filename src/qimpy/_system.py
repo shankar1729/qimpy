@@ -1,6 +1,7 @@
 from __future__ import annotations
 import qimpy as qp
 import numpy as np
+import torch
 from typing import Union, Optional, Dict, List, Any, Sequence
 
 
@@ -138,13 +139,30 @@ class System(qp.TreeNode):
 
         qp.log.info(f"\nInitialization completed at t[s]: {qp.rc.clock():.2f}\n")
 
+    def geometry_grad(self) -> None:
+        """Update geometric gradients i.e. forces and optionally, stresses."""
+        # Initialize gradients:
+        self.ions.positions.requires_grad_(True)
+        self.ions.positions.grad = torch.zeros_like(self.ions.positions)
+        if self.lattice.compute_stress:
+            self.lattice.requires_grad_(True, clear=True)
+
+        # Compute gradients:
+        self.ions.accumulate_geometry_grad(self)  # includes ionic and electronic pieces
+
+        # Disable gradient computation flags:
+        self.ions.positions.requires_grad_(False)
+        self.lattice.requires_grad_(False)
+
     def run(self) -> None:
         """Run any actions specified in the input."""
         self.electrons.run(self)
         qp.log.info(f"\nEnergy components:\n{repr(self.energy)}")
         qp.log.info("")
-        self.ions.update_grad(self)  # update forces / stress
-        self.ions.report(report_grad=True)  # report positions with forces / stress
+        self.geometry_grad()  # update forces / stress
+        self.ions.report(report_grad=True, lattice=self.lattice)  # positions, forces
+        if self.lattice.compute_stress:
+            self.lattice.report(report_grad=True)  # lattice, stress
         if self.checkpoint_out:
             self.save_checkpoint(
                 qp.utils.CpPath(

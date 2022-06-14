@@ -359,24 +359,20 @@ class Electrons(qp.TreeNode):
     def update_potential(self, system: qp.System, requires_grad: bool = True) -> None:
         """Update density-dependent energy terms and electron potential.
         If `requires_grad` is False, only compute the energy (skip the potentials)."""
-        self.n_tilde.requires_grad_(requires_grad)
-        self.tau_tilde.requires_grad_(requires_grad)
+        self.n_tilde.requires_grad_(requires_grad, clear=True)
+        self.tau_tilde.requires_grad_(requires_grad, clear=True)
         # Exchange-correlation contributions:
         n_xc_tilde = self.n_tilde + system.ions.n_core_tilde
-        n_xc_tilde.requires_grad_(requires_grad)
+        n_xc_tilde.requires_grad_(requires_grad, clear=True)
         system.energy["Exc"] = self.xc(n_xc_tilde, self.tau_tilde)
         if requires_grad:
             self.n_tilde.grad += n_xc_tilde.grad
-            if system.ions.n_core_tilde.requires_grad:
-                system.ions.n_core_tilde.grad += n_xc_tilde.grad
         # Hartree and local contributions:
         rho_tilde = self.n_tilde[0]  # total charge density
         VH_tilde = system.coulomb(rho_tilde)  # Hartree potential
         system.energy["Ehartree"] = 0.5 * (rho_tilde ^ VH_tilde).item()
         system.energy["Eloc"] = (rho_tilde ^ system.ions.Vloc_tilde).item()
         if requires_grad:
-            if system.ions.Vloc_tilde.requires_grad:
-                system.ions.Vloc_tilde.grad += rho_tilde
             self.n_tilde.grad[0] += system.ions.Vloc_tilde + VH_tilde
             self.n_tilde.grad.symmetrize()
 
@@ -402,6 +398,33 @@ class Electrons(qp.TreeNode):
             ).real,
             self.kpoints.comm,
         )
+
+    def accumulate_geometry_grad(self, system: qp.System) -> None:
+        """Accumulate geometry gradient contributions of electronic energy.
+        Each contribution is accumulated to a `grad` attribute,
+        only if the corresponding `requires_grad` is enabled.
+        Force contributions are accumulated to `system.ions.positions.grad`.
+        Stress contributions are accumulated to `system.lattice.grad`.
+        Gradients with respect to ionic scalar fields are accumulated to
+        `system.ions.Vloc_tilde.grad` and `system.ions.n_core_tilde.grad`.
+        """
+        # Exchange-correlation:
+        n_xc_tilde = self.n_tilde + system.ions.n_core_tilde
+        n_xc_tilde.requires_grad_(True, clear=True)
+        self.xc(n_xc_tilde, self.tau_tilde)
+        if system.ions.n_core_tilde.requires_grad:
+            system.ions.n_core_tilde.grad += n_xc_tilde.grad
+
+        # Coulomb / Local pseudootential:
+        rho_tilde = self.n_tilde[0]  # total charge density
+        if system.ions.Vloc_tilde.requires_grad:
+            system.ions.Vloc_tilde.grad += rho_tilde
+
+        # Kinetic:
+        # TODO
+
+        # Nonlocal:
+        # TODO
 
     def run(self, system: qp.System) -> None:
         """Run any actions specified in the input."""

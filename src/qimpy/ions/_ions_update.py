@@ -3,7 +3,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from .quintic_spline import Interpolator
-from typing import Optional, Tuple
+from typing import Tuple
 
 
 def update(self: qp.ions.Ions, system: qp.System) -> None:
@@ -36,26 +36,25 @@ def update(self: qp.ions.Ions, system: qp.System) -> None:
     self.beta_version += 1  # will auto-invalidate cached projections
 
 
-def update_grad(self: qp.ions.Ions, system: qp.System) -> None:
-    """Update ionic gradients in `self.forces`, and optionally in `self.stress`,
-    depending on `self.compute_stress`.
+def accumulate_geometry_grad(self: qp.ions.Ions, system: qp.System) -> None:
+    """Accumulate geometry gradient contributions of total energy.
+    Each contribution is accumulated to a `grad` attribute,
+    only if the corresponding `requires_grad` is enabled.
+    Force contributions are collected in `self.positions.grad`.
+    Stress contributions are collected in `system.lattice.grad`.
     Assumes Hellman-Feynman theorem, i.e., electronic system must be converged.
-    The corresponding energy components are stored within `system.E`.
+    Note that this invokes `system.electrons.accumulate_geometry_grad`
+    as a dependency and therefore includes electronic force / stress contributions.
     """
-    E_pos = torch.zeros_like(self.forces)  # fractional forces
-    E_RRT: Optional[torch.Tensor] = (
-        torch.zeros_like(self.stress) if self.compute_stress else None
-    )  # lattice derivative of energy (stress * vol)
+    # Electronic contributions (direct and through ion-dependent scalar fields):
+    self.rho_tilde.requires_grad_(True, clear=True)
+    self.Vloc_tilde.requires_grad_(True, clear=True)
+    self.n_core_tilde.requires_grad_(True, clear=True)
+    system.electrons.accumulate_geometry_grad(system)
 
-    # Collect contributions:
-    system.coulomb.ewald(self.positions, self.Z[self.types], E_pos, E_RRT)
-    update_local_grad(self, system, E_pos, E_RRT)
-    update_nonlocal_grad(self, system, E_pos, E_RRT)
-
-    # Store in Cartesian form:
-    self.forces = E_pos @ torch.linalg.inv(system.lattice.Rbasis)
-    if E_RRT is not None:
-        self.stress = E_RRT / system.lattice.volume
+    # Ionic contributions:
+    update_local_grad(self, system)  # propagate ionic scalar fields
+    system.coulomb.ewald(self.positions, self.Z[self.types])
 
 
 def update_local(ions: qp.ions.Ions, system: qp.System) -> None:
@@ -69,18 +68,8 @@ def update_local(ions: qp.ions.Ions, system: qp.System) -> None:
     ions.Vloc_tilde += system.coulomb(ions.rho_tilde, correct_G0_width=True)
 
 
-def update_local_grad(
-    ions: qp.ions.Ions,
-    system: qp.System,
-    E_pos: torch.Tensor,
-    E_RRT: Optional[torch.Tensor],
-) -> None:
+def update_local_grad(ions: qp.ions.Ions, system: qp.System) -> None:
     """Accumulate local-pseudopotential force / stress contributions."""
-    # Compute gradient with respect to ionic potentials / charges:
-    ions.rho_tilde.requires_grad_(True)
-    ions.Vloc_tilde.requires_grad_(True)
-    ions.n_core_tilde.requires_grad_(True)
-    system.electrons.update_potential(system, True)
     # Propagate long-range local-potential gradient to ionic charge gradient:
     ions.rho_tilde.grad += system.coulomb(ions.Vloc_tilde.grad, correct_G0_width=True)
     # Propagate to structure factor gradient:
@@ -89,7 +78,7 @@ def update_local_grad(
     SF_grad += Ginterp(n_core_coeff) * ions.n_core_tilde.grad.data[0]
     SF_grad -= (ions.rho_tilde.grad.data * ion_gauss) * ions.Z.view(-1, 1, 1, 1)
     # Propagate to ionic gradient:
-    accumulate_structure_factor_forces(ions, system.grid, iG, SF_grad, E_pos)
+    accumulate_structure_factor_forces(ions, system.grid, iG, SF_grad)
 
 
 def get_local_coeff(
@@ -130,27 +119,15 @@ def get_structure_factor(
 
 
 def accumulate_structure_factor_forces(
-    ions: qp.ions.Ions,
-    grid: qp.grid.Grid,
-    iG: torch.Tensor,
-    SF_grad: torch.Tensor,
-    E_pos: torch.Tensor,
+    ions: qp.ions.Ions, grid: qp.grid.Grid, iG: torch.Tensor, SF_grad: torch.Tensor
 ) -> None:
     """Propagate structure factor gradient to forces."""
+    pos_grad = ions.positions.grad
     d_by_dpos = iG.permute(3, 0, 1, 2)[None] * (-2j * np.pi / grid.lattice.volume)
     for slice_i, SF_grad_i in zip(ions.slices, SF_grad):
         phase_bcast = ions.translation_phase(iG, slice_i).permute(3, 0, 1, 2)[:, None]
         dphase_by_dpos = qp.grid.FieldH(grid, data=d_by_dpos * phase_bcast)
-        E_pos[slice_i] -= qp.grid.FieldH(grid, data=SF_grad_i) ^ dphase_by_dpos
-
-
-def update_nonlocal_grad(
-    ions: qp.ions.Ions,
-    system: qp.System,
-    E_pos: torch.Tensor,
-    E_RRT: Optional[torch.Tensor],
-) -> None:
-    """Accumulate local-pseudopotential force / stress contributions."""
+        pos_grad[slice_i] += qp.grid.FieldH(grid, data=SF_grad_i) ^ dphase_by_dpos
 
 
 def _collect_ps_matrix(self: qp.ions.Ions, n_spinor: int) -> None:

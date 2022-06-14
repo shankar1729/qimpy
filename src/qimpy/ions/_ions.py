@@ -6,7 +6,7 @@ import pathlib
 import re
 from ._ions_projectors import _get_projectors
 from ._ions_atomic import get_atomic_orbitals, get_atomic_density
-from ._ions_update import update, update_grad, _collect_ps_matrix
+from ._ions_update import update, accumulate_geometry_grad, _collect_ps_matrix
 from typing import Optional, Union, List
 
 
@@ -20,11 +20,8 @@ class Ions(qp.TreeNode):
         "n_ions_type",
         "slices",
         "pseudopotentials",
-        "compute_stress",
         "positions",
         "velocities",
-        "forces",
-        "stress",
         "types",
         "M_initial",
         "Z",
@@ -43,11 +40,8 @@ class Ions(qp.TreeNode):
     symbols: List[str]  #: symbol for each ion type
     slices: List[slice]  #: slice to get each ion type
     pseudopotentials: List[qp.ions.Pseudopotential]  #: pseudopotential for each type
-    compute_stress: bool  #: whether to compute and report stress
     positions: torch.Tensor  #: fractional positions of each ion (n_ions x 3)
     velocities: torch.Tensor  #: Cartesian velocities of each ion (n_ions x 3)
-    forces: torch.Tensor  #: Cartesian forces [in Eh/a0] of each ion (n_ions x 3)
-    stress: torch.Tensor  #: Cartesian stress tensor [in Eh/a0^3] (3 x 3)
     types: torch.Tensor  #: type of each ion (n_ions, int)
     M_initial: Optional[torch.Tensor]  #: initial magnetic moment for each ion
     Z: torch.Tensor  #: charge of each ion type (n_types, float)
@@ -64,7 +58,7 @@ class Ions(qp.TreeNode):
     get_atomic_orbitals = get_atomic_orbitals
     get_atomic_density = get_atomic_density
     update = update
-    update_grad = update_grad
+    accumulate_geometry_grad = accumulate_geometry_grad
     _collect_ps_matrix = _collect_ps_matrix
 
     def __init__(
@@ -74,7 +68,6 @@ class Ions(qp.TreeNode):
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         coordinates: Optional[List] = None,
         pseudopotentials: Optional[Union[str, List[str]]] = None,
-        compute_stress: bool = False,
     ) -> None:
         """Initialize geometry and pseudopotentials.
 
@@ -100,11 +93,6 @@ class Ions(qp.TreeNode):
             symbol of the element. The list of specified file names and
             templates is processed in order, and the first match for
             each element takes precedence.
-        compute_stress
-            :yaml:`Whether to compute and report stress.`
-            Enable to report stress regardless of lattice optimization.
-            Note that when lattice optimization is enabled, this input
-            is overridden and stresses are always computed.
         """
         super().__init__()
         qp.log.info("\n--- Initializing Ions ---")
@@ -155,11 +143,9 @@ class Ions(qp.TreeNode):
             raise ValueError("coordinates must group ions of same type together")
 
         # Convert to tensors before storing in class object:
-        self.compute_stress = compute_stress
         self.positions = torch.tensor(positions, device=qp.rc.device)
         self.velocities = torch.zeros_like(self.positions)
-        self.forces = torch.zeros_like(self.positions)
-        self.stress = torch.zeros((3, 3), device=qp.rc.device)
+        self.positions.grad = torch.full_like(self.positions, np.nan)
         self.types = torch.tensor(types, device=qp.rc.device, dtype=torch.long)
         # --- Fill in missing magnetizations (if any specified):
         M_lengths = set(
@@ -227,8 +213,10 @@ class Ions(qp.TreeNode):
         n_replicas = 1  # this will eventually change for NEB / phonon DFPT
         process_grid.provide_n_tasks("r", n_replicas)
 
-    def report(self, report_grad: bool) -> None:
-        """Report ionic positions / attributes, and optionally forces / stresses."""
+    def report(
+        self, report_grad: bool, lattice: Optional[qp.lattice.Lattice] = None
+    ) -> None:
+        """Report ionic positions / attributes, and optionally forces if `report_grad`."""
         qp.log.info(f"{self.n_ions} total ions of {self.n_types} types; positions:")
         # Fetch to CPU for reporting:
         positions = self.positions.to(qp.rc.cpu).numpy()
@@ -256,16 +244,14 @@ class Ions(qp.TreeNode):
 
         # Report forces / stresses if requested:
         if report_grad:
-            forces = self.forces.to(qp.rc.cpu).numpy()
+            assert lattice is not None
+            forces = self.get_forces(lattice).detach().to(qp.rc.cpu).numpy()
             qp.log.info("\nforces:")
-            for i_ion, (fx, fy, fz) in enumerate(forces):
+            for type_i, (fx, fy, fz) in zip(types, forces):
                 qp.log.info(
-                    f"- [{self.symbols[types[i_ion]]},"
-                    f" {fx:11.8f}, {fy:11.8f}, {fz:11.8f}]"
+                    f"- [{self.symbols[type_i]}, {fx:11.8f}, {fy:11.8f}, {fz:11.8f}]"
                 )
-
-            if self.compute_stress:
-                qp.log.info(f"\nstress:\n{qp.utils.fmt(self.stress)}")
+        qp.log.info("")
 
     def translation_phase(
         self, iG: torch.Tensor, atom_slice: slice = slice(None)
@@ -299,3 +285,10 @@ class Ions(qp.TreeNode):
             (ps.n_atomic_orbitals(n_spinor) * self.n_ions_type[i_ps])
             for i_ps, ps in enumerate(self.pseudopotentials)
         )
+
+    def get_forces(self, lattice: qp.lattice.Lattice) -> torch.Tensor:
+        """Cartesian forces [in Eh/a0] of each ion (n_ions x 3).
+        This converts from the fractional energy gradient in `positions.grad`,
+        which should have already been calculated.
+        """
+        return -self.positions.grad @ torch.linalg.inv(lattice.Rbasis)
