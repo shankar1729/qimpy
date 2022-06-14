@@ -11,7 +11,7 @@ def _getitem(self: qp.electrons.Wavefunction, index: Any) -> qp.electrons.Wavefu
     )
     if self._proj_is_valid():
         assert self._proj is not None
-        result._proj = self._proj[index]
+        result._proj = self._proj[_proj_index(index)]
         result._proj_version = self._proj_version
     return result
 
@@ -24,9 +24,17 @@ def _setitem(
     if self._proj_is_valid() and other._proj_is_valid():
         assert self._proj is not None
         assert other._proj is not None
-        self._proj[index] = other._proj
+        self._proj[_proj_index(index)] = other._proj
     else:
         self._proj_invalidate()
+
+
+def _proj_index(index: Any) -> Any:
+    """Convert wavefunction index to projector index, adding extra dim when needed."""
+    if isinstance(index, tuple) and len(index) > 2:
+        return index[:2] + (slice(None),) + index[2:]  # insert projector index at 2
+    else:
+        return index  # only slicing one or two dimensions (before projector index)
 
 
 def _cat(

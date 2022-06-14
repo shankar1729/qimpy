@@ -10,7 +10,7 @@ from ._wavefunction_dot import _norm, _dot, _dot_O, _overlap, _matmul, _orthonor
 from typing import Callable, Optional, Union
 
 
-class Wavefunction:
+class Wavefunction(qp.utils.Gradable["Wavefunction"]):
     """Electronic wavefunctions including coefficients and projections"""
 
     __slots__ = ("basis", "coeff", "band_division", "_proj", "_proj_version")
@@ -20,7 +20,7 @@ class Wavefunction:
     coeff: torch.Tensor
 
     #: Projections of each band on all pseudopotential projectors
-    #: (n_spins x nk x n_bands x n_spinor x n_projectors)
+    #: (n_spins x nk x (n_spinor*n_projectors) x n_bands)
     #: Access this using property `proj` instead, which takes care of
     #: automatically calculating and invalidating this when necessary.
     _proj: Optional[torch.Tensor]

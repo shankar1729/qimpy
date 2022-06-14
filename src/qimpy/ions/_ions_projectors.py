@@ -50,12 +50,10 @@ def _get_projectors(
         # Current range:
         n_proj_cur = pqn.n_tot * self.n_ions_type[i_ps]
         i_proj_stop = i_proj_start + n_proj_cur
-        # Compute atomic template:
+        # Compute atomic template (indices: k,1,i_proj,G):
         proj_atom = (Ginterp(f_t_coeff)[pqn.i_rf] * Ylm_tilde[pqn.i_lm]).transpose(
             0, 1
-        )[
-            :, None
-        ]  # k,1,i_proj,G
+        )[:, None]
         # Repeat by translation to each atom:
         trans_cur = translations[:, self.slices[i_ps], None]  # k,atom,1,G
         proj[0, :, i_proj_start:i_proj_stop, 0] = (proj_atom * trans_cur).flatten(1, 2)
@@ -65,3 +63,56 @@ def _get_projectors(
     pad_index = basis.pad_index if full_basis else basis.pad_index_mine
     proj[pad_index] = 0.0
     return qp.electrons.Wavefunction(basis, coeff=proj)
+
+
+def _projectors_grad(
+    self: qp.ions.Ions, proj: qp.electrons.Wavefunction, is_psi: bool = False
+) -> None:
+    """Propagate `proj.grad` to forces and stresses.
+    Each contribution is accumulated to a `grad` attribute,
+    only if the corresponding `requires_grad` is enabled.
+    Force contributions are collected in `self.positions.grad`.
+    Stress contributions are collected in `basis.lattice.grad`.
+    """
+    basis = proj.basis
+
+    # Projector forces:
+    if self.positions.requires_grad:
+        # Combine all terms except for the iG from d/dpos of structure factor:
+        # (sum over spin and spinors here, as projectors don't depend on them)
+        pp_grad = (proj.coeff * proj.grad.coeff).sum(dim=(1, 3), keepdim=True)
+        d_by_dpos = qp.electrons.Wavefunction(
+            basis,
+            coeff=(
+                (basis.iG[:, basis.mine] + basis.k[:, None])
+                * (-2j * np.pi / basis.lattice.volume)
+            ).transpose(1, 2)[:, None, :, None],
+        )  # shape like a 3-band wavefunction
+
+        # Collect forces by species:
+        pos_grad = torch.zeros_like(self.positions)
+        i_proj_start = 0
+        for ps, n_ions_i, slice_i in zip(
+            self.pseudopotentials, self.n_ions_type, self.slices
+        ):
+            # Get projector range for this species:
+            pqn = ps.pqn_psi if is_psi else ps.pqn_beta
+            n_proj_cur = pqn.n_tot * n_ions_i
+            i_proj_stop = i_proj_start + n_proj_cur
+            # Reduce pp_grad over projectors on each atom:
+            pp_grad_cur = qp.electrons.Wavefunction(
+                basis,
+                coeff=pp_grad[:, :, i_proj_start:i_proj_stop]
+                .view(pp_grad.shape[:2] + (n_ions_i, pqn.n_tot) + pp_grad.shape[3:])
+                .sum(dim=3),
+            )
+            # Convert to forces:
+            pos_grad[slice_i] += 2.0 * (pp_grad_cur ^ d_by_dpos).wait().real.sum(
+                dim=(0, 1)
+            )
+            # Prepare for next species:
+            i_proj_start = i_proj_stop
+        basis.kpoints.comm.Allreduce(
+            qp.MPI.IN_PLACE, qp.utils.BufferView(pos_grad), qp.MPI.SUM
+        )
+        self.positions.grad += pos_grad

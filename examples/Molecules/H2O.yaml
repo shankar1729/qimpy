@@ -19,4 +19,4 @@ electrons:
   scf:
     mix-density: no  # mix potential instead
 
-checkpoint: null  # disable reading checkpoint
+#checkpoint: null  # disable reading checkpoint

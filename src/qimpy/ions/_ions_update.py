@@ -46,15 +46,23 @@ def accumulate_geometry_grad(self: qp.ions.Ions, system: qp.System) -> None:
     Note that this invokes `system.electrons.accumulate_geometry_grad`
     as a dependency and therefore includes electronic force / stress contributions.
     """
-    # Electronic contributions (direct and through ion-dependent scalar fields):
+    # Electronic contributions (direct and through ion-dependent scalar fields, beta):
+    self.beta.requires_grad_(True)  # don't zero-initialize to save memory
     self.rho_tilde.requires_grad_(True, clear=True)
     self.Vloc_tilde.requires_grad_(True, clear=True)
     self.n_core_tilde.requires_grad_(True, clear=True)
     system.electrons.accumulate_geometry_grad(system)
 
     # Ionic contributions:
-    update_local_grad(self, system)  # propagate ionic scalar fields
+    self._projectors_grad(self.beta)
+    update_local_grad(self, system)
     system.coulomb.ewald(self.positions, self.Z[self.types])
+
+    # Clean up intermediate gradients:
+    self.beta.requires_grad_(False, clear=True)
+    self.rho_tilde.requires_grad_(False, clear=True)
+    self.Vloc_tilde.requires_grad_(False, clear=True)
+    self.n_core_tilde.requires_grad_(False, clear=True)
 
 
 def update_local(ions: qp.ions.Ions, system: qp.System) -> None:
