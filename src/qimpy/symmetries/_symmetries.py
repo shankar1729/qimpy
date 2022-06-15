@@ -3,7 +3,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from ._lattice import _get_lattice_point_group, _symmetrize_lattice
-from ._ions import _get_space_group, _symmetrize_positions
+from ._ions import _get_space_group, _symmetrize_positions, _symmetrize_forces
 from ._grid import _check_grid_shape, _get_grid_shape
 from typing import List, Dict
 
@@ -36,6 +36,7 @@ class Symmetries(qp.TreeNode):
 
     symmetrize_lattice = _symmetrize_lattice
     symmetrize_positions = _symmetrize_positions
+    symmetrize_forces = _symmetrize_forces
     check_grid_shape = _check_grid_shape
     get_grid_shape = _get_grid_shape
 

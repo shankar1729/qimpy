@@ -121,3 +121,13 @@ def _symmetrize_positions(
     # Transform corrections back and average:
     dpos = dpos_rot @ torch.linalg.inv(self.rot.transpose(-2, -1))
     return positions + dpos.mean(dim=0)
+
+
+def _symmetrize_forces(
+    self: qp.symmetries.Symmetries, pos_grad: torch.Tensor
+) -> torch.Tensor:
+    """Symmetrize forces `pos_grad` (n_ions x 3) in lattice coordinates.
+    Note that these are contravariant lattice coordinates corresponding
+    to dE/dpos, e.g., as computed in `qimpy.ions.Ions.positions.grad`.
+    """
+    return (pos_grad[self.ion_map, :] @ self.rot).mean(dim=0)

@@ -80,12 +80,12 @@ def _projectors_grad(
     if self.positions.requires_grad:
         # Combine all terms except for the iG from d/dpos of translation phase:
         # (sum over spin and spinors here, as projectors don't depend on them)
-        pp_grad = (proj.coeff.conj() * proj.grad.coeff).sum(dim=(1, 3), keepdim=True)
+        pp_grad = (proj.coeff.conj() * proj.grad.coeff).sum(dim=(0, 3), keepdim=True)
         d_by_dpos = qp.electrons.Wavefunction(
             basis,
             coeff=(
                 (basis.iG[:, basis.mine] + basis.k[:, None]) * (-2j * np.pi)
-            ).transpose(1, 2)[:, None, :, None],
+            ).transpose(1, 2)[None, :, :, None],
         )  # shape like a 3-band wavefunction
 
         # Collect forces by species:
@@ -111,6 +111,7 @@ def _projectors_grad(
             )
             # Prepare for next species:
             i_proj_start = i_proj_stop
+
         basis.kpoints.comm.Allreduce(
             qp.MPI.IN_PLACE, qp.utils.BufferView(pos_grad), qp.MPI.SUM
         )

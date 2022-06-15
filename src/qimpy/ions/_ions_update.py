@@ -64,6 +64,9 @@ def accumulate_geometry_grad(self: qp.ions.Ions, system: qp.System) -> None:
     self.Vloc_tilde.requires_grad_(False, clear=True)
     self.n_core_tilde.requires_grad_(False, clear=True)
 
+    # Symmetrize:
+    self.positions.grad = system.symmetries.symmetrize_forces(self.positions.grad)
+
 
 def update_local(ions: qp.ions.Ions, system: qp.System) -> None:
     """Update ionic densities and potentials."""
