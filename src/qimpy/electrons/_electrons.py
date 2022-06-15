@@ -429,7 +429,11 @@ class Electrons(qp.TreeNode):
             C = self.C[:, :, : self.fillings.n_bands]
             beta_C = C.proj
             beta_C_grad = (system.ions.D_all @ beta_C) * wf[:, :, None]
-            system.ions.beta.grad = C @ beta_C_grad.transpose(-2, -1).conj()
+            if self.n_spinor == 2:
+                beta_C_grad = (
+                    beta_C_grad.unflatten(2, (-1, 2)).swapaxes(-2, -1).flatten(-2, -1)
+                )
+            system.ions.beta.grad = C.non_spinor @ beta_C_grad.transpose(-2, -1).conj()
 
     def run(self, system: qp.System) -> None:
         """Run any actions specified in the input."""

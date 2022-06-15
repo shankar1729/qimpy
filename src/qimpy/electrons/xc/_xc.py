@@ -177,17 +177,20 @@ class XC(qp.TreeNode):
             if n_densities == 1:
                 X_in.grad = qp.grid.FieldR(grid, data=x.grad)
                 return
-            x_in_grad = torch.empty(
-                (n_densities,) + x.shape[1:], dtype=x.dtype, device=x.device
+            X_in.grad = qp.grid.FieldR(
+                grid,
+                data=torch.empty(
+                    (n_densities,) + x.shape[1:], dtype=x.dtype, device=x.device
+                ),
             )
-            x_in_grad[0] = 0.5 * (x.grad[0] + x.grad[1])
+            X_in.grad.data[0] = 0.5 * (x.grad[0] + x.grad[1])
             x_diff_grad = 0.5 * (x.grad[0] - x.grad[1])
             if n_densities == 4:
                 # Broadcast Mhat with any batch dimensions of x_in:
                 n_batch = len(x.shape) - 4
                 Mhat_view = Mhat.view((3,) + (1,) * n_batch + Mhat.shape[1:])
                 # Propagate x_diff_grad (which is Mhat_grad) to x_in.grad:
-                x_in_grad[1:] = x_diff_grad * Mhat_view
+                X_in.grad.data[1:] = x_diff_grad * Mhat_view
                 # Additional propagation of Mhat_grad to n_in.grad:
                 x_vec = X_in.data[1:]
                 M_grad = (
@@ -200,8 +203,7 @@ class XC(qp.TreeNode):
                     M_grad = M_grad.sum(dim=batch_dims)
                 n_in.grad.data[1:] += M_grad
             else:  # n_densities == 2:
-                x_in_grad[1] = x_diff_grad
-            X_in.grad = qp.grid.FieldR(grid, data=x_in_grad)
+                X_in.grad.data[1] = x_diff_grad
 
         if requires_grad:
             watch = qp.utils.StopWatch("xc.propagate_grad")

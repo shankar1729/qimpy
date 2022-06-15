@@ -260,7 +260,7 @@ def _collect_density(
     density.data[0] = rho_diag.sum(dim=0)  # n_tot
     if n_densities >= 2:
         density.data[-1] = rho_diag[0] - rho_diag[1]  # Mz
-    if rho_dn_up:
+    if rho_dn_up is not None:
         density.data[1] = 2.0 * rho_dn_up.real  # Mx
         density.data[2] = 2.0 * rho_dn_up.imag  # My
 
@@ -306,7 +306,7 @@ class _CollectDensityKernel(_KernelCommon):
                 # Expand -> ifft -> collect | |^2
                 ICb = self.expand_ifft(C.coeff, fft_block_slice)
                 prefac_cur = prefac_mine[:, :, fft_block_slice]
-                if self.rho_dn_up:  # vector-magnetization mode
+                if self.rho_dn_up is not None:  # vector-magnetization mode
                     qp.utils.accum_norm_(prefac_cur, ICb, self.rho_diag, start_dim=0)
                     qp.utils.accum_prod_(
                         prefac_cur,
