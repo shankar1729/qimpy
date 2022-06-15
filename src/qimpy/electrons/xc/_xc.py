@@ -90,19 +90,20 @@ class XC(qp.TreeNode):
         Presently, either both gradients or no gradients should be requested."""
         grid = n_tilde.grid
         watch = qp.utils.StopWatch("xc.prepare")
-        n_in = (~n_tilde).data
-        n_densities = n_in.shape[0]
+        n_in = ~n_tilde
+        n_densities = n_in.data.shape[0]
 
         # Initialize local spin basis for vector-spin mode:
         if n_densities == 4:
-            Mvec = n_in[1:]
+            Mvec = n_in.data[1:]
             MmagInv = 1.0 / Mvec.norm(dim=0).clamp(min=N_CUT)
             Mhat = Mvec * MmagInv  # regularized unit vector
 
         # Get required quantities in local-spin basis:
-        def from_magnetization(x_in: torch.Tensor) -> torch.Tensor:
+        def from_magnetization(X_in: qp.grid.FieldR) -> torch.Tensor:
             """Transform a density-like quantity `x` from magnetization to up/dn basis.
-            First dimension of `x_in` must be the spin dimension."""
+            First dimension of `X_in` must be the spin dimension."""
+            x_in = X_in.data
             if n_densities == 1:
                 return x_in
             x = torch.empty((2,) + x_in.shape[1:], dtype=x_in.dtype, device=x_in.device)
@@ -123,7 +124,7 @@ class XC(qp.TreeNode):
         n_spins = n.shape[0]  # always 1 or 2 (local basis in vector case)
         # --- density gradient:
         if self.need_sigma:
-            Dn_in = (~(n_tilde.gradient(dim=1))).data
+            Dn_in = ~(n_tilde.gradient(dim=1))
             Dn = from_magnetization(Dn_in)
             sigma = torch.empty(
                 (2 * n_spins - 1,) + n.shape[1:], dtype=n.dtype, device=n.device
@@ -135,13 +136,13 @@ class XC(qp.TreeNode):
             sigma = torch.tensor(0.0, device=n.device)
         # --- laplacian:
         if self.need_lap:
-            lap_in = (~(n_tilde.laplacian())).data
+            lap_in = ~(n_tilde.laplacian())
             lap = from_magnetization(lap_in)
         else:
             lap = torch.tensor(0.0, device=n.device)
         # --- KE density:
         if self.need_tau:
-            tau_in = (~tau_tilde).data
+            tau_in = ~tau_tilde
             tau = from_magnetization(tau_in)
         else:
             tau = torch.tensor(0.0, device=n.device)
@@ -155,6 +156,8 @@ class XC(qp.TreeNode):
         watch = qp.utils.StopWatch("xc.functional")
         requires_grad = n_tilde.requires_grad
         assert requires_grad == tau_tilde.requires_grad  # compute all or no gradients
+        if grid.lattice.requires_grad:
+            assert requires_grad  # Must request density gradients during stress calc.
         if requires_grad:
             n.grad = torch.zeros_like(n)
             sigma.grad = torch.zeros_like(sigma)
@@ -166,38 +169,39 @@ class XC(qp.TreeNode):
         watch.stop()
 
         # Gradient propagation for potential:
-        def from_magnetization_grad(x: torch.Tensor, x_in: torch.Tensor) -> None:
+        def from_magnetization_grad(x: torch.Tensor, X_in: qp.grid.FieldR) -> None:
             """Gradient propagation corresponding to `from_magnetization`.
-            Sets the gradient contribution to `x_in.grad` from `x.grad`.
+            Sets the gradient contribution to `X_in.grad` from `x.grad`.
             In vector-spin mode, this also contributes to `n_in.grad`, even
             when `x` is not `n` because `n` determines `Mhat`."""
             if n_densities == 1:
+                X_in.grad = qp.grid.FieldR(grid, data=x.grad)
                 return
-            x_in.grad = torch.empty(
+            x_in_grad = torch.empty(
                 (n_densities,) + x.shape[1:], dtype=x.dtype, device=x.device
             )
-            x_in.grad[0] = 0.5 * (x.grad[0] + x.grad[1])
+            x_in_grad[0] = 0.5 * (x.grad[0] + x.grad[1])
             x_diff_grad = 0.5 * (x.grad[0] - x.grad[1])
             if n_densities == 4:
                 # Broadcast Mhat with any batch dimensions of x_in:
                 n_batch = len(x.shape) - 4
                 Mhat_view = Mhat.view((3,) + (1,) * n_batch + Mhat.shape[1:])
                 # Propagate x_diff_grad (which is Mhat_grad) to x_in.grad:
-                x_in.grad[1:] = x_diff_grad * Mhat_view
+                x_in_grad[1:] = x_diff_grad * Mhat_view
                 # Additional propagation of Mhat_grad to n_in.grad:
-                if x_in is not None:
-                    x_vec = x_in[1:]
-                    M_grad = (
-                        x_diff_grad
-                        * MmagInv
-                        * (x_vec - Mhat_view * (Mhat_view * x_vec).sum(dim=0))
-                    )
-                    if n_batch:
-                        batch_dims = tuple(range(1, 1 + n_batch))
-                        M_grad = M_grad.sum(dim=batch_dims)
-                    n_in.grad[1:] += M_grad
+                x_vec = X_in.data[1:]
+                M_grad = (
+                    x_diff_grad
+                    * MmagInv
+                    * (x_vec - Mhat_view * (Mhat_view * x_vec).sum(dim=0))
+                )
+                if n_batch:
+                    batch_dims = tuple(range(1, 1 + n_batch))
+                    M_grad = M_grad.sum(dim=batch_dims)
+                n_in.grad.data[1:] += M_grad
             else:  # n_densities == 2:
-                x_in.grad[1] = x_diff_grad
+                x_in_grad[1] = x_diff_grad
+            X_in.grad = qp.grid.FieldR(grid, data=x_in_grad)
 
         if requires_grad:
             watch = qp.utils.StopWatch("xc.propagate_grad")
@@ -211,19 +215,23 @@ class XC(qp.TreeNode):
                         Dn.grad[s1] += sigma.grad[s1 + s2] * Dn[s2]
                         Dn.grad[s2] += sigma.grad[s1 + s2] * Dn[s1]
                 from_magnetization_grad(Dn, Dn_in)
-                n_tilde.grad -= (~qp.grid.FieldR(grid, data=Dn_in.grad)).divergence(
-                    dim=1
-                )
+                n_tilde.grad -= (~(Dn_in.grad)).divergence(dim=1)
+                if grid.lattice.requires_grad:
+                    grid.lattice.grad -= (
+                        Dn_in.grad[:, None, :] ^ Dn_in[:, :, None]
+                    ).sum(dim=0)
             # --- contributions from Laplacian:
             if self.need_lap:
                 from_magnetization_grad(lap, lap_in)
-                n_tilde.grad += (~qp.grid.FieldR(grid, data=lap_in.grad)).laplacian()
+                n_tilde.grad += (~lap_in.grad).laplacian()
+                if grid.lattice.requires_grad:
+                    pass  # TODO: propagate lap_in.grad to lattice.grad
             # --- contributions from KE density:
             if self.need_tau:
                 from_magnetization_grad(tau, tau_in)
-                tau_tilde.grad += ~qp.grid.FieldR(grid, data=tau_in.grad)
+                tau_tilde.grad += ~tau_in.grad
             # --- direct n contributions
-            n_tilde.grad += ~qp.grid.FieldR(grid, data=n_in.grad)
+            n_tilde.grad += ~n_in.grad
             watch.stop()
 
         # Collect energy
