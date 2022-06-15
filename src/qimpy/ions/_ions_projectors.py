@@ -78,14 +78,13 @@ def _projectors_grad(
 
     # Projector forces:
     if self.positions.requires_grad:
-        # Combine all terms except for the iG from d/dpos of structure factor:
+        # Combine all terms except for the iG from d/dpos of translation phase:
         # (sum over spin and spinors here, as projectors don't depend on them)
-        pp_grad = (proj.coeff * proj.grad.coeff).sum(dim=(1, 3), keepdim=True)
+        pp_grad = (proj.coeff.conj() * proj.grad.coeff).sum(dim=(1, 3), keepdim=True)
         d_by_dpos = qp.electrons.Wavefunction(
             basis,
             coeff=(
-                (basis.iG[:, basis.mine] + basis.k[:, None])
-                * (-2j * np.pi / basis.lattice.volume)
+                (basis.iG[:, basis.mine] + basis.k[:, None]) * (-2j * np.pi)
             ).transpose(1, 2)[:, None, :, None],
         )  # shape like a 3-band wavefunction
 
