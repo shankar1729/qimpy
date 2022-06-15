@@ -1,0 +1,26 @@
+lattice:
+  system: Cubic
+  a: 8.37
+  compute-stress: yes
+
+ions:
+  pseudopotentials:
+    - ../../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
+  coordinates:
+    - [Co, 0.7, 0.5, 0.2]
+    - [Co, 0.5, 0.2, 0.7]
+    - [Co, 0.2, 0.7, 0.5]
+    - [Co, 0.0, 0.0, 0.0]
+    - [Si, 0.0, 0.2, 0.5]
+    - [Si, 0.2, 0.5, 0.0]
+    - [Si, 0.5, 0.0, 0.2]
+    - [Si, 0.7, 0.7, 0.7]
+
+electrons:
+  basis:
+    ke-cutoff: 30
+  fillings:
+    smearing: Gauss
+    sigma: 0.004
+  k-mesh:
+    size: [6, 6, 6]
