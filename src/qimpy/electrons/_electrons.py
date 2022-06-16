@@ -417,10 +417,12 @@ class Electrons(qp.TreeNode):
 
         # Coulomb / Local pseudootential:
         rho_tilde = self.n_tilde[0]  # total charge density
+        if system.lattice.requires_grad:
+            system.lattice.grad += 0.5 * system.coulomb.stress(rho_tilde, rho_tilde)
         if system.ions.Vloc_tilde.requires_grad:
             system.ions.Vloc_tilde.grad += rho_tilde
 
-        # Kinetic, orthonormality constraint and volume stress contributions:
+        # Kinetic, orthonormality constraint and volume contributions to stress:
         C = self.C[:, :, : self.fillings.n_bands]
         wf = self.fillings.f * self.basis.w_sk
         if system.lattice.requires_grad:

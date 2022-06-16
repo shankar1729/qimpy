@@ -109,7 +109,7 @@ class Coulomb:
 
         # Set up kernel:
         iG = grid.get_mesh("H").to(torch.double)  # half-space
-        Gsq = ((iG @ grid.lattice.Gbasis.T) ** 2).sum(dim=-1)
+        Gsq = (iG @ grid.lattice.Gbasis.T).square().sum(dim=-1)
         self._kernel = torch.where(Gsq == 0.0, 0.0, (4 * np.pi) / Gsq)
 
     def __call__(
@@ -124,6 +124,21 @@ class Coulomb:
         if correct_G0_width:
             result.o += rho.o * (4 * np.pi * (-0.5 * (self.ion_width ** 2)))
         return result
+
+    def stress(self, rho1: qp.grid.FieldH, rho2: qp.grid.FieldH) -> torch.Tensor:
+        """Return stress due to Coulomb interaction between `rho1` and `rho2`.
+        The result has dimensions of energy, appropriate for adding to `lattice.grad`.
+        """
+        G = self.grid.get_mesh("H").to(torch.double) @ self.grid.lattice.Gbasis.T
+        Gsq = G.square().sum(dim=-1)
+        G = G.permute(3, 0, 1, 2)  # bring gradient direction to front
+        stress_kernel = (
+            torch.where(Gsq == 0.0, 0.0, (8 * np.pi) / (Gsq * Gsq))
+            * G[None]
+            * G[:, None]
+        )
+        stress_rho2 = qp.grid.FieldH(self.grid, data=(stress_kernel * rho2.data))
+        return rho1 ^ stress_rho2
 
     def ewald(
         self,
