@@ -261,10 +261,25 @@ class Basis(qp.TreeNode):
         torch.Tensor
             KE for each plane-wave, dimensions: `nk_mine` x len(`basis_slice`)
         """
-        return 0.5 * (
-            ((self.iG[:, basis_slice] + self.k[:, None, :]) @ self.lattice.Gbasis.T)
-            ** 2
-        ).sum(dim=-1)
+        G = (self.iG[:, basis_slice] + self.k[:, None, :]) @ self.lattice.Gbasis.T
+        return 0.5 * G.square().sum(dim=-1)
+
+    def get_ke_stress(self, basis_slice: slice = slice(None)) -> torch.Tensor:
+        """Kinetic energy (KE) stress tensor of each plane wave in basis in :math:`E_h`
+
+        Parameters
+        ----------
+        basis_slice
+            Selection of basis functions to get KE for (default: full basis)
+
+        Returns
+        -------
+        torch.Tensor
+            KE tensor for each plane-wave,
+             dimensions: `nk_mine` x len(`basis_slice`) x 3 x 3
+        """
+        G = (self.iG[:, basis_slice] + self.k[:, None, :]) @ self.lattice.Gbasis.T
+        return -G.unsqueeze(2) * G.unsqueeze(3)  # 3 x 3 outer product
 
     def get_fft_block_size(self, n_batch: int, n_bands: int) -> int:
         """Number of FFTs to perform together. Equals `fft_block_size`, if that is

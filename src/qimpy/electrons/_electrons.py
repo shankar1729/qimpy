@@ -420,13 +420,33 @@ class Electrons(qp.TreeNode):
         if system.ions.Vloc_tilde.requires_grad:
             system.ions.Vloc_tilde.grad += rho_tilde
 
-        # Kinetic:
+        # Kinetic, orthonormality constraint and volume stress contributions:
+        C = self.C[:, :, : self.fillings.n_bands]
         wf = self.fillings.f * self.basis.w_sk
-        # TODO: kinetic stress contributions
+        if system.lattice.requires_grad:
+            # Wavefunction squared, with fillings and weights:
+            wf_coeff_sq = qp.utils.abs_squared(C.coeff).sum(dim=3)  # sum over spinors
+            wf_coeff_sq *= wf.unsqueeze(3)
+            if C.basis.real_wavefunctions:
+                wf_coeff_sq *= C.basis.real.Gweight_mine.view(1, 1, 1, -1)
+
+            # Kinetic:
+            lattice_grad_mine = (
+                wf_coeff_sq.sum(dim=(0, 2))[:, :, None, None]
+                * C.basis.get_ke_stress(C.basis.mine)
+            ).sum(dim=(0, 1))
+
+            # Orthonormality constraint:
+            eig = self.eig[..., : self.fillings.n_bands]
+            eye3 = torch.eye(3, device=qp.rc.device)
+            lattice_grad_mine -= (wf_coeff_sq.sum(dim=-1) * eig).sum() * eye3
+
+            # Collect above local contributions over MPI:
+            self.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(lattice_grad_mine))
+            system.lattice.grad += lattice_grad_mine
 
         # Nonlocal:
         if system.ions.beta.requires_grad:
-            C = self.C[:, :, : self.fillings.n_bands]
             beta_C = C.proj
             beta_C_grad = (system.ions.D_all @ beta_C) * wf[:, :, None]
             if self.n_spinor == 2:
