@@ -74,13 +74,14 @@ def get_harmonics_tilde(l_max: int, G: torch.Tensor) -> torch.Tensor:
     is a complex tensor containing :math:`(iG)^l Y_{lm}(G)`, where the extra
     phase factor is from the Fourier transform of spherical harmonics. This is
     required for the corresponding real-space version to be real."""
-    # Prepare phase factors:
+    return get_harmonics(l_max, G) * _reciprocal_phase(l_max, G)
+
+
+def _reciprocal_phase(l_max: int, G: torch.Tensor) -> torch.Tensor:
+    """Return (-1)^l reciprocal-space phases shaped appropriately."""
     phase = []
     phase_cur = 1.0 + 0.0j
     for l in range(l_max + 1):
         phase.extend([phase_cur] * (2 * l + 1))  # repeated for m
         phase_cur *= 1.0j
-    # Multiply real harmonics:
-    return get_harmonics(l_max, G) * torch.tensor(phase, device=G.device).view(
-        (len(phase),) + (1,) * (len(G.shape) - 1)
-    )
+    return torch.tensor(phase, device=G.device).view((-1,) + (1,) * (len(G.shape) - 1))
