@@ -3,7 +3,6 @@ import qimpy as qp
 import numpy as np
 import torch
 from .quintic_spline import Interpolator
-from typing import Tuple
 
 
 def update(self: qp.ions.Ions, system: qp.System) -> None:
@@ -23,7 +22,7 @@ def update(self: qp.ions.Ions, system: qp.System) -> None:
     system.energy["Eewald"] = system.coulomb.ewald(self.positions, self.Z[self.types])
 
     # Update ionic densities and potentials:
-    update_local(self, system)
+    _LocalTerms(self, system).update()
 
     # Update pseudopotential matrix and projectors:
     self._collect_ps_matrix(system.electrons.n_spinor)
@@ -55,7 +54,7 @@ def accumulate_geometry_grad(self: qp.ions.Ions, system: qp.System) -> None:
 
     # Ionic contributions:
     self._projectors_grad(self.beta)
-    update_local_grad(self, system)
+    _LocalTerms(self, system).update_grad()
     system.coulomb.ewald(self.positions, self.Z[self.types])
 
     # Clean up intermediate gradients:
@@ -68,77 +67,88 @@ def accumulate_geometry_grad(self: qp.ions.Ions, system: qp.System) -> None:
     self.positions.grad = system.symmetries.symmetrize_forces(self.positions.grad)
 
 
-def update_local(ions: qp.ions.Ions, system: qp.System) -> None:
-    """Update ionic densities and potentials."""
-    Ginterp, iG, Vloc_coeff, n_core_coeff, ion_gauss = get_local_coeff(ions, system)
-    SF = get_structure_factor(ions, system.grid, iG)
-    ions.Vloc_tilde.data = (SF * Ginterp(Vloc_coeff)).sum(dim=0)
-    ions.n_core_tilde.data[0] = (SF * Ginterp(n_core_coeff)).sum(dim=0)
-    ions.rho_tilde.data = (-ions.Z.view(-1, 1, 1, 1) * SF).sum(dim=0) * ion_gauss
-    # Add long-range part of local potential from ionic charge:
-    ions.Vloc_tilde += system.coulomb(ions.rho_tilde, correct_G0_width=True)
-
-
-def update_local_grad(ions: qp.ions.Ions, system: qp.System) -> None:
-    """Accumulate local-pseudopotential force / stress contributions."""
-    # Propagate long-range local-potential gradient to ionic charge gradient:
-    ions.rho_tilde.grad += system.coulomb(ions.Vloc_tilde.grad, correct_G0_width=True)
-    # Propagate to structure factor gradient:
-    Ginterp, iG, Vloc_coeff, n_core_coeff, ion_gauss = get_local_coeff(ions, system)
-    SF_grad = Ginterp(Vloc_coeff) * ions.Vloc_tilde.grad.data
-    SF_grad += Ginterp(n_core_coeff) * ions.n_core_tilde.grad.data[0]
-    SF_grad -= (ions.rho_tilde.grad.data * ion_gauss) * ions.Z.view(-1, 1, 1, 1)
-    # Propagate to ionic gradient:
-    accumulate_structure_factor_forces(ions, system.grid, iG, SF_grad)
-
-
-def get_local_coeff(
-    ions: qp.ions.Ions, system: qp.System
-) -> Tuple[Interpolator, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Get interpolator and radial coefficients,
-    shared between `update_local` and `update_local_grad`.
+class _LocalTerms:
     """
-    # Prepare interpolator for grid:
-    grid = system.grid
-    iG = grid.get_mesh("H").to(torch.double)  # half-space
-    Gsq = ((iG @ grid.lattice.Gbasis.T) ** 2).sum(dim=-1)
-    Ginterp = Interpolator(Gsq.sqrt(), qp.ions.RadialFunction.DG)
+    Handle generation and gradient propagation of ionic scalar fields (local terms).
+    """
 
-    # Collect structure factor and radial coefficients:
-    Vloc_coeff = []
-    n_core_coeff = []
-    Gmax = grid.get_Gmax()
-    ion_width = system.coulomb.ion_width
-    for i_type, ps in enumerate(ions.pseudopotentials):
-        ps.update(Gmax, ion_width, system.electrons.comm)
-        Vloc_coeff.append(ps.Vloc.f_tilde_coeff)
-        n_core_coeff.append(ps.n_core.f_tilde_coeff)
-    ion_gauss = torch.exp((-0.5 * (ion_width ** 2)) * Gsq)
-    return Ginterp, iG, torch.hstack(Vloc_coeff), torch.hstack(n_core_coeff), ion_gauss
+    def __init__(self, ions: qp.ions.Ions, system: qp.System):
+        self.ions = ions
+        self.system = system
 
+        # Prepare interpolator for grid:
+        grid = system.grid
+        self.iG = grid.get_mesh("H").to(torch.double)  # half-space
+        G = self.iG @ grid.lattice.Gbasis.T
+        Gsq = G.square().sum(dim=-1)
+        Gmag = Gsq.sqrt()
+        self.Ginterp = Interpolator(Gmag, qp.ions.RadialFunction.DG)
 
-def get_structure_factor(
-    ions: qp.ions.Ions, grid: qp.grid.Grid, iG: torch.Tensor
-) -> torch.Tensor:
-    """Compute structure factor."""
-    return torch.stack(
-        [
-            ions.translation_phase(iG, slice_i).sum(dim=-1) / grid.lattice.volume
-            for slice_i in ions.slices
-        ]
-    )
+        # Collect structure factor and radial coefficients:
+        Vloc_coeff = []
+        n_core_coeff = []
+        Gmax = grid.get_Gmax()
+        ion_width = system.coulomb.ion_width
+        for i_type, ps in enumerate(ions.pseudopotentials):
+            ps.update(Gmax, ion_width, system.electrons.comm)
+            Vloc_coeff.append(ps.Vloc.f_tilde_coeff)
+            n_core_coeff.append(ps.n_core.f_tilde_coeff)
+        self.Vloc_coeff = torch.hstack(Vloc_coeff)
+        self.n_core_coeff = torch.hstack(n_core_coeff)
+        self.rho_kernel = -ions.Z.view(-1, 1, 1, 1) * torch.exp(
+            (-0.5 * (ion_width ** 2)) * Gsq
+        )
 
+        # Extra requirements for lattice gradient:
+        if system.lattice.requires_grad:
+            pass  # TODO
 
-def accumulate_structure_factor_forces(
-    ions: qp.ions.Ions, grid: qp.grid.Grid, iG: torch.Tensor, SF_grad: torch.Tensor
-) -> None:
-    """Propagate structure factor gradient to forces."""
-    pos_grad = ions.positions.grad
-    d_by_dpos = iG.permute(3, 0, 1, 2)[None] * (-2j * np.pi / grid.lattice.volume)
-    for slice_i, SF_grad_i in zip(ions.slices, SF_grad):
-        phase_bcast = ions.translation_phase(iG, slice_i).permute(3, 0, 1, 2)[:, None]
-        dphase_by_dpos = qp.grid.FieldH(grid, data=d_by_dpos * phase_bcast)
-        pos_grad[slice_i] += qp.grid.FieldH(grid, data=SF_grad_i) ^ dphase_by_dpos
+    def update(self) -> None:
+        """Update ionic densities and potentials."""
+        ions = self.ions
+        SF = self.get_structure_factor()
+        ions.Vloc_tilde.data = (SF * self.Ginterp(self.Vloc_coeff)).sum(dim=0)
+        ions.n_core_tilde.data[0] = (SF * self.Ginterp(self.n_core_coeff)).sum(dim=0)
+        ions.rho_tilde.data = (SF * self.rho_kernel).sum(dim=0)
+        # Add long-range part of local potential from ionic charge:
+        ions.Vloc_tilde += self.system.coulomb(ions.rho_tilde, correct_G0_width=True)
+
+    def update_grad(self) -> None:
+        """Accumulate local-pseudopotential force / stress contributions."""
+        # Propagate long-range local-potential gradient to ionic charge gradient:
+        ions = self.ions
+        ions.rho_tilde.grad += self.system.coulomb(
+            ions.Vloc_tilde.grad, correct_G0_width=True
+        )
+        # Propagate to structure factor gradient:
+        SF_grad = self.Ginterp(self.Vloc_coeff) * ions.Vloc_tilde.grad.data
+        SF_grad += self.Ginterp(self.n_core_coeff) * ions.n_core_tilde.grad.data[0]
+        SF_grad += self.rho_kernel * ions.rho_tilde.grad.data
+        # Propagate to ionic gradient:
+        self.accumulate_structure_factor_forces(SF_grad)
+
+    def get_structure_factor(self) -> torch.Tensor:
+        """Compute structure factor."""
+        inv_volume = 1.0 / self.system.lattice.volume
+        return torch.stack(
+            [
+                self.ions.translation_phase(self.iG, slice_i).sum(dim=-1) * inv_volume
+                for slice_i in self.ions.slices
+            ]
+        )
+
+    def accumulate_structure_factor_forces(self, SF_grad: torch.Tensor) -> None:
+        """Propagate structure factor gradient to forces."""
+        grid = self.system.grid
+        pos_grad = self.ions.positions.grad
+        inv_volume = 1.0 / grid.lattice.volume
+        d_by_dpos = self.iG.permute(3, 0, 1, 2)[None] * (-2j * np.pi * inv_volume)
+        for slice_i, SF_grad_i in zip(self.ions.slices, SF_grad):
+            phase = self.ions.translation_phase(self.iG, slice_i).permute(3, 0, 1, 2)[
+                :, None
+            ]
+            dphase_by_dpos = qp.grid.FieldH(grid, data=d_by_dpos * phase)
+            pos_grad[slice_i] += qp.grid.FieldH(grid, data=SF_grad_i) ^ dphase_by_dpos
 
 
 def _collect_ps_matrix(self: qp.ions.Ions, n_spinor: int) -> None:
