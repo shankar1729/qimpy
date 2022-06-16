@@ -101,7 +101,15 @@ class _LocalTerms:
 
         # Extra requirements for lattice gradient:
         if system.lattice.requires_grad:
-            pass  # TODO
+            self.Ginterp_prime = Interpolator(Gmag, qp.ions.RadialFunction.DG, deriv=1)
+            self.rho_kernel_prime = self.rho_kernel * (-(ion_width ** 2)) * Gmag
+            G = G.permute(3, 0, 1, 2)  # bring gradient direction to front
+            self.stress_kernel = qp.grid.FieldH(
+                grid,
+                data=(
+                    torch.where(Gmag == 0.0, 0.0, -1.0 / Gmag) * G[None] * G[:, None]
+                ).to(dtype=torch.cdouble),
+            )
 
     def update(self) -> None:
         """Update ionic densities and potentials."""
@@ -120,12 +128,33 @@ class _LocalTerms:
         ions.rho_tilde.grad += self.system.coulomb(
             ions.Vloc_tilde.grad, correct_G0_width=True
         )
+        if self.system.lattice.requires_grad:
+            self.system.lattice.grad += self.system.coulomb.stress(
+                ions.Vloc_tilde.grad, ions.rho_tilde
+            )
+
         # Propagate to structure factor gradient:
-        SF_grad = self.Ginterp(self.Vloc_coeff) * ions.Vloc_tilde.grad.data
-        SF_grad += self.Ginterp(self.n_core_coeff) * ions.n_core_tilde.grad.data[0]
-        SF_grad += self.rho_kernel * ions.rho_tilde.grad.data
+        SF_grad = (
+            self.Ginterp(self.Vloc_coeff) * ions.Vloc_tilde.grad.data
+            + self.Ginterp(self.n_core_coeff) * ions.n_core_tilde.grad.data[0]
+            + self.rho_kernel * ions.rho_tilde.grad.data
+        )
         # Propagate to ionic gradient:
         self.accumulate_structure_factor_forces(SF_grad)
+
+        if self.system.lattice.requires_grad:
+            # Propagate to radial function gradient:
+            SF = self.get_structure_factor()
+            radial_part = (
+                self.Ginterp_prime(self.Vloc_coeff) * ions.Vloc_tilde.grad.data
+                + self.Ginterp_prime(self.n_core_coeff) * ions.n_core_tilde.grad.data[0]
+                + self.rho_kernel_prime * ions.rho_tilde.grad.data
+            )
+            radial_grad = qp.grid.FieldH(
+                self.system.grid, data=(radial_part * SF.conj()).sum(dim=0)
+            )
+            # Propagate to lattice gradient:
+            self.system.lattice.grad += radial_grad ^ self.stress_kernel
 
     def get_structure_factor(self) -> torch.Tensor:
         """Compute structure factor."""
@@ -144,9 +173,8 @@ class _LocalTerms:
         inv_volume = 1.0 / grid.lattice.volume
         d_by_dpos = self.iG.permute(3, 0, 1, 2)[None] * (-2j * np.pi * inv_volume)
         for slice_i, SF_grad_i in zip(self.ions.slices, SF_grad):
-            phase = self.ions.translation_phase(self.iG, slice_i).permute(3, 0, 1, 2)[
-                :, None
-            ]
+            phase = self.ions.translation_phase(self.iG, slice_i)
+            phase = phase.permute(3, 0, 1, 2)[:, None]  # bring atom dim to front
             dphase_by_dpos = qp.grid.FieldH(grid, data=d_by_dpos * phase)
             pos_grad[slice_i] += qp.grid.FieldH(grid, data=SF_grad_i) ^ dphase_by_dpos
 
