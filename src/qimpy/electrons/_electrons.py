@@ -445,6 +445,11 @@ class Electrons(qp.TreeNode):
             self.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(lattice_grad_mine))
             system.lattice.grad += lattice_grad_mine
 
+            # Volume contributions:
+            system.lattice.grad += eye3 * (
+                system.energy["KE"] + system.energy["Ehartree"] + system.energy["Exc"]
+            )
+
         # Nonlocal:
         if system.ions.beta.requires_grad:
             beta_C = C.proj
