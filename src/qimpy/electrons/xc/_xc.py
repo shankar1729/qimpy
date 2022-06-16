@@ -225,9 +225,13 @@ class XC(qp.TreeNode):
             # --- contributions from Laplacian:
             if self.need_lap:
                 from_magnetization_grad(lap, lap_in)
-                n_tilde.grad += (~lap_in.grad).laplacian()
+                lap_in_grad_tilde = ~lap_in.grad
+                n_tilde.grad += lap_in_grad_tilde.laplacian()
                 if grid.lattice.requires_grad:
-                    pass  # TODO: propagate lap_in.grad to lattice.grad
+                    grid.lattice.grad += 2.0 * (
+                        n_tilde.gradient()[:, None]
+                        ^ lap_in_grad_tilde.gradient()[None, :]
+                    ).sum(dim=2)
             # --- contributions from KE density:
             if self.need_tau:
                 from_magnetization_grad(tau, tau_in)
