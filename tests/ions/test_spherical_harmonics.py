@@ -72,7 +72,7 @@ def test_ylm_prod(r_ylm: Tuple[torch.Tensor, torch.Tensor]) -> None:
             rel_err_all.append(rel_err)
             qp.log.info(f"  l: {l1} {l2} Err: {rel_err:9.3e}")
     rel_err_overall = np.sqrt((np.array(rel_err_all) ** 2).mean())
-    qp.log.info(f"  Overall Err: {rel_err_overall:9.3e}")
+    qp.log.info(f"  Overall Err: {rel_err_overall:9.3e}\n")
     assert rel_err_overall < 1e-14
 
 
@@ -83,6 +83,7 @@ def test_ylm_prime(r_ylm: Tuple[torch.Tensor, torch.Tensor]) -> None:
     r, ylm = r_ylm
     ylm_prime = sh.get_harmonics_prime(sh.L_MAX, r)
     err = torch.zeros((ylm.shape[0], 3), device=r.device, dtype=r.dtype)
+    err_den_sq = torch.zeros(ylm.shape[0], device=r.device, dtype=r.dtype)
     # Compare to numerical derivative:
     dr_mag = 1e-4
     dr_shape = (1,) * (len(r.shape) - 1) + (3,)
@@ -93,12 +94,19 @@ def test_ylm_prime(r_ylm: Tuple[torch.Tensor, torch.Tensor]) -> None:
             sh.get_harmonics(sh.L_MAX, r + dr) - sh.get_harmonics(sh.L_MAX, r - dr)
         )
         err[:, i_dir] = (ylm_prime_num - ylm_prime[i_dir]).flatten(1).norm(dim=-1)
+        err_den_sq += ylm_prime_num.flatten(1).norm(dim=1).square()
+    err[1:] *= 1.0 / err_den_sq.sqrt()[1:, None]  # to relative error
     # Report:
     err_np = err.to(qp.rc.cpu).numpy()
     for l in range(sh.L_MAX + 1):
         for m in range(-l, l + 1):
             err_x, err_y, err_z = err_np[l * (l + 1) + m]
             qp.log.info(f"  l: {l} m: {m:+d}  Err: {err_x:.3e} {err_y:.3e} {err_z:.3e}")
+    # Overall error:
+    err_avg = err_np.mean(axis=0)
+    err_x, err_y, err_z = err_avg
+    qp.log.info(f"      Overall Err: {err_x:.3e} {err_y:.3e} {err_z:.3e}")
+    assert np.all(err_avg < 1e-8)
 
 
 def main():

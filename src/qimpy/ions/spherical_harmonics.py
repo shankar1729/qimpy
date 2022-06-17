@@ -88,39 +88,45 @@ def get_harmonics_prime(l_max: int, r: torch.Tensor) -> torch.Tensor:
     Ylm_prime = torch.zeros((3, n_lm) + r.shape[:-1], dtype=r.dtype, device=r.device)
     bcast_shape = (-1,) + (1,) * (len(r.shape) - 1)
 
-    # Use recursion relations to set non-zero Ylm:
+    # Use recurrence relations to set non-zero Ylm derivatives:
     for l in range(1, l_max + 1):
-        i0 = l * (l + 1)  # index of m = 0 component at l (indexing Ylm_prime)
-        i0_in = (l - 1) * l  # index of m = 0 component at l - 1  (indexing Ylm)
+        i0 = l * (l + 1)  # index of m = 0 component at l (indexing Ylm_prime output)
+        i0_in = (l - 1) * l  # index of m = 0 component at l - 1  (indexing Ylm input)
         norm_fac = (2 * l + 1) / (2 * l - 1)  # common factor in C-G coefficients below
+
+        # Change m = 0 norm at input to simplify factors:
+        Ylm[i0_in] *= np.sqrt(2.0)
 
         # z-component (same form for all m):
         m = torch.arange(-l + 1, l, dtype=torch.long, device=r.device)
         alpha = ((l * l - m.square()) * norm_fac).sqrt().view(bcast_shape)
         Ylm_prime[2, i0 + m] = alpha * Ylm[i0_in + m]
 
-        # m = 0 case for x, y components:
+        # x, y components (m-dependent formulae because of real/imag in real harmonics):
+        m = torch.arange(-l, l - 1, dtype=torch.long, device=r.device)
+        alpha = 0.5 * ((l - m) * (l - m - 1) * norm_fac).sqrt().view(bcast_shape)
+        Ylm_prime[0, i0 + m] -= Ylm[i0_in + m + 1] * alpha
+        Ylm_prime[0, i0 - m] += Ylm[i0_in - (m + 1)] * alpha
+        Ylm_prime[1, i0 + m] -= Ylm[i0_in - (m + 1)] * alpha
+        Ylm_prime[1, i0 - m] -= Ylm[i0_in + m + 1] * alpha
+
+        # Correct exceptions near m = 0 to above formulae:
         if l > 1:
-            # Change m = 0 norm at input to simplify factors:
-            Ylm[i0_in] *= np.sqrt(2.0)
-            m = torch.arange(-l, l - 1, dtype=torch.long, device=r.device)
-            alpha = 0.5 * ((l - m) * (l - m - 1) * norm_fac).sqrt().view(bcast_shape)
-            Ylm_prime[0, i0 + m] -= Ylm[i0_in + m + 1] * alpha
-            Ylm_prime[0, i0 - m] += Ylm[i0_in - (m + 1)] * alpha
-            Ylm_prime[1, i0 + m] -= Ylm[i0_in - (m + 1)] * alpha
-            Ylm_prime[1, i0 - m] -= Ylm[i0_in + m + 1] * alpha
-            # Restore m = 0 norm of output and flip m < 0 sign to simplify factors:
-            Ylm_prime[:, i0] *= np.sqrt(0.5)
-            Ylm_prime[:, i0 - l : i0] *= -1.0
-            """
-            # Pending exceptions:
-            Ylm_prime[0, i0 + m] -= Ylm[i0_in + 1] * alpha  # m = 0
-            Ylm_prime[0, i0 + m] -= Ylm[i0_in - 1] * alpha  # m = 0
-            Ylm_prime[0, i0 + m] += Ylm[i0_in + 0] * alpha  # m = -1
-            Ylm_prime[1, i0 - m] -= Ylm[i0_in - 1] * alpha  # m = 0
-            Ylm_prime[1, i0 - m] += Ylm[i0_in + 1] * alpha  # m = 0
-            Ylm_prime[1, i0 - m] += Ylm[i0_in + 0] * alpha  # m = -1
-            """
+            Ylm_1, Ylm0, Ylm1 = Ylm[i0_in - 1 : i0_in + 2]  # m = -1, 0, +1
+            alpha_1, alpha0 = alpha[l - 1 : l + 1]  # m = -1, 0
+            Ylm_prime[0, i0] -= (Ylm1 + Ylm_1) * alpha0
+            Ylm_prime[1, i0] += (Ylm1 - Ylm_1) * alpha0
+            Ylm_prime[0, i0 - 1] += Ylm0 * alpha_1
+            Ylm_prime[1, i0 + 1] += Ylm0 * alpha_1
+        else:
+            Ylm0 = Ylm[i0_in]  # m = 0
+            alpha_1 = alpha[0]  # m = -1
+            Ylm_prime[0, i0 - 1] += Ylm0 * alpha_1
+            Ylm_prime[1, i0 + 1] += Ylm0 * alpha_1
+
+        # Restore m = 0 norm of output and flip m < 0 sign to simplify factors above:
+        Ylm_prime[:, i0] *= np.sqrt(0.5)
+        Ylm_prime[:2, i0 - l : i0] *= -1.0
     return Ylm_prime
 
 
