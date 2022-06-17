@@ -2,7 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from ._lattice import _get_lattice_point_group, _symmetrize_lattice
+from ._lattice import _get_lattice_point_group, _symmetrize_lattice, _symmetrize_matrix
 from ._ions import _get_space_group, _symmetrize_positions, _symmetrize_forces
 from ._grid import _check_grid_shape, _get_grid_shape
 from typing import List, Dict
@@ -35,6 +35,7 @@ class Symmetries(qp.TreeNode):
     i_inv: List[int]  #: Indices of any inversion operations in space group
 
     symmetrize_lattice = _symmetrize_lattice
+    symmetrize_matrix = _symmetrize_matrix
     symmetrize_positions = _symmetrize_positions
     symmetrize_forces = _symmetrize_forces
     check_grid_shape = _check_grid_shape
@@ -117,3 +118,9 @@ class Symmetries(qp.TreeNode):
         self.i_inv = torch.where(
             ((self.rot + id) ** 2).sum(dim=(1, 2)) < tolerance ** 2
         )[0].tolist()
+
+    @property
+    def rot_cart(self) -> torch.Tensor:
+        """Symmetry rotation matrices in Cartesian coordinates."""
+        Rbasis = self.lattice.Rbasis
+        return Rbasis @ self.rot @ torch.linalg.inv(Rbasis)

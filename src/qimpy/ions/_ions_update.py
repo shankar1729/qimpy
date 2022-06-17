@@ -65,6 +65,10 @@ def accumulate_geometry_grad(self: qp.ions.Ions, system: qp.System) -> None:
 
     # Symmetrize:
     self.positions.grad = system.symmetries.symmetrize_forces(self.positions.grad)
+    if system.lattice.requires_grad:
+        system.lattice.grad = system.symmetries.symmetrize_matrix(
+            0.5 * (system.lattice.grad + system.lattice.grad.transpose(-2, -1))
+        )
 
 
 class _LocalTerms:

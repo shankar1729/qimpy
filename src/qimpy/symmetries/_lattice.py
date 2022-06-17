@@ -73,7 +73,7 @@ def _reduce_matrix33(M: torch.Tensor, tolerance: float) -> torch.Tensor:
 def _symmetrize_lattice(
     self: qp.symmetries.Symmetries, Rbasis: torch.Tensor
 ) -> torch.Tensor:
-    """Symmetrize lattice vectors `Rbasis` (3 x 3)"""
+    """Symmetrize lattice vectors `Rbasis` (3 x 3)."""
     # Compute symmetrized metric:
     metric = Rbasis.T @ Rbasis
     metric_sym = (self.rot.transpose(-2, -1) @ (metric @ self.rot)).mean(dim=0)
@@ -85,3 +85,13 @@ def _symmetrize_lattice(
         @ (V @ ((1.0 / E.sqrt()).diag_embed() @ V.T))  # metric^(-1/2)
         @ (V_sym @ (E_sym.sqrt().diag_embed() @ V_sym.T))
     )  # metric_sym^(1/2)
+
+
+def _symmetrize_matrix(
+    self: qp.symmetries.Symmetries, mat: torch.Tensor
+) -> torch.Tensor:
+    """Symmetrize Cartesian matrix `mat` (3 x 3).
+    Suitable to symmetrize, e.g., stress tensors.
+    """
+    rot_cart = self.rot_cart
+    return (rot_cart @ mat @ rot_cart.transpose(-2, -1)).mean(dim=0)
