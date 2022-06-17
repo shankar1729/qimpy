@@ -81,7 +81,7 @@ def test_ylm_prime(r_ylm: Tuple[torch.Tensor, torch.Tensor]) -> None:
     qp.log.info("Testing derivatives:")
     # Analytical calculation:
     r, ylm = r_ylm
-    ylm_prime = sh.get_harmonics_prime(sh.L_MAX, r)
+    _, ylm_prime = sh.get_harmonics_and_prime(sh.L_MAX, r)
     err = torch.zeros((ylm.shape[0], 3), device=r.device, dtype=r.dtype)
     err_den_sq = torch.zeros(ylm.shape[0], device=r.device, dtype=r.dtype)
     # Compare to numerical derivative:

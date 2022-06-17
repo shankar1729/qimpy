@@ -1,12 +1,18 @@
 """Calculate spherical harmonics and their product expansions."""
 from __future__ import annotations
 import qimpy.ions._spherical_harmonics_data as shdata
-import numpy as np
 import torch
 from typing import List, Tuple, Dict
 
 # List exported symbols for doc generation
-__all__ = ["L_MAX", "L_MAX_HLF", "get_harmonics"]
+__all__ = [
+    "L_MAX",
+    "L_MAX_HLF",
+    "get_harmonics",
+    "get_harmonics_and_prime",
+    "get_harmonics_tilde",
+    "get_harmonics_tilde_and_prime",
+]
 
 
 # Versions of shdata converted to torch.Tensors on appropriate device
@@ -44,31 +50,63 @@ def get_harmonics(l_max: int, r: torch.Tensor) -> torch.Tensor:
     """Compute real solid harmonics :math:`r^l Y_{lm}(r)` for each l <= l_max.
     Contains l=0, followed by all m for l=1, and so on till l_max along first dimension.
     Remaining dimensions are same as input `r`."""
+    return get_harmonics_and_prime(l_max, r, compute_prime=False)[0]
+
+
+def get_harmonics_and_prime(
+    l_max: int, r: torch.Tensor, compute_prime=True
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Compute real solid harmonics :math:`r^l Y_{lm}(r)` for each l <= l_max.
+    First return value is harmonics with l=0, followed by all m for l=1, and so on
+    till l_max along first dimension. Remaining dimensions are same as input `r`.
+    Second return value is the derivative with respect to `r`, with the direction
+    as a first additional dimension of length 3. (Empty if `compute_prime` is False.)
+    """
     if not _YLM_PROD:
         _initialize_device(r.device)
     assert l_max <= shdata.L_MAX
-    result = torch.empty(
-        ((l_max + 1) ** 2,) + r.shape[:-1], dtype=r.dtype, device=r.device
+    shape = r.shape[:-1]  # shape of r except for Cartesian direction
+    Y = torch.empty(((l_max + 1) ** 2,) + shape, dtype=r.dtype, device=r.device)
+    Y_prime = (
+        torch.empty((3,) + Y.shape, dtype=r.dtype, device=r.device)
+        if compute_prime
+        else torch.zeros((1,), dtype=r.dtype, device=r.device)
     )
     if l_max >= 0:
         # l = 0: constant
-        result[0] = _YLM_RECUR[0]
+        Y[0] = _YLM_RECUR[0]
+        if compute_prime:
+            Y_prime[:, 0] = 0.0
     if l_max >= 1:
         # l = 1: proportional to (y, z, x) for m = (-1, 0, +1):
-        Y1 = (_YLM_RECUR[1] * r.flatten(0, -2).T[(1, 2, 0), :]).view(
-            (3,) + r.shape[:-1]
-        )
-        result[1:4] = Y1
+        lm_slice = slice(1, 4)
+        Y1 = _YLM_RECUR[1] * r.flatten(0, -2).T[(1, 2, 0), :]
+        Y[lm_slice] = Y1.unflatten(1, shape)
+        if compute_prime:
+            eye3 = torch.eye(3, dtype=r.dtype, device=r.device)
+            Y1_prime = _YLM_RECUR[1] * eye3[:, (1, 2, 0), None]
+            Y_prime[:, lm_slice] = Y1_prime.unflatten(2, (1,) * len(shape))
+            Yprev_prime = Y1_prime
         Yprev = Y1
     for l in range(2, l_max + 1):
         # l > 1: compute from product of harmonics at l = 1 and l - 1:
-        Yl = (
-            _YLM_RECUR[l]
-            @ (Yprev[:, None, :] * Y1[None, :, :]).view(3 * (2 * l - 1), -1)
-        ).view((2 * l + 1,) + r.shape[:-1])
-        result[l ** 2 : (l + 1) ** 2] = Yl
+        lm_slice = slice(l ** 2, (l + 1) ** 2)
+        Yprod = Yprev[:, None] * Y1  # outer product of l = 1 and l - 1
+        Yl = _YLM_RECUR[l] @ Yprod.flatten(0, 1)
+        Y[lm_slice] = Yl.unflatten(1, shape)
+        if compute_prime:
+            Yprod_prime = (
+                Yprev_prime[:, :, None] * Y1 + Yprev[:, None] * Y1_prime[:, None]
+            )
+            Yl_prime = (
+                (_YLM_RECUR[l] @ Yprod_prime.flatten(1, 2).transpose(0, 1).flatten(1))
+                .unflatten(1, (3, -1))
+                .transpose(0, 1)
+            )
+            Y_prime[:, lm_slice] = Yl_prime.unflatten(2, shape)
+            Yprev_prime = Yl_prime
         Yprev = Yl
-    return result
+    return Y, Y_prime
 
 
 def get_harmonics_tilde(l_max: int, G: torch.Tensor) -> torch.Tensor:
@@ -79,62 +117,15 @@ def get_harmonics_tilde(l_max: int, G: torch.Tensor) -> torch.Tensor:
     return get_harmonics(l_max, G) * _reciprocal_phase(l_max, G)
 
 
-def get_harmonics_prime(l_max: int, r: torch.Tensor) -> torch.Tensor:
-    """Compute derivative of `get_harmonics` result with respect to `r`.
-    The derivative dimension of length 3 is first, followed by those
-    in the result of `get_harmonics`."""
-    Ylm = get_harmonics(l_max - 1, r)
-    n_lm = (l_max + 1) ** 2  # total number of Ylm up to l_max + 1
-    Ylm_prime = torch.zeros((3, n_lm) + r.shape[:-1], dtype=r.dtype, device=r.device)
-    bcast_shape = (-1,) + (1,) * (len(r.shape) - 1)
-
-    # Use recurrence relations to set non-zero Ylm derivatives:
-    for l in range(1, l_max + 1):
-        i0 = l * (l + 1)  # index of m = 0 component at l (indexing Ylm_prime output)
-        i0_in = (l - 1) * l  # index of m = 0 component at l - 1  (indexing Ylm input)
-        norm_fac = (2 * l + 1) / (2 * l - 1)  # common factor in C-G coefficients below
-
-        # Change m = 0 norm at input to simplify factors:
-        Ylm[i0_in] *= np.sqrt(2.0)
-
-        # z-component (same form for all m):
-        m = torch.arange(-l + 1, l, dtype=torch.long, device=r.device)
-        alpha = ((l * l - m.square()) * norm_fac).sqrt().view(bcast_shape)
-        Ylm_prime[2, i0 + m] = alpha * Ylm[i0_in + m]
-
-        # x, y components (m-dependent formulae because of real/imag in real harmonics):
-        m = torch.arange(-l, l - 1, dtype=torch.long, device=r.device)
-        alpha = 0.5 * ((l - m) * (l - m - 1) * norm_fac).sqrt().view(bcast_shape)
-        Ylm_prime[0, i0 + m] -= Ylm[i0_in + m + 1] * alpha
-        Ylm_prime[0, i0 - m] += Ylm[i0_in - (m + 1)] * alpha
-        Ylm_prime[1, i0 + m] -= Ylm[i0_in - (m + 1)] * alpha
-        Ylm_prime[1, i0 - m] -= Ylm[i0_in + m + 1] * alpha
-
-        # Correct exceptions near m = 0 to above formulae:
-        if l > 1:
-            Ylm_1, Ylm0, Ylm1 = Ylm[i0_in - 1 : i0_in + 2]  # m = -1, 0, +1
-            alpha_1, alpha0 = alpha[l - 1 : l + 1]  # m = -1, 0
-            Ylm_prime[0, i0] -= (Ylm1 + Ylm_1) * alpha0
-            Ylm_prime[1, i0] += (Ylm1 - Ylm_1) * alpha0
-            Ylm_prime[0, i0 - 1] += Ylm0 * alpha_1
-            Ylm_prime[1, i0 + 1] += Ylm0 * alpha_1
-        else:
-            Ylm0 = Ylm[i0_in]  # m = 0
-            alpha_1 = alpha[0]  # m = -1
-            Ylm_prime[0, i0 - 1] += Ylm0 * alpha_1
-            Ylm_prime[1, i0 + 1] += Ylm0 * alpha_1
-
-        # Restore m = 0 norm of output and flip m < 0 sign to simplify factors above:
-        Ylm_prime[:, i0] *= np.sqrt(0.5)
-        Ylm_prime[:2, i0 - l : i0] *= -1.0
-    return Ylm_prime
-
-
-def get_harmonics_tilde_prime(l_max: int, G: torch.Tensor) -> torch.Tensor:
-    """Same as :func:`get_harmonics_prime`, but in reciprocal space.
+def get_harmonics_tilde_and_prime(
+    l_max: int, G: torch.Tensor, compute_prime=True
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Same as :func:`get_harmonics_and_prime`, but in reciprocal space.
     The result contains an extra phase of :math:`(iG)^l`, as discussed
     in `get_harmonics_tilde`."""
-    return get_harmonics_prime(l_max, G) * _reciprocal_phase(l_max, G)
+    Y, Y_prime = get_harmonics_and_prime(l_max, G, compute_prime)
+    phase = _reciprocal_phase(l_max, G)
+    return Y * phase, Y_prime * phase
 
 
 def _reciprocal_phase(l_max: int, G: torch.Tensor) -> torch.Tensor:

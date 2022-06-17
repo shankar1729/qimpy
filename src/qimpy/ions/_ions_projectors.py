@@ -3,6 +3,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from .quintic_spline import Interpolator
+from .spherical_harmonics import get_harmonics_tilde, get_harmonics_tilde_and_prime
 
 
 def _get_projectors(
@@ -36,7 +37,7 @@ def _get_projectors(
         return qp.electrons.Wavefunction(basis, coeff=proj)
     # Get harmonics (per l,m):
     l_max = max(ps.l_max for ps in self.pseudopotentials)
-    Ylm_tilde = qp.ions.spherical_harmonics.get_harmonics_tilde(l_max, Gk)
+    Ylm_tilde = get_harmonics_tilde(l_max, Gk)
     # Get per-atom translations:
     translations = self.translation_phase(iGk).transpose(1, 2)  # k, atom, G
     translations *= 1.0 / np.sqrt(basis.lattice.volume)  # due to factor in C
@@ -132,10 +133,7 @@ def _projectors_grad(
 
         # Get harmonics (and derivatives):
         l_max = max(ps.l_max for ps in self.pseudopotentials)
-        Ylm_tilde = qp.ions.spherical_harmonics.get_harmonics_tilde(l_max, Gk)
-        Ylm_tilde_prime = qp.ions.spherical_harmonics.get_harmonics_tilde_prime(
-            l_max, Gk
-        )
+        Ylm_tilde, Ylm_tilde_prime = get_harmonics_tilde_and_prime(l_max, Gk)
         # Get per-atom translations:
         translations = self.translation_phase(iGk).transpose(1, 2)  # k,atom,G
         translations *= 1.0 / np.sqrt(basis.lattice.volume)  # due to factor in C
