@@ -116,3 +116,12 @@ def _projectors_grad(
             qp.MPI.IN_PLACE, qp.utils.BufferView(pos_grad), qp.MPI.SUM
         )
         self.positions.grad += pos_grad
+
+    # Projector stress:
+    # if basis.lattice.requires_grad:
+    # Prepare interpolators for radial functions (and derivatives):
+    # iGk = basis.iG[:, basis.mine] + basis.k[:, None]  # fractional G + k
+    # Gk = iGk @ basis.lattice.Gbasis.T  # Cartesian G + k (of this process)
+    # Gk_mag = (Gk ** 2).sum(dim=-1).sqrt()
+    # Ginterp = Interpolator(Gk_mag, qp.ions.RadialFunction.DG)
+    # Ginterp_prime = Interpolator(Gk_mag, qp.ions.RadialFunction.DG, deriv=1)

@@ -76,6 +76,31 @@ def test_ylm_prod(r_ylm: Tuple[torch.Tensor, torch.Tensor]) -> None:
     assert rel_err_overall < 1e-14
 
 
+@pytest.mark.mpi_skip
+def test_ylm_prime(r_ylm: Tuple[torch.Tensor, torch.Tensor]) -> None:
+    qp.log.info("Testing derivatives:")
+    # Analytical calculation:
+    r, ylm = r_ylm
+    ylm_prime = sh.get_harmonics_prime(sh.L_MAX, r)
+    err = torch.zeros((ylm.shape[0], 3), device=r.device, dtype=r.dtype)
+    # Compare to numerical derivative:
+    dr_mag = 1e-4
+    dr_shape = (1,) * (len(r.shape) - 1) + (3,)
+    for i_dir in range(3):
+        dr = torch.zeros(dr_shape, device=r.device, dtype=r.dtype)
+        dr[..., i_dir] = dr_mag
+        ylm_prime_num = (0.5 / dr_mag) * (
+            sh.get_harmonics(sh.L_MAX, r + dr) - sh.get_harmonics(sh.L_MAX, r - dr)
+        )
+        err[:, i_dir] = (ylm_prime_num - ylm_prime[i_dir]).flatten(1).norm(dim=-1)
+    # Report:
+    err_np = err.to(qp.rc.cpu).numpy()
+    for l in range(sh.L_MAX + 1):
+        for m in range(-l, l + 1):
+            err_x, err_y, err_z = err_np[l * (l + 1) + m]
+            qp.log.info(f"  l: {l} m: {m:+d}  Err: {err_x:.3e} {err_y:.3e} {err_z:.3e}")
+
+
 def main():
     """Run test with verbose log."""
     qp.utils.log_config()
@@ -84,6 +109,7 @@ def main():
     r, ylm = get_r_ylm()
     test_ylm((r, ylm))
     test_ylm_prod((r, ylm))
+    test_ylm_prime((r, ylm))
 
 
 if __name__ == "__main__":
