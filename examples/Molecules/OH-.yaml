@@ -5,9 +5,10 @@ lattice:
 ions:
   pseudopotentials:
     - ../../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
+  fractional: no
   coordinates:
-    - [H, +0.046, 0., 0.]
-    - [O, -0.046, 0., 0.]
+    - [H, +0.92, 0., 0.]
+    - [O, -0.92, 0., 0.]
 
 electrons:
   fillings:
