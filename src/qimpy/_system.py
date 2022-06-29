@@ -152,10 +152,11 @@ class System(qp.TreeNode):
         self.electrons.run(self)
         qp.log.info(f"\nEnergy components:\n{repr(self.energy)}")
         qp.log.info("")
-        self.geometry_grad()  # update forces / stress
-        self.ions.report(report_grad=True)  # positions, forces
-        if self.lattice.compute_stress:
-            self.lattice.report(report_grad=True)  # lattice, stress
+        if not self.electrons.fixed_H:
+            self.geometry_grad()  # update forces / stress
+            self.ions.report(report_grad=True)  # positions, forces
+            if self.lattice.compute_stress:
+                self.lattice.report(report_grad=True)  # lattice, stress
         if self.checkpoint_out:
             self.save_checkpoint(
                 qp.utils.CpPath(
