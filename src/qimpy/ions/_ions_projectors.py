@@ -21,7 +21,7 @@ def _get_projectors(
     case when `full_basis` is False."""
     basis_slice = slice(None) if full_basis else basis.mine
     iGk = basis.iG[:, basis_slice] + basis.k[:, None]  # fractional G + k
-    Gk = iGk @ basis.lattice.Gbasis.T  # Cartesian G + k (of this process)
+    Gk = iGk @ self.lattice.Gbasis.T  # Cartesian G + k (of this process)
     # Prepare interpolator for radial functions:
     Gk_mag = (Gk ** 2).sum(dim=-1).sqrt()
     Ginterp = Interpolator(Gk_mag, qp.ions.RadialFunction.DG)
@@ -40,7 +40,7 @@ def _get_projectors(
     Ylm_tilde = get_harmonics_tilde(l_max, Gk)
     # Get per-atom translations:
     translations = self.translation_phase(iGk).transpose(1, 2)  # k, atom, G
-    translations *= 1.0 / np.sqrt(basis.lattice.volume)  # due to factor in C
+    translations *= 1.0 / np.sqrt(self.lattice.volume)  # due to factor in C
     # Compute projectors by species:
     i_proj_start = 0
     for ps, n_ions_i, slice_i in zip(
@@ -73,7 +73,7 @@ def _projectors_grad(
     Each contribution is accumulated to a `grad` attribute,
     only if the corresponding `requires_grad` is enabled.
     Force contributions are collected in `self.positions.grad`.
-    Stress contributions are collected in `basis.lattice.grad`.
+    Stress contributions are collected in `self.lattice.grad`.
     """
     basis = proj.basis
     iGk = basis.iG[:, basis.mine] + basis.k[:, None]  # fractional G + k
@@ -119,9 +119,9 @@ def _projectors_grad(
         self.positions.grad += pos_grad
 
     # Projector stress:
-    if basis.lattice.requires_grad:
+    if self.lattice.requires_grad:
         # Prepare interpolators for radial functions (and derivatives):
-        Gk = iGk @ basis.lattice.Gbasis.T  # Cartesian G + k (of this process)
+        Gk = iGk @ self.lattice.Gbasis.T  # Cartesian G + k (of this process)
         Gk_mag = Gk.norm(dim=-1)
         Gk_hat = Gk * torch.where(Gk_mag == 0.0, 0.0, 1.0 / Gk_mag).unsqueeze(2)
         Gk_hat = Gk_hat.permute(2, 0, 1)[:, None]  # 3,1,k,G
@@ -136,9 +136,9 @@ def _projectors_grad(
         Ylm_tilde, Ylm_tilde_prime = get_harmonics_tilde_and_prime(l_max, Gk)
         # Get per-atom translations:
         translations = self.translation_phase(iGk).transpose(1, 2)  # k,atom,G
-        translations *= 1.0 / np.sqrt(basis.lattice.volume)  # due to factor in C
+        translations *= 1.0 / np.sqrt(self.lattice.volume)  # due to factor in C
         # Collect stresses by species:
-        lattice_grad = torch.zeros_like(basis.lattice.grad)
+        lattice_grad = torch.zeros_like(self.lattice.grad)
         i_proj_start = 0
         for ps, n_ions_i, slice_i in zip(
             self.pseudopotentials, self.n_ions_type, self.slices
@@ -170,4 +170,4 @@ def _projectors_grad(
             i_proj_start = i_proj_stop
 
         basis.kpoints.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(lattice_grad))
-        basis.lattice.grad += lattice_grad
+        self.lattice.grad += lattice_grad

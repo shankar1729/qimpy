@@ -13,6 +13,8 @@ from typing import Optional, Union, List
 class Ions(qp.TreeNode):
     """Ionic system: ionic geometry and pseudopotentials."""
 
+    lattice: qp.lattice.Lattice  #: Lattice vectors of corresponding unit cell
+    fractional: bool  #: use fractional coordinates in input/output
     n_ions: int  #: number of ions
     n_types: int  #: number of distinct ion types
     n_ions_type: List[int]  #: number of ions of each type
@@ -46,6 +48,8 @@ class Ions(qp.TreeNode):
         *,
         process_grid: qp.utils.ProcessGrid,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        lattice: qp.lattice.Lattice,
+        fractional: bool = True,
         coordinates: Optional[List] = None,
         pseudopotentials: Optional[Union[str, List[str]]] = None,
     ) -> None:
@@ -53,6 +57,9 @@ class Ions(qp.TreeNode):
 
         Parameters
         ----------
+        fractional
+            :yaml:`Whether to use fractional coordinates for input/output.`
+            Note that positions in memory and checkpoint files are always fractional.
         coordinates
             :yaml:`List of [symbol, x, y, z, args] for each ion in unit cell.`
             Here, symbol is the chemical symbol of the element,
@@ -81,6 +88,8 @@ class Ions(qp.TreeNode):
         if coordinates is None:
             coordinates = []
         assert isinstance(coordinates, list)
+        self.lattice = lattice
+        self.fractional = fractional
         self.n_ions = 0  # number of ions
         self.n_types = 0  # number of distinct ion types
         self.symbols = []  # symbol for each ion type
@@ -124,6 +133,9 @@ class Ions(qp.TreeNode):
 
         # Convert to tensors before storing in class object:
         self.positions = torch.tensor(positions, device=qp.rc.device)
+        if not fractional:
+            # Convert Cartesian input to fractional coordinates:
+            self.positions = self.positions @ lattice.invRbasisT
         self.velocities = torch.zeros_like(self.positions)
         self.positions.grad = torch.full_like(self.positions, np.nan)
         self.types = torch.tensor(types, device=qp.rc.device, dtype=torch.long)
@@ -193,13 +205,22 @@ class Ions(qp.TreeNode):
         n_replicas = 1  # this will eventually change for NEB / phonon DFPT
         process_grid.provide_n_tasks("r", n_replicas)
 
-    def report(
-        self, report_grad: bool, lattice: Optional[qp.lattice.Lattice] = None
-    ) -> None:
+    def report(self, report_grad: bool) -> None:
         """Report ionic positions / attributes, and optionally forces if `report_grad`."""
-        qp.log.info(f"{self.n_ions} total ions of {self.n_types} types; positions:")
-        # Fetch to CPU for reporting:
-        positions = self.positions.to(qp.rc.cpu).numpy()
+        qp.log.info(
+            f"{self.n_ions} total ions of {self.n_types} types; positions:"
+            f"  # in {'fractional' if self.fractional else 'Cartesian [a0]'} coordinates"
+        )
+        # Fetch to CPU in required coordinate system for reporting:
+        positions = (
+            (
+                self.positions
+                if self.fractional
+                else self.positions @ self.lattice.Rbasis.T
+            )
+            .to(qp.rc.cpu)
+            .numpy()
+        )
         types = self.types.to(qp.rc.cpu).numpy()
         M_initial = (
             None if (self.M_initial is None) else self.M_initial.to(qp.rc.cpu).numpy()
@@ -224,9 +245,8 @@ class Ions(qp.TreeNode):
 
         # Report forces / stresses if requested:
         if report_grad:
-            assert lattice is not None
-            forces = self.get_forces(lattice).detach().to(qp.rc.cpu).numpy()
-            qp.log.info("\nforces:")
+            forces = self.forces.detach().to(qp.rc.cpu).numpy()
+            qp.log.info("\nforces:  # in Cartesian [Eh/a0] coordinates")
             for type_i, (fx, fy, fz) in zip(types, forces):
                 qp.log.info(
                     f"- [{self.symbols[type_i]}, {fx:11.8f}, {fy:11.8f}, {fz:11.8f}]"
@@ -266,9 +286,10 @@ class Ions(qp.TreeNode):
             for i_ps, ps in enumerate(self.pseudopotentials)
         )
 
-    def get_forces(self, lattice: qp.lattice.Lattice) -> torch.Tensor:
+    @property
+    def forces(self) -> torch.Tensor:
         """Cartesian forces [in Eh/a0] of each ion (n_ions x 3).
         This converts from the fractional energy gradient in `positions.grad`,
         which should have already been calculated.
         """
-        return -self.positions.grad @ torch.linalg.inv(lattice.Rbasis)
+        return -self.positions.grad @ self.lattice.invRbasis

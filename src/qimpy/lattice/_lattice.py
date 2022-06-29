@@ -119,25 +119,26 @@ class Lattice(qp.TreeNode):
             self.Rbasis = scale_vector[None, :] * self.Rbasis
 
         # Compute dependent quantities:
-        self.Rbasis = self.Rbasis.to(qp.rc.device)
-        self.Gbasis = (2 * np.pi) * torch.linalg.inv(self.Rbasis.T)
-        self.volume = abs(torch.linalg.det(self.Rbasis).item())
+        self.update(self.Rbasis.to(qp.rc.device), report_change=False)
         self.compute_stress = compute_stress
         self.requires_grad_(False, clear=True)  # initialize gradient
         self.report(report_grad=False)
 
-    def update(self, Rbasis: torch.Tensor) -> None:
-        """Update lattice vectors and dependent quantities"""
+    def update(self, Rbasis: torch.Tensor, report_change: bool = True) -> None:
+        """Update lattice vectors and dependent quantities.
+        If `report_change` is True, report the relative change of lattice and volume.
+        """
         Gbasis = (2 * np.pi) * torch.linalg.inv(self.Rbasis.T)
         volume = abs(torch.linalg.det(self.Rbasis).item())
-        change_Rbasis = torch.linalg.norm(Rbasis - self.Rbasis) / torch.linalg.norm(
-            self.Rbasis
-        )
-        change_volume = (volume - self.volume) / self.volume
-        qp.log.info(
-            f"Relative change in Rbasis: {change_Rbasis:e}"
-            f" and volume: {change_volume:e}"
-        )
+        if report_change:
+            change_Rbasis = torch.linalg.norm(Rbasis - self.Rbasis) / torch.linalg.norm(
+                self.Rbasis
+            )
+            change_volume = (volume - self.volume) / self.volume
+            qp.log.info(
+                f"Relative change in Rbasis: {change_Rbasis:e}"
+                f" and volume: {change_volume:e}"
+            )
         self.Rbasis = Rbasis
         self.Gbasis = Gbasis
         self.volume = volume
@@ -145,12 +146,33 @@ class Lattice(qp.TreeNode):
     def report(self, report_grad: bool) -> None:
         """Report lattice vectors, and optionally stress if `report_grad`."""
         qp.log.info(
-            f"Rbasis (real-space basis in columns):\n{qp.utils.fmt(self.Rbasis)}\n"
-            f"Gbasis (reciprocal-space basis in columns):\n{qp.utils.fmt(self.Gbasis)}"
+            f"Rbasis (real-space basis [a0] in columns):\n{qp.utils.fmt(self.Rbasis)}\n"
+            "Gbasis (reciprocal-space basis [1/a0] in columns):\n"
+            f"{qp.utils.fmt(self.Gbasis)}"
             f"\nUnit cell volume: {self.volume}"
         )
         if report_grad and self.compute_stress:
-            qp.log.info(f"Stress:\n{qp.utils.fmt(self.stress)}")
+            qp.log.info(f"Stress [Eh/a0^3]:\n{qp.utils.fmt(self.stress)}")
+
+    @property
+    def invRbasis(self):
+        """Inverse of `Rbasis`."""
+        return self.Gbasis.T * (0.5 / np.pi)  # reuse the already computed inverse
+
+    @property
+    def invRbasisT(self):
+        """Inverse transpose of `Rbasis`."""
+        return self.Gbasis * (0.5 / np.pi)  # reuse the already computed inverse
+
+    @property
+    def invGbasis(self):
+        """Inverse of `Gbasis`."""
+        return self.Rbasis.T * (0.5 / np.pi)  # use the existing inverse
+
+    @property
+    def invGbasisT(self):
+        """Inverse transpose of `Gbasis`."""
+        return self.Rbasis * (0.5 / np.pi)  # use the existing inverse
 
     @property
     def stress(self) -> torch.Tensor:

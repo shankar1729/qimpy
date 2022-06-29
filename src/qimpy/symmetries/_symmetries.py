@@ -60,9 +60,7 @@ class Symmetries(qp.TreeNode):
         )
 
         # Reduce symmetries by any global axes:
-        sym_axis = (lattice.Rbasis @ lattice_sym) @ torch.linalg.inv(
-            lattice.Rbasis
-        )  # Cartesian axes
+        sym_axis = (lattice.Rbasis @ lattice_sym) @ lattice.invRbasis  # Cartesian axes
         for axis_name, axis_np in axes.items():
             axis = torch.from_numpy(axis_np).to(qp.rc.device)
             sel = torch.where((sym_axis @ axis - axis).norm(dim=-1) < tolerance)[0]
@@ -111,5 +109,4 @@ class Symmetries(qp.TreeNode):
     @property
     def rot_cart(self) -> torch.Tensor:
         """Symmetry rotation matrices in Cartesian coordinates."""
-        Rbasis = self.lattice.Rbasis
-        return Rbasis @ self.rot @ torch.linalg.inv(Rbasis)
+        return self.lattice.Rbasis @ self.rot @ self.lattice.invRbasis

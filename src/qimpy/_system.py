@@ -86,7 +86,12 @@ class System(qp.TreeNode):
 
         self.add_child("lattice", qp.lattice.Lattice, lattice, checkpoint_in)
         self.add_child(
-            "ions", qp.ions.Ions, ions, checkpoint_in, process_grid=self.process_grid
+            "ions",
+            qp.ions.Ions,
+            ions,
+            checkpoint_in,
+            process_grid=self.process_grid,
+            lattice=self.lattice,
         )
         self.add_child(
             "symmetries",
@@ -148,7 +153,7 @@ class System(qp.TreeNode):
         qp.log.info(f"\nEnergy components:\n{repr(self.energy)}")
         qp.log.info("")
         self.geometry_grad()  # update forces / stress
-        self.ions.report(report_grad=True, lattice=self.lattice)  # positions, forces
+        self.ions.report(report_grad=True)  # positions, forces
         if self.lattice.compute_stress:
             self.lattice.report(report_grad=True)  # lattice, stress
         if self.checkpoint_out:

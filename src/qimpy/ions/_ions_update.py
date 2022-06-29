@@ -104,7 +104,7 @@ class _LocalTerms:
         )
 
         # Extra requirements for lattice gradient:
-        if system.lattice.requires_grad:
+        if ions.lattice.requires_grad:
             self.Ginterp_prime = Interpolator(Gmag, qp.ions.RadialFunction.DG, deriv=1)
             self.rho_kernel_prime = self.rho_kernel * (-(ion_width ** 2)) * Gmag
             G = G.permute(3, 0, 1, 2)  # bring gradient direction to front
@@ -132,8 +132,8 @@ class _LocalTerms:
         ions.rho_tilde.grad += self.system.coulomb(
             ions.Vloc_tilde.grad, correct_G0_width=True
         )
-        if self.system.lattice.requires_grad:
-            self.system.lattice.grad += self.system.coulomb.stress(
+        if ions.lattice.requires_grad:
+            ions.lattice.grad += self.system.coulomb.stress(
                 ions.Vloc_tilde.grad, ions.rho_tilde
             )
 
@@ -146,7 +146,7 @@ class _LocalTerms:
         # Propagate to ionic gradient:
         self.accumulate_structure_factor_forces(SF_grad)
 
-        if self.system.lattice.requires_grad:
+        if ions.lattice.requires_grad:
             # Propagate to radial function gradient:
             SF = self.get_structure_factor()
             radial_part = (
@@ -158,7 +158,7 @@ class _LocalTerms:
                 self.system.grid, data=(radial_part * SF.conj()).sum(dim=0)
             )
             # Propagate to lattice gradient:
-            self.system.lattice.grad += radial_grad ^ self.stress_kernel
+            ions.lattice.grad += radial_grad ^ self.stress_kernel
 
     def get_structure_factor(self) -> torch.Tensor:
         """Compute structure factor."""

@@ -48,7 +48,7 @@ def _get_space_group(
         M0 = None  # no more handling of magnetization needed below
     else:
         # Vector magentization needs Cartesian rotation matrices:
-        sym_M = (lattice.Rbasis @ lattice_sym) @ torch.linalg.inv(lattice.Rbasis)
+        sym_M = (lattice.Rbasis @ lattice_sym) @ lattice.invRbasis
         sym_M *= torch.linalg.det(lattice_sym).view(-1, 1, 1)  # pseudo-vector
 
     rot_list = []
