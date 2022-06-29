@@ -1,0 +1,25 @@
+lattice:
+  system: hexagonal
+  a: 4.651
+  c: 15
+  compute-stress: yes
+
+ions:
+  pseudopotentials:
+    - ../../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
+  coordinates:
+    - [C, 0.00000000,  0.00000000, 0.0]
+    - [C, 0.33333333, -0.33333333, 0.0]
+
+electrons:
+  fillings:
+    smearing: Gauss
+    sigma: 0.01
+  k-mesh:
+    size: [12, 12, 1]
+  xc: 
+    functional: gga-pbe
+  save-wavefunction: no  #keeps checkpoint small
+
+checkpoint: null  # disable reading checkpoint
+checkpoint-out: totalE.h5  # but still create it

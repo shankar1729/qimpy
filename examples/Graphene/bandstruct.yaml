@@ -1,0 +1,17 @@
+include: totalE.yaml
+
+electrons:
+  fixed-H: totalE.h5
+  k-mesh: null  # disable k-mesh included from totalE.yaml
+  k-path:
+    dk: 0.02
+    points:
+    - [0.0000000,  0.0000000, 0., $\Gamma$]
+    - [0.5000000,  0.0000000, 0., M]
+    - [0.6666667, -0.3333333, 0., K]
+    - [0.0000000,  0.0000000, 0., $\Gamma$]
+  fillings:
+    n-bands: 8
+    n-bands-extra: 4
+
+checkpoint-out: null  # disable totalE.h5 output included from totalE.yaml
