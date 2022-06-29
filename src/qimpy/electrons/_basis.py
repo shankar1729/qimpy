@@ -11,36 +11,6 @@ class Basis(qp.TreeNode):
     """Plane-wave basis for electronic wavefunctions. The underlying
     :class:`qimpy.utils.TaskDivision` splits plane waves over `rc.comm_b`"""
 
-    __slots__ = (
-        "comm",
-        "comm_kb",
-        "lattice",
-        "ions",
-        "kpoints",
-        "n_spins",
-        "n_spinor",
-        "k",
-        "wk",
-        "w_sk",
-        "real_wavefunctions",
-        "ke_cutoff",
-        "grid",
-        "iG",
-        "n",
-        "n_min",
-        "n_max",
-        "n_avg",
-        "n_tot",
-        "n_ideal",
-        "fft_index",
-        "fft_block_size",
-        "mpi_block_size",
-        "pad_index",
-        "pad_index_mine",
-        "division",
-        "mine",
-        "real",
-    )
     comm: qp.MPI.Comm  #: Basis/bands communicator
     comm_kb: qp.MPI.Comm  #: Overall k-points and basis/bands communicator
     lattice: qp.lattice.Lattice  #: Lattice vectors of unit cell

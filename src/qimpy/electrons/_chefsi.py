@@ -9,7 +9,6 @@ from typing import Optional
 class CheFSI(Davidson):
     """Chebyshev Filter Subspace Iteration (CheFSI) diagonalization."""
 
-    __slots__ = ("filter_order", "init_threshold")
     filter_order: int  #: Order of Chebyshev filter
     init_threshold: float  #: Threshold for Davidson initialization
 

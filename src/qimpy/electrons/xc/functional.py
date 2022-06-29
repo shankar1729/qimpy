@@ -116,18 +116,6 @@ class _FunctionalLibxc:
     Uses a different internal interface than Functional, and is wrapped
     together for all components by FunctionalsLibxc for efficiency."""
 
-    __slots__ = (
-        "functional",
-        "scale_factor",
-        "needs_sigma",
-        "needs_lap",
-        "needs_tau",
-        "has_exchange",
-        "has_correlation",
-        "has_kinetic",
-        "has_energy",
-        "output_labels",
-    )
     functional: pylibxc.LibXCFunctional
     scale_factor: float  #: Scale factor in energy and potential
     needs_sigma: bool  #: Whether functional needs gradient :math:`\sigma`
@@ -227,7 +215,6 @@ class _FunctionalLibxc:
 class FunctionalsLibxc(Functional):
     """Evaluate one or more functionals from Libxc together."""
 
-    __slots__ = "_functionals"
     _functionals: List[_FunctionalLibxc]  #: Individual Libxc functionals
 
     def __init__(

@@ -11,7 +11,6 @@ class RadialFunction:
     solid harmonics that already contain these factors of r^l or G^l.
     """
 
-    __slots__ = ("r", "dr", "f", "l", "Gmax", "G", "f_tilde", "f_tilde_coeff")
     r: torch.Tensor  #: radial grid
     dr: torch.Tensor  #: radial grid integration weights (dr in 4 pi r^2 dr)
     f: torch.Tensor  #: real-space values corresponding to r (n x len(r))

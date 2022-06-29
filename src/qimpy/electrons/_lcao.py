@@ -8,7 +8,6 @@ from ..utils import Minimize, MinimizeState, MatrixArray
 class LCAO(Minimize[MatrixArray]):
     """Optimize electronic state in atomic-orbital subspace."""
 
-    __slots__ = ("system", "_rot_prev")
     system: qp.System
     _rot_prev: torch.Tensor  #: accumulated rotations of subspace
 

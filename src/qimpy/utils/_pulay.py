@@ -16,19 +16,6 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
     by the `Optimizable` abstract base class.
     """
 
-    __slots__ = (
-        "comm",
-        "name",
-        "n_iterations",
-        "energy_threshold",
-        "residual_threshold",
-        "extra_thresholds",
-        "n_history",
-        "mix_fraction",
-        "_variables",
-        "_residuals",
-        "_overlaps",
-    )
     comm: qp.MPI.Comm  #: Communicator over which algorithm operates in unison
     name: str  #: Name of algorithm instance used in reporting eg. 'SCF'.
     n_iterations: int  #: Maximum number of iterations

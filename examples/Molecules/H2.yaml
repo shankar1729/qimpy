@@ -1,6 +1,7 @@
 lattice:
   system: cubic
   a: 20.  # bohrs
+  compute-stress: yes
 
 ions:
   pseudopotentials:
@@ -18,5 +19,5 @@ electrons:
   scf:
     mix-density: no  # mix potential instead
 
-checkpoint: null  # disable reading checkpoint
-checkpoint-out: H2.h5  # but still create it
+#checkpoint: null  # disable reading checkpoint
+#checkpoint-out: H2.h5  # but still create it

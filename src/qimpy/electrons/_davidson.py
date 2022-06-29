@@ -9,15 +9,6 @@ from typing import Optional, Tuple
 class Davidson(qp.TreeNode):
     """Davidson diagonalization of Hamiltonian in `electrons`."""
 
-    __slots__ = (
-        "electrons",
-        "n_iterations",
-        "eig_threshold",
-        "_line_prefix",
-        "_norm_cut",
-        "_i_iter",
-        "_HC",
-    )
     electrons: qp.electrons.Electrons  #: Electronic system to diagonalize
     n_iterations: int  #: Number of diagonalization iterations
     eig_threshold: float  #: Eigenvalue convergence threshold (in :math:`E_h`)

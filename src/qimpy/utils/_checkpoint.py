@@ -9,7 +9,6 @@ from typing import Tuple, Any, Optional, NamedTuple
 class Checkpoint(h5py.File):
     """Helper for checkpoint load/save from HDF5 files."""
 
-    __slots__ = "writable"
     writable: bool  #: Whether file has been opened for writing
 
     def __init__(self, filename: str, *, mode: str = "r") -> None:

@@ -12,7 +12,6 @@ N_CUT = 1e-16  # Regularization threshold for densities
 class XC(qp.TreeNode):
     """Exchange-correlation functional."""
 
-    __slots__ = ("_functionals", "need_sigma", "need_lap", "need_tau")
     _functionals: List[Functional]  #: list of functionals that add up to XC
     need_sigma: bool  #: whether overall functional needs gradient
     need_lap: bool  #: whether overall functional needs laplacian

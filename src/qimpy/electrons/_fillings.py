@@ -16,23 +16,6 @@ SmearingFunc = Callable[
 class Fillings(qp.TreeNode):
     """Electron occupation factors (smearing)"""
 
-    __slots__ = (
-        "electrons",
-        "n_electrons",
-        "n_bands_min",
-        "n_bands",
-        "n_bands_extra",
-        "smearing",
-        "sigma",
-        "mu_constrain",
-        "M_constrain",
-        "mu",
-        "B",
-        "M",
-        "f",
-        "f_eig",
-        "_smearing_func",
-    )
     electrons: qp.electrons.Electrons
     n_electrons: float  #: Number of electrons
     n_bands_min: int  #: Minimum number of bands to accomodate `n_electrons`

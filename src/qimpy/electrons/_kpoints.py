@@ -8,7 +8,6 @@ from typing import Union, Sequence, Tuple
 class Kpoints(qp.TreeNode):
     """Set of k-points in Brillouin zone."""
 
-    __slots__ = ("comm", "k", "wk", "division")
     comm: qp.MPI.Comm  #: Communicator for k-point division
     k: torch.Tensor  #: Array of k-points (N x 3)
     wk: torch.Tensor  #: Integration weights for each k (adds to 1)
@@ -44,7 +43,6 @@ class Kpoints(qp.TreeNode):
 class Kmesh(Kpoints):
     """Uniform k-mesh sampling of Brillouin zone"""
 
-    __slots__ = ("size", "i_reduced", "i_sym", "invert")
     size: Tuple[int, ...]  #: Dimensions of k-mesh
     i_reduced: torch.Tensor  #: Reduced index of each k-point in mesh
     i_sym: torch.Tensor  #: Symmetry index that maps mesh points to reduced set

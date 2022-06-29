@@ -13,17 +13,6 @@ class Symmetries(qp.TreeNode):
     Detects space group from lattice and ions, and provides methods to
     symmetrize properties such as positions, forces and densities."""
 
-    __slots__ = (
-        "lattice",
-        "ions",
-        "tolerance",
-        "n_sym",
-        "rot",
-        "trans",
-        "ion_map",
-        "i_id",
-        "i_inv",
-    )
     lattice: qp.lattice.Lattice  #: Corresponding lattice vectors
     ions: qp.ions.Ions  #: Corresponding ionic geometry
     tolerance: float  #: Relative error threshold in detecting symmetries

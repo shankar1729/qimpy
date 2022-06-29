@@ -12,31 +12,6 @@ class Grid(qp.TreeNode):
     and routines to convert fields between grids.
     """
 
-    __slots__ = (
-        "lattice",
-        "symmetries",
-        "_field_symmetrizer",
-        "comm",
-        "n_procs",
-        "i_proc",
-        "is_split",
-        "ke_cutoff",
-        "dV",
-        "shape",
-        "shapeH",
-        "shapeR_mine",
-        "shapeG_mine",
-        "shapeH_mine",
-        "split0",
-        "split2",
-        "split2H",
-        "_mesh1D",
-        "_mesh1D_mine",
-        "_indices_fft",
-        "_indices_ifft",
-        "_indices_rfft",
-        "_indices_irfft",
-    )
     lattice: qp.lattice.Lattice
     symmetries: qp.symmetries.Symmetries
     _field_symmetrizer: Optional[qp.symmetries.FieldSymmetrizer]

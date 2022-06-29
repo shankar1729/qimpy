@@ -14,7 +14,6 @@ class StopWatch:
     Use `print_stats` at the end of the run to log statistics of execution times
     of each named code block or function."""
 
-    __slots__ = ["name", "t_start"]
     name: str  #: name of code block
     t_start: Union[float, torch.cuda.Event]  #: start time of current event
 

@@ -20,5 +20,5 @@ electrons:
   xc: 
     functional: ${FUNC}
 
-checkpoint: null  # disable reading checkpoint
-checkpoint-out: O2.h5  # but still create it
+#checkpoint: null  # disable reading checkpoint
+#checkpoint-out: O2.h5  # but still create it

@@ -7,17 +7,6 @@ import torch
 class BasisReal:
     """Extra book-keeping for real basis"""
 
-    __slots__ = (
-        "basis",
-        "iz0",
-        "iz0_conj",
-        "iz0_conj_self",
-        "iz0_mine_local",
-        "iz0_mine_conj",
-        "nz0_prev",
-        "Gweight",
-        "Gweight_mine",
-    )
     basis: qp.electrons.Basis
     iz0: torch.Tensor  #: Index of Gz = 0 points
     iz0_conj: torch.Tensor  #: Hermitian conjugate points of `iz0`

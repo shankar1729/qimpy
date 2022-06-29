@@ -66,7 +66,6 @@ class Interpolator:
         y = interp(y_coeff)  # interpolate y_samples at locations x
     """
 
-    __slots__ = ("_shape", "_mat")
     _shape: Tuple[int, ...]  #: Dimensions of x to reproduced at output
     _mat: torch.Tensor  #: internal sparse matrix used for interpolation
     _BLIP_TO_POLY: Optional[torch.Tensor] = None  #: blip to poly transform

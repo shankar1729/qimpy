@@ -7,18 +7,6 @@ from typing import Optional, Sequence
 class SCF(qp.utils.Pulay[qp.grid.FieldH]):
     """Electronic self-consistent field iteration."""
 
-    __slots__ = (
-        "mix_fraction_mag",
-        "q_kerker",
-        "q_metric",
-        "q_kappa",
-        "n_eig_steps",
-        "eig_threshold",
-        "mix_density",
-        "system",
-        "K_kerker",
-        "K_metric",
-    )
     mix_fraction_mag: float  #: Mix-fraction for magnetization
     q_kerker: float  #: Kerker-mixing wavevector
     q_metric: float  #: Wavevector controlling reciprocal-space metric

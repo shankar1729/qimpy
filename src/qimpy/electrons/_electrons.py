@@ -9,29 +9,6 @@ from typing import Union, Optional, List
 class Electrons(qp.TreeNode):
     """Electronic subsystem"""
 
-    __slots__ = (
-        "comm",
-        "kpoints",
-        "spin_polarized",
-        "spinorial",
-        "n_spins",
-        "n_spinor",
-        "w_spin",
-        "fillings",
-        "basis",
-        "xc",
-        "diagonalize",
-        "scf",
-        "C",
-        "_n_bands_done",
-        "fixed_H",
-        "save_wavefunction",
-        "lcao",
-        "eig",
-        "deig_max",
-        "n_tilde",
-        "tau_tilde",
-    )
     comm: qp.MPI.Comm  #: Overall electronic communicator (k-points and bands/basis)
     kpoints: qp.electrons.Kpoints  #: Set of kpoints (mesh or path)
     spin_polarized: bool  #: Whether calculation is spin-polarized

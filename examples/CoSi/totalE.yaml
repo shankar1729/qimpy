@@ -24,3 +24,5 @@ electrons:
     sigma: 0.004
   k-mesh:
     size: [6, 6, 6]
+  scf:
+    n-iterations: 0

@@ -8,7 +8,6 @@ class Coulomb:
     """Coulomb interactions between fields and point charges.
     TODO: support non-periodic geometries (truncation)."""
 
-    __slots__ = ("grid", "ion_width", "sigma", "iR", "iG", "_kernel")
     grid: qp.grid.Grid  #: Grid associated with fields for coulomb interaction
     ion_width: float  #: Ion-charge gaussian width for embedding and solvation
     sigma: float  #: Ewald range-separation parameter

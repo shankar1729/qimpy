@@ -8,14 +8,6 @@ from typing import Optional, Union, Sequence
 class Lattice(qp.TreeNode):
     """Real and reciprocal space lattice vectors"""
 
-    __slots__ = (
-        "Rbasis",
-        "Gbasis",
-        "volume",
-        "compute_stress",
-        "grad",
-        "_requires_grad",
-    )
     Rbasis: torch.Tensor  #: Real-space lattice vectors (in columns)
     Gbasis: torch.Tensor  #: Reciprocal-space lattice vectors (in columns)
     volume: float  #: Unit cell volume

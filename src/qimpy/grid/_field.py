@@ -17,7 +17,6 @@ class Field(qp.utils.Gradable[FieldType]):
     full-reciprocal (:class:`FieldG`) or half-reciprocal (:class:`FieldH`)
     space."""
 
-    __slots__ = ("grid", "data")
     grid: qp.grid.Grid  #: Associated grid that determines dimensions of field
     data: torch.Tensor  #: Underlying data, with last three dimensions on grid
 

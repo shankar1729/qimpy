@@ -13,7 +13,6 @@ from typing import Callable, Optional, Union
 class Wavefunction(qp.utils.Gradable["Wavefunction"]):
     """Electronic wavefunctions including coefficients and projections"""
 
-    __slots__ = ("basis", "coeff", "band_division", "_proj", "_proj_version")
     basis: qp.electrons.Basis  #: Corresponding basis
 
     #: Wavefunction coefficients (n_spins x nk x n_bands x n_spinor x n_basis)

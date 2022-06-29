@@ -11,29 +11,6 @@ class Pseudopotential:
     for local potential, nonlocal projectors and atomic orbitals.
     Currently supports norm-conserving pseudopotentials."""
 
-    __slots__ = (
-        "element",
-        "atomic_number",
-        "is_paw",
-        "Z",
-        "l_max",
-        "r",
-        "dr",
-        "rho_atom",
-        "n_core",
-        "Vloc",
-        "ion_width",
-        "beta",
-        "psi",
-        "is_relativistic",
-        "j_beta",
-        "j_psi",
-        "eig_psi",
-        "D",
-        "Gmax",
-        "pqn_beta",
-        "pqn_psi",
-    )
     element: str  #: Chemical symbol of element
     atomic_number: int  #: Atomic number of element
     is_paw: bool  #: Whether this is a PAW pseudopotential

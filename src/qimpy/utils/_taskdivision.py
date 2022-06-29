@@ -7,17 +7,6 @@ from typing import Optional, List
 class TaskDivision:
     """Division of a number of tasks over MPI."""
 
-    __slots__ = (
-        "n_tot",
-        "n_procs",
-        "i_proc",
-        "n_each",
-        "n_prev",
-        "i_start",
-        "i_stop",
-        "n_mine",
-    )
-
     n_tot: int  #: Total number of tasks over all processes
     n_procs: int  #: Number of processes to split over
     i_proc: int  #: Rank of current process
@@ -66,7 +55,6 @@ class TaskDivision:
 class TaskDivisionCustom(TaskDivision):
     """Customized division of a number of tasks over MPI."""
 
-    __slots__ = ("n_each_custom",)
     n_each_custom: np.ndarray  #: Custom number of tasks on each process
 
     def __init__(self, *, n_mine: int, comm: Optional[qp.MPI.Comm]) -> None:

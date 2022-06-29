@@ -7,23 +7,6 @@ from typing import Optional
 class PseudoQuantumNumbers:
     """Quantum numbers of pseudo-atom in projector or orbital order."""
 
-    __slots__ = (
-        "n_tot",
-        "l_max",
-        "i_rf",
-        "n",
-        "l",
-        "m",
-        "i_lm",
-        "is_relativistic",
-        "n_tot_s",
-        "ns",
-        "ls",
-        "j",
-        "mj",
-        "i_ljm",
-        "i_ljms",
-    )
     n_tot: int  #: total number of projectors / orbitals (accounting for m)
     l_max: int  #: maximum l of projectors / orbitals
     i_rf: torch.Tensor  #: index of radial function (across all l)

@@ -8,18 +8,6 @@ from typing import Union, Optional, Dict, List, Any, Sequence
 class System(qp.TreeNode):
     """Overall system to calculate within QimPy"""
 
-    __slots__ = (
-        "lattice",
-        "ions",
-        "symmetries",
-        "electrons",
-        "grid",
-        "coulomb",
-        "energy",
-        "checkpoint_in",
-        "checkpoint_out",
-        "process_grid",
-    )
     lattice: qp.lattice.Lattice  #: Lattice vectors / unit cell definition
     ions: qp.ions.Ions  #: Ionic positions and pseudopotentials
     symmetries: qp.symmetries.Symmetries  #: Point and space group symmetries

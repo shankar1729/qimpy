@@ -14,7 +14,6 @@ class TreeNode:
     such as from YAML files, and to output to checkpoints such as in HDF5
     files preserving the same tree structure."""
 
-    __slots__ = ("child_names",)
     child_names: List[str]  #: Names of attributes with child objects.
 
     def __init__(self, **kwargs):

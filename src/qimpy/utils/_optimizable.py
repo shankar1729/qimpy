@@ -38,7 +38,6 @@ class Optimizable(Protocol):
 class ConvergenceCheck(Deque[bool]):
     """Check quantity stays unchanged a certain number of times."""
 
-    __slots__ = ("threshold", "n_check")
     threshold: float  #: Convergence threshold
     n_check: int  #: Number of consecutive checks that must pass at convergence
 

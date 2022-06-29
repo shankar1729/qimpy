@@ -13,27 +13,6 @@ from typing import Optional, Union, List
 class Ions(qp.TreeNode):
     """Ionic system: ionic geometry and pseudopotentials."""
 
-    __slots__ = (
-        "n_ions",
-        "n_types",
-        "symbols",
-        "n_ions_type",
-        "slices",
-        "pseudopotentials",
-        "positions",
-        "velocities",
-        "types",
-        "M_initial",
-        "Z",
-        "Z_tot",
-        "rho_tilde",
-        "Vloc_tilde",
-        "n_core_tilde",
-        "beta",
-        "beta_full",
-        "beta_version",
-        "D_all",
-    )
     n_ions: int  #: number of ions
     n_types: int  #: number of distinct ion types
     n_ions_type: List[int]  #: number of ions of each type
