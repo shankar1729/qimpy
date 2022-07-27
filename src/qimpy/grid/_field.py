@@ -125,13 +125,33 @@ class Field(qp.utils.Gradable[FieldType]):
     def __neg__(self: FieldType) -> FieldType:
         return self.__class__(self.grid, data=(-self.data))
 
-    def __mul__(self: FieldType, other: float) -> FieldType:
-        return self.__class__(self.grid, data=(self.data * other))
+    def __mul__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+        return self.clone().__imul__(other)
 
     __rmul__ = __mul__
 
-    def __imul__(self: FieldType, other: float) -> FieldType:
-        self.data *= other
+    def __imul__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+        if isinstance(other, float):
+            self.data *= other
+        elif isinstance(other, type(self)):
+            self.data *= other.data
+        else:
+            return NotImplemented
+        return self
+
+    def __truediv__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+        return self.clone().__itruediv__(other)
+
+    def __rtruediv__(self: FieldType, other: float) -> FieldType:
+        return self.__class__(self.grid, data=(other / self.data))
+
+    def __itruediv__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+        if isinstance(other, float):
+            self.data /= other
+        elif isinstance(other, type(self)):
+            self.data /= other.data
+        else:
+            return NotImplemented
         return self
 
     def dot(self: FieldType, other: FieldType) -> torch.Tensor:
