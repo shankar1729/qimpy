@@ -36,6 +36,21 @@ class Field(qp.utils.Gradable[FieldType]):
     def offset_grid_mine(self) -> Tuple[int, ...]:
         """Offset of local grid dimensions into global grid for Field type"""
 
+    @property
+    @abstractmethod
+    def is_complex(self) -> bool:
+        """Whether this represents a complex scalar field.
+        Note that a real scalar field has complex Fourier transform coefficients,
+        but would still be considered real here (i.e. this is False for `FieldH`).
+        """
+
+    @property
+    @abstractmethod
+    def is_tilde(self) -> bool:
+        """Whether this field is in reciprocal space.
+        (Corresponding variable names are typically suffixed by '_tilde'.)
+        """
+
     def __init__(
         self,
         grid: qp.grid.Grid,
@@ -134,7 +149,7 @@ class Field(qp.utils.Gradable[FieldType]):
         else:
             result = (data1 * data2).sum(dim=(-3, -2, -1))
         # Volume factor:
-        if isinstance(self, (FieldG, FieldH)):
+        if self.is_tilde:
             result *= self.grid.lattice.volume  # reciprocal space integration weight
         else:
             result *= self.grid.dV  # real space integration weight
@@ -195,10 +210,9 @@ class Field(qp.utils.Gradable[FieldType]):
     def gradient(self: FieldType, dim: int = 0) -> FieldType:
         """Gradient of field. A new batch dimension of length 3 is inserted
         at the location specified by `dim`, by default at the beginning."""
-        field_type = type(self)
-        if field_type in {FieldR, FieldC}:  # apply in reciprocal space
+        if not self.is_tilde:  # apply in reciprocal space
             return ~((~self).gradient(dim=dim))  # type: ignore
-        op = self.grid.get_gradient_operator("H" if (field_type == FieldH) else "G")
+        op = self.grid.get_gradient_operator("G" if self.is_complex else "H")
         shape_in = self.data.shape
         n_batch_dims = len(shape_in) - 3
         shape_data = shape_in[:dim] + (1,) + shape_in[dim:]
@@ -210,10 +224,9 @@ class Field(qp.utils.Gradable[FieldType]):
     def divergence(self: FieldType, dim: int = 0) -> FieldType:
         """Divergence of field. A dimension of length 3 at `dim`, by default
         at the beginning, is contracted against the gradient operator."""
-        field_type = type(self)
-        if field_type in {FieldR, FieldC}:  # apply in reciprocal space
+        if not self.is_tilde:  # apply in reciprocal space
             return ~((~self).divergence(dim=dim))  # type: ignore
-        op = self.grid.get_gradient_operator("H" if (field_type == FieldH) else "G")
+        op = self.grid.get_gradient_operator("G" if self.is_complex else "H")
         n_batch_dims = len(self.data.shape) - 4  # other than contracted one
         shape_op = (1,) * dim + (3,) + (1,) * (n_batch_dims - dim) + op.shape[1:]
         return self.__class__(
@@ -222,10 +235,9 @@ class Field(qp.utils.Gradable[FieldType]):
 
     def laplacian(self: FieldType) -> FieldType:
         """Laplacian of field."""
-        field_type = type(self)
-        if field_type in {FieldR, FieldC}:  # apply in reciprocal space
+        if not self.is_tilde:  # apply in reciprocal space
             return ~((~self).laplacian())  # type: ignore
-        iG = self.grid.get_mesh("H" if (field_type == FieldH) else "G")
+        iG = self.grid.get_mesh("G" if self.is_complex else "H")
         op = -((iG.to(torch.double) @ self.grid.lattice.Gbasis) ** 2).sum(dim=-1)
         return self.__class__(self.grid, data=(op * self.data))
 
@@ -280,6 +292,14 @@ class FieldR(Field["FieldR"]):
     def offset_grid_mine(self) -> Tuple[int, ...]:
         return self.grid.split0.i_start, 0, 0
 
+    @property
+    def is_complex(self) -> bool:
+        return False
+
+    @property
+    def is_tilde(self) -> bool:
+        return False
+
     def __invert__(self) -> FieldH:
         """Fourier transform (enables the ~ operator)"""
         return FieldH(self.grid, data=self.grid.fft(self.data))
@@ -306,6 +326,14 @@ class FieldC(Field["FieldC"]):
 
     def offset_grid_mine(self) -> Tuple[int, ...]:
         return self.grid.split0.i_start, 0, 0
+
+    @property
+    def is_complex(self) -> bool:
+        return True
+
+    @property
+    def is_tilde(self) -> bool:
+        return False
 
     def __invert__(self) -> FieldG:
         """Fourier transform (enables the ~ operator)"""
@@ -335,6 +363,14 @@ class FieldH(Field["FieldH"]):
 
     def offset_grid_mine(self) -> Tuple[int, ...]:
         return 0, 0, self.grid.split2H.i_start
+
+    @property
+    def is_complex(self) -> bool:
+        return False
+
+    @property
+    def is_tilde(self) -> bool:
+        return True
 
     def __invert__(self) -> FieldR:
         """Fourier transform (enables the ~ operator)"""
@@ -367,6 +403,14 @@ class FieldG(Field["FieldG"]):
 
     def offset_grid_mine(self) -> Tuple[int, ...]:
         return 0, 0, self.grid.split2.i_start
+
+    @property
+    def is_complex(self) -> bool:
+        return True
+
+    @property
+    def is_tilde(self) -> bool:
+        return True
 
     def __invert__(self) -> FieldC:
         """Fourier transform (enables the ~ operator)"""
