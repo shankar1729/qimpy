@@ -32,7 +32,10 @@ class RandomFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
         process_grid = qp.utils.ProcessGrid(self.comm, "rkb")
         lattice = qp.lattice.Lattice(system="Orthorhombic", a=10.0, b=1.0, c=1.0)
         ions = qp.ions.Ions(
-            pseudopotentials=[], coordinates=[], process_grid=process_grid
+            lattice=lattice,
+            pseudopotentials=[],
+            coordinates=[],
+            process_grid=process_grid,
         )
         symmetries = qp.symmetries.Symmetries(lattice=lattice, ions=ions)
         grid = qp.grid.Grid(
