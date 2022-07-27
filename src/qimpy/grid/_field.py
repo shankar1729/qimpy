@@ -318,6 +318,12 @@ class FieldR(Field["FieldR"]):
             return self
         return _change_real(self, grid)
 
+    def log(self) -> FieldR:
+        return FieldR(self.grid, data=self.data.log())
+
+    def exp(self) -> FieldR:
+        return FieldR(self.grid, data=self.data.exp())
+
 
 class FieldC(Field["FieldC"]):
     """Complex fields in real space."""
