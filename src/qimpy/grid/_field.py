@@ -2,9 +2,8 @@ from __future__ import annotations
 import qimpy as qp
 import torch
 from abc import abstractmethod
-from numbers import Number
 from ._change import _change_real, _change_recip
-from typing import TypeVar, Any, Tuple, Optional, Sequence
+from typing import TypeVar, Any, Union, Tuple, Optional, Sequence
 
 
 FieldType = TypeVar("FieldType", bound="Field")  #: Type for field ops.
@@ -85,45 +84,53 @@ class Field(qp.utils.Gradable[FieldType]):
             assert data.dtype == dtype
             self.data = data
 
-    def __add__(self: FieldType, other: FieldType) -> FieldType:
-        if not isinstance(other, type(self)):
-            return NotImplemented
-        assert self.grid is other.grid
-        return self.__class__(self.grid, data=(self.data + other.data))
+    def clone(self: FieldType) -> FieldType:
+        """Create field with cloned data (deep copy)."""
+        return self.__class__(self.grid, data=self.data.clone())
 
-    def __iadd__(self: FieldType, other: FieldType) -> FieldType:
-        if not isinstance(other, type(self)):
+    def add_(
+        self: FieldType, other: Union[FieldType, float], *, alpha: float = 1.0
+    ) -> FieldType:
+        """Add in-place with optional scale factor (Mirroring torch.Tensor.add_)."""
+        if isinstance(other, float):
+            if self.is_tilde:
+                # Scalar shift only affects constant G=0 term:
+                self.data[self.get_origin_index()] += other * alpha
+            else:
+                self.data += other * alpha
+        elif isinstance(other, type(self)):
+            assert self.grid is other.grid
+            self.data.add_(other.data, alpha=alpha)
+        else:
             return NotImplemented
-        assert self.grid is other.grid
-        self.data += other.data
         return self
 
-    def __sub__(self: FieldType, other: FieldType) -> FieldType:
-        if not isinstance(other, type(self)):
-            return NotImplemented
-        assert self.grid is other.grid
-        return self.__class__(self.grid, data=(self.data - other.data))
+    def __add__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+        return self.clone().add_(other)
 
-    def __isub__(self: FieldType, other: FieldType) -> FieldType:
-        if not isinstance(other, type(self)):
-            return NotImplemented
-        assert self.grid is other.grid
-        self.data -= other.data
-        return self
+    __radd__ = __add__
+
+    def __iadd__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+        return self.add_(other)
+
+    def __sub__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+        return self.clone().add_(other, alpha=-1.0)
+
+    def __rsub__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+        return (-self).add_(other)
+
+    def __isub__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+        return self.add_(other, alpha=-1.0)
 
     def __neg__(self: FieldType) -> FieldType:
         return self.__class__(self.grid, data=(-self.data))
 
     def __mul__(self: FieldType, other: float) -> FieldType:
-        if not isinstance(other, Number):
-            return NotImplemented
         return self.__class__(self.grid, data=(self.data * other))
 
     __rmul__ = __mul__
 
     def __imul__(self: FieldType, other: float) -> FieldType:
-        if not isinstance(other, Number):
-            return NotImplemented
         self.data *= other
         return self
 
