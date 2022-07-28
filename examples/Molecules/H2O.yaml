@@ -20,4 +20,8 @@ electrons:
   scf:
     mix-density: no  # mix potential instead
 
+geometry:
+  relax:
+    n-iterations: 10
+
 #checkpoint: null  # disable reading checkpoint

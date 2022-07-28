@@ -128,7 +128,14 @@ class System(qp.TreeNode):
         )
         self.coulomb = qp.grid.Coulomb(self.grid, self.ions.n_ions)
 
-        self.add_child("geometry", qp.geometry.Geometry, geometry, checkpoint_in)
+        self.add_child(
+            "geometry",
+            qp.geometry.Geometry,
+            geometry,
+            checkpoint_in,
+            comm=self.electrons.comm,
+            lattice=self.lattice,
+        )
 
         # Initialize ionic potentials and energies at initial configuration:
         self.energy = qp.Energy()

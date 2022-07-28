@@ -199,6 +199,11 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
                 )
             self.variable = v  # type: ignore
 
+        # Cleanup: TODO: decide if desirable to keep history
+        self._variables.clear()
+        self._residuals.clear()
+        self._overlaps = np.zeros((0, 0), dtype=float)
+
     def _sync(self, v: float) -> float:
         """Ensure `v` is consistent on `comm`."""
         return self.comm.bcast(v)

@@ -18,6 +18,8 @@ class Geometry(qp.TreeNode):
     def __init__(
         self,
         *,
+        comm: qp.MPI.Comm,
+        lattice: qp.lattice.Lattice,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         fixed: Optional[Union[dict, qp.geometry.Fixed]] = None,
         relax: Optional[Union[dict, qp.geometry.Relax]] = None,
@@ -30,7 +32,9 @@ class Geometry(qp.TreeNode):
             "action",
             checkpoint_in,
             qp.TreeNode.ChildOptions("fixed", qp.geometry.Fixed, fixed),
-            qp.TreeNode.ChildOptions("relax", qp.geometry.Relax, relax),
+            qp.TreeNode.ChildOptions(
+                "relax", qp.geometry.Relax, relax, comm=comm, lattice=lattice
+            ),
             have_default=True,
         )
 
