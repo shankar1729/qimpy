@@ -121,32 +121,26 @@ class Electrons(qp.TreeNode):
         qp.log.info("\n--- Initializing Electrons ---")
 
         # Initialize k-points:
-        n_options = np.count_nonzero([(k is not None) for k in (k_mesh, k_path)])
-        if n_options == 0:
-            k_mesh = {}  # Gamma-only
-        if n_options > 1:
-            raise ValueError("Cannot use both k-mesh and k-path")
-        if k_mesh is not None:
-            self.add_child(
-                "kpoints",
+        self.add_child_one_of(
+            "kpoints",
+            checkpoint_in,
+            qp.TreeNode.ChildOptions(
+                "k-mesh",
                 qp.electrons.Kmesh,
                 k_mesh,
-                checkpoint_in,
-                attr_version_name="k-mesh",
                 process_grid=process_grid,
                 symmetries=symmetries,
                 lattice=lattice,
-            )
-        if k_path is not None:
-            self.add_child(
-                "kpoints",
+            ),
+            qp.TreeNode.ChildOptions(
+                "k-path",
                 qp.electrons.Kpath,
                 k_path,
-                checkpoint_in,
-                attr_version_name="k-path",
                 process_grid=process_grid,
                 lattice=lattice,
-            )
+            ),
+            have_default=True,
+        )
         self.comm = process_grid.get_comm("kb")
 
         # Initialize spin:
@@ -226,29 +220,23 @@ class Electrons(qp.TreeNode):
             )
 
         # Initialize diagonalizer:
-        n_options = np.count_nonzero([(d is not None) for d in (davidson, chefsi)])
-        if n_options == 0:
-            davidson = {}
-        if n_options > 1:
-            raise ValueError("Cannot use both davidson and chefsi")
-        if davidson is not None:
-            self.add_child(
-                "diagonalize",
+        self.add_child_one_of(
+            "diagonalize",
+            checkpoint_in,
+            qp.TreeNode.ChildOptions(
+                "davidson",
                 qp.electrons.Davidson,
                 davidson,
-                checkpoint_in,
-                attr_version_name="davidson",
                 electrons=self,
-            )
-        if chefsi is not None:
-            self.add_child(
-                "diagonalize",
+            ),
+            qp.TreeNode.ChildOptions(
+                "chefsi",
                 qp.electrons.CheFSI,
                 chefsi,
-                checkpoint_in,
-                attr_version_name="chefsi",
                 electrons=self,
-            )
+            ),
+            have_default=True,
+        )
         qp.log.info("\nDiagonalization: " + repr(self.diagonalize))
 
         # Initialize SCF:

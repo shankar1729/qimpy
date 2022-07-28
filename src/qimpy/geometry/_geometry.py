@@ -1,6 +1,5 @@
 from __future__ import annotations
 import qimpy as qp
-import numpy as np
 from typing import Protocol, Optional, Union
 
 
@@ -27,27 +26,13 @@ class Geometry(qp.TreeNode):
         Defaults to `Fixed` if none specified.
         """
         super().__init__()
-        n_options = np.count_nonzero([(d is not None) for d in (fixed, relax)])
-        if n_options == 0:
-            fixed = {}
-        if n_options > 1:
-            raise ValueError("Cannot use both davidson and chefsi")
-        if fixed is not None:
-            self.add_child(
-                "action",
-                qp.geometry.Fixed,
-                fixed,
-                checkpoint_in,
-                attr_version_name="fixed",
-            )
-        if relax is not None:
-            self.add_child(
-                "action",
-                qp.geometry.Relax,
-                relax,
-                checkpoint_in,
-                attr_version_name="relax",
-            )
+        self.add_child_one_of(
+            "action",
+            checkpoint_in,
+            qp.TreeNode.ChildOptions("fixed", qp.geometry.Fixed, fixed),
+            qp.TreeNode.ChildOptions("relax", qp.geometry.Relax, relax),
+            have_default=True,
+        )
 
     def run(self, system: qp.System):
         """Run selected geometry action."""

@@ -5,7 +5,6 @@ from typing import List, Union, TypeVar, Type, final
 
 ClassType = TypeVar("ClassType")
 TreeNodeType = TypeVar("TreeNodeType", bound="TreeNode")
-TreeNodeType2 = TypeVar("TreeNodeType2", bound="TreeNode")
 
 
 class TreeNode:
@@ -59,6 +58,8 @@ class TreeNode:
         error, which may be useful when the same `attr_name` could be
         initialized by several versions eg. `kpoints` in :class:`Electrons`
         could be `k-mesh` (:class:`Kmesh`) or `k-path` (:class:`Kmesh`).
+        For such cases, use `add_child_one_of` instead, which wraps `add_child`
+        and handles the selection of which version of the child to use.
         """
         if params is None:
             params = {}  # Logic below can focus on dict vs cls now.
@@ -88,3 +89,50 @@ class TreeNode:
         # Add as an attribute and child in hierarchy:
         setattr(self, attr_name, result)
         self.child_names.append(attr_name)
+
+    def add_child_one_of(
+        self,
+        attr_name: str,
+        checkpoint_in: qp.utils.CpPath,
+        *args: ChildOptions,
+        have_default: bool,
+    ) -> None:
+        """Invoke `add_child` on one of several child options in `args`.
+        At most one of the child options should have a `params` that is not None.
+        If `have_default`, create child with the first class and default `params`.
+        Otherwise, at least one of the child options should have a non-None `params`.
+        """
+        arg_options = [arg for arg in args if (arg.params is not None)]
+        if len(arg_options) > 1:
+            arg_option_names = ", ".join(arg.attr_version_name for arg in arg_options)
+            raise ValueError(f"Cannot use more than one of {arg_option_names}")
+        if not (arg_options or have_default):
+            arg_names = ", ".join(arg.attr_version_name for arg in args)
+            raise ValueError(f"At least one of {arg_names} must be specified")
+        # Add the selected / default child:
+        arg_sel = arg_options[0] if arg_options else args[0]
+        self.add_child(
+            attr_name,
+            arg_sel.cls,
+            arg_sel.params,
+            checkpoint_in,
+            arg_sel.attr_version_name,
+            **arg_sel.kwargs,
+        )
+
+    class ChildOptions:
+        """Arguments to `qimpy.TreeNode.add_child`.
+        Used to specify multiple option lists in `qimpy.TreeNode.add_child_one_of`.
+        """
+
+        def __init__(
+            self,
+            attr_version_name: str,
+            cls: Type[TreeNodeType],
+            params: Union[TreeNodeType, dict, None],
+            **kwargs,
+        ) -> None:
+            self.attr_version_name = attr_version_name
+            self.cls = cls
+            self.params = params
+            self.kwargs = kwargs
