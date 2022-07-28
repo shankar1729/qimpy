@@ -11,6 +11,7 @@ __all__ = [
     "symmetries",
     "grid",
     "electrons",
+    "geometry",
     "System",
     "log",
 ]
@@ -26,6 +27,7 @@ from . import lattice
 from . import symmetries
 from . import grid
 from . import electrons
+from . import geometry
 from ._system import System
 import logging
 

@@ -14,6 +14,7 @@ class System(qp.TreeNode):
     electrons: qp.electrons.Electrons  #: Electronic sub-system
     grid: qp.grid.Grid  #: Charge-density grid
     coulomb: qp.grid.Coulomb  #: Coulomb interactions on charge-density grid
+    geometry: qp.geometry.Geometry  #: Geometry actions, e.g., relaxation / dynamics
     energy: qp.Energy  #: Energy components
     checkpoint_in: qp.utils.CpPath  #: Input checkpoint
     checkpoint_out: Optional[str]  #: Filename for output checkpoint
@@ -27,6 +28,7 @@ class System(qp.TreeNode):
         symmetries: Union[qp.symmetries.Symmetries, dict, None] = None,
         electrons: Union[qp.electrons.Electrons, dict, None] = None,
         grid: Union[qp.grid.Grid, dict, None] = None,
+        geometry: Union[qp.geometry.Geometry, dict, None] = None,
         checkpoint: Optional[str] = None,
         checkpoint_out: Optional[str] = None,
         comm: Optional[qp.MPI.Comm] = None,
@@ -126,6 +128,8 @@ class System(qp.TreeNode):
         )
         self.coulomb = qp.grid.Coulomb(self.grid, self.ions.n_ions)
 
+        self.add_child("geometry", qp.geometry.Geometry, geometry, checkpoint_in)
+
         # Initialize ionic potentials and energies at initial configuration:
         self.energy = qp.Energy()
         self.ions.update(self)
@@ -149,20 +153,7 @@ class System(qp.TreeNode):
 
     def run(self) -> None:
         """Run any actions specified in the input."""
-        self.electrons.run(self)
-        qp.log.info(f"\nEnergy components:\n{repr(self.energy)}")
-        qp.log.info("")
-        if not self.electrons.fixed_H:
-            self.geometry_grad()  # update forces / stress
-            self.ions.report(report_grad=True)  # positions, forces
-            if self.lattice.compute_stress:
-                self.lattice.report(report_grad=True)  # lattice, stress
-        if self.checkpoint_out:
-            self.save_checkpoint(
-                qp.utils.CpPath(
-                    checkpoint=qp.utils.Checkpoint(self.checkpoint_out, mode="w")
-                )
-            )
+        self.geometry.run(self)
 
 
 def _add_axis(

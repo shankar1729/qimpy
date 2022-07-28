@@ -17,6 +17,9 @@ class Lattice(qp.TreeNode):
     grad: torch.Tensor  #: Lattice gradient of energy := dE/dRbasis @ Rbasis.T
     _requires_grad: bool  #: Internal flag to control collection of lattice gradients
 
+    movable: bool  #: Whether lattice can be moved in geometry relaxation / dynamics
+    move_scale: torch.Tensor  #: Scale factors to precondition / constrain lattice move
+
     def __init__(
         self,
         *,
@@ -34,6 +37,8 @@ class Lattice(qp.TreeNode):
         vector3: Optional[Sequence[float]] = None,
         scale: Optional[Union[float, Sequence[float]]] = None,
         compute_stress: bool = False,
+        movable: bool = False,
+        move_scale: Sequence[float] = (1.0, 1.0, 1.0),
     ) -> None:
         """Initialize from lattice vectors or lengths and angles.
         Either specify a lattice `system` and optional `modification`,
@@ -85,12 +90,18 @@ class Lattice(qp.TreeNode):
         scale
             :yaml:`Scale factor for lattice vectors.` Either a single number
             that uniformly scales all lattice vectors or separate factor
-            :math:`[s_1, s_2, s_3]` for each lattice vector. boo
+            :math:`[s_1, s_2, s_3]` for each lattice vector.
         compute_stress
             :yaml:`Whether to compute and report stress.`
-            Enable to report stress regardless of lattice optimization.
-            Note that when lattice optimization is enabled, this input
-            is overridden and stresses are always computed.
+            Enable to report stress regardless of whether lattice is `movable`.
+            (Stresses are always computed when lattice is `movable`.)
+        movable
+            :yaml:`Whether to move lattice during geometry relaxation / dynamics.`
+        move_scale
+            :yaml:`Scale factor for moving each lattice vector.`
+            Set to zero for some directions to constrain lattice relaxation
+            or dynamics. Can also adjust the magnitude to precondition lattice
+            motion relative to the ions (internal coordinates).
         """
         super().__init__()
         qp.log.info("\n--- Initializing Lattice ---")
@@ -120,9 +131,14 @@ class Lattice(qp.TreeNode):
 
         # Compute dependent quantities:
         self.update(self.Rbasis.to(qp.rc.device), report_change=False)
-        self.compute_stress = compute_stress
+        self.compute_stress = compute_stress or movable
         self.requires_grad_(False, clear=True)  # initialize gradient
         self.report(report_grad=False)
+
+        # Optimization / constraints:
+        self.movable = movable
+        self.move_scale = torch.tensor(move_scale, device=qp.rc.device)
+        assert self.move_scale.shape == (3,)
 
     def update(self, Rbasis: torch.Tensor, report_change: bool = True) -> None:
         """Update lattice vectors and dependent quantities.
