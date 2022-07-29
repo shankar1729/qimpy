@@ -2,7 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import torch
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 
 
 @dataclass
@@ -87,6 +87,7 @@ class Relax(qp.utils.Minimize[Gradient]):
         cg_type: str = "polak-ribiere",
         line_minimize: str = "auto",
         n_history: int = 15,
+        converge_on: Union[str, int] = "any",
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
     ) -> None:
         """
@@ -120,6 +121,13 @@ class Relax(qp.utils.Minimize[Gradient]):
             Wolfe is a cubic line step best suited for L-BFGS.
         n_history
             :yaml:`Maximum history size (only used for L-BFGS).`
+        converge_on
+            :yaml:`Converge on 'any', 'all' or a specific number of thresholds.`
+            If set to `any`, reaching threshold on any one of energy, force and stress
+            (wherever applicable) will lead to convergence. When set to `all`, all
+            applicable thresholds must be satisfied. If set to an integer between 1
+            and the number of applicable thresholds, require that many thresholds to
+            be satisfied simultaneously to achieve convergence.
         """
         extra_thresholds = {"fmax": fmax_threshold}
         if lattice.movable:
@@ -135,6 +143,7 @@ class Relax(qp.utils.Minimize[Gradient]):
             cg_type=cg_type,
             line_minimize=line_minimize,
             n_history=n_history,
+            converge_on=converge_on,
         )
 
     def run(self, system: qp.System) -> None:

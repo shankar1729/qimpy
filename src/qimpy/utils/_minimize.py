@@ -5,7 +5,7 @@ from ._minimize_lbfgs import _lbfgs
 from ._minimize_cg import _cg
 from ._minimize_line import LINE_MINIMIZE, Vector
 from abc import ABC, abstractmethod
-from typing import Generic, Sequence, Dict, NamedTuple, Optional
+from typing import Generic, Sequence, Dict, NamedTuple, Optional, Union
 
 
 class MinimizeState(Generic[Vector]):
@@ -52,6 +52,8 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
     step_size: StepSize  #: Step size options
     n_history: int  #: Maximum history size (only used for L-BFGS)
     wolfe: Wolfe  #: Wolfe line minimize stopping conditions
+    converge_on: Union[str, int]  #: Converge on 'any', 'all' or a number of thresholds
+    n_converge: int  #: Number of thresholds that `converge_on` corresponds to
 
     #: Names and thresholds for any additional convergence quantities. These
     #: are in addition to energy, included by default. Use a name bracketed by
@@ -74,6 +76,7 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         step_size: Optional[dict] = None,
         n_history: int = 15,
         wolfe: Optional[dict] = None,
+        converge_on: Union[str, int] = "any",
     ) -> None:
         """Initialize minimization algorithm parameters."""
         super().__init__()
@@ -89,6 +92,8 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         self.wolfe = Minimize.Wolfe(
             **qp.utils.dict.key_cleanup({} if (wolfe is None) else wolfe)
         )
+        self.converge_on = converge_on
+        self.n_converge = _get_nconverge(converge_on, 1 + len(extra_thresholds))
 
         # Validate direction update options:
         preferred_lm = {
@@ -196,3 +201,18 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
                 delattr(state, attr_name)
         self.compute(state, energy_only)
         return self._sync(float(state.energy))
+
+
+def _get_nconverge(converge_on: Union[str, int], n_thresholds: int) -> int:
+    """Convert `converge_on` to number of convergence thresholds."""
+    if isinstance(converge_on, str):
+        converge_key = converge_on.lower()  # don't enforce case
+        if converge_key == "any":
+            return 1
+        if converge_key == "all":
+            return n_thresholds
+    if isinstance(converge_on, int) and (1 <= converge_on <= n_thresholds):
+        return converge_on
+    raise ValueError(
+        f"converge_on must be 'any', 'all' or an integer between 1 and {n_thresholds}"
+    )

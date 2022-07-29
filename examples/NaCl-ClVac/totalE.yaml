@@ -5,7 +5,7 @@ lattice:
   vector2: [0.5, 0, 0.5] #Also, not ambiguous as separate vectors,
   vector3: [0.5, 0.5, 0] #compared to the 3x3 matrix of JDFTx.
   scale: 21.48 #for 2x2x2 supercell, in bohrs (could be a length 3 list/tuple)
-  compute-stress: yes
+  movable: yes #optimize lattice vectors
 
 ions:
   pseudopotentials:
@@ -34,5 +34,10 @@ electrons:
   scf:
     mix-density: no  # mix potential instead
 
-checkpoint: null  # disable reading checkpoint
+geometry:
+  relax:
+    n-iterations: 10
+    stress-threshold: 1.0E-7
+
+#checkpoint: null  # disable reading checkpoint
 #checkpoint-out: NaCl-ClVac.h5  # but still create it

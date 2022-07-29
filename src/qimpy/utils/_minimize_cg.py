@@ -144,7 +144,7 @@ def _check_convergence(
     qp.log.info(line)
 
     # Stopping criteria:
-    if converged:
+    if len(converged) >= self.n_converge:
         qp.log.info(f"{self.name}: Converged on " f'{", ".join(converged)} criteria.')
         return E, E_prev, True
     if not np.isfinite(E):

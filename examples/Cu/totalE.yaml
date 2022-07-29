@@ -2,7 +2,8 @@ lattice:
   system: cubic
   modification: face-centered
   a: 6.822  # bohrs
-  
+  movable: yes
+
 ions:
   pseudopotentials:
     - ../../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
@@ -21,6 +22,11 @@ electrons:
   xc: 
     functional: gga-xc-pbe
   save-wavefunction: no  #keeps checkpoint small
+
+geometry:
+  relax:
+    n-iterations: 10
+    converge-on: all
 
 checkpoint: null  # disable reading checkpoint
 checkpoint-out: totalE.h5  # but still create it
