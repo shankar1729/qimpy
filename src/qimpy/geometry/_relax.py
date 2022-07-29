@@ -83,6 +83,7 @@ class Relax(qp.utils.Minimize[Gradient]):
         energy_threshold: float = 1e-5,
         fmax_threshold: float = 5e-4,
         stress_threshold: float = 1e-3,
+        n_consecutive: int = 1,
         method: str = "l-bfgs",
         cg_type: str = "polak-ribiere",
         line_minimize: str = "auto",
@@ -103,6 +104,8 @@ class Relax(qp.utils.Minimize[Gradient]):
             :yaml:`Convergence threshold on maximum force in Eh/a0.`
         stress_threshold
             :yaml:`Convergence threshold on |stress| (stress tensor norm) in Eh/a0^3.`
+        n_consecutive
+            :yaml:`Number of consecutive iterations each threshold must be satisfied.`
         method
             :yaml:`Relaxation algorithm: L-BFGS, CG or Gradient.`
             The default L-BFGS (limited-memory Broyden–Fletcher–Goldfarb–Shanno)
@@ -139,6 +142,7 @@ class Relax(qp.utils.Minimize[Gradient]):
             n_iterations=n_iterations,
             energy_threshold=energy_threshold,
             extra_thresholds=extra_thresholds,
+            n_consecutive=n_consecutive,
             method=method,
             cg_type=cg_type,
             line_minimize=line_minimize,

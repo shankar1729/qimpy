@@ -41,6 +41,7 @@ class LCAO(Minimize[MatrixArray]):
             n_iterations=n_iterations,
             extra_thresholds={"|grad|": gradient_threshold},
             energy_threshold=energy_threshold,
+            n_consecutive=1,
         )
 
     def update(self, system: qp.System) -> None:

@@ -46,6 +46,7 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
     name: str  #: Name of algorithm instance used in reporting eg. 'Ionic'
     n_iterations: int  #: Maximum number of iterations
     energy_threshold: float  #: Convergence threshold on energy change
+    n_consecutive: int  #: Number of consecutive iterations threshold must be satisfied
     method: str  #: CG, L-BFGS or Gradient (i.e steepest descent)
     cg_type: str  #: Polak-Ribiere, Fletcher-Reeves or Hestenes-Stiefel
     line_minimize: str  #: Line minimization: Auto, Constant, Quadratic, Wolfe
@@ -70,6 +71,7 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         n_iterations: int,
         energy_threshold: float,
         extra_thresholds: Dict[str, float],
+        n_consecutive: int,
         method: str,
         cg_type: str = "polak-ribiere",
         line_minimize: str = "auto",
@@ -85,6 +87,7 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         self.n_iterations = n_iterations
         self.energy_threshold = energy_threshold
         self.extra_thresholds = extra_thresholds
+        self.n_consecutive = n_consecutive
         self.step_size = Minimize.StepSize(
             **qp.utils.dict.key_cleanup({} if (step_size is None) else step_size)
         )

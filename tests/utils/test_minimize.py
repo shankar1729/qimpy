@@ -27,6 +27,7 @@ class RandomFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
             n_iterations=100,
             energy_threshold=1e-9,
             extra_thresholds={"|grad|": 1e-8},
+            n_consecutive=1,
             method=method,
         )
         process_grid = qp.utils.ProcessGrid(self.comm, "rkb")

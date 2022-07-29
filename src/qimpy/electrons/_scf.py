@@ -26,6 +26,7 @@ class SCF(qp.utils.Pulay[qp.grid.FieldH]):
         n_iterations: int = 50,
         energy_threshold: float = 1e-8,
         residual_threshold: float = 1e-7,
+        n_consecutive: int = 1,
         n_history: int = 10,
         mix_fraction: float = 0.5,
         mix_fraction_mag: float = 1.5,
@@ -51,6 +52,8 @@ class SCF(qp.utils.Pulay[qp.grid.FieldH]):
             Stop when the norm of the residual i.e. difference in mixed
             variable (density / potential) between consecutive iterations
             falls below this threshold.
+        n_consecutive
+            :yaml:`Number of consecutive iterations each threshold must be satisfied.`
         n_history
             :yaml:`History size for Pulay mixing.`
             This sets the number of previous residuals and variables to use
@@ -97,6 +100,7 @@ class SCF(qp.utils.Pulay[qp.grid.FieldH]):
             n_iterations=n_iterations,
             energy_threshold=float(energy_threshold),
             residual_threshold=float(residual_threshold),
+            n_consecutive=n_consecutive,
             extra_thresholds={"|deig|": self.eig_threshold},
             n_history=n_history,
             mix_fraction=mix_fraction,

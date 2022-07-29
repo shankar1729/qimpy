@@ -21,6 +21,7 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
     n_iterations: int  #: Maximum number of iterations
     energy_threshold: float  #: Convergence threshold on energy change
     residual_threshold: float  #: Covergence threshold on residual
+    n_consecutive: int  #: Number of consecutive iterations threshold must be satisfied
     n_history: int  #: Number of past variables / residuals to retain
     mix_fraction: float  #: Variable mixing fraction between cycles
     _variables: Deque[Variable]  #: History of most recent variables
@@ -44,6 +45,7 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
         energy_threshold: float,
         residual_threshold: float,
         extra_thresholds: Dict[str, float],
+        n_consecutive: int,
         n_history: int,
         mix_fraction: float,
     ) -> None:
@@ -55,6 +57,7 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
         self.energy_threshold = energy_threshold
         self.residual_threshold = residual_threshold
         self.extra_thresholds = extra_thresholds
+        self.n_consecutive = n_consecutive
         self.n_history = n_history
         self.mix_fraction = mix_fraction
         self._variables = deque(maxlen=n_history)
@@ -126,11 +129,11 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
         # Initialize convergence checks:
         Ename = energy.name
         checks = {
-            "d" + Ename: ConvergenceCheck(self.energy_threshold),
-            "|residual|": ConvergenceCheck(self.residual_threshold),
+            "d" + Ename: ConvergenceCheck(self.energy_threshold, self.n_consecutive),
+            "|residual|": ConvergenceCheck(self.residual_threshold, self.n_consecutive),
         }
         for extra_name, extra_threshold in self.extra_thresholds.items():
-            checks[extra_name] = ConvergenceCheck(extra_threshold)
+            checks[extra_name] = ConvergenceCheck(extra_threshold, self.n_consecutive)
 
         for i_iter in range(self.n_iterations):
             # Cache variable:

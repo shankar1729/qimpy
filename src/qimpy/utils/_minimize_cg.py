@@ -110,9 +110,14 @@ def _initialize_convergence_checks(
 ) -> Dict[str, qp.utils.ConvergenceCheck]:
     """Initialize convergence checkers for energy and `extra_thresholds`."""
     Ename = state.energy.name
-    checks = {"d" + Ename: qp.utils.ConvergenceCheck(self.energy_threshold)}
+    checks = {
+        "d"
+        + Ename: qp.utils.ConvergenceCheck(self.energy_threshold, self.n_consecutive)
+    }
     for extra_name, extra_threshold in self.extra_thresholds.items():
-        checks[extra_name] = qp.utils.ConvergenceCheck(extra_threshold)
+        checks[extra_name] = qp.utils.ConvergenceCheck(
+            extra_threshold, self.n_consecutive
+        )
     return checks
 
 
