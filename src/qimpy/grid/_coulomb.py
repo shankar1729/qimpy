@@ -26,17 +26,21 @@ class Coulomb:
             Number of point charges to optimize Ewald sums for.
         """
         self.grid = grid
-        rc = qp.rc
-        lattice = grid.lattice
 
         # Determine ionic width from maximum grid spacing
         h_max = (
-            (lattice.Rbasis.norm(dim=0).to(rc.cpu) / torch.tensor(grid.shape))
+            (grid.lattice.Rbasis.norm(dim=0).to(qp.rc.cpu) / torch.tensor(grid.shape))
             .max()
             .item()
         )
         self.ion_width = 2.2 * h_max  # Best balance from test_nyquist()
         qp.log.info(f"Ionic width for embedding / fluids: {self.ion_width:f}")
+        self.update_lattice_dependent(n_ions)
+
+    def update_lattice_dependent(self, n_ions: int) -> None:
+        """Update all members that depend on lattice vectors."""
+        grid = self.grid
+        lattice = grid.lattice
 
         # Determine optimum gaussian width for Ewald sums:
         # Uses fact that number of reciprocal cells is proportional to lattice
@@ -60,10 +64,10 @@ class Coulomb:
             and optionaly excluding the zero (origin) point"""
             Rcut = qp.grid.N_SIGMAS_PER_WIDTH * sigma
             # Create parallelopiped mesh:
-            RlengthInv = Gbasis.norm(dim=0).to(rc.cpu) / (2 * np.pi)
+            RlengthInv = Gbasis.norm(dim=0).to(qp.rc.cpu) / (2 * np.pi)
             Ncut = 1 + torch.ceil(Rcut * RlengthInv).to(torch.int)
             iRgrids = [
-                torch.arange(-N, N + 1, device=rc.device, dtype=torch.double)
+                torch.arange(-N, N + 1, device=qp.rc.device, dtype=torch.double)
                 for N in Ncut
             ]
             iR = (
@@ -73,7 +77,7 @@ class Coulomb:
                 iR = iR[torch.where(iR.abs().sum(dim=-1))[0]]
             # Add margin mesh:
             marginGrid = torch.tensor(
-                [-1, +1] if include_margin else [0], device=rc.device
+                [-1, +1] if include_margin else [0], device=qp.rc.device
             )
             iMargin = (
                 torch.stack(torch.meshgrid([marginGrid] * 3, indexing="ij"))

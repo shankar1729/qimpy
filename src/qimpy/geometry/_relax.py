@@ -73,6 +73,7 @@ class Relax(qp.utils.Minimize[Gradient]):
 
     system: qp.System  #: System being optimized currently
     invRbasis0: torch.Tensor  #: Initial lattice vectors inverse (used to define strain)
+    latticeK: float  #: Preconditioning factor of lattice relative to ions
 
     def __init__(
         self,
@@ -154,6 +155,9 @@ class Relax(qp.utils.Minimize[Gradient]):
         qp.log.info("\n--- Geometry relaxation ---\n")
         self.system = system
         self.invRbasis0 = system.lattice.invRbasis
+        self.latticeK = (
+            system.lattice.move_scale.mean() / system.lattice.volume ** (1.0 / 3)
+        ) ** 2  # effectively bring lattice derivatives to same dimensions as forces
         self.minimize()
 
     def step(self, direction: Gradient, step_size: float) -> None:
@@ -166,6 +170,7 @@ class Relax(qp.utils.Minimize[Gradient]):
                 + step_size * (direction.lattice @ lattice.Rbasis),
                 report_change=False,
             )
+            self.system.coulomb.update_lattice_dependent(self.system.ions.n_ions)
 
     def compute(
         self, state: qp.utils.MinimizeState[Gradient], energy_only: bool
@@ -186,10 +191,12 @@ class Relax(qp.utils.Minimize[Gradient]):
             state.gradient = self.constrain(
                 Gradient(
                     ions=-system.ions.forces,
-                    lattice=(lattice.stress if lattice.movable else None),
+                    lattice=(lattice.grad if lattice.movable else None),
                 )
             )
-            state.K_gradient = state.gradient.clone()  # TODO: precondition
+            state.K_gradient = state.gradient.clone()
+            if state.K_gradient.lattice is not None:
+                state.K_gradient.lattice *= self.latticeK
             state.extra = [system.ions.forces.norm(dim=1).max().item()]  # fmax
             if lattice.movable:
                 state.extra.append(lattice.stress.norm().item())  # |stress|

@@ -20,7 +20,6 @@ class Grid(qp.TreeNode):
     i_proc: int  #: Rank within comm
     is_split: bool  #: Whether the grid is split over MPI
     ke_cutoff: float  #: Kinetic energy of Nyquist-frequency plane-waves
-    dV: float  #: Volume per grid point (real-space integration weight)
     shape: Tuple[int, ...]  #: Global real-space grid dimensions
     shapeH: Tuple[int, ...]  #: Global half-reciprocal-space grid dimensions
     shapeR_mine: Tuple[int, ...]  #: Local real grid dimensions
@@ -137,8 +136,12 @@ class Grid(qp.TreeNode):
                 )
             self.shape = tuple(symmetries.get_grid_shape(shape_min))
         qp.log.info(f"selected shape: {self.shape}")
-        self.dV = self.lattice.volume / float(np.prod(self.shape))
         _init_grid_fft(self)
+
+    @property
+    def dV(self) -> float:
+        """Volume per grid point (real-space integration weight)."""
+        return self.lattice.volume / float(np.prod(self.shape))
 
     def get_mesh(self, space: str, mine: bool = True) -> torch.Tensor:
         """Get mesh integer coordinates for real or reciprocal space
