@@ -12,6 +12,12 @@ class Gradient:
     ions: torch.Tensor  #: ionic gradient (forces)
     lattice: Optional[torch.Tensor]  #: lattice gradient (stress)
 
+    def clone(self) -> "Gradient":
+        return Gradient(
+            ions=self.ions.clone().detach(),
+            lattice=(None if (self.lattice is None) else self.lattice.clone().detach()),
+        )
+
     def __add__(self, other: "Gradient") -> "Gradient":
         return Gradient(
             ions=(self.ions + other.ions),
@@ -129,16 +135,19 @@ class Relax(qp.utils.Minimize[Gradient]):
         system.energy = qp.Energy()
         system.ions.update(system)
         # Optimize electrons:
+        qp.log.info("\n--- Electronic optimization ---\n")
         system.electrons.run(system)
         state.energy = system.energy
         # Update forces / stresses if needed:
         if not energy_only:
             system.geometry_grad()  # update forces / stress
-            state.gradient = Gradient(
-                ions=-system.ions.forces,
-                lattice=(lattice.stress if lattice.movable else None),
+            state.gradient = self.constrain(
+                Gradient(
+                    ions=-system.ions.forces,
+                    lattice=(lattice.stress if lattice.movable else None),
+                )
             )
-            state.K_gradient = state.gradient  # TODO: precondition / constrain
+            state.K_gradient = state.gradient.clone()  # TODO: precondition
             state.extra = [system.ions.forces.norm(dim=1).max().item()]  # fmax
             if lattice.movable:
                 state.extra.append(lattice.stress.norm().item())  # |stress|
@@ -150,9 +159,15 @@ class Relax(qp.utils.Minimize[Gradient]):
         if self.system.lattice.compute_stress:
             self.system.lattice.report(report_grad=True)  # lattice, stress
             qp.log.info(f"Strain:\n{qp.utils.fmt(self.strain)}")
+            qp.log.info("")
         return False  # State not changed by report
 
     @property
     def strain(self) -> torch.Tensor:
         eye = torch.eye(3, device=qp.rc.device)
         return self.system.lattice.Rbasis @ self.invRbasis0 - eye
+
+    def constrain(self, v: Gradient) -> Gradient:
+        """Impose fixed atom / lattice direction constraints."""
+        v.ions -= v.ions.mean(dim=0)
+        return v

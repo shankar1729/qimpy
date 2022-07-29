@@ -112,6 +112,11 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
     def optimize(self) -> None:
         """Minimize residual using a Pulay-mixing / DIIS algorithm."""
 
+        # Cleanup previous history (if any):
+        self._variables.clear()
+        self._residuals.clear()
+        self._overlaps = np.zeros((0, 0), dtype=float)
+
         # Initial energy and difference:
         energy = self.energy
         E = self._sync(float(energy))
@@ -198,11 +203,6 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
                     + self.mix_fraction * self.precondition(self._residuals[i_hist])
                 )
             self.variable = v  # type: ignore
-
-        # Cleanup: TODO: decide if desirable to keep history
-        self._variables.clear()
-        self._residuals.clear()
-        self._overlaps = np.zeros((0, 0), dtype=float)
 
     def _sync(self, v: float) -> float:
         """Ensure `v` is consistent on `comm`."""
