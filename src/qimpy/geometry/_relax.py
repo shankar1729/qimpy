@@ -81,7 +81,7 @@ class Relax(qp.utils.Minimize[Gradient]):
         lattice: qp.lattice.Lattice,
         n_iterations: int,
         energy_threshold: float = 1e-5,
-        fmax_threshold: float = 3e-4,
+        fmax_threshold: float = 5e-4,
         stress_threshold: float = 1e-3,
         method: str = "l-bfgs",
         cg_type: str = "polak-ribiere",
@@ -117,7 +117,7 @@ class Relax(qp.utils.Minimize[Gradient]):
     def step(self, direction: Gradient, step_size: float) -> None:
         """Update the geometry along `direction` by amount `step_size`"""
         lattice = self.system.lattice
-        self.system.ions.positions += step_size * (direction.ions @ lattice.Rbasis)
+        self.system.ions.positions += step_size * (direction.ions @ lattice.invRbasis)
         if lattice.movable:
             lattice.update(
                 Rbasis=lattice.Rbasis
