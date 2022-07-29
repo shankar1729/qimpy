@@ -26,6 +26,13 @@ class Geometry(qp.TreeNode):
     ) -> None:
         """Specify one of the supported geometry actions.
         Defaults to `Fixed` if none specified.
+
+        Parameters
+        ----------
+        fixed
+            Electronic optimization only at a fixed geometry.
+        relax
+            :yaml:`Geometry relaxation of ions, and optionally, also the lattice.`
         """
         super().__init__()
         self.add_child_one_of(

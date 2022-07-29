@@ -90,6 +90,10 @@ class Relax(qp.utils.Minimize[Gradient]):
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
     ) -> None:
         """
+        Specify geometry relaxation algorithm and convergence parameters.
+
+        Parameters
+        ----------
         n_iterations
             :yaml:`Maximum number of iterations.`
         energy_threshold
