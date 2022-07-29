@@ -50,6 +50,8 @@ class System(qp.TreeNode):
             :yaml:`Electronic sub-system.`
         grid
             :yaml:`Charge-density grid.`
+        geometry
+            :yaml:`Geometry actions such as relaxation and dynamics.`
         checkpoint
             :yaml:`Checkpoint file to read at start-up.`
         checkpoint_out

@@ -90,7 +90,32 @@ class Relax(qp.utils.Minimize[Gradient]):
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
     ) -> None:
         """
-        TODO.
+        n_iterations
+            :yaml:`Maximum number of iterations.`
+        energy_threshold
+            :yaml:`Convergence threshold on energy change in Eh.`
+        fmax_threshold
+            :yaml:`Convergence threshold on maximum force in Eh/a0.`
+        stress_threshold
+            :yaml:`Convergence threshold on |stress| (stress tensor norm) in Eh/a0^3.`
+        method
+            :yaml:`Relaxation algorithm: L-BFGS, CG or Gradient.`
+            The default L-BFGS (limited-memory Broyden–Fletcher–Goldfarb–Shanno)
+            method is strongly recommended as it requires the least number of force
+            evaluations per line minimize step (with the `Wolfe` line minimize).
+            Only use CG (conjugate gradients) if L-BFGS fails for some system.
+            The steepest-descent `Gradient` method is only for special test cases.
+        cg_type
+            :yaml:`CG variant: Polak-Ribiere, Fletcher-Reeves or Hestenes-Stiefel.`
+            Variant of conjugate gradients method (only matters if `method` is CG).
+        line_minimize
+            :yaml:`Line minimization scheme: Auto, Constant, Quadratic, Wolfe.`
+            Auto matches the line minimization scheme to `method` (recommended).
+            Constant is a constant step-size usable with the Gradient-descent method.
+            Quadratic is best-suited for conjugate-gradients methods.
+            Wolfe is a cubic line step best suited for L-BFGS.
+        n_history
+            :yaml:`Maximum history size (only used for L-BFGS).`
         """
         extra_thresholds = {"fmax": fmax_threshold}
         if lattice.movable:
