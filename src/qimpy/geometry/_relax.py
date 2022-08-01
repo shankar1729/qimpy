@@ -239,15 +239,23 @@ class Relax(qp.utils.Minimize[Gradient]):
 
     def _run_fd_test(self):
         """Run finite difference test."""
+
+        def _randn_like(t: torch.Tensor) -> torch.Tensor:
+            """Return an MPI-consistent random tensor with same shape as `t`."""
+            result = torch.randn_like(t)
+            if self.comm.size > 1:
+                self.comm.Bcast(qp.utils.BufferView(result))
+            return result
+
         # Prepare a random direction to test along:
         STD_FORCES = 1e-3  # Std. deviation of force components
         STD_STRESS = STD_FORCES * self.latticeK  # Std. deviation of stress components
         lattice = self.system.lattice
         direction = self.constrain(
             Gradient(
-                ions=torch.randn_like(self.system.ions.positions) * STD_FORCES,
+                ions=_randn_like(self.system.ions.positions) * STD_FORCES,
                 lattice=(
-                    torch.randn_like(lattice.Rbasis) * STD_STRESS
+                    _randn_like(lattice.Rbasis) * STD_STRESS
                     if lattice.movable
                     else None
                 ),
