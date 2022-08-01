@@ -34,6 +34,7 @@ class Ions(qp.TreeNode):
     beta_full: Optional[qp.electrons.Wavefunction]  #: full-basis version of `beta`
     beta_version: int  #: version of `beta` to invalidate cached projections
     D_all: torch.Tensor  #: nonlocal pseudopotential matrix (all atoms)
+    dEtot_drho_basis: float  #: dE/d(basis function density) for Pulay correction
 
     _get_projectors = _get_projectors
     _projectors_grad = _projectors_grad

@@ -16,6 +16,7 @@ class BasisReal:
     nz0_prev: np.ndarray  #: Number of Gz = 0 entries before this process
     Gweight: torch.Tensor  #: Weight of all plane waves
     Gweight_mine: torch.Tensor  #: Weight of local plane waves
+    Gweight_tot: float  #: Total weight of all plane waves
 
     def __init__(self, basis: qp.electrons.Basis):
         """Initialize extra indexing required for real wavefunctions,
@@ -56,8 +57,8 @@ class BasisReal:
         self.Gweight = torch.where(iGz == 0, 1.0, 2.0)
         self.Gweight[basis.n_max :] = 0.0  # padded elements
         self.Gweight_mine = self.Gweight[div.i_start : div.i_stop]
-        Gweight_sum = self.Gweight.sum()
-        qp.log.info(f"real basis weight sum: {Gweight_sum:g}")
+        self.Gweight_tot = self.Gweight.sum().item()
+        qp.log.info(f"real basis weight sum: {self.Gweight_tot:g}")
 
     def symmetrize(self, coeff: torch.Tensor) -> None:
         """Impose Hermitian symmetry constraint on Gz = 0 coefficients."""

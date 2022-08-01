@@ -2,6 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
+import pathlib
 from ._read_upf import _read_upf
 from typing import Optional
 
@@ -33,6 +34,7 @@ class Pseudopotential:
     Gmax: float  #: Current reciprocal space extent of radial functions
     pqn_beta: qp.ions.PseudoQuantumNumbers  #: quantum numbers for projectors
     pqn_psi: qp.ions.PseudoQuantumNumbers  #: quantum numbers for orbitals
+    pulay_data: Optional[np.ndarray]  #: Pulay correction data for finite ke cutoff
 
     # Methods defined out of class:
     read_upf = _read_upf
@@ -51,6 +53,7 @@ class Pseudopotential:
         self.Gmax = 0.0  # reciprocal space versions not yet initialized
         self.pqn_beta = qp.ions.PseudoQuantumNumbers(self.beta.l, self.j_beta)
         self.pqn_psi = qp.ions.PseudoQuantumNumbers(self.psi.l, self.j_psi)
+        self._read_pulay(filename)
 
     def update(self, Gmax: float, ion_width: float, comm: qp.MPI.Comm) -> None:
         """Update to support calculation of G upto `Gmax`.
@@ -104,3 +107,54 @@ class Pseudopotential:
             return self.pqn_psi.n_tot_s
         else:
             return self.pqn_psi.n_tot * n_spinor
+
+    def _read_pulay(self, filename: str) -> None:
+        """Initialize Pulay correction data, if available"""
+        filename_parts = filename.split(".")
+        filename_parts[-1] = "pulay"  # replace psp extension
+        pulay_filename = ".".join(filename_parts)
+        if pathlib.Path(pulay_filename).exists():
+            for line in open(pulay_filename):
+                if not line.startswith("#"):  # ignore comments
+                    tokens = line.split()
+                    if len(tokens) == 1:
+                        n_cutoffs = int(tokens[0])
+                        i_cutoff = 0
+                        data = np.zeros((n_cutoffs, 2))
+                    elif len(tokens) == 2:
+                        data[i_cutoff] = [float(token) for token in tokens]
+                        i_cutoff += 1
+                    else:
+                        raise IOError("Incorrect pulay correction file format.")
+            assert n_cutoffs == i_cutoff
+            self.pulay_data = data[data[:, 0].argsort()]  # sort by cutoffs
+            qp.log.info(f"  Loaded Pulay corrections from {pulay_filename}")
+
+    def dE_drho_basis(self, ke_cutoff: float) -> float:
+        """Get Pulay correction dE/drho_basis, if available. Here, rho_basis is
+        defined as the number of plane-wave basis functions per unit cell volume.
+        """
+        if self.pulay_data is None:
+            return 0.0
+        else:
+            # Check ranges:
+            ke_cutoffs = self.pulay_data[:, 0]
+            corrections = self.pulay_data[:, 1]
+            ke_cutoff_min = ke_cutoffs[0]
+            if ke_cutoff < ke_cutoff_min:
+                raise ValueError(
+                    f"ke_cutoff lower than {ke_cutoff_min = } Eh for {self.element}"
+                    " Pulay correction"
+                )
+            ke_cutoff_max = ke_cutoffs[-1]
+            if ke_cutoff > ke_cutoff_max:
+                qp.log.warning(
+                    f"ke_cutoff higher than {ke_cutoff_max = } Eh in {self.element}"
+                    " Pulay correction."
+                )
+                return 0.0
+            result = np.interp(ke_cutoff, ke_cutoffs, corrections)
+            qp.log.info(
+                f"Pulay dE/drho_basis = {result:.6f} Eh a0^3 for {self.element}"
+            )
+            return result

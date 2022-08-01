@@ -20,6 +20,7 @@ def update(self: qp.ions.Ions, system: qp.System) -> None:
     if not self.n_ions:
         return  # no contributions below if no ions!
     system.energy["Eewald"] = system.coulomb.ewald(self.positions, self.Z[self.types])
+    system.energy["Epulay"] = _update_pulay(self, system.electrons.basis)
 
     # Update ionic densities and potentials:
     _LocalTerms(self, system).update()
@@ -56,6 +57,14 @@ def accumulate_geometry_grad(self: qp.ions.Ions, system: qp.System) -> None:
     self._projectors_grad(self.beta)
     _LocalTerms(self, system).update_grad()
     system.coulomb.ewald(self.positions, self.Z[self.types])
+    if system.lattice.requires_grad and self.dEtot_drho_basis:
+        # Pulay stress:
+        eye3 = torch.eye(3, device=qp.rc.device)
+        system.lattice.grad += (
+            self.dEtot_drho_basis
+            * system.electrons.basis.n_avg_weighted
+            / system.lattice.volume
+        ) * eye3
 
     # Clean up intermediate gradients:
     self.beta.requires_grad_(False, clear=True)
@@ -200,3 +209,16 @@ def _collect_ps_matrix(self: qp.ions.Ions, n_spinor: int) -> None:
             slice_cur = slice(i_proj_start, i_proj_stop)
             self.D_all[slice_cur, slice_cur] = D_nlms
             i_proj_start = i_proj_stop
+
+
+def _update_pulay(ions: qp.ions.Ions, basis: qp.electrons.Basis) -> float:
+    "Update `ions.dEtot_drho_basis` and return Pulay correction."
+    ions.dEtot_drho_basis = sum(
+        n_ions_i * ps.dE_drho_basis(basis.ke_cutoff)
+        for n_ions_i, ps in zip(ions.n_ions_type, ions.pseudopotentials)
+    )
+    return (
+        ions.dEtot_drho_basis
+        * (basis.n_ideal - basis.n_avg_weighted)
+        / basis.lattice.volume
+    )

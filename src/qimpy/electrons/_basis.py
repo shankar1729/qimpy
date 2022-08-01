@@ -30,7 +30,6 @@ class Basis(qp.TreeNode):
     n_max: int  #: Maximum of `n` across all `k` (including on other processes)
     n_avg: float  #: Average `n` across all `k` (weighted by `wk`)
     n_tot: int  #: Actual common `n` stored for each `k` including padding
-    n_ideal: float  #: Ideal `n_avg` based on `ke_cutoff` G-sphere volume
     fft_index: torch.Tensor  #: Index of each plane wave in reciprocal grid
     fft_block_size: int  #: Number of bands to FFT together
     mpi_block_size: int  #: Number of bands to MPI transfer together
@@ -166,7 +165,6 @@ class Basis(qp.TreeNode):
         n_procs_b = self.comm.size
         self.n_tot = qp.utils.ceildiv(self.n_max, n_procs_b) * n_procs_b
         self.n_avg = qp.utils.globalreduce.sum(self.n * self.wk, kpoints.comm)
-        self.n_ideal = ((2.0 * ke_cutoff) ** 1.5) * lattice.volume / (6 * np.pi ** 2)
         qp.log.info(
             f"n_basis:  min: {self.n_min}  max: {self.n_max}"
             f"  avg: {self.n_avg:.3f}  ideal: {self.n_ideal:.3f}"
@@ -217,6 +215,16 @@ class Basis(qp.TreeNode):
 
         if self.real_wavefunctions and kpoints.division.n_mine:
             self.real = BasisReal(self)
+
+    @property
+    def n_avg_weighted(self) -> float:
+        """`n_avg` accounting for real-basis weights if any."""
+        return self.real.Gweight_tot if self.real_wavefunctions else self.n_avg
+
+    @property
+    def n_ideal(self) -> float:
+        """Ideal `n_avg_weighted` based on `ke_cutoff` G-sphere volume."""
+        return ((2.0 * self.ke_cutoff) ** 1.5) * self.lattice.volume / (6 * np.pi ** 2)
 
     def get_ke(self, basis_slice: slice = slice(None)) -> torch.Tensor:
         """Kinetic energy (KE) of each plane wave in basis in :math:`E_h`
