@@ -38,7 +38,9 @@ class Geometry(qp.TreeNode):
         self.add_child_one_of(
             "action",
             checkpoint_in,
-            qp.TreeNode.ChildOptions("fixed", qp.geometry.Fixed, fixed),
+            qp.TreeNode.ChildOptions(
+                "fixed", qp.geometry.Fixed, fixed, comm=comm, lattice=lattice
+            ),
             qp.TreeNode.ChildOptions(
                 "relax", qp.geometry.Relax, relax, comm=comm, lattice=lattice
             ),

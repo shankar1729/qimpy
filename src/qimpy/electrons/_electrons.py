@@ -207,6 +207,7 @@ class Electrons(qp.TreeNode):
             ):
                 self.deig_max = np.inf  # not fully wrong, but accuracy unknown
         self.fixed_H = str(fixed_H)
+        assert self.fixed_H or (not isinstance(self.kpoints, qp.electrons.Kpath))
         self.save_wavefunction = bool(save_wavefunction)
 
         # Initialize LCAO subspace initializer:

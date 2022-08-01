@@ -92,7 +92,11 @@ class Relax(qp.utils.Minimize[Gradient]):
         )
 
     def run(self, system: qp.System) -> None:
-        qp.log.info("\n--- Geometry relaxation ---\n")
+        qp.log.info(
+            "\n--- Geometry relaxation ---\n"
+            if self.n_iterations
+            else "\n--- Electronic optimization at fixed geometry ---\n"
+        )
         self.system = system
         self.invRbasis0 = system.lattice.invRbasis
         self.latticeK = (
@@ -101,6 +105,14 @@ class Relax(qp.utils.Minimize[Gradient]):
         if os.environ.get("QIMPY_FDTEST_RELAX", "0") in {"1", "yes"}:
             self._run_fd_test()  # finite difference test if needed
         self.minimize()
+
+        # Check point at end:
+        if system.checkpoint_out:
+            system.save_checkpoint(
+                qp.utils.CpPath(
+                    checkpoint=qp.utils.Checkpoint(system.checkpoint_out, mode="w")
+                )
+            )
 
     def step(self, direction: Gradient, step_size: float) -> None:
         """Update the geometry along `direction` by amount `step_size`"""
@@ -140,7 +152,11 @@ class Relax(qp.utils.Minimize[Gradient]):
             if state.K_gradient.lattice is not None:
                 state.K_gradient.lattice *= self.latticeK
             # Extra convergence checks:
-            state.extra = [system.ions.forces.norm(dim=1).max().item()]  # fmax
+            state.extra = [
+                system.ions.forces.norm(dim=1).max().item()
+                if system.ions.n_ions
+                else 0.0
+            ]  # fmax
             if lattice.movable:
                 state.extra.append(lattice.stress.norm().item())  # |stress|
 
@@ -152,6 +168,7 @@ class Relax(qp.utils.Minimize[Gradient]):
             self.system.lattice.report(report_grad=True)  # lattice, stress
             qp.log.info(f"Strain:\n{qp.utils.fmt(self.strain)}")
             qp.log.info("")
+        # TODO: checkpoint handling at each relax step
         return False  # State not changed by report
 
     @property
