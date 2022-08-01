@@ -26,7 +26,6 @@ electrons:
 geometry:
   relax:
     n-iterations: 10
-    converge-on: all
 
 checkpoint: null  # disable reading checkpoint
 checkpoint-out: totalE.h5  # but still create it

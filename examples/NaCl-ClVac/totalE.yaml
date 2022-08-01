@@ -37,7 +37,6 @@ electrons:
 geometry:
   relax:
     n-iterations: 10
-    stress-threshold: 1.0E-7
 
 #checkpoint: null  # disable reading checkpoint
 #checkpoint-out: NaCl-ClVac.h5  # but still create it

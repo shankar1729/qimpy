@@ -23,6 +23,5 @@ electrons:
 geometry:
   relax:
     n-iterations: 10
-    converge-on: all
 
 #checkpoint: null  # disable reading checkpoint

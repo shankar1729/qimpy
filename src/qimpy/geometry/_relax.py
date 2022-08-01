@@ -82,15 +82,15 @@ class Relax(qp.utils.Minimize[Gradient]):
         comm: qp.MPI.Comm,
         lattice: qp.lattice.Lattice,
         n_iterations: int,
-        energy_threshold: float = 1e-5,
+        energy_threshold: float = 5e-5,
         fmax_threshold: float = 5e-4,
-        stress_threshold: float = 1e-3,
+        stress_threshold: float = 1e-5,
         n_consecutive: int = 1,
         method: str = "l-bfgs",
         cg_type: str = "polak-ribiere",
         line_minimize: str = "auto",
         n_history: int = 15,
-        converge_on: Union[str, int] = "any",
+        converge_on: Union[str, int] = "all",
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
     ) -> None:
         """
