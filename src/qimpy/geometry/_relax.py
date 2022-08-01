@@ -2,69 +2,8 @@ from __future__ import annotations
 import qimpy as qp
 import torch
 import os
-from dataclasses import dataclass
-from typing import Optional, Union
-
-
-@dataclass
-class Gradient:
-    """Geometry gradient used for"""
-
-    ions: torch.Tensor  #: ionic gradient (forces)
-    lattice: Optional[torch.Tensor]  #: lattice gradient (stress)
-
-    def clone(self) -> "Gradient":
-        return Gradient(
-            ions=self.ions.clone().detach(),
-            lattice=(None if (self.lattice is None) else self.lattice.clone().detach()),
-        )
-
-    def __add__(self, other: "Gradient") -> "Gradient":
-        return Gradient(
-            ions=(self.ions + other.ions),
-            lattice=(None if (self.lattice is None) else self.lattice + other.lattice),
-        )
-
-    def __iadd__(self, other: "Gradient") -> "Gradient":
-        self.ions += other.ions
-        if self.lattice is not None:
-            self.lattice += other.lattice
-        return self
-
-    def __sub__(self, other: "Gradient") -> "Gradient":
-        return Gradient(
-            ions=(self.ions - other.ions),
-            lattice=(None if (self.lattice is None) else self.lattice - other.lattice),
-        )
-
-    def __isub__(self, other: "Gradient") -> "Gradient":
-        self.ions -= other.ions
-        if self.lattice is not None:
-            self.lattice -= other.lattice
-        return self
-
-    def __mul__(self, other: float) -> "Gradient":
-        return Gradient(
-            ions=(self.ions * other),
-            lattice=(None if (self.lattice is None) else self.lattice * other),
-        )
-
-    __rmul__ = __mul__
-
-    def __imul__(self, other: float) -> "Gradient":
-        self.ions *= other
-        if self.lattice is not None:
-            self.lattice *= other
-        return self
-
-    def overlap(self, other: "Gradient") -> float:
-        """Global overlap collected over `comm`. For complex arrays,
-        real and imaginary components are treated as independent."""
-        result = self.ions.flatten() @ other.ions.flatten()
-        if self.lattice is not None:
-            assert other.lattice is not None
-            result += self.lattice.flatten() @ other.lattice.flatten()
-        return float(result.item())
+from typing import Union
+from ._gradient import Gradient
 
 
 class Relax(qp.utils.Minimize[Gradient]):
