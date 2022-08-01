@@ -18,6 +18,27 @@ def update(self: qp.ions.Ions, system: qp.System) -> None:
         grid, shape_batch=(n_densities,)  # initialize zero core density
     )
     if not self.n_ions:
+        nk_mine = system.electrons.kpoints.division.n_mine
+        n_basis_mine = system.electrons.basis.division.n_mine
+        self.beta = qp.electrons.Wavefunction(
+            system.electrons.basis,
+            coeff=torch.empty(
+                (1, nk_mine, 0, 1, n_basis_mine),
+                dtype=torch.complex128,
+                device=qp.rc.device,
+            ),
+        )
+        self.D_all = torch.empty((0, 0), dtype=torch.complex128, device=qp.rc.device)
+        if system.electrons.need_full_projectors:
+            n_basis_tot = system.electrons.basis.n_tot
+            self.beta_full = qp.electrons.Wavefunction(
+                system.electrons.basis,
+                coeff=torch.empty(
+                    (1, nk_mine, 0, 1, n_basis_tot),
+                    dtype=torch.complex128,
+                    device=qp.rc.device,
+                ),
+            )
         return  # no contributions below if no ions!
     system.energy["Eewald"] = system.coulomb.ewald(self.positions, self.Z[self.types])
     system.energy["Epulay"] = _update_pulay(self, system.electrons.basis)
@@ -54,17 +75,18 @@ def accumulate_geometry_grad(self: qp.ions.Ions, system: qp.System) -> None:
     system.electrons.accumulate_geometry_grad(system)
 
     # Ionic contributions:
-    self._projectors_grad(self.beta)
-    _LocalTerms(self, system).update_grad()
-    system.coulomb.ewald(self.positions, self.Z[self.types])
-    if system.lattice.requires_grad and self.dEtot_drho_basis:
-        # Pulay stress:
-        eye3 = torch.eye(3, device=qp.rc.device)
-        system.lattice.grad += (
-            self.dEtot_drho_basis
-            * system.electrons.basis.n_avg_weighted
-            / system.lattice.volume
-        ) * eye3
+    if self.n_ions:
+        self._projectors_grad(self.beta)
+        _LocalTerms(self, system).update_grad()
+        system.coulomb.ewald(self.positions, self.Z[self.types])
+        if system.lattice.requires_grad and self.dEtot_drho_basis:
+            # Pulay stress:
+            eye3 = torch.eye(3, device=qp.rc.device)
+            system.lattice.grad += (
+                self.dEtot_drho_basis
+                * system.electrons.basis.n_avg_weighted
+                / system.lattice.volume
+            ) * eye3
 
     # Clean up intermediate gradients:
     self.beta.requires_grad_(False, clear=True)

@@ -4,18 +4,10 @@ lattice:
   modification: body-centered
   a: 5  # bohrs
   c: 7  # bohrs
+  compute-stress: yes
 
 electrons:
   fillings:
-    n-bands: 10
-    n-bands-extra: 'x0.5'
-  k-path:
-    dk: 0.01
-    points:
-    - [0.00, 0.00,  0.00, $\Gamma$]
-    - [0.50, 0.00,  0.00, X]
-    - [0.25, 0.25, -0.25, P]
-    - [0.00, 0.50,  0.00, N]
-    - [0.00, 0.00,  0.00, $\Gamma$]
-    - [0.50, 0.50, -0.50, Z]
-#  chefsi: {filter-order: 10}
+    charge: -4
+  k-mesh:
+    size: 35.0  # supercell dimension

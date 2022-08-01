@@ -133,7 +133,11 @@ class Ions(qp.TreeNode):
             raise ValueError("coordinates must group ions of same type together")
 
         # Convert to tensors before storing in class object:
-        self.positions = torch.tensor(positions, device=qp.rc.device)
+        self.positions = (
+            torch.tensor(positions, device=qp.rc.device)
+            if positions
+            else torch.empty((0, 3), device=qp.rc.device)
+        )
         if not fractional:
             # Convert Cartesian input to fractional coordinates:
             self.positions = self.positions @ lattice.invRbasisT

@@ -30,7 +30,9 @@ def _get_space_group(
         # space group = point group:
         rot = lattice_sym.clone().detach()
         trans = torch.zeros((lattice_sym.shape[0], 3), device=device)
-        ion_map = torch.zeros((lattice_sym.shape[0], 0), dtype=torch.int, device=device)
+        ion_map = torch.zeros(
+            (lattice_sym.shape[0], 0), dtype=torch.long, device=device
+        )
         return rot, trans, ion_map
 
     # Prepare ion properties needed for space group determination:
