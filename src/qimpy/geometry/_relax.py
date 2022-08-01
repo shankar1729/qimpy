@@ -1,6 +1,7 @@
 from __future__ import annotations
 import qimpy as qp
 import torch
+import os
 from dataclasses import dataclass
 from typing import Optional, Union
 
@@ -158,6 +159,8 @@ class Relax(qp.utils.Minimize[Gradient]):
         self.latticeK = (
             system.lattice.move_scale.mean() / system.lattice.volume ** (1.0 / 3)
         ) ** 2  # effectively bring lattice derivatives to same dimensions as forces
+        if os.environ.get("QIMPY_FDTEST_RELAX", "0") in {"1", "yes"}:
+            self._run_fd_test()  # finite difference test if needed
         self.minimize()
 
     def step(self, direction: Gradient, step_size: float) -> None:
@@ -197,6 +200,7 @@ class Relax(qp.utils.Minimize[Gradient]):
             state.K_gradient = state.gradient.clone()
             if state.K_gradient.lattice is not None:
                 state.K_gradient.lattice *= self.latticeK
+            # Extra convergence checks:
             state.extra = [system.ions.forces.norm(dim=1).max().item()]  # fmax
             if lattice.movable:
                 state.extra.append(lattice.stress.norm().item())  # |stress|
@@ -218,5 +222,35 @@ class Relax(qp.utils.Minimize[Gradient]):
 
     def constrain(self, v: Gradient) -> Gradient:
         """Impose fixed atom / lattice direction constraints."""
+        self.symmetrize_(v)
         v.ions -= v.ions.mean(dim=0)
+        self.symmetrize_(v)
         return v
+
+    def symmetrize_(self, v: Gradient) -> None:
+        """Symmetrize gradient in-place."""
+        lattice = self.system.lattice
+        v.ions = (
+            self.system.symmetries.symmetrize_forces(v.ions @ lattice.Rbasis)
+            @ lattice.invRbasis
+        )
+        if v.lattice is not None:
+            v.lattice = self.system.symmetries.symmetrize_matrix(v.lattice)
+
+    def _run_fd_test(self):
+        """Run finite difference test."""
+        # Prepare a random direction to test along:
+        STD_FORCES = 1e-3  # Std. deviation of force components
+        STD_STRESS = STD_FORCES * self.latticeK  # Std. deviation of stress components
+        lattice = self.system.lattice
+        direction = self.constrain(
+            Gradient(
+                ions=torch.randn_like(self.system.ions.positions) * STD_FORCES,
+                lattice=(
+                    torch.randn_like(lattice.Rbasis) * STD_STRESS
+                    if lattice.movable
+                    else None
+                ),
+            )
+        )
+        self.finite_difference_test(direction)
