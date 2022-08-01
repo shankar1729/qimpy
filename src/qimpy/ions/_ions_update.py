@@ -13,7 +13,7 @@ def update(self: qp.ions.Ions, system: qp.System) -> None:
     grid = system.grid
     n_densities = system.electrons.n_densities
     self.rho_tilde = qp.grid.FieldH(grid)  # initialize zero ionic charge
-    self.Vloc_tilde = qp.grid.FieldH(grid)  # initizliae zero local potential
+    self.Vloc_tilde = qp.grid.FieldH(grid)  # initialize zero local potential
     self.n_core_tilde = qp.grid.FieldH(
         grid, shape_batch=(n_densities,)  # initialize zero core density
     )

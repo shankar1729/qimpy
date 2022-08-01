@@ -251,6 +251,7 @@ class Relax(qp.utils.Minimize[Gradient]):
         STD_FORCES = 1e-3  # Std. deviation of force components
         STD_STRESS = STD_FORCES * self.latticeK  # Std. deviation of stress components
         lattice = self.system.lattice
+        torch.manual_seed(0)
         direction = self.constrain(
             Gradient(
                 ions=_randn_like(self.system.ions.positions) * STD_FORCES,

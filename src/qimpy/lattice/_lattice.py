@@ -144,8 +144,8 @@ class Lattice(qp.TreeNode):
         """Update lattice vectors and dependent quantities.
         If `report_change` is True, report the relative change of lattice and volume.
         """
-        Gbasis = (2 * np.pi) * torch.linalg.inv(self.Rbasis.T)
-        volume = abs(torch.linalg.det(self.Rbasis).item())
+        Gbasis = (2 * np.pi) * torch.linalg.inv(Rbasis.T)
+        volume = abs(torch.linalg.det(Rbasis).item())
         if report_change:
             change_Rbasis = torch.linalg.norm(Rbasis - self.Rbasis) / torch.linalg.norm(
                 self.Rbasis
