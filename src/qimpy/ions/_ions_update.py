@@ -49,8 +49,9 @@ def update(self: qp.ions.Ions, system: qp.System) -> None:
     # Update pseudopotential matrix and projectors:
     self._collect_ps_matrix(system.electrons.n_spinor)
     if system.electrons.need_full_projectors:
-        self.beta_full = self._get_projectors(system.electrons.basis, full_basis=True)
-        self.beta = self.beta_full[..., system.electrons.basis.mine]
+        beta_full = self._get_projectors(system.electrons.basis, full_basis=True)
+        self.beta_full = beta_full
+        self.beta = beta_full[..., system.electrons.basis.mine]
     else:
         self.beta = self._get_projectors(system.electrons.basis)
         self.beta_full = None
@@ -107,6 +108,7 @@ class _LocalTerms:
     Handle generation and gradient propagation of ionic scalar fields (local terms).
     """
 
+    @qp.utils.stopwatch(name="Ions.LocalTerms.init")
     def __init__(self, ions: qp.ions.Ions, system: qp.System):
         self.ions = ions
         self.system = system
@@ -146,6 +148,7 @@ class _LocalTerms:
                 ).to(dtype=torch.cdouble),
             )
 
+    @qp.utils.stopwatch(name="Ions.LocalTerms.update")
     def update(self) -> None:
         """Update ionic densities and potentials."""
         ions = self.ions
@@ -156,6 +159,7 @@ class _LocalTerms:
         # Add long-range part of local potential from ionic charge:
         ions.Vloc_tilde += self.system.coulomb(ions.rho_tilde, correct_G0_width=True)
 
+    @qp.utils.stopwatch(name="Ions.LocalTerms.update_grad")
     def update_grad(self) -> None:
         """Accumulate local-pseudopotential force / stress contributions."""
         # Propagate long-range local-potential gradient to ionic charge gradient:

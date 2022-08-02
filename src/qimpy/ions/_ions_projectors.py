@@ -6,6 +6,7 @@ from .quintic_spline import Interpolator
 from .spherical_harmonics import get_harmonics_tilde, get_harmonics_tilde_and_prime
 
 
+@qp.utils.stopwatch(name="Ions.get_projectors")
 def _get_projectors(
     self: qp.ions.Ions,
     basis: qp.electrons.Basis,
@@ -66,6 +67,7 @@ def _get_projectors(
     return qp.electrons.Wavefunction(basis, coeff=proj)
 
 
+@qp.utils.stopwatch(name="Ions.projectors_grad")
 def _projectors_grad(
     self: qp.ions.Ions, proj: qp.electrons.Wavefunction, is_psi: bool = False
 ) -> None:
