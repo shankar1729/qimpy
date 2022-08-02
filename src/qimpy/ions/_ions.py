@@ -5,7 +5,11 @@ import torch
 import pathlib
 import re
 from ._ions_projectors import _get_projectors, _projectors_grad
-from ._ions_atomic import get_atomic_orbitals, get_atomic_density
+from ._ions_atomic import (
+    get_atomic_orbital_index,
+    get_atomic_orbitals,
+    get_atomic_density,
+)
 from ._ions_update import update, accumulate_geometry_grad, _collect_ps_matrix
 from typing import Optional, Union, List
 
@@ -38,6 +42,7 @@ class Ions(qp.TreeNode):
 
     _get_projectors = _get_projectors
     _projectors_grad = _projectors_grad
+    get_atomic_orbital_index = get_atomic_orbital_index
     get_atomic_orbitals = get_atomic_orbitals
     get_atomic_density = get_atomic_density
     update = update

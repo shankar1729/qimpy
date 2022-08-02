@@ -88,10 +88,9 @@ class PseudoQuantumNumbers:
             # To next shell:
             i_start = i_stop
         self.i_ljm = (
-            self.ls * (2 * self.j + 1) + self.j + self.mj  # from previous l,j
-        ).to(
-            torch.long
-        )  # within current l,j
+            (self.ls * (2 * self.j + 1))  # from previous l,j
+            + (self.j + self.mj)  # within current l,j
+        ).to(torch.long)
         self.i_ljms = self._get_i_ljms(j)
 
     def _get_i_ljms(self, j: torch.Tensor) -> torch.Tensor:
@@ -153,6 +152,27 @@ class PseudoQuantumNumbers:
         sel = torch.where(self.n[:, None] != self.ns[None, :])
         C_out[sel[0], slice(None), sel[1]] = 0.0
         return C_out
+
+    def get_index(self, n_spinor: int) -> torch.Tensor:
+        """Get integer indices corresponding to all quantum numbers.
+        If not relativistic, the result is (n, l, m, 0) for `n_tot` orbitals in
+        non-spinorial calculations, and is (n, l, m, 2ms) for 2`n_tot` orbitals
+        in spinorial calculations.
+        If relativistic, the result is (n, l, 2j, 2mj) for `n_tot_s` orbitals.
+        """
+        if self.is_relativistic:
+            j2 = (2 * self.j).to(dtype=self.ns.dtype)
+            mj2 = (2 * self.mj).to(dtype=self.ns.dtype)
+            return torch.stack((self.ns, self.ls, j2, mj2)).T
+        else:
+            result = torch.stack((self.n, self.l, self.m, torch.zeros_like(self.n))).T
+            if n_spinor == 1:
+                return result
+            else:
+                result = result[:, None, :].tile(1, 2, 1)  # repeat for spin
+                ms2 = 1 - 2 * torch.arange(2, dtype=self.n.dtype, device=self.n.device)
+                result[..., -1] = ms2[None, None]  # add spin index
+                return result.flatten(0, 1)
 
 
 @lru_cache

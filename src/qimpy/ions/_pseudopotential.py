@@ -102,7 +102,7 @@ class Pseudopotential:
         if self.is_relativistic:
             if n_spinor != 2:
                 raise ValueError(
-                    "Relativistic pseudopotentials require" " spinorial calculation"
+                    "Relativistic pseudopotentials require spinorial calculation"
                 )
             return self.pqn_psi.n_tot_s
         else:
@@ -129,6 +129,8 @@ class Pseudopotential:
             assert n_cutoffs == i_cutoff
             self.pulay_data = data[data[:, 0].argsort()]  # sort by cutoffs
             qp.log.info(f"  Loaded Pulay corrections from {pulay_filename}")
+        else:
+            self.pulay_data = None
 
     def dE_drho_basis(self, ke_cutoff: float) -> float:
         """Get Pulay correction dE/drho_basis, if available. Here, rho_basis is

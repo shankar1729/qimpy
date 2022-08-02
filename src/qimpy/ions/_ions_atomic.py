@@ -3,6 +3,38 @@ import qimpy as qp
 import torch
 
 
+def get_atomic_orbital_index(
+    self: qp.ions.Ions, basis: qp.electrons.Basis
+) -> torch.Tensor:
+    """Get ion index and quantum numbers of atomic orbitals.
+    The result is an n_orbitals x 5 integer tensor, with ion index as the first column.
+    For non-spinorial pseudopotentials, the remaining columns are (n, l, m, 0)
+    in non-spinorial calculations, and (n, l, m, 2m_s) in spinorial calculations.
+    For spinorial pseudopotentials, the remaining columns are (n, l, 2j, 2m_j)."""
+    n_spinor = basis.n_spinor
+    n_psi_tot = self.n_atomic_orbitals(n_spinor)
+    result = torch.empty((n_psi_tot, 5), dtype=torch.long, device=qp.rc.device)
+    i_psi_start = 0
+    i_ion_start = 0
+    for n_ions_i, ps in zip(self.n_ions_type, self.pseudopotentials):
+        # Quantum numbers for a single ion (as integers):
+        index_atom = ps.pqn_psi.get_index(n_spinor)
+        # Repeat quantum numbers for all ions:
+        n_psi_each = index_atom.shape[0]
+        i_psi_stop = i_psi_start + n_ions_i * n_psi_each
+        result_i = result[i_psi_start:i_psi_stop].view(n_ions_i, n_psi_each, 5)
+        result_i[..., 1:] = index_atom[None]
+        # Add ion indices:
+        i_ion_stop = i_ion_start + n_ions_i
+        result_i[..., 0] = torch.arange(
+            i_ion_start, i_ion_stop, dtype=torch.long, device=qp.rc.device
+        )[:, None]
+        # Update for next species:
+        i_psi_start = i_psi_stop
+        i_ion_start = i_ion_stop
+    return result
+
+
 def get_atomic_orbitals(
     self: qp.ions.Ions, basis: qp.electrons.Basis
 ) -> qp.electrons.Wavefunction:
@@ -21,9 +53,8 @@ def get_atomic_orbitals(
         )
         i_proj_start = 0
         i_psi_start = 0
-        for i_ps, ps in enumerate(self.pseudopotentials):
+        for n_ions_i, ps in zip(self.n_ions_type, self.pseudopotentials):
             # Slices of input projectors and output orbitals:
-            n_ions_i = self.n_ions_type[i_ps]
             n_proj_each = ps.n_orbital_projectors
             n_psi_each = ps.n_atomic_orbitals(n_spinor)
             i_proj_stop = i_proj_start + n_ions_i * n_proj_each
