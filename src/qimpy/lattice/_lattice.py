@@ -171,22 +171,22 @@ class Lattice(qp.TreeNode):
             qp.log.info(f"Stress [Eh/a0^3]:\n{qp.utils.fmt(self.stress)}")
 
     @property
-    def invRbasis(self):
+    def invRbasis(self) -> torch.Tensor:
         """Inverse of `Rbasis`."""
         return self.Gbasis.T * (0.5 / np.pi)  # reuse the already computed inverse
 
     @property
-    def invRbasisT(self):
+    def invRbasisT(self) -> torch.Tensor:
         """Inverse transpose of `Rbasis`."""
         return self.Gbasis * (0.5 / np.pi)  # reuse the already computed inverse
 
     @property
-    def invGbasis(self):
+    def invGbasis(self) -> torch.Tensor:
         """Inverse of `Gbasis`."""
         return self.Rbasis.T * (0.5 / np.pi)  # use the existing inverse
 
     @property
-    def invGbasisT(self):
+    def invGbasisT(self) -> torch.Tensor:
         """Inverse transpose of `Gbasis`."""
         return self.Rbasis * (0.5 / np.pi)  # use the existing inverse
 

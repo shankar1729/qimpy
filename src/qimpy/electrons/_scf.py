@@ -26,7 +26,7 @@ class SCF(qp.utils.Pulay[qp.grid.FieldH]):
         n_iterations: int = 50,
         energy_threshold: float = 1e-8,
         residual_threshold: float = 1e-7,
-        n_consecutive: int = 1,
+        n_consecutive: int = 2,
         n_history: int = 10,
         mix_fraction: float = 0.5,
         mix_fraction_mag: float = 1.5,
