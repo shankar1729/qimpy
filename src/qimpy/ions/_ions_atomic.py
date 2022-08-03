@@ -1,6 +1,7 @@
 from __future__ import annotations
 import qimpy as qp
 import torch
+from .quintic_spline import Interpolator
 
 
 def get_atomic_orbital_index(
@@ -86,15 +87,21 @@ def get_atomic_orbitals(
 
 
 def get_atomic_density(
-    self: qp.ions.Ions, grid: qp.grid.Grid, M_tot: torch.Tensor
+    self: qp.ions.Ions, grid: qp.grid.Grid, n_electrons: float, M_tot: torch.Tensor
 ) -> qp.grid.FieldH:
     """Get atomic reference density (for LCAO) on `grid`.
+    The overall norm / charge of the generated density is set by `n_electrons`.
     The magnetization mode and overall magnitude is set by `M_tot`."""
-    from .quintic_spline import Interpolator
 
-    iG = grid.get_mesh("H").to(torch.double)  # half-space
-    G = ((iG @ grid.lattice.Gbasis.T) ** 2).sum(dim=-1).sqrt()
-    Ginterp = Interpolator(G, qp.ions.RadialFunction.DG)
+    # Compute fractional electron number on each atom:
+    Z = self.Z[self.types].to(torch.complex128)  # number of electrons on each atom
+    N_frac = (
+        torch.ones(self.n_ions, dtype=torch.complex128, device=qp.rc.device)
+        if (self.Q is None)
+        else (1.0 - self.Q / Z)
+    )
+    N_frac += (n_electrons - N_frac @ Z) / self.Z_tot  # match overall electron count
+
     # Compute magnetization on each atom if needed:
     n_mag = M_tot.shape[0]
     if n_mag:
@@ -113,7 +120,7 @@ def get_atomic_density(
         else:
             M = torch.zeros((self.n_ions, n_mag), device=M_tot.device)
         # Get fractional magnetization of each atom:
-        M_frac = M / self.Z[self.types, None]
+        M_frac = M / Z[:, None]
         if M_tot.norm().item():
             # Correct to match overall magnetization, if specified:
             M_frac += ((M_tot - M.sum(dim=0)) / self.Z_tot)[None, :]
@@ -124,13 +131,13 @@ def get_atomic_density(
     # Collect density from each atom:
     n_densities = 1 + n_mag
     n = qp.grid.FieldH(grid, shape_batch=(n_densities,))
-    for i_type, ps in enumerate(self.pseudopotentials):
+    iG = grid.get_mesh("H").to(torch.double)  # half-space
+    G = ((iG @ grid.lattice.Gbasis.T) ** 2).sum(dim=-1).sqrt()
+    Ginterp = Interpolator(G, qp.ions.RadialFunction.DG)
+    for slice_i, ps in zip(self.slices, self.pseudopotentials):
         rho_i = Ginterp(ps.rho_atom.f_tilde_coeff / grid.lattice.volume)
-        SF = self.translation_phase(iG, self.slices[i_type])
-        n.data[0] += rho_i[0] * SF.sum(dim=-1)
+        SF = self.translation_phase(iG, slice_i)
+        n.data[0] += rho_i[0] * (SF @ N_frac[slice_i])
         if n_mag:
-            for i_ion, M_ion in enumerate(M_frac[self.slices[i_type]]):
-                n.data[1:] += (
-                    rho_i * SF[None, ..., i_ion] * M_ion.view((n_mag, 1, 1, 1))
-                )
+            n.data[1:] += rho_i * (SF @ M_frac[slice_i]).permute(3, 0, 1, 2)
     return n

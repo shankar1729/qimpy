@@ -49,7 +49,9 @@ class LCAO(Minimize[MatrixArray]):
         el = system.electrons
         # Initialize based on reference atomic density (or fixed-H density):
         if not el.fixed_H:
-            el.n_tilde = system.ions.get_atomic_density(system.grid, el.fillings.M)
+            el.n_tilde = system.ions.get_atomic_density(
+                system.grid, el.fillings.n_electrons, el.fillings.M
+            )
             el.tau_tilde = qp.grid.FieldH(system.grid, shape_batch=(0,))  # TODO
             el.update_potential(system)
         C_OC = el.C.dot_O(el.C).wait()
