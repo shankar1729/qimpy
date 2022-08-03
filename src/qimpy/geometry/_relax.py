@@ -180,13 +180,15 @@ class Relax(qp.utils.Minimize[Gradient]):
 
     def report(self, i_iter: int) -> bool:
         system = self.system
+        ions = system.ions
+        electrons = system.electrons
         qp.log.info(f"\nEnergy components:\n{repr(system.energy)}")
         qp.log.info("")
-        self._lowdin = qp.ions.Lowdin(system.electrons.C)
-        system.ions.Q, system.ions.M = self._lowdin.analyze(
-            system.electrons.spin_polarized
+        self._lowdin = qp.ions.Lowdin(electrons.C)
+        ions.Q, ions.M = self._lowdin.analyze(
+            electrons.fillings.f, electrons.spin_polarized
         )
-        system.ions.report(report_grad=True)  # positions, forces, Lowdin Q/M
+        ions.report(report_grad=True)  # positions, forces, Lowdin Q/M
         if system.lattice.compute_stress:
             system.lattice.report(report_grad=True)  # lattice, stress
             qp.log.info(f"Strain:\n{qp.utils.fmt(self.strain)}")

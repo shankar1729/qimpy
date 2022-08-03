@@ -3,7 +3,7 @@ import numpy as np
 import logging
 import torch
 import sys
-from typing import Optional
+from typing import Optional, Union
 
 
 def log_config(
@@ -72,11 +72,16 @@ def log_config(
         qp.log.setLevel(logging.WARNING)
 
 
-def fmt(tensor: torch.Tensor, **kwargs) -> str:
-    """Standardized conversion of torch tensors for logging.
+def fmt(tensor: Union[torch.Tensor, np.ndarray], **kwargs) -> str:
+    """Standardized conversion of torch tensors and numpy arrays for logging.
     Keyword arguments are forwarded to `numpy.array2string`."""
     # Set some defaults in formatter:
     kwargs.setdefault("precision", 8)
     kwargs.setdefault("suppress_small", True)
     kwargs.setdefault("separator", ", ")
-    return np.array2string(tensor.detach().to(qp.rc.cpu).numpy(), **kwargs)
+    return np.array2string(
+        tensor.detach().to(qp.rc.cpu).numpy()
+        if isinstance(tensor, torch.Tensor)
+        else tensor,
+        **kwargs
+    )

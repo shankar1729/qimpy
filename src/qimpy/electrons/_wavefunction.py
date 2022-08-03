@@ -205,6 +205,11 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
         _randomize(self, seed, b_start, b_stop)
 
     @property
+    def spinorial(self) -> bool:
+        """Whether this wavefunction has spinor components."""
+        return self.coeff.shape[-2] != 1
+
+    @property
     def non_spinor(self) -> Wavefunction:
         """Return a non-spinorial view of this wavefunction.
         If spinorial, the result will have twice the bands instead.
@@ -212,10 +217,10 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
         non-spinorial, even in spinorial calculations.
         The view is identical to the input for non-spinorial wavefunctions.
         """
-        if self.coeff.shape[-2] == 1:
-            return self
-        else:
+        if self.spinorial:
             return Wavefunction(self.basis, coeff=self.coeff.flatten(2, 3).unsqueeze(3))
+        else:
+            return self
 
     # Function types for checking imported methods:
     UnaryOpAsync = Callable[["Wavefunction"], qp.utils.Waitable["Wavefunction"]]

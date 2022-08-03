@@ -174,6 +174,34 @@ class PseudoQuantumNumbers:
                 result[..., -1] = ms2[None, None]  # add spin index
                 return result.flatten(0, 1)
 
+    def pauli_expectation(self) -> torch.Tensor:
+        """Pauli-matrix expectation values in orbital basis (spinorial case only).
+        The result is 4 x n_tot_s x n_tot_s for relativistic pseudopotentials,
+        and 4 x (2 n_tot) x (2 n_tot) for non-relativistic pseudopotentials,
+        where the first dimension of 4 corresponds to identity, x, y and z."""
+        pauli = torch.tensor(
+            [
+                [[1.0, 0.0], [0.0, 1.0]],  # identity
+                [[0.0, 1.0], [1.0, 0.0]],  # sigma_x
+                [[0.0, -1.0j], [1.0j, 0.0]],  # sigma_y
+                [[1.0, 0.0], [0.0, -1.0]],  # sigma_z
+            ],
+            device=self.n.device,
+        )
+        # Repeat for each (n, l, m):
+        eye_nlm = torch.eye(self.n_tot, device=self.n.device)
+        pauli = torch.einsum("ab, dsS -> dasbS", eye_nlm, pauli)
+        # Transform to spin-angle basis if needed:
+        if self.is_relativistic:
+            C = self.get_spin_angle_transform()
+            return torch.einsum(
+                "dAbS, bSB -> dAB",
+                torch.einsum("dasbS, asA -> dAbS", pauli, C.conj()),
+                C,
+            )
+        else:
+            return pauli.flatten(3, 4).flatten(1, 2)  # just combine as, bS indices
+
 
 @lru_cache
 def get_Ylm_to_spin_angle(l: int) -> np.ndarray:

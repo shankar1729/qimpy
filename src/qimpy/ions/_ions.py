@@ -257,10 +257,13 @@ class Ions(qp.TreeNode):
                 # Generate attribute string:
                 attribs = {}
                 if Q is not None:
-                    attribs["Q"] = Q[i_ion]
+                    attribs["Q"] = f"{Q[i_ion]:+.5f}"
                 if M is not None:
-                    attribs["M"] = M[i_ion]
-                attrib_str = f", {_attrib_cleanup.sub('', str(attribs))}"
+                    attribs["M"] = qp.utils.fmt(
+                        M[i_ion], floatmode="fixed", precision=5
+                    )
+                attrib_str = str(attribs).replace("'", "")
+                attrib_str = f", {attrib_str}"
             else:
                 attrib_str = ""
             # Report:
@@ -319,6 +322,3 @@ class Ions(qp.TreeNode):
         which should have already been calculated.
         """
         return -self.positions.grad.detach() @ self.lattice.invRbasis
-
-
-_attrib_cleanup = re.compile(r"'|array\(|\)")  #: Pattern to clean up attrib in `report`
