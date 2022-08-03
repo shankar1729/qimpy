@@ -38,12 +38,17 @@ def _get_space_group(
     # Prepare ion properties needed for space group determination:
     pos0 = ions.positions  # original ionic positions
     type_mask = ions.types[:, None] == ions.types[None, :]
+    # --- charge / oxidation state:
+    if ions.Q is not None:
+        type_mask = torch.logical_and(
+            type_mask, (ions.Q[:, None] - ions.Q[None, :]).abs() < tolerance
+        )
     # --- magnetization:
     M0 = ions.M
     if M0 is None:
         pass  # no handling needed
     elif len(M0.shape) == 1:
-        # Scalar magnetization must be invariant; treat just like type:
+        # Scalar magnetization must be invariant; treat just like type and charge:
         type_mask = torch.logical_and(
             type_mask, (M0[:, None] - M0[None, :]).abs() < tolerance
         )

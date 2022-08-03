@@ -75,9 +75,13 @@ class Ions(qp.TreeNode):
             parameters that may include:
 
                 * `Q`: initial oxidation state / charge for the ion.
+                  This can be used to tune initial density for LCAO,
+                  or to specify charge disproportionation for symmetry detection.
                 * `M`: initial magnetic moment for the ion, which would be a
                   single Mz or [Mx, My, Mz] depending on if the calculation
                   is spinorial. Only specify in spin-polarized calculations.
+                  This can be used to tune initial magnetization for LCAO,
+                  or to specify magnetic order for symmetry detection.
                 * Relaxation constraints: TODO
 
             Ions of the same type (symbol) must be specified consecutively.
