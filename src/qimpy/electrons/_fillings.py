@@ -2,12 +2,16 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-import collections
 from scipy import optimize
-from typing import Optional, Dict, Union, Callable, Tuple, List, Sequence
+from typing import Optional, Dict, Union, NamedTuple, Callable, Tuple, List, Sequence
 
 
-SmearingResults = collections.namedtuple("SmearingResults", ["f", "f_eig", "S"])
+class SmearingResults(NamedTuple):
+    f: torch.Tensor  #: Occupation factors
+    f_eig: torch.Tensor  #: Energy derivative of occupation factor
+    S: torch.Tensor  #: Entropy contribution
+
+
 SmearingFunc = Callable[
     [torch.Tensor, Union[float, torch.Tensor], float], SmearingResults
 ]

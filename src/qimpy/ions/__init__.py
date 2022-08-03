@@ -9,6 +9,7 @@ __all__ = [
     "spherical_bessel",
     "quintic_spline",
     "RadialFunction",
+    "Lowdin",
 ]
 
 from ._ions import Ions
@@ -19,3 +20,4 @@ from . import spherical_harmonics
 from . import spherical_bessel
 from . import quintic_spline
 from ._radial_function import RadialFunction
+from ._lowdin import Lowdin

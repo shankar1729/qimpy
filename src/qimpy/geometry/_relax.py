@@ -1,9 +1,8 @@
 from __future__ import annotations
 import qimpy as qp
-import numpy as np
 import torch
 import os
-from typing import Union, Tuple
+from typing import Union, Optional
 from ._gradient import Gradient
 
 
@@ -17,7 +16,7 @@ class Relax(qp.utils.Minimize[Gradient]):
     latticeK: float  #: Preconditioning factor of lattice relative to ions
     drag_wavefunctions: bool  #: Whether to drag atomic components of wavefunctions
 
-    _drag_data: Tuple[qp.electrons.Wavefunction, torch.Tensor]  #: Cached data for drag
+    _lowdin: Optional[qp.ions.Lowdin]  #: Lowdin and wavefunction drag shared data
 
     def __init__(
         self,
@@ -111,6 +110,7 @@ class Relax(qp.utils.Minimize[Gradient]):
         if os.environ.get("QIMPY_FDTEST_RELAX", "0") in {"1", "yes"}:
             self._run_fd_test()  # finite difference test if needed
         self.minimize()
+        self._lowdin = None  # Clean up cached data from final report
 
         # Check point at end:
         if system.checkpoint_out:
@@ -123,9 +123,12 @@ class Relax(qp.utils.Minimize[Gradient]):
     def step(self, direction: Gradient, step_size: float) -> None:
         """Update the geometry along `direction` by amount `step_size`"""
         lattice = self.system.lattice
-        self.remove_atomic_projections(step_size)  # wavefunction drag pre-step
-        if not step_size:
-            return  # step() called only for atomic projection analysis
+
+        if self.drag_wavefunctions:
+            if self._lowdin is None:
+                self._lowdin = qp.ions.Lowdin(self.system.electrons.C)
+            self._lowdin.remove_atomic_projections()
+
         delta_positions = step_size * (direction.ions @ lattice.invRbasis)
         self.system.ions.positions += delta_positions
         if lattice.movable:
@@ -135,7 +138,11 @@ class Relax(qp.utils.Minimize[Gradient]):
                 report_change=False,
             )
             self.system.coulomb.update_lattice_dependent(self.system.ions.n_ions)
-        self.restore_atomic_projections(delta_positions)  # wavefunction drag post-step
+
+        if self.drag_wavefunctions:
+            assert self._lowdin is not None
+            self._lowdin.restore_atomic_projections(delta_positions)
+            self._lowdin = None
 
     def compute(
         self, state: qp.utils.MinimizeState[Gradient], energy_only: bool
@@ -172,11 +179,16 @@ class Relax(qp.utils.Minimize[Gradient]):
                 state.extra.append(lattice.stress.norm().item())  # |stress|
 
     def report(self, i_iter: int) -> bool:
-        qp.log.info(f"\nEnergy components:\n{repr(self.system.energy)}")
+        system = self.system
+        qp.log.info(f"\nEnergy components:\n{repr(system.energy)}")
         qp.log.info("")
-        self.system.ions.report(report_grad=True)  # positions, forces
-        if self.system.lattice.compute_stress:
-            self.system.lattice.report(report_grad=True)  # lattice, stress
+        self._lowdin = qp.ions.Lowdin(system.electrons.C)
+        system.ions.Q, system.ions.M = self._lowdin.analyze(
+            system.electrons.spin_polarized
+        )
+        system.ions.report(report_grad=True)  # positions, forces, Lowdin Q/M
+        if system.lattice.compute_stress:
+            system.lattice.report(report_grad=True)  # lattice, stress
             qp.log.info(f"Strain:\n{qp.utils.fmt(self.strain)}")
             qp.log.info("")
         # TODO: checkpoint handling at each relax step
@@ -203,44 +215,6 @@ class Relax(qp.utils.Minimize[Gradient]):
         )
         if v.lattice is not None:
             v.lattice = self.system.symmetries.symmetrize_matrix(v.lattice)
-
-    def remove_atomic_projections(self, step_size: float) -> None:
-        """Wavefunction drag pre-step: subtract atomic projections of wavefunctions."""
-        if self.drag_wavefunctions:
-            system = self.system
-            # Fit wavefunctions to linear combination of atomic orbitals:
-            psi = system.ions.get_atomic_orbitals(system.electrons.basis)
-            psi_Opsi = psi.dot_O(psi).wait()
-            C = system.electrons.C
-            psi_OC = psi.dot_O(C).wait()
-            coeff = torch.linalg.inv(psi_Opsi) @ psi_OC
-            if step_size:
-                # Remove best-fit atomic projections:
-                C -= psi @ coeff
-                self._drag_data = (psi, coeff)
-
-    def restore_atomic_projections(self, delta_positions: torch.Tensor) -> None:
-        """Wavefunction drag pre-step: subtract atomic projections of wavefunctions."""
-        if self.drag_wavefunctions:
-            # Retrieve cached data:
-            psi, coeff = self._drag_data
-            del self._drag_data
-            # Recompute / drag atomic orbitals:
-            system = self.system
-            if system.lattice.movable:
-                # Recompute orbitals (since lattice dilation not straightforward)
-                psi = system.ions.get_atomic_orbitals(system.electrons.basis)
-            else:
-                # Drag orbitals with appropriate translation phase:
-                basis = psi.basis
-                iGk = basis.iG[:, basis.mine] + basis.k[:, None]  # fractional G + k
-                phase = qp.utils.cis((-2 * np.pi) * (iGk @ delta_positions.T))
-                i_ion = system.ions.get_atomic_orbital_index(basis)[:, 0]
-                psi *= phase[..., i_ion].transpose(1, 2)[None, :, :, None, :]
-            # Restore atomic projections:
-            C = system.electrons.C
-            C += psi @ coeff
-            C.orthonormalize()
 
     def _run_fd_test(self):
         """Run finite difference test."""
