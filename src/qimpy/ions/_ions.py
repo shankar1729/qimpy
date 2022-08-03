@@ -28,7 +28,8 @@ class Ions(qp.TreeNode):
     positions: torch.Tensor  #: fractional positions of each ion (n_ions x 3)
     velocities: torch.Tensor  #: Cartesian velocities of each ion (n_ions x 3)
     types: torch.Tensor  #: type of each ion (n_ions, int)
-    M_initial: Optional[torch.Tensor]  #: initial magnetic moment for each ion
+    Q: Optional[torch.Tensor]  #: initial / Lowdin charge (oxidation state) for each ion
+    M: Optional[torch.Tensor]  #: initial / Lowdin magnetic moment for each ion
     Z: torch.Tensor  #: charge of each ion type (n_types, float)
     Z_tot: float  #: total ionic charge
     rho_tilde: qp.grid.FieldH  #: ionic charge density (uses coulomb.ion_width)
@@ -73,6 +74,7 @@ class Ions(qp.TreeNode):
             Optional args is a dictionary of additional per-ion
             parameters that may include:
 
+                * `Q`: initial oxidation state / charge for the ion.
                 * `M`: initial magnetic moment for the ion, which would be a
                   single Mz or [Mx, My, Mz] depending on if the calculation
                   is spinorial. Only specify in spin-polarized calculations.
@@ -103,6 +105,7 @@ class Ions(qp.TreeNode):
         self.slices = []  # slice to get each ion type
         positions = []  # position of each ion
         types = []  # type of each ion (index into symbols)
+        Q_initial = []  # initial charge / oxidation states
         M_initial = []  # initial magnetic moments
         type_start = 0
         for coord in coordinates:
@@ -127,6 +130,7 @@ class Ions(qp.TreeNode):
             # Add type and position of current ion:
             types.append(self.n_types - 1)
             positions.append([float(x) for x in coord[1:4]])
+            Q_initial.append(attrib.get("Q", None))
             M_initial.append(attrib.get("M", None))
             self.n_ions += 1
         if type_start != self.n_ions:
@@ -149,6 +153,15 @@ class Ions(qp.TreeNode):
         self.velocities = torch.zeros_like(self.positions)
         self.positions.grad = torch.full_like(self.positions, np.nan)
         self.types = torch.tensor(types, device=qp.rc.device, dtype=torch.long)
+        # --- Fill in missing oxidation states (if any specified):
+        if Q_initial.count(None) == len(Q_initial):
+            self.Q = None  # no charge specified
+        else:
+            self.Q = torch.tensor(
+                [(0.0 if (Q is None) else Q) for Q in Q_initial],
+                device=qp.rc.device,
+                dtype=torch.double,
+            )
         # --- Fill in missing magnetizations (if any specified):
         M_lengths = set(
             [(len(M) if isinstance(M, list) else 1) for M in M_initial if M]
@@ -159,13 +172,13 @@ class Ions(qp.TreeNode):
             M_length = next(iter(M_lengths))
             assert (M_length == 1) or (M_length == 3)
             M_default = [0.0, 0.0, 0.0] if (M_length == 3) else 0.0
-            self.M_initial = torch.tensor(
-                [(M if M else M_default) for M in M_initial],
+            self.M = torch.tensor(
+                [(M_default if (M is None) else M) for M in M_initial],
                 device=qp.rc.device,
                 dtype=torch.double,
             )
         else:
-            self.M_initial = None
+            self.M = None
         self.report(report_grad=False)
 
         # Initialize pseudopotentials:
@@ -232,21 +245,20 @@ class Ions(qp.TreeNode):
             .numpy()
         )
         types = self.types.to(qp.rc.cpu).numpy()
-        M_initial = (
-            None if (self.M_initial is None) else self.M_initial.to(qp.rc.cpu).numpy()
-        )
+        Q = None if (self.Q is None) else self.Q.to(qp.rc.cpu).numpy()
+        M = None if (self.M is None) else self.M.to(qp.rc.cpu).numpy()
+        any_attribs = not ((Q is None) and (M is None))
         for i_ion, (pos_x, pos_y, pos_z) in enumerate(positions):
-            # Generate attribute string:
-            attrib_str = ""
-            attribs = {}
-            if M_initial is not None:
-                M_i = M_initial[i_ion]
-                if np.linalg.norm(M_i):
-                    attribs["M"] = M_i
-            if attribs:
-                attrib_str = ", " + str(attribs).replace("'", "").replace(
-                    "array(", ""
-                ).replace(")", "")
+            if any_attribs:
+                # Generate attribute string:
+                attribs = {}
+                if Q is not None:
+                    attribs["Q"] = Q[i_ion]
+                if M is not None:
+                    attribs["M"] = M[i_ion]
+                attrib_str = f", {_attrib_cleanup.sub('', str(attribs))}"
+            else:
+                attrib_str = ""
             # Report:
             qp.log.info(
                 f"- [{self.symbols[types[i_ion]]},"
@@ -303,3 +315,6 @@ class Ions(qp.TreeNode):
         which should have already been calculated.
         """
         return -self.positions.grad.detach() @ self.lattice.invRbasis
+
+
+_attrib_cleanup = re.compile(r"'|array\(|\)")  #: Pattern to clean up attrib in `report`

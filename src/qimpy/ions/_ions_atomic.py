@@ -98,26 +98,25 @@ def get_atomic_density(
     # Compute magnetization on each atom if needed:
     n_mag = M_tot.shape[0]
     if n_mag:
-        if self.M_initial is not None:
+        if self.M is not None:
             if n_mag == 1:
-                if len(self.M_initial.shape) != 1:
+                if len(self.M.shape) != 1:
                     raise ValueError(
-                        "Per-ion magnetization must be a"
-                        " scalar in non-spinorial mode"
+                        "Per-ion magnetization must be a scalar in non-spinorial mode"
                     )
             else:  # n_mag == 3:
-                if len(self.M_initial.shape) != 3:
+                if len(self.M.shape) != 3:
                     raise ValueError(
-                        "Per-ion magnetization must be a" " 3-vector in spinorial mode"
+                        "Per-ion magnetization must be a 3-vector in spinorial mode"
                     )
-            M_initial = self.M_initial.view((self.n_ions, n_mag))
+            M = self.M.view((self.n_ions, n_mag))
         else:
-            M_initial = torch.zeros((self.n_ions, n_mag), device=M_tot.device)
+            M = torch.zeros((self.n_ions, n_mag), device=M_tot.device)
         # Get fractional magnetization of each atom:
-        M_frac = M_initial / self.Z[self.types, None]
+        M_frac = M / self.Z[self.types, None]
         if M_tot.norm().item():
             # Correct to match overall magnetization, if specified:
-            M_frac += ((M_tot - M_initial.sum(dim=0)) / self.Z_tot)[None, :]
+            M_frac += ((M_tot - M.sum(dim=0)) / self.Z_tot)[None, :]
         # Make sure fractional magnetization in range:
         M_frac_max = 0.9  # need some minority spin for numerical stability
         M_frac *= (M_frac_max / M_frac.norm(dim=1).clamp(min=M_frac_max))[:, None]

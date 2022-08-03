@@ -101,7 +101,7 @@ class Relax(qp.utils.Minimize[Gradient]):
         qp.log.info(
             "\n--- Geometry relaxation ---\n"
             if self.n_iterations
-            else "\n--- Electronic optimization at fixed geometry ---\n"
+            else "\n--- Fixed geometry ---\n"
         )
         self.system = system
         self.invRbasis0 = system.lattice.invRbasis

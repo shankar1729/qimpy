@@ -39,7 +39,7 @@ def _get_space_group(
     pos0 = ions.positions  # original ionic positions
     type_mask = ions.types[:, None] == ions.types[None, :]
     # --- magnetization:
-    M0 = ions.M_initial
+    M0 = ions.M
     if M0 is None:
         pass  # no handling needed
     elif len(M0.shape) == 1:
