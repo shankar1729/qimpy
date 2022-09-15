@@ -21,7 +21,7 @@ class Export(qp.TreeNode):
         *,
         system: qp.System,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
-        bgw: Optional[Union[dict, qp.geometry.Fixed]] = None,
+        bgw: Optional[Union[dict, qp.export.BGW]] = None,
     ) -> None:
         """Specify one or more export formats.
 
