@@ -15,6 +15,7 @@ class System(qp.TreeNode):
     grid: qp.grid.Grid  #: Charge-density grid
     coulomb: qp.grid.Coulomb  #: Coulomb interactions on charge-density grid
     geometry: qp.geometry.Geometry  #: Geometry actions, e.g., relaxation / dynamics
+    export: qp.export.Export  #: Exporters to interface with other codes
     energy: qp.Energy  #: Energy components
     checkpoint_in: qp.utils.CpPath  #: Input checkpoint
     checkpoint_out: Optional[str]  #: Filename for output checkpoint
@@ -29,6 +30,7 @@ class System(qp.TreeNode):
         electrons: Union[qp.electrons.Electrons, dict, None] = None,
         grid: Union[qp.grid.Grid, dict, None] = None,
         geometry: Union[qp.geometry.Geometry, dict, None] = None,
+        export: Union[qp.export.Export, dict, None] = None,
         checkpoint: Optional[str] = None,
         checkpoint_out: Optional[str] = None,
         comm: Optional[qp.MPI.Comm] = None,
@@ -52,6 +54,8 @@ class System(qp.TreeNode):
             :yaml:`Charge-density grid.`
         geometry
             :yaml:`Geometry actions such as relaxation and dynamics.`
+        export
+            :yaml:`Export data for other codes.`
         checkpoint
             :yaml:`Checkpoint file to read at start-up.`
         checkpoint_out
@@ -139,6 +143,8 @@ class System(qp.TreeNode):
             lattice=self.lattice,
         )
 
+        self.add_child("export", qp.export.Export, export, checkpoint_in, system=self)
+
         # Initialize ionic potentials and energies at initial configuration:
         self.energy = qp.Energy()
         self.ions.update(self)
@@ -163,6 +169,7 @@ class System(qp.TreeNode):
     def run(self) -> None:
         """Run any actions specified in the input."""
         self.geometry.run(self)
+        self.export(self)
 
 
 def _add_axis(
