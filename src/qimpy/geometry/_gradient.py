@@ -54,9 +54,7 @@ class Gradient:
             self.lattice *= other
         return self
 
-    def overlap(self, other: "Gradient") -> float:
-        """Global overlap collected over `comm`. For complex arrays,
-        real and imaginary components are treated as independent."""
+    def vdot(self, other: "Gradient") -> float:
         result = self.ions.flatten() @ other.ions.flatten()
         if self.lattice is not None:
             assert other.lattice is not None

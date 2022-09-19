@@ -44,20 +44,20 @@ def _cg(self: qp.utils.Minimize[Vector]) -> qp.Energy:
             return state.energy
 
         # Direction update:
-        g_Kg = self._sync(state.gradient.overlap(state.K_gradient))
+        g_Kg = self._sync(state.gradient.vdot(state.K_gradient))
         if along_gradient or self.method == "gradient":
             beta = 0.0  # weight of previous search direction
         else:
             # Conjugate gradient update:
-            g_d = self._sync(state.gradient.overlap(direction))
+            g_d = self._sync(state.gradient.vdot(direction))
             g_prev_Kg = (
-                self._sync(g_prev.overlap(state.K_gradient)) if g_prev_used else 0.0
+                self._sync(g_prev.vdot(state.K_gradient)) if g_prev_used else 0.0
             )
             # --- nonlinear CG variants:
             if self.cg_type == "polak-ribiere":
                 beta = (g_Kg - g_prev_Kg) / g_prev_Kg_prev
             elif self.cg_type == "hestenes-stiefel":
-                g_prev_d = self._sync(g_prev.overlap(direction))
+                g_prev_d = self._sync(g_prev.vdot(direction))
                 beta = (g_Kg - g_prev_Kg) / (g_d - g_prev_d)
             else:  # self.cg_type == 'fletcher-reeves':
                 beta = g_Kg / g_prev_Kg_prev

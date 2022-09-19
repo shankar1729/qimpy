@@ -148,7 +148,8 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
 
             # Cache residual:
             residual = self.residual
-            res_norm = self._sync(np.sqrt(residual.overlap(residual)))
+            Mresidual = self.metric(residual)
+            res_norm = self._sync(np.sqrt(residual.vdot(Mresidual)))
             self._residuals.append(residual)
 
             # Check and report convergence:
@@ -179,8 +180,7 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
 
             # Pulay mixing / DIIS step:
             # --- update the overlap matrix
-            Mresidual = self.metric(residual)
-            new_overlaps = np.array([r.overlap(Mresidual) for r in self._residuals])
+            new_overlaps = np.array([r.vdot(Mresidual) for r in self._residuals])
             N = len(new_overlaps)
             self._overlaps = np.vstack(
                 (

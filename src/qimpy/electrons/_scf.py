@@ -163,10 +163,10 @@ class SCF(qp.utils.Pulay[qp.grid.FieldH]):
             electrons.n_tilde.grad = v
 
     def precondition(self, v: qp.grid.FieldH) -> qp.grid.FieldH:
-        result = qp.grid.FieldH(v.grid, data=(v.data * self.K_kerker))
+        result = v.convolve(self.K_kerker)
         if result.data.shape[0] > 1:  # Different fraction for magnetization
             result.data[1:] *= self.mix_fraction_mag / self.mix_fraction
         return result
 
     def metric(self, v: qp.grid.FieldH) -> qp.grid.FieldH:
-        return qp.grid.FieldH(v.grid, data=(v.data * self.K_metric))
+        return v.convolve(self.K_metric)

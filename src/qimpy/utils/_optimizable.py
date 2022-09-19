@@ -31,7 +31,7 @@ class Optimizable(Protocol):
     def __imul__(self: T, other: float) -> T:
         ...
 
-    def overlap(self: T, other: T) -> float:
+    def vdot(self: T, other: T) -> float:
         ...
 
 
@@ -86,9 +86,8 @@ class MatrixArray:
         self.M *= other
         return self
 
-    def overlap(self, other: "MatrixArray") -> float:
-        """Global overlap collected over `comm`. For complex arrays,
-        real and imaginary components are treated as independent."""
-        M1 = torch.view_as_real(self.M) if self.M.is_complex() else self.M
-        M2 = torch.view_as_real(other.M) if other.M.is_complex() else other.M
-        return qp.utils.globalreduce.sum(M1 * M2, self.comm)
+    def vdot(self, other: "MatrixArray") -> float:
+        """Global vector-space dot product collected over `comm`."""
+        result = torch.vdot(self.M.flatten(), other.M.flatten()).real
+        self.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(result), qp.MPI.SUM)
+        return result.item()

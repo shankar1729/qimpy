@@ -126,4 +126,4 @@ class LCAO(Minimize[MatrixArray]):
         # Store gradients:
         state.gradient = MatrixArray(M=E_H_aux, comm=el.kpoints.comm)
         state.K_gradient = MatrixArray(M=K_E_H_aux, comm=el.kpoints.comm)
-        state.extra = [np.sqrt(state.gradient.overlap(state.gradient))]
+        state.extra = [np.sqrt(state.gradient.vdot(state.gradient))]

@@ -45,7 +45,7 @@ def _quadratic(
     step_size_prev = 0.0  # cumulative progress along direction
     E = self._sync(float(state.energy))
     E_orig = E
-    g_d = self._sync(state.gradient.overlap(direction))
+    g_d = self._sync(state.gradient.vdot(direction))
     if g_d >= 0.0:
         qp.log.info(
             f"{self.name}: Bad step direction with positive" " gradient component"
@@ -160,7 +160,7 @@ def _wolfe(
     # Check initial point:
     step_size_prev = 0.0  # cumulative progress along direction
     E = self._sync(float(state.energy))
-    g_d = self._sync(state.gradient.overlap(direction))
+    g_d = self._sync(state.gradient.vdot(direction))
     if g_d >= 0.0:
         qp.log.info(
             f"{self.name}: Bad step direction with positive" " gradient component"
@@ -178,7 +178,7 @@ def _wolfe(
         self.step(direction, step_size - step_size_state)
         step_size_state = step_size
         E = self._compute(state, energy_only=False)
-        g_d = self._sync(state.gradient.overlap(direction))
+        g_d = self._sync(state.gradient.vdot(direction))
         if i_step == self.step_size.n_adjust:
             break  # Reached step limit of line minimize
         # Make sure within domain:

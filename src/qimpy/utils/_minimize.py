@@ -173,7 +173,7 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         state = qp.utils.MinimizeState["Vector"]()
         E0 = self._compute(state, energy_only=False)
         dE_step = self._sync(
-            state.gradient.overlap(direction)
+            state.gradient.vdot(direction)
         )  # directional derivative along step direction
         # Finite difference derivatives:
         step_size_prev = 0.0  # cumulative progress along step:

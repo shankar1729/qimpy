@@ -191,14 +191,16 @@ class Field(qp.utils.Gradable[FieldType]):
 
     __xor__ = dot
 
-    def overlap(self: FieldType, other: FieldType) -> float:
-        """Compute net inner product i.e. `dot` summed over batch dimensions.
-        The result is always real, which amounts to treating complex fields
-        as two-component real fields, and is therefore useful for optimizing
-        over `Field`s eg. with the `Pulay` or `Minimizer` algorithm templates.
+    def vdot(self: FieldType, other: FieldType) -> float:
+        """Vector-space dot product of data summed over all dimensions.
+        (Scalar contraction needed for the `Pulay` or `Minimizer` algorithm templates.)
         """
-        result = self.dot(other).sum()
-        return float(result.real.item() if result.is_complex() else result.item())
+        result = torch.vdot(self.data.flatten(), other.data.flatten()).real
+        if self.grid.comm is not None:
+            self.grid.comm.Allreduce(
+                qp.MPI.IN_PLACE, qp.utils.BufferView(result), qp.MPI.SUM
+            )
+        return result.item()
 
     def norm(self: FieldType) -> torch.Tensor:
         r"""Norm of a field, defined by :math:`\sqrt{\int |a|^2}`.
