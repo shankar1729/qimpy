@@ -11,6 +11,8 @@ FunctionFFT = Callable[[torch.Tensor], torch.Tensor]
 
 
 class _FFT(torch.autograd.Function):
+    """Differentiable interface to :func:`_fft`."""
+
     @staticmethod
     def forward(ctx, grid: qp.grid.Grid, input: torch.Tensor) -> torch.Tensor:  # type: ignore
         ctx.grid = grid
@@ -22,6 +24,8 @@ class _FFT(torch.autograd.Function):
 
 
 class _IFFT(torch.autograd.Function):
+    """Differentiable interface to :func:`_ifft`."""
+
     @staticmethod
     def forward(ctx, grid: qp.grid.Grid, input: torch.Tensor) -> torch.Tensor:  # type: ignore
         ctx.grid = grid
@@ -217,26 +221,10 @@ def parallel_transform(
 
 
 def _fft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
-    """Forward Fast Fourier Transform.
-    This method dispatches to complex-to-complex or real-to-complex
-    transforms depending on whether the input `v` is complex or real.
-    Note that QimPy applies normalization in forward transforms,
-    corresponding to norm='forward' in the torch.fft routines.
-    This makes the G=0 components in reciprocal space correspond
-    to the mean value of the real space version.
-
-    Parameters
-    ----------
-    v : torch.Tensor (complex or real)
-        Last 3 dimensions must match `shapeR_mine`,
-        and any preceding dimensions are batched over.
-
-    Returns
-    -------
-    torch.Tensor (complex)
-        Last 3 dimensions will be `shapeG_mine` or `shapeH_mine`,
-        depending on whether `v` is complex or real respectively,
-        preceded by any batch dimensions in the input.
+    """
+    Underlying implementation of :meth:`qimpy.grid.Grid.fft`.
+    Additional argument `norm` matches torch.fft routines and is used internally
+    by the differentiable interface in :class:`_FFT` and :class:`_IFFT`.
     """
     if v.dtype.is_complex:
         # Complex to complex forward transform:
@@ -283,26 +271,10 @@ def _fft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
 
 
 def _ifft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
-    """Inverse Fast Fourier Transform.
-    This method dispatches to complex-to-complex or complex-to-real
-    transforms depending on whether the last three dimensions of `v`
-    match `shapeG_mine` or `shapeH_mine` respectively.
-    Note that QimPy applies normalization in forward transforms
-    (see :meth:`qimpy.grid.Grid.fft`).
-
-    Parameters
-    ----------
-    v : torch.Tensor (complex)
-        Last 3 dimensions must match shapeG_mine,
-        and any preceding dimensions are batched over
-
-    Returns
-    -------
-    torch.Tensor (complex or real)
-        Last 3 dimensions will be shapeR_mine,
-        preceded by any batch dimensions in the input.
-        The result will be complex or real, depending on whether the last
-        three dimensions of `v` match `shapeG_mine` or `shapeH_mine`.
+    """
+    Underlying implementation of :meth:`qimpy.grid.Grid.ifft`.
+    Additional argument `norm` matches torch.fft routines and is used internally
+    by the differentiable interface in :class:`_FFT` and :class:`_IFFT`.
     """
     # Get total size of last dimension to dispatch complex vs real:
     assert v.dtype.is_complex

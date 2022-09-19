@@ -35,12 +35,6 @@ class Grid(qp.TreeNode):
     _indices_rfft: IndicesType  #: All-to-all unscramble indices for `rfft`
     _indices_irfft: IndicesType  #: All-to-all unscramble indices for `irfft`
 
-    def fft(self, v: torch.Tensor) -> torch.Tensor:
-        return _FFT.apply(self, v)
-
-    def ifft(self, v: torch.Tensor) -> torch.Tensor:
-        return _IFFT.apply(self, v)
-
     def __init__(
         self,
         *,
@@ -205,3 +199,53 @@ class Grid(qp.TreeNode):
         if self._field_symmetrizer is None:
             self._field_symmetrizer = qp.symmetries.FieldSymmetrizer(self)
         return self._field_symmetrizer
+
+    def fft(self, v: torch.Tensor) -> torch.Tensor:
+        """
+        Forward Fast Fourier Transform.
+        This method dispatches to complex-to-complex or real-to-complex
+        transforms depending on whether the input `v` is complex or real.
+        Note that QimPy applies normalization in forward transforms,
+        corresponding to norm='forward' in the torch.fft routines.
+        This makes the G=0 components in reciprocal space correspond
+        to the mean value of the real space version.
+
+        Parameters
+        ----------
+        v : torch.Tensor (complex or real)
+            Last 3 dimensions must match `shapeR_mine`,
+            and any preceding dimensions are batched over.
+
+        Returns
+        -------
+        torch.Tensor (complex)
+            Last 3 dimensions will be `shapeG_mine` or `shapeH_mine`,
+            depending on whether `v` is complex or real respectively,
+            preceded by any batch dimensions in the input.
+        """
+        return _FFT.apply(self, v)
+
+    def ifft(self, v: torch.Tensor) -> torch.Tensor:
+        """
+        Inverse Fast Fourier Transform.
+        This method dispatches to complex-to-complex or complex-to-real
+        transforms depending on whether the last three dimensions of `v`
+        match `shapeG_mine` or `shapeH_mine` respectively.
+        Note that QimPy applies normalization in forward transforms
+        (see :meth:`qimpy.grid.Grid.fft`).
+
+        Parameters
+        ----------
+        v : torch.Tensor (complex)
+            Last 3 dimensions must match shapeG_mine,
+            and any preceding dimensions are batched over
+
+        Returns
+        -------
+        torch.Tensor (complex or real)
+            Last 3 dimensions will be shapeR_mine,
+            preceded by any batch dimensions in the input.
+            The result will be complex or real, depending on whether the last
+            three dimensions of `v` match `shapeG_mine` or `shapeH_mine`.
+        """
+        return _IFFT.apply(self, v)
