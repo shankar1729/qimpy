@@ -1,4 +1,5 @@
 import qimpy as qp
+import numpy as np
 import torch
 import pytest
 from typing import Sequence
@@ -65,33 +66,37 @@ class RandomFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
         # Preconditioner (inexact inverse):
         Kreg = 0.1 * (M_all[0] ** 2).sum() * torch.eye(n_dim, device=qp.rc.device)
         self.K = torch.linalg.inv(Kreg + M_all[0].T @ M_all[0])[:, self.i0slice]
+        self.K *= grid.dV  # include integration weights in preconditioner
 
     def step(self, direction: qp.grid.FieldR, step_size: float) -> None:
         self.x += step_size * direction
 
     def compute(self, state, energy_only):  # type: ignore
-        E = self.E0
-        E_x = torch.zeros_like(self.x0.data.flatten())
+        grid = self.grid
+        if not energy_only:
+            self.x.data.requires_grad = True
+            self.x.data.grad = None
+
+        E = torch.tensor(self.E0, device=qp.rc.device)
         for i_M, M in enumerate(self.M):
             v = M @ (self.x - self.x0).data.flatten()  # partial results, full array
             qp.rc.current_stream_synchronize()
             self.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(v), qp.MPI.SUM)
-            v_norm_sq = (v ** 2).sum().item()
-            E += v_norm_sq ** (i_M + 1) * self.grid.dV
-            E_x += (2 * (i_M + 1) * (v_norm_sq ** i_M)) * (M.T @ v)
-        # Apply preconditioner:
-        K_E_x = self.K @ E_x  # partial results, full array
-        self.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(K_E_x), qp.MPI.SUM)
-        K_E_x = K_E_x[self.i0slice]  # full results, partial array
-        state.energy["E"] = E
+            E += (v ** 2).sum() ** (i_M + 1) * grid.dV
+        state.energy["E"] = E.item()
+
         if not energy_only:
-            state.gradient = qp.grid.FieldR(
-                self.grid, data=E_x.view(self.grid.shapeR_mine)
-            )
-            state.K_gradient = qp.grid.FieldR(
-                self.grid, data=K_E_x.view(self.grid.shapeR_mine)
-            )
-            state.extra = [state.gradient.norm()]
+            E.backward()
+            E_x = self.x.data.grad
+            # Apply preconditioner:
+            K_E_x = self.K @ E_x.flatten()  # partial results, full array
+            self.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(K_E_x), qp.MPI.SUM)
+            K_E_x = K_E_x.view(grid.shape)[self.i0slice]  # full results, partial array
+            # Convert to fields:
+            state.gradient = qp.grid.FieldR(grid, data=E_x)
+            state.K_gradient = qp.grid.FieldR(grid, data=K_E_x)
+            state.extra = [np.sqrt(state.gradient.vdot(state.K_gradient))]
+            self.x.data.requires_grad = False
 
     def random_direction(self) -> qp.grid.FieldR:
         data = torch.randn(self.grid.shape, device=qp.rc.device)
