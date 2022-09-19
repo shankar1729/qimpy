@@ -1,7 +1,7 @@
 import qimpy as qp
 import numpy as np
 import torch
-from ._fft import _init_grid_fft, _fft, _ifft, IndicesType, MethodFFT
+from ._fft import _init_grid_fft, _FFT, _IFFT, IndicesType
 from typing import Optional, Sequence, Tuple, Dict
 
 
@@ -35,8 +35,11 @@ class Grid(qp.TreeNode):
     _indices_rfft: IndicesType  #: All-to-all unscramble indices for `rfft`
     _indices_irfft: IndicesType  #: All-to-all unscramble indices for `irfft`
 
-    fft: MethodFFT = _fft
-    ifft: MethodFFT = _ifft
+    def fft(self, v: torch.Tensor) -> torch.Tensor:
+        return _FFT.apply(self, v)
+
+    def ifft(self, v: torch.Tensor) -> torch.Tensor:
+        return _IFFT.apply(self, v)
 
     def __init__(
         self,

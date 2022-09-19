@@ -7,8 +7,29 @@ from typing import Tuple, Callable
 
 
 IndicesType = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
-MethodFFT = Callable[["qp.grid.Grid", torch.Tensor], torch.Tensor]
 FunctionFFT = Callable[[torch.Tensor], torch.Tensor]
+
+
+class _FFT(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, grid: qp.grid.Grid, input: torch.Tensor) -> torch.Tensor:  # type: ignore
+        ctx.grid = grid
+        return _fft(grid, input)
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor) -> Tuple[None, torch.Tensor]:  # type: ignore
+        return None, _ifft(ctx.grid, grad_output) * (1.0 / np.prod(ctx.grid.shape))
+
+
+class _IFFT(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, grid: qp.grid.Grid, input: torch.Tensor) -> torch.Tensor:  # type: ignore
+        ctx.grid = grid
+        return _ifft(grid, input)
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor) -> Tuple[None, torch.Tensor]:  # type: ignore
+        return None, _fft(ctx.grid, grad_output) * np.prod(ctx.grid.shape)
 
 
 def _init_grid_fft(self: qp.grid.Grid) -> None:
