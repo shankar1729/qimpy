@@ -7,7 +7,7 @@ from typing import Tuple, Callable
 
 
 IndicesType = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
-FunctionFFT = Callable[[torch.Tensor], torch.Tensor]
+FunctionFFT = Callable[[torch.Tensor, str], torch.Tensor]
 
 
 class _FFT(torch.autograd.Function):
@@ -16,11 +16,11 @@ class _FFT(torch.autograd.Function):
     @staticmethod
     def forward(ctx, grid: qp.grid.Grid, input: torch.Tensor) -> torch.Tensor:  # type: ignore
         ctx.grid = grid
-        return _fft(grid, input)
+        return _fft(grid, input, norm="forward")
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor) -> Tuple[None, torch.Tensor]:  # type: ignore
-        return None, _ifft(ctx.grid, grad_output) * (1.0 / np.prod(ctx.grid.shape))
+        return None, _ifft(ctx.grid, grad_output, norm="backward")
 
 
 class _IFFT(torch.autograd.Function):
@@ -29,11 +29,11 @@ class _IFFT(torch.autograd.Function):
     @staticmethod
     def forward(ctx, grid: qp.grid.Grid, input: torch.Tensor) -> torch.Tensor:  # type: ignore
         ctx.grid = grid
-        return _ifft(grid, input)
+        return _ifft(grid, input, norm="forward")
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor) -> Tuple[None, torch.Tensor]:  # type: ignore
-        return None, _fft(ctx.grid, grad_output) * np.prod(ctx.grid.shape)
+        return None, _fft(ctx.grid, grad_output, norm="backward")
 
 
 def _init_grid_fft(self: qp.grid.Grid) -> None:
@@ -150,6 +150,7 @@ def _init_grid_fft(self: qp.grid.Grid) -> None:
 def parallel_transform(
     comm: qp.MPI.Comm,
     v: torch.Tensor,
+    norm: str,
     shape_in: Tuple[int, ...],
     shape_out: Tuple[int, ...],
     fft_before: FunctionFFT,
@@ -174,6 +175,8 @@ def parallel_transform(
         Communicator that this transform is split on
     v
         Input tensor, 3D, real for rfft and complex for all else
+    norm
+        Normalization mode (see `torch.fft`) for `fft_before` and `fft_after`
     shape_in
         local spatial dimensions before MPI exchange
     shape_out
@@ -195,7 +198,7 @@ def parallel_transform(
     """
     assert v.shape[-3:] == shape_in
     n_batch = int(np.prod(v.shape[:-3]))
-    v_tilde = fft_before(v)  # Transform 2 or 1 dims here
+    v_tilde = fft_before(v, norm)  # Transform 2 or 1 dims here
     v_tilde = v_tilde.flatten(0, -2).T.contiguous()  # bring last dim to front
 
     # MPI rearrangement:
@@ -217,10 +220,10 @@ def parallel_transform(
         index = index_1 + index_i_batch * i_batch + index_n_batch * n_batch
     v_tilde = v_tmp[index].view(v.shape[:-3] + shape_out)
     del v_tmp
-    return fft_after(v_tilde)  # Transform 1 or 2 dims here
+    return fft_after(v_tilde, norm)  # Transform 1 or 2 dims here
 
 
-def _fft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
+def _fft(self: qp.grid.Grid, v: torch.Tensor, norm: str) -> torch.Tensor:
     """
     Underlying implementation of :meth:`qimpy.grid.Grid.fft`.
     Additional argument `norm` matches torch.fft routines and is used internally
@@ -231,11 +234,12 @@ def _fft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
         if v.shape[:-3].count(0):  # zero-sized batches
             return v
         if self.n_procs == 1:
-            return torch.fft.fftn(v, s=self.shape, norm="forward")
+            return torch.fft.fftn(v, s=self.shape, norm=norm)
         assert self.comm is not None
         return parallel_transform(
             self.comm,
             v,
+            norm,
             self.shapeR_mine,
             self.shapeG_mine[::-1],
             safe_fft2,
@@ -254,12 +258,13 @@ def _fft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
                 device=v.device,
             )
         if self.n_procs == 1:
-            return torch.fft.rfftn(v, s=self.shape, norm="forward")
+            return torch.fft.rfftn(v, s=self.shape, norm=norm)
         assert v.dtype.is_floating_point
         assert self.comm is not None
         return parallel_transform(
             self.comm,
             v,
+            norm,
             self.shapeR_mine,
             self.shapeH_mine[::-1],
             safe_rfft,
@@ -270,7 +275,7 @@ def _fft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
         ).swapaxes(-1, -3)
 
 
-def _ifft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
+def _ifft(self: qp.grid.Grid, v: torch.Tensor, norm: str) -> torch.Tensor:
     """
     Underlying implementation of :meth:`qimpy.grid.Grid.ifft`.
     Additional argument `norm` matches torch.fft routines and is used internally
@@ -288,11 +293,12 @@ def _ifft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
         if v.shape[:-3].count(0):  # zero-sized batches
             return v
         if self.n_procs == 1:
-            return torch.fft.ifftn(v, s=self.shape, norm="forward")
+            return torch.fft.ifftn(v, s=self.shape, norm=norm)
         assert self.comm is not None
         return parallel_transform(
             self.comm,
             v.swapaxes(-1, -3),
+            norm,
             self.shapeG_mine[::-1],
             self.shapeR_mine,
             safe_ifft,
@@ -311,13 +317,14 @@ def _ifft(self: qp.grid.Grid, v: torch.Tensor) -> torch.Tensor:
                 device=v.device,
             )
         if self.n_procs == 1:
-            return torch.fft.irfftn(v, s=self.shape, norm="forward")
+            return torch.fft.irfftn(v, s=self.shape, norm=norm)
         assert v.dtype.is_complex
         assert self.comm is not None
         shapeR_mine_complex = (self.split0.n_mine, self.shape[1], self.shapeH[2])
         return parallel_transform(
             self.comm,
             v.swapaxes(-1, -3),
+            norm,
             self.shapeH_mine[::-1],
             shapeR_mine_complex,
             safe_ifft2,
@@ -334,25 +341,25 @@ COMPLEX_TYPE = {torch.double: torch.complex128, torch.float: torch.complex64}
 
 
 # --- Wrappers to torch FFTs that are safe for zero sizes ---
-def safe_fft(v: torch.Tensor) -> torch.Tensor:
-    return torch.fft.fft(v, norm="forward") if v.numel() else v
+def safe_fft(v: torch.Tensor, norm: str) -> torch.Tensor:
+    return torch.fft.fft(v, norm=norm) if v.numel() else v
 
 
-def safe_fft2(v: torch.Tensor) -> torch.Tensor:
-    return torch.fft.fft2(v, norm="forward") if v.numel() else v
+def safe_fft2(v: torch.Tensor, norm: str) -> torch.Tensor:
+    return torch.fft.fft2(v, norm=norm) if v.numel() else v
 
 
-def safe_ifft(v: torch.Tensor) -> torch.Tensor:
-    return torch.fft.ifft(v, norm="forward") if v.numel() else v
+def safe_ifft(v: torch.Tensor, norm: str) -> torch.Tensor:
+    return torch.fft.ifft(v, norm=norm) if v.numel() else v
 
 
-def safe_ifft2(v: torch.Tensor) -> torch.Tensor:
-    return torch.fft.ifft2(v, norm="forward") if v.numel() else v
+def safe_ifft2(v: torch.Tensor, norm: str) -> torch.Tensor:
+    return torch.fft.ifft2(v, norm=norm) if v.numel() else v
 
 
-def safe_rfft(v: torch.Tensor) -> torch.Tensor:
+def safe_rfft(v: torch.Tensor, norm: str) -> torch.Tensor:
     if v.numel():
-        return torch.fft.rfft(v, norm="forward")
+        return torch.fft.rfft(v, norm=norm)
     else:
         return torch.zeros(
             v.shape[:-1] + (v.shape[-1] // 2 + 1,),
@@ -361,9 +368,9 @@ def safe_rfft(v: torch.Tensor) -> torch.Tensor:
         )
 
 
-def safe_irfft(v: torch.Tensor) -> torch.Tensor:
+def safe_irfft(v: torch.Tensor, norm: str) -> torch.Tensor:
     if v.numel():
-        return torch.fft.irfft(v, norm="forward")
+        return torch.fft.irfft(v, norm=norm)
     else:
         return torch.zeros(
             v.shape[:-1] + (2 * (v.shape[-1] - 1),),
