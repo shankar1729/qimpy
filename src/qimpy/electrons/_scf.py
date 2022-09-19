@@ -125,6 +125,7 @@ class SCF(qp.utils.Pulay[qp.grid.FieldH]):
             if self.mix_density
             else Gsq_reg / (Gsq_reg + q_metric_sq)
         )
+        self.K_metric *= grid.lattice.volume * grid.weight2H  # integration weight
         # Initialize electronic energy for current state:
         system.electrons.update(system)
 

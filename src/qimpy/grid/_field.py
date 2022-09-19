@@ -166,13 +166,7 @@ class Field(qp.utils.Gradable[FieldType]):
         data1 = self.data.conj() if self.data.is_complex() else self.data
         data2 = other.data
         if type(self) == FieldH:
-            result = (data1 * data2).sum(dim=(-3, -2))  # z-axis not summed yet
-            # Account for Hermitian symmetry weights:
-            split2H = self.grid.split2H
-            iz_start = max(1, split2H.i_start) - split2H.i_start
-            iz_stop = min(split2H.n_tot - 1, split2H.i_stop) - split2H.i_start
-            result[..., iz_start:iz_stop] *= 2
-            result = result.sum(dim=-1).real  # z-axis summed here
+            result = (data1 * data2).sum(dim=(-3, -2)).real @ self.grid.weight2H
         else:
             result = (data1 * data2).sum(dim=(-3, -2, -1))
         # Volume factor:

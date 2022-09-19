@@ -140,6 +140,16 @@ class Grid(qp.TreeNode):
         """Volume per grid point (real-space integration weight)."""
         return self.lattice.volume / float(np.prod(self.shape))
 
+    @property
+    def weight2H(self) -> torch.Tensor:
+        """Hermitian-symmetry weights for reduced reciprocal space."""
+        split2H = self.split2H
+        iz_start = max(1, split2H.i_start) - split2H.i_start
+        iz_stop = min(split2H.n_tot - 1, split2H.i_stop) - split2H.i_start
+        result = torch.ones(split2H.n_mine, device=qp.rc.device)
+        result[iz_start:iz_stop] *= 2.0
+        return result
+
     def get_mesh(self, space: str, mine: bool = True) -> torch.Tensor:
         """Get mesh integer coordinates for real or reciprocal space
 
