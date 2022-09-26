@@ -124,7 +124,7 @@ def init(
     if torch.cuda.is_available():
         device = torch.device("cuda:0")
         use_cuda = True
-        torch.cuda.device(device)  # set as defeault CUDA device
+        torch.cuda.device(device)  # set as default CUDA device
         # Enable compute stream based on environment (default on):
         if os.environ.get("QIMPY_COMPUTE_STREAM", "1") in {"1", "yes"}:
             compute_stream = torch.cuda.Stream(device=device)

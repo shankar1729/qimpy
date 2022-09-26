@@ -134,7 +134,7 @@ class ProcessGrid:
         if self.n_procs % prod_known:
             raise ValueError(
                 f"Cannot distribute {self.n_procs} processes to"
-                f" {' x '.join(shape)} grid"
+                f" {' x '.join(map(str, shape))} grid"
             )
 
         # Compute a single unknown dimension if present:
