@@ -1,8 +1,8 @@
 """QimPy: Quantum-Integrated Multi-PhYsics"""
 # List exported symbols for doc generation
 __all__ = [
-    "MPI",
     "rc",
+    "MPI",
     "TreeNode",
     "Energy",
     "utils",
@@ -18,8 +18,8 @@ __all__ = [
 ]
 
 # Module import definition
-from mpi4py import MPI
 from . import rc
+from .rc import MPI
 from ._tree import TreeNode
 from ._energy import Energy
 from . import utils

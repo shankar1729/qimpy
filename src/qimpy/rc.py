@@ -4,11 +4,15 @@ selects a single CPU core for each MPI process in `mpi4py.MPI.COMM_WORLD`.
 
 Call `init` to select the number of cores or a GPU device, as available and based
 on environment variables including SLURM_CPUS_PER_TASK and CUDA_VISIBLE_DEVICES.
+
 Note that `init` must be called before any torch CUDA calls, so that a single CUDA
-context is associated with this process. Otherwise, on multi-GPU systems,
-any CUDA MPI will subsequently fail.
+context is associated with this process. Otherwise, on multi-GPU systems, any CUDA MPI
+will subsequently fail. To mitigate this potential issue whenever possible, this module
+uses SLURM_LOCALID or OMPI_COMM_WORLD_LOCAL_RANK to pick a specific GPU and alter
+CUDA_VISIBLE_DEVICES before any torch or MPI calls.
 """
 
+from . import _gpu_init  # before any gpu-related modules (torch, mpi)
 import os
 import time
 import datetime
@@ -17,9 +21,12 @@ import qimpy as qp
 import numpy as np
 from psutil import cpu_count
 from typing import Optional, Dict
+from mpi4py import MPI
+
 
 # List exported symbols for doc generation
 __all__ = (
+    "MPI",
     "comm",
     "i_proc",
     "n_procs",
@@ -35,7 +42,7 @@ __all__ = (
     "report_end",
 )
 
-comm: qp.MPI.Comm = qp.MPI.COMM_WORLD  #: Global communicator for QimPy
+comm: MPI.Comm = MPI.COMM_WORLD  #: Global communicator for QimPy
 i_proc: int = comm.rank  #: Rank within `comm`
 n_procs: int = comm.size  #: Size of `comm`
 is_head: bool = i_proc == 0  #: Whether head of `comm`
@@ -50,13 +57,13 @@ torch.set_default_tensor_type(torch.DoubleTensor)
 torch.set_num_threads(1)  # to prevent overcommit between MPI processes
 
 # Declare type mappings from torch to MPI and numpy:
-mpi_type: Dict[torch.dtype, qp.MPI.Datatype] = {
-    torch.int32: qp.MPI.INT,
-    torch.int64: qp.MPI.LONG,
-    torch.float32: qp.MPI.FLOAT,
-    torch.float64: qp.MPI.DOUBLE,
-    torch.complex64: qp.MPI.COMPLEX,
-    torch.complex128: qp.MPI.DOUBLE_COMPLEX,
+mpi_type: Dict[torch.dtype, MPI.Datatype] = {
+    torch.int32: MPI.INT,
+    torch.int64: MPI.LONG,
+    torch.float32: MPI.FLOAT,
+    torch.float64: MPI.DOUBLE,
+    torch.complex64: MPI.COMPLEX,
+    torch.complex128: MPI.DOUBLE_COMPLEX,
 }  #: Mapping from torch to MPI datatypes
 
 np_type: Dict[torch.dtype, type] = {
@@ -75,7 +82,7 @@ np_type: Dict[torch.dtype, type] = {
 
 
 def init(
-    *, comm_override: Optional[qp.MPI.Comm] = None, cores_override: Optional[int] = None
+    *, comm_override: Optional[MPI.Comm] = None, cores_override: Optional[int] = None
 ) -> None:
     """Initialize overall hardware resources to be used by QimPy.
 
@@ -104,20 +111,10 @@ def init(
         is_head = i_proc == 0
 
     # Select GPU before initializing torch:
-    comm_node = comm.Split_type(qp.MPI.COMM_TYPE_SHARED)  # on-node communicator
+    comm_node = comm.Split_type(MPI.COMM_TYPE_SHARED)  # on-node communicator
     i_proc_node = comm_node.Get_rank()
     n_procs_node = comm_node.Get_size()
-    cuda_dev_str = os.environ.get("CUDA_VISIBLE_DEVICES")
-    if cuda_dev_str:
-        # Select one GPU and make sure it's only one visible to torch:
-        cuda_devs = [int(s) for s in cuda_dev_str.split(",")]
-        cuda_dev_selected = cuda_devs[i_proc_node % len(cuda_devs)]
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(cuda_dev_selected)
-        n_gpus = min(1.0, len(cuda_devs) / n_procs_node)
-    else:
-        # Disable GPUs unless explicitly requested:
-        os.environ["CUDA_VISIBLE_DEVICES"] = ""
-        n_gpus = 0.0
+    gpu_id = _gpu_init.set_visibility(i_proc_node)
 
     # Initialize torch:
     global device, use_cuda, compute_stream
@@ -132,7 +129,12 @@ def init(
         else:
             qp.log.info("Async compute stream disabled for GPU operations.")
     else:
-        n_gpus = 0.0
+        gpu_id = -1
+    # --- count unique GPUs on node using IDs (average over processes on same node)
+    gpu_ids_mine = np.array([gpu_id], dtype=int)
+    gpu_ids_local = np.zeros(n_procs_node, dtype=int)
+    comm_node.Allgather(gpu_ids_mine, gpu_ids_local)
+    n_gpus = np.count_nonzero(np.unique(gpu_ids_local) >= 0) / n_procs_node
 
     # Threads:
     # --- First priority: override argument
@@ -154,10 +156,10 @@ def init(
 
     # Report total resources:
     run_totals = np.array([n_threads, n_gpus])
-    comm.Allreduce(qp.MPI.IN_PLACE, run_totals, op=qp.MPI.SUM)
+    comm.Allreduce(MPI.IN_PLACE, run_totals, op=MPI.SUM)
+    n_threads_tot, n_gpus_tot = run_totals.astype(int)
     qp.log.info(
-        f"Run totals: {n_procs:g} processes, "
-        f"{int(run_totals[0])} threads, {int(run_totals[1])} GPUs"
+        f"Run totals: {n_procs} processes, {n_threads_tot} threads, {n_gpus_tot} GPUs"
     )
 
 
