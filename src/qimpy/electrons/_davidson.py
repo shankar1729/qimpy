@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from dataclasses import dataclass
 from typing import Optional, Tuple
+from qimpy.rc import MPI
 
 
 class Davidson(qp.TreeNode):
@@ -131,7 +132,7 @@ class Davidson(qp.TreeNode):
             (deig[..., :n_bands] > eig_threshold).flatten(0, 1).any(dim=0)
         )[0]
         n_eigs_done = self.electrons.comm.allreduce(
-            pending[0].item() if len(pending) else n_bands, qp.MPI.MIN
+            pending[0].item() if len(pending) else n_bands, MPI.MIN
         )
         return deig_max, n_eigs_done
 

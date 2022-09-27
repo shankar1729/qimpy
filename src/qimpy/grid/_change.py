@@ -3,6 +3,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from typing import Optional, TypeVar
+from qimpy.rc import MPI
 
 
 def scatter(
@@ -17,7 +18,7 @@ def scatter(
 def gather(
     v: torch.Tensor,
     split_in: qp.utils.TaskDivision,
-    comm: qp.MPI.Comm,
+    comm: MPI.Comm,
     dim: int,
 ) -> torch.Tensor:
     """Return the contents of v, changed from split based on split_in on
@@ -45,7 +46,7 @@ def redistribute(
     v: torch.Tensor,
     split_in: qp.utils.TaskDivision,
     split_out: qp.utils.TaskDivision,
-    comm: qp.MPI.Comm,
+    comm: MPI.Comm,
     dim: int,
 ) -> torch.Tensor:
     """Return the contents of v, changed from split based on split_in to split
@@ -80,9 +81,9 @@ def redistribute(
 def fix_split(
     v: torch.Tensor,
     split_in: qp.utils.TaskDivision,
-    comm_in: Optional[qp.MPI.Comm],
+    comm_in: Optional[MPI.Comm],
     split_out: qp.utils.TaskDivision,
-    comm_out: Optional[qp.MPI.Comm],
+    comm_out: Optional[MPI.Comm],
     dim: int,
 ) -> torch.Tensor:
     """Fix how v is split along dimension dim, from split_in on comm_in

@@ -4,6 +4,7 @@ import torch
 from abc import abstractmethod
 from ._change import _change_real, _change_recip
 from typing import TypeVar, Any, Union, Tuple, Optional, Sequence
+from qimpy.rc import MPI
 
 
 FieldType = TypeVar("FieldType", bound="Field")  #: Type for field ops.
@@ -178,9 +179,7 @@ class Field(qp.utils.Gradable[FieldType]):
         if self.grid.comm is not None:
             result = result.contiguous()
             qp.rc.current_stream_synchronize()
-            self.grid.comm.Allreduce(
-                qp.MPI.IN_PLACE, qp.utils.BufferView(result), qp.MPI.SUM
-            )
+            self.grid.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(result), MPI.SUM)
         return result
 
     __xor__ = dot
@@ -191,9 +190,7 @@ class Field(qp.utils.Gradable[FieldType]):
         """
         result = torch.vdot(self.data.flatten(), other.data.flatten()).real
         if self.grid.comm is not None:
-            self.grid.comm.Allreduce(
-                qp.MPI.IN_PLACE, qp.utils.BufferView(result), qp.MPI.SUM
-            )
+            self.grid.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(result), MPI.SUM)
         return result.item()
 
     def norm(self: FieldType) -> torch.Tensor:

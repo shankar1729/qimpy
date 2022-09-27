@@ -4,6 +4,7 @@ import torch
 from . import lda, gga
 from .functional import Functional, get_libxc_functional_names, FunctionalsLibxc
 from typing import List, Dict, Union
+from qimpy.rc import MPI
 
 
 N_CUT = 1e-16  # Regularization threshold for densities
@@ -241,7 +242,7 @@ class XC(qp.TreeNode):
 
         # Collect energy
         if grid.comm is not None:
-            E = grid.comm.allreduce(E, qp.MPI.SUM)
+            E = grid.comm.allreduce(E, MPI.SUM)
         return E
 
 

@@ -3,6 +3,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from typing import Union, Optional, Dict, List, Any, Sequence
+from qimpy.rc import MPI
 
 
 class System(qp.TreeNode):
@@ -33,7 +34,7 @@ class System(qp.TreeNode):
         export: Union[qp.export.Export, dict, None] = None,
         checkpoint: Optional[str] = None,
         checkpoint_out: Optional[str] = None,
-        comm: Optional[qp.MPI.Comm] = None,
+        comm: Optional[MPI.Comm] = None,
         process_grid_shape: Optional[Sequence[int]] = None,
     ):
         """Compose a System to calculate from its pieces. Each piece

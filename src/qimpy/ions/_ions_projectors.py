@@ -2,6 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
+from qimpy.rc import MPI
 from .quintic_spline import Interpolator
 from .spherical_harmonics import get_harmonics_tilde, get_harmonics_tilde_and_prime
 
@@ -117,7 +118,7 @@ def _projectors_grad(
             # Prepare for next species:
             i_proj_start = i_proj_stop
 
-        basis.kpoints.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(pos_grad))
+        basis.kpoints.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(pos_grad))
         self.positions.grad += pos_grad
 
     # Projector stress:
@@ -171,5 +172,5 @@ def _projectors_grad(
             # Prepare for next species:
             i_proj_start = i_proj_stop
 
-        basis.kpoints.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(lattice_grad))
+        basis.kpoints.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(lattice_grad))
         self.lattice.grad += lattice_grad

@@ -3,12 +3,13 @@ import qimpy as qp
 import numpy as np
 import torch
 from typing import Union, Sequence, Tuple
+from qimpy.rc import MPI
 
 
 class Kpoints(qp.TreeNode):
     """Set of k-points in Brillouin zone."""
 
-    comm: qp.MPI.Comm  #: Communicator for k-point division
+    comm: MPI.Comm  #: Communicator for k-point division
     k: torch.Tensor  #: Array of k-points (N x 3)
     wk: torch.Tensor  #: Integration weights for each k (adds to 1)
     division: qp.utils.TaskDivision  #: Division of k-points across `comm`

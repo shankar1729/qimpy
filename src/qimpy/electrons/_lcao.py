@@ -3,6 +3,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from ..utils import Minimize, MinimizeState, MatrixArray
+from qimpy.rc import MPI
 
 
 class LCAO(Minimize[MatrixArray]):
@@ -14,7 +15,7 @@ class LCAO(Minimize[MatrixArray]):
     def __init__(
         self,
         *,
-        comm: qp.MPI.Comm,
+        comm: MPI.Comm,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         n_iterations: int = 30,
         energy_threshold: float = 1e-6,
@@ -96,12 +97,8 @@ class LCAO(Minimize[MatrixArray]):
         E_mu_num = (wf_eig * dH_sub_diag).sum(dim=(1, 2))
         E_mu_den = wf_eig.sum(dim=(1, 2))  # TODO: make this more general:
         qp.rc.current_stream_synchronize()
-        el.kpoints.comm.Allreduce(
-            qp.MPI.IN_PLACE, qp.utils.BufferView(E_mu_num), qp.MPI.SUM
-        )
-        el.kpoints.comm.Allreduce(
-            qp.MPI.IN_PLACE, qp.utils.BufferView(E_mu_den), qp.MPI.SUM
-        )
+        el.kpoints.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(E_mu_num), MPI.SUM)
+        el.kpoints.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(E_mu_den), MPI.SUM)
         E_mu_den.clamp_(max=-1e-20)  # avoid 0/0 in large-gap corner cases
         if (el.n_spins == 1) or el.fillings.M_constrain:
             E_mu = E_mu_num / E_mu_den  # N of each spin channel constrained

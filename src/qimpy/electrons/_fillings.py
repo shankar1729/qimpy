@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from scipy import optimize
 from typing import Optional, Dict, Union, NamedTuple, Callable, Tuple, List, Sequence
+from qimpy.rc import MPI
 
 
 class SmearingResults(NamedTuple):
@@ -349,7 +350,7 @@ class Fillings(qp.TreeNode):
             qp.rc.current_stream_synchronize()
             for tensor in (NM, NM_mu_B):
                 el.kpoints.comm.Allreduce(
-                    qp.MPI.IN_PLACE, qp.utils.BufferView(tensor), qp.MPI.SUM
+                    MPI.IN_PLACE, qp.utils.BufferView(tensor), MPI.SUM
                 )
                 el.comm.Bcast(qp.utils.BufferView(tensor))
             self.f = f

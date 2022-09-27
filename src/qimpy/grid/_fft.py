@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from qimpy.utils import TaskDivision, BufferView
 from typing import Tuple, Callable
+from qimpy.rc import MPI
 
 
 IndicesType = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
@@ -148,7 +149,7 @@ def _init_grid_fft(self: qp.grid.Grid) -> None:
 
 
 def parallel_transform(
-    comm: qp.MPI.Comm,
+    comm: MPI.Comm,
     v: torch.Tensor,
     norm: str,
     shape_in: Tuple[int, ...],
@@ -286,7 +287,7 @@ def _ifft(self: qp.grid.Grid, v: torch.Tensor, norm: str) -> torch.Tensor:
     shape2 = v.shape[-1]
     if self.n_procs > 1:
         assert self.comm is not None
-        shape2 = self.comm.allreduce(shape2, qp.MPI.SUM)
+        shape2 = self.comm.allreduce(shape2, MPI.SUM)
 
     if shape2 == self.shape[2]:
         # Complex to complex inverse transform:
@@ -458,7 +459,7 @@ if __name__ == "__main__":
                         (torch.abs(v_tld_ref) ** 2).sum().item(),
                     ]
                 )
-                qp.rc.comm.Allreduce(qp.MPI.IN_PLACE, errors)
+                qp.rc.comm.Allreduce(MPI.IN_PLACE, errors)
                 rmse = np.sqrt(errors[0] / errors[1])
                 qp.log.info(f"{name} RMSE: {rmse:.2e}")
 

@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from ._fft import _init_grid_fft, _FFT, _IFFT, IndicesType
 from typing import Optional, Sequence, Tuple, Dict
+from qimpy.rc import MPI
 
 
 class Grid(qp.TreeNode):
@@ -15,7 +16,7 @@ class Grid(qp.TreeNode):
     lattice: qp.lattice.Lattice
     symmetries: qp.symmetries.Symmetries
     _field_symmetrizer: Optional[qp.symmetries.FieldSymmetrizer]
-    comm: Optional[qp.MPI.Comm]  #: Communicator to split grid and FFTs over
+    comm: Optional[MPI.Comm]  #: Communicator to split grid and FFTs over
     n_procs: int  #: Size of comm
     i_proc: int  #: Rank within comm
     is_split: bool  #: Whether the grid is split over MPI
@@ -40,7 +41,7 @@ class Grid(qp.TreeNode):
         *,
         lattice: qp.lattice.Lattice,
         symmetries: qp.symmetries.Symmetries,
-        comm: Optional[qp.MPI.Comm],
+        comm: Optional[MPI.Comm],
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         ke_cutoff_wavefunction: Optional[float] = None,
         ke_cutoff: Optional[float] = None,

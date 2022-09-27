@@ -2,6 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
+from qimpy.rc import MPI
 
 
 def _norm(self: qp.electrons.Wavefunction) -> float:
@@ -98,7 +99,7 @@ def _dot(
     # Reduce asynchronously if needed:
     need_reduce = (basis.division.n_procs > 1) and (not full_basis)
     if need_reduce:
-        return qp.utils.Iallreduce_in_place(basis.comm, result, op=qp.MPI.SUM)
+        return qp.utils.Iallreduce_in_place(basis.comm, result, op=MPI.SUM)
     else:
         return qp.utils.Waitless(result)  # Result available now
 

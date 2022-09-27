@@ -1,5 +1,6 @@
 from __future__ import annotations
 import qimpy as qp
+from qimpy.rc import MPI
 from ._relax import Relax
 
 
@@ -9,7 +10,7 @@ class Fixed(Relax):
     def __init__(
         self,
         *,
-        comm: qp.MPI.Comm,
+        comm: MPI.Comm,
         lattice: qp.lattice.Lattice,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath()
     ) -> None:

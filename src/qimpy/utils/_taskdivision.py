@@ -2,6 +2,7 @@ import numpy as np
 import qimpy as qp
 import torch
 from typing import Optional, List
+from qimpy.rc import MPI
 
 
 class TaskDivision:
@@ -57,7 +58,7 @@ class TaskDivisionCustom(TaskDivision):
 
     n_each_custom: np.ndarray  #: Custom number of tasks on each process
 
-    def __init__(self, *, n_mine: int, comm: Optional[qp.MPI.Comm]) -> None:
+    def __init__(self, *, n_mine: int, comm: Optional[MPI.Comm]) -> None:
         """Initialize given local number of tasks on each processes."""
         # Collect n_mine on each process and initialize process parameters:
         if comm is None:

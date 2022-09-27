@@ -2,6 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import torch
 from typing import Optional, Sequence
+from qimpy.rc import MPI
 
 
 class SCF(qp.utils.Pulay[qp.grid.FieldH]):
@@ -21,7 +22,7 @@ class SCF(qp.utils.Pulay[qp.grid.FieldH]):
     def __init__(
         self,
         *,
-        comm: qp.MPI.Comm,
+        comm: MPI.Comm,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         n_iterations: int = 50,
         energy_threshold: float = 1e-8,

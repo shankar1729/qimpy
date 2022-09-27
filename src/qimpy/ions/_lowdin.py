@@ -3,6 +3,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from typing import NamedTuple, Optional
+from qimpy.rc import MPI
 
 
 class LowdinResults(NamedTuple):
@@ -45,7 +46,7 @@ class Lowdin:
         if spin_polarized and self.C.spinorial:
             # Need off-diagonal density matrix components for spinorial magnetization:
             Rho = torch.einsum("skab, skb, skAb -> aA", lowdin, wf, lowdin.conj())
-            basis.kpoints.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(Rho))
+            basis.kpoints.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(Rho))
             result = torch.empty((4, ions.n_ions), device=qp.rc.device)
             i_psi_start = 0
             for slice_i, ps in zip(ions.slices, ions.pseudopotentials):
@@ -67,7 +68,7 @@ class Lowdin:
         else:
             # Diagonal components of density matrix suffice:
             Rho = torch.einsum("skb, skab -> sa", wf, qp.utils.abs_squared(lowdin))
-            basis.kpoints.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(Rho))
+            basis.kpoints.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(Rho))
             # Reduce to (spin)-number on each atom:
             Ns = torch.zeros((Rho.shape[0], ions.n_ions), device=qp.rc.device)
             Ns.index_add_(1, i_ion, Rho)

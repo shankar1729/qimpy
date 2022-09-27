@@ -2,6 +2,7 @@ import qimpy as qp
 import numpy as np
 from functools import lru_cache
 from typing import Optional, Sequence, Tuple
+from qimpy.rc import MPI
 
 
 IMBALANCE_THRESHOLD = 20.0  #: max cpu time% waste tolerated in process grid dimension
@@ -15,14 +16,14 @@ class ProcessGrid:
     connect processes whose index only varies along specified subsets of dimensions.
     """
 
-    comm: qp.MPI.Comm  #: Overall communicator within which grid is set-up.
+    comm: MPI.Comm  #: Overall communicator within which grid is set-up.
     n_procs: int  #: Total number of processes in grid.
     i_proc: int  #: Overall rank of current process in grid.
     dim_names: str  #: Each character (must be unique) names a dimension.
     shape: np.ndarray  #: Grid dimensions. Unresolved dimensions are -1.
 
     def __init__(
-        self, comm: qp.MPI.Comm, dim_names: str, shape: Optional[Sequence[int]] = None
+        self, comm: MPI.Comm, dim_names: str, shape: Optional[Sequence[int]] = None
     ) -> None:
         self.comm = comm
         self.n_procs = comm.size
@@ -71,7 +72,7 @@ class ProcessGrid:
         self._check_report()
 
     @lru_cache
-    def get_comm(self, dim_names: str) -> qp.MPI.Comm:
+    def get_comm(self, dim_names: str) -> MPI.Comm:
         """Get communicator for a hyper-plane spanning `dim_names`.
         The resulting communicator will connect processes whose index in
         the process grid only varies along dimensions within `dim_names`.
@@ -81,7 +82,7 @@ class ProcessGrid:
 
         # Check input:
         if not dim_names:
-            return qp.MPI.COMM_SELF  # no varying dimensions => self only
+            return MPI.COMM_SELF  # no varying dimensions => self only
         dim_names_uniq = set(dim_names)
         assert len(dim_names_uniq) == len(dim_names)  # no repetitions
         assert dim_names_uniq.issubset(self.dim_names)  # each dim valid

@@ -6,6 +6,7 @@ from ._minimize_cg import _cg
 from ._minimize_line import LINE_MINIMIZE, Vector
 from abc import ABC, abstractmethod
 from typing import Generic, Sequence, Dict, NamedTuple, Optional, Union
+from qimpy.rc import MPI
 
 
 class MinimizeState(Generic[Vector]):
@@ -42,7 +43,7 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         energy: float = 1e-4  #: Dimensionless minimum energy reduction in step
         gradient: float = 0.9  #: Required reduction of projected gradient
 
-    comm: qp.MPI.Comm  #: Communicator over which algorithm operates in unison
+    comm: MPI.Comm  #: Communicator over which algorithm operates in unison
     name: str  #: Name of algorithm instance used in reporting eg. 'Ionic'
     n_iterations: int  #: Maximum number of iterations
     energy_threshold: float  #: Convergence threshold on energy change
@@ -66,7 +67,7 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         self,
         *,
         checkpoint_in: qp.utils.CpPath,
-        comm: qp.MPI.Comm,
+        comm: MPI.Comm,
         name: str,
         n_iterations: int,
         energy_threshold: float,

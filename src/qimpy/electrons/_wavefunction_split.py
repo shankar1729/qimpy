@@ -3,6 +3,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from dataclasses import dataclass
+from qimpy.rc import MPI
 
 
 def _split_bands(
@@ -49,7 +50,7 @@ def _split_bands(
 class SplitBandsWait:
     """`Waitable` object for the result of `Wavefunction.split_bands`."""
 
-    request: qp.MPI.Request
+    request: MPI.Request
     send_coeff: torch.Tensor
     recv_coeff: torch.Tensor
     basis: qp.electrons.Basis
@@ -118,7 +119,7 @@ def _split_basis(
 class SplitBasisWait:
     """`Waitable` object for the result of `Wavefunction.split_basis`."""
 
-    request: qp.MPI.Request
+    request: MPI.Request
     send_coeff: torch.Tensor
     recv_coeff: torch.Tensor
     basis: qp.electrons.Basis

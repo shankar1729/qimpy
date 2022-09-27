@@ -2,6 +2,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from typing import Optional, Union, List
+from qimpy.rc import MPI
 
 
 class RadialFunction:
@@ -58,7 +59,7 @@ class RadialFunction:
         cls,
         radial_functions: List["RadialFunction"],
         Gmax: float,
-        comm: qp.MPI.Comm,
+        comm: MPI.Comm,
         name: str = "",
     ) -> None:
         """Initialize reciprocal space version of radial functions.
@@ -100,7 +101,7 @@ class RadialFunction:
         if f_tilde.is_cuda:
             torch.cuda.current_stream().synchronize()
         comm.Allreduce(
-            qp.MPI.IN_PLACE, qp.utils.BufferView(f_tilde), op=qp.MPI.SUM
+            MPI.IN_PLACE, qp.utils.BufferView(f_tilde), op=MPI.SUM
         )  # collect over r that was split above
 
         # Compute spline coefficients:

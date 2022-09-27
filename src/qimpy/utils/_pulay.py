@@ -5,6 +5,7 @@ from ._optimizable import Optimizable, ConvergenceCheck
 from collections import deque
 from abc import ABC, abstractmethod
 from typing import TypeVar, Generic, Sequence, Dict, Deque
+from qimpy.rc import MPI
 
 
 Variable = TypeVar("Variable", bound=Optimizable)
@@ -16,7 +17,7 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
     by the `Optimizable` abstract base class.
     """
 
-    comm: qp.MPI.Comm  #: Communicator over which algorithm operates in unison
+    comm: MPI.Comm  #: Communicator over which algorithm operates in unison
     name: str  #: Name of algorithm instance used in reporting eg. 'SCF'.
     n_iterations: int  #: Maximum number of iterations
     energy_threshold: float  #: Convergence threshold on energy change
@@ -39,7 +40,7 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
         self,
         *,
         checkpoint_in: qp.utils.CpPath,
-        comm: qp.MPI.Comm,
+        comm: MPI.Comm,
         name: str,
         n_iterations: int,
         energy_threshold: float,

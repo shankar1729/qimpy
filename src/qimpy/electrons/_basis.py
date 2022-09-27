@@ -5,14 +5,15 @@ import torch
 from ._basis_ops import _apply_ke, _apply_potential, _collect_density
 from ._basis_real import BasisReal
 from typing import Optional, Tuple, Union
+from qimpy.rc import MPI
 
 
 class Basis(qp.TreeNode):
     """Plane-wave basis for electronic wavefunctions. The underlying
     :class:`qimpy.utils.TaskDivision` splits plane waves over `rc.comm_b`"""
 
-    comm: qp.MPI.Comm  #: Basis/bands communicator
-    comm_kb: qp.MPI.Comm  #: Overall k-points and basis/bands communicator
+    comm: MPI.Comm  #: Basis/bands communicator
+    comm_kb: MPI.Comm  #: Overall k-points and basis/bands communicator
     lattice: qp.lattice.Lattice  #: Lattice vectors of unit cell
     ions: qp.ions.Ions  #: Ionic system: implicit in basis for ultrasoft / PAW
     kpoints: qp.electrons.Kpoints  #: Corresponding k-point set

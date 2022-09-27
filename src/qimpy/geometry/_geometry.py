@@ -1,6 +1,7 @@
 from __future__ import annotations
 import qimpy as qp
 from typing import Protocol, Optional, Union
+from qimpy.rc import MPI
 
 
 class Action(Protocol):
@@ -18,7 +19,7 @@ class Geometry(qp.TreeNode):
     def __init__(
         self,
         *,
-        comm: qp.MPI.Comm,
+        comm: MPI.Comm,
         lattice: qp.lattice.Lattice,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         fixed: Optional[Union[dict, qp.geometry.Fixed]] = None,

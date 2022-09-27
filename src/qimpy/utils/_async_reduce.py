@@ -2,6 +2,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from functools import lru_cache
+from qimpy.rc import MPI
 
 
 @lru_cache
@@ -10,7 +11,7 @@ def is_async_reduce_supported(is_cuda: bool) -> bool:
     if is_cuda:
         # OpenMPI does not support Ireduce, Iallreduce etc. on GPU buffers
         # TODO: add similar checks for other MPI implementations
-        return "Open MPI" not in qp.MPI.Get_library_version()
+        return "Open MPI" not in MPI.Get_library_version()
     else:
         return True  # cpu MPI likely always supports it
 
@@ -21,17 +22,15 @@ class Iallreduce_in_place:
     even if the MPI implementation does not support Iallreduce.
     This is true of some MPI implementations on GPU buffers eg. OpenMPI."""
 
-    def __init__(self, comm: qp.MPI.Comm, buf: torch.Tensor, op: qp.MPI.Op) -> None:
+    def __init__(self, comm: MPI.Comm, buf: torch.Tensor, op: MPI.Op) -> None:
         # Check if real async supported (or need to fake it):
         self.async_supported = is_async_reduce_supported(buf.is_cuda)
-        self.local_reduce = op is qp.MPI.SUM  # could optimize other Ops when needed
+        self.local_reduce = op is MPI.SUM  # could optimize other Ops when needed
         self.local_reduce_op = torch.sum
         self.buf = buf
         if self.async_supported:
             # Initiate the MPI async operation:
-            self.request = comm.Iallreduce(
-                qp.MPI.IN_PLACE, qp.utils.BufferView(buf), op
-            )
+            self.request = comm.Iallreduce(MPI.IN_PLACE, qp.utils.BufferView(buf), op)
         elif self.local_reduce:
             # Initiate an MPI transpose for subsequent local reduction:
             # Determine division for MPI transpose:
@@ -82,5 +81,5 @@ class Iallreduce_in_place:
             )
         else:
             # Perform the blocking MPI operation now:
-            self.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(self.buf), self.op)
+            self.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(self.buf), self.op)
         return self.buf

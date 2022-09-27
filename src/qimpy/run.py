@@ -45,11 +45,12 @@ import qimpy as qp
 import argparse
 import sys
 import os
+from qimpy.rc import MPI
 
 if __name__ == "__main__":
 
     # Parse the commandline arguments on main process:
-    i_proc = qp.MPI.COMM_WORLD.Get_rank()
+    i_proc = MPI.COMM_WORLD.Get_rank()
     if i_proc == 0:
 
         # Set terminal size (used by argparse) if unreasonable:
@@ -146,7 +147,7 @@ if __name__ == "__main__":
         args = argparse.Namespace()
 
     # Make commandline arguments available on all processes:
-    args = qp.MPI.COMM_WORLD.bcast(args, root=0)
+    args = MPI.COMM_WORLD.bcast(args, root=0)
     if args.error_occured:
         exit()  # exit all processes
 
@@ -166,7 +167,7 @@ if __name__ == "__main__":
     qp.utils.log_config(
         output_file=args.output_file,
         mpi_log=args.mpi_log,
-        mpi_comm=qp.MPI.COMM_WORLD,
+        mpi_comm=MPI.COMM_WORLD,
         append=(not args.no_append),
         verbose=args.verbose,
     )

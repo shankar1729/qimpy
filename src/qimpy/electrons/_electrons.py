@@ -4,12 +4,13 @@ import numpy as np
 import torch
 from ._hamiltonian import _hamiltonian
 from typing import Union, Optional, List
+from qimpy.rc import MPI
 
 
 class Electrons(qp.TreeNode):
     """Electronic subsystem"""
 
-    comm: qp.MPI.Comm  #: Overall electronic communicator (k-points and bands/basis)
+    comm: MPI.Comm  #: Overall electronic communicator (k-points and bands/basis)
     kpoints: qp.electrons.Kpoints  #: Set of kpoints (mesh or path)
     spin_polarized: bool  #: Whether calculation is spin-polarized
     spinorial: bool  #: Whether calculation is relativistic / spinorial
@@ -410,7 +411,7 @@ class Electrons(qp.TreeNode):
             lattice_grad_mine -= (wf_coeff_sq.sum(dim=-1) * eig).sum() * eye3
 
             # Collect above local contributions over MPI:
-            self.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(lattice_grad_mine))
+            self.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(lattice_grad_mine))
             system.lattice.grad += lattice_grad_mine
 
             # Volume contributions:

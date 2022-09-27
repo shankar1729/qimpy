@@ -5,6 +5,7 @@ import torch
 import pathlib
 from ._read_upf import _read_upf
 from typing import Optional
+from qimpy.rc import MPI
 
 
 class Pseudopotential:
@@ -55,7 +56,7 @@ class Pseudopotential:
         self.pqn_psi = qp.ions.PseudoQuantumNumbers(self.psi.l, self.j_psi)
         self._read_pulay(filename)
 
-    def update(self, Gmax: float, ion_width: float, comm: qp.MPI.Comm) -> None:
+    def update(self, Gmax: float, ion_width: float, comm: MPI.Comm) -> None:
         """Update to support calculation of G upto `Gmax`.
         Along with radial function transformations, also update the range
         separation of Vloc to be consistent with specified `ion_width`.

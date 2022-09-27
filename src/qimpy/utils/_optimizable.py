@@ -2,6 +2,7 @@ import qimpy as qp
 import torch
 from dataclasses import dataclass
 from typing import Protocol, TypeVar, Deque
+from qimpy.rc import MPI
 
 T = TypeVar("T")
 
@@ -61,7 +62,7 @@ class MatrixArray:
     subspace rotations, such as in `LCAO` and `Wannier`."""
 
     M: torch.Tensor  #: Array of matrices with dimension ..., N x N
-    comm: qp.MPI.Comm  #: Communicator where M is split on some dimension(s)
+    comm: MPI.Comm  #: Communicator where M is split on some dimension(s)
 
     def __add__(self, other: "MatrixArray") -> "MatrixArray":
         return MatrixArray(M=(self.M + other.M), comm=self.comm)
@@ -89,5 +90,5 @@ class MatrixArray:
     def vdot(self, other: "MatrixArray") -> float:
         """Global vector-space dot product collected over `comm`."""
         result = torch.vdot(self.M.flatten(), other.M.flatten()).real
-        self.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(result), qp.MPI.SUM)
+        self.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(result), MPI.SUM)
         return result.item()

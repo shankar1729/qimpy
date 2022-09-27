@@ -3,6 +3,7 @@ import qimpy as qp
 import torch
 import os
 from typing import Union, Optional
+from qimpy.rc import MPI
 from ._gradient import Gradient
 
 
@@ -21,7 +22,7 @@ class Relax(qp.utils.Minimize[Gradient]):
     def __init__(
         self,
         *,
-        comm: qp.MPI.Comm,
+        comm: MPI.Comm,
         lattice: qp.lattice.Lattice,
         n_iterations: int,
         energy_threshold: float = 5e-5,

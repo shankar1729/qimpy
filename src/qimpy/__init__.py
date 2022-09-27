@@ -2,7 +2,6 @@
 # List exported symbols for doc generation
 __all__ = [
     "rc",
-    "MPI",
     "TreeNode",
     "Energy",
     "utils",
@@ -19,7 +18,6 @@ __all__ = [
 
 # Module import definition
 from . import rc
-from .rc import MPI
 from ._tree import TreeNode
 from ._energy import Energy
 from . import utils

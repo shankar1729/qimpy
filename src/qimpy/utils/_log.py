@@ -4,13 +4,14 @@ import logging
 import torch
 import sys
 from typing import Optional, Union
+from qimpy.rc import MPI
 
 
 def log_config(
     *,
     output_file: Optional[str] = None,
     mpi_log: Optional[str] = None,
-    mpi_comm: Optional[qp.MPI.Comm] = None,
+    mpi_comm: Optional[MPI.Comm] = None,
     append: bool = True,
     verbose: bool = False
 ):
@@ -40,7 +41,7 @@ def log_config(
     """
 
     # Create handler with appropriate output file and mode, if any:
-    i_proc = (mpi_comm if mpi_comm else qp.MPI.COMM_WORLD).Get_rank()
+    i_proc = (mpi_comm if mpi_comm else MPI.COMM_WORLD).Get_rank()
     is_head = i_proc == 0
     filemode = "a" if append else "w"
     filename = None

@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import pytest
 from typing import Sequence
+from qimpy.rc import MPI
 
 
 class RandomFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
@@ -81,7 +82,7 @@ class RandomFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
         for i_M, M in enumerate(self.M):
             v = M @ (self.x - self.x0).data.flatten()  # partial results, full array
             qp.rc.current_stream_synchronize()
-            self.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(v), qp.MPI.SUM)
+            self.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(v), MPI.SUM)
             E += (v ** 2).sum() ** (i_M + 1) * grid.dV
         state.energy["E"] = E.item()
 
@@ -90,7 +91,7 @@ class RandomFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
             E_x = self.x.data.grad
             # Apply preconditioner:
             K_E_x = self.K @ E_x.flatten()  # partial results, full array
-            self.comm.Allreduce(qp.MPI.IN_PLACE, qp.utils.BufferView(K_E_x), qp.MPI.SUM)
+            self.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(K_E_x), MPI.SUM)
             K_E_x = K_E_x.view(grid.shape)[self.i0slice]  # full results, partial array
             # Convert to fields:
             state.gradient = qp.grid.FieldR(grid, data=E_x)
