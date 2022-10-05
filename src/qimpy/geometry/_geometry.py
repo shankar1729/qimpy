@@ -24,6 +24,7 @@ class Geometry(qp.TreeNode):
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         fixed: Optional[Union[dict, qp.geometry.Fixed]] = None,
         relax: Optional[Union[dict, qp.geometry.Relax]] = None,
+        dynamics: Optional[Union[dict, qp.geometry.Dynamics]] = None,
     ) -> None:
         """Specify one of the supported geometry actions.
         Defaults to `Fixed` if none specified.
@@ -34,6 +35,8 @@ class Geometry(qp.TreeNode):
             Electronic optimization only at a fixed geometry.
         relax
             :yaml:`Geometry relaxation of ions, and optionally, also the lattice.`
+        dynamics
+            :yaml:`Molecular dynamics of ions, and optionally, also the lattice.`
         """
         super().__init__()
         self.add_child_one_of(
@@ -44,6 +47,9 @@ class Geometry(qp.TreeNode):
             ),
             qp.TreeNode.ChildOptions(
                 "relax", qp.geometry.Relax, relax, comm=comm, lattice=lattice
+            ),
+            qp.TreeNode.ChildOptions(
+                "dynamics", qp.geometry.Dynamics, dynamics, comm=comm, lattice=lattice
             ),
             have_default=True,
         )
