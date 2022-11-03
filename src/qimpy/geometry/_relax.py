@@ -2,9 +2,10 @@ from __future__ import annotations
 import qimpy as qp
 import torch
 import os
-from typing import Union, Optional
+from typing import Union
 from qimpy.rc import MPI
 from ._gradient import Gradient
+from ._stepper import Stepper
 
 
 class Relax(qp.utils.Minimize[Gradient]):
@@ -12,12 +13,9 @@ class Relax(qp.utils.Minimize[Gradient]):
     Whether lattice changes is controlled by `lattice.movable`.
     """
 
-    system: qp.System  #: System being optimized currently
-    invRbasis0: torch.Tensor  #: Initial lattice vectors inverse (used to define strain)
     latticeK: float  #: Preconditioning factor of lattice relative to ions
     drag_wavefunctions: bool  #: Whether to drag atomic components of wavefunctions
-
-    _lowdin: Optional[qp.ions.Lowdin]  #: Lowdin and wavefunction drag shared data
+    stepper: Stepper  #: Interface to move ions/lattice and compute forces/stress
 
     def __init__(
         self,
@@ -98,20 +96,19 @@ class Relax(qp.utils.Minimize[Gradient]):
         self.drag_wavefunctions = drag_wavefunctions
 
     def run(self, system: qp.System) -> None:
+        self.stepper = Stepper(system, drag_wavefunctions=self.drag_wavefunctions)
         qp.log.info(
             "\n--- Geometry relaxation ---\n"
             if self.n_iterations
             else "\n--- Fixed geometry ---\n"
         )
-        self.system = system
-        self.invRbasis0 = system.lattice.invRbasis
         self.latticeK = (
             system.lattice.move_scale.mean() / system.lattice.volume ** (1.0 / 3)
         ) ** 2  # effectively bring lattice derivatives to same dimensions as forces
         if os.environ.get("QIMPY_FDTEST_RELAX", "0") in {"1", "yes"}:
             self._run_fd_test()  # finite difference test if needed
         self.minimize()
-        self._lowdin = None  # Clean up cached data from final report
+        del self.stepper
 
         # Check point at end:
         if system.checkpoint_out:
@@ -123,101 +120,32 @@ class Relax(qp.utils.Minimize[Gradient]):
 
     def step(self, direction: Gradient, step_size: float) -> None:
         """Update the geometry along `direction` by amount `step_size`"""
-        lattice = self.system.lattice
-
-        if self.drag_wavefunctions:
-            if self._lowdin is None:
-                self._lowdin = qp.ions.Lowdin(self.system.electrons.C)
-            self._lowdin.remove_atomic_projections()
-
-        delta_positions = step_size * (direction.ions @ lattice.invRbasis)
-        self.system.ions.positions += delta_positions
-        if lattice.movable:
-            lattice.update(
-                Rbasis=lattice.Rbasis
-                + step_size * (direction.lattice @ lattice.Rbasis),
-                report_change=False,
-            )
-            self.system.coulomb.update_lattice_dependent(self.system.ions.n_ions)
-
-        if self.drag_wavefunctions:
-            assert self._lowdin is not None
-            self._lowdin.restore_atomic_projections(delta_positions)
-            self._lowdin = None
+        self.stepper.step(direction, step_size)
 
     def compute(
         self, state: qp.utils.MinimizeState[Gradient], energy_only: bool
     ) -> None:
         """Update energy and/or gradients in `state`."""
-        system = self.system
-        lattice = system.lattice
-        # Update ionic potentials and energies:
-        system.energy = qp.Energy()
-        system.ions.update(system)
-        # Optimize electrons:
-        qp.log.info("\n--- Electronic optimization ---\n")
-        system.electrons.run(system)
-        state.energy = system.energy
-        # Update forces / stresses if needed:
-        if not energy_only:
-            system.geometry_grad()  # update forces / stress
-            state.gradient = self.constrain(
-                Gradient(
-                    ions=-system.ions.forces,
-                    lattice=(lattice.grad if lattice.movable else None),
-                )
-            )
-            state.K_gradient = state.gradient.clone()
+        state.energy, gradient = self.stepper.compute(not energy_only)
+        if gradient is not None:
+            state.gradient = gradient
+            state.K_gradient = gradient.clone()
             if state.K_gradient.lattice is not None:
                 state.K_gradient.lattice *= self.latticeK
             # Extra convergence checks:
+            system = self.stepper.system
             state.extra = [
                 system.ions.forces.norm(dim=1).max().item()
                 if system.ions.n_ions
                 else 0.0
             ]  # fmax
-            if lattice.movable:
-                state.extra.append(lattice.stress.norm().item())  # |stress|
+            if system.lattice.movable:
+                state.extra.append(system.lattice.stress.norm().item())  # |stress|
 
     def report(self, i_iter: int) -> bool:
-        system = self.system
-        ions = system.ions
-        electrons = system.electrons
-        qp.log.info(f"\nEnergy components:\n{repr(system.energy)}")
-        qp.log.info("")
-        self._lowdin = qp.ions.Lowdin(electrons.C)
-        ions.Q, ions.M = self._lowdin.analyze(
-            electrons.fillings.f, electrons.spin_polarized
-        )
-        ions.report(report_grad=True)  # positions, forces, Lowdin Q/M
-        if system.lattice.compute_stress:
-            system.lattice.report(report_grad=True)  # lattice, stress
-            qp.log.info(f"Strain:\n{qp.utils.fmt(self.strain)}")
-            qp.log.info("")
+        self.stepper.report()
         # TODO: checkpoint handling at each relax step
         return False  # State not changed by report
-
-    @property
-    def strain(self) -> torch.Tensor:
-        eye = torch.eye(3, device=qp.rc.device)
-        return self.system.lattice.Rbasis @ self.invRbasis0 - eye
-
-    def constrain(self, v: Gradient) -> Gradient:
-        """Impose fixed atom / lattice direction constraints."""
-        self.symmetrize_(v)
-        v.ions -= v.ions.mean(dim=0)
-        self.symmetrize_(v)
-        return v
-
-    def symmetrize_(self, v: Gradient) -> None:
-        """Symmetrize gradient in-place."""
-        lattice = self.system.lattice
-        v.ions = (
-            self.system.symmetries.symmetrize_forces(v.ions @ lattice.Rbasis)
-            @ lattice.invRbasis
-        )
-        if v.lattice is not None:
-            v.lattice = self.system.symmetries.symmetrize_matrix(v.lattice)
 
     def _run_fd_test(self):
         """Run finite difference test."""
@@ -232,11 +160,12 @@ class Relax(qp.utils.Minimize[Gradient]):
         # Prepare a random direction to test along:
         STD_FORCES = 1e-3  # Std. deviation of force components
         STD_STRESS = STD_FORCES * self.latticeK  # Std. deviation of stress components
-        lattice = self.system.lattice
+        system = self.stepper.system
+        lattice = system.lattice
         torch.manual_seed(0)
         direction = self.constrain(
             Gradient(
-                ions=_randn_like(self.system.ions.positions) * STD_FORCES,
+                ions=_randn_like(system.ions.positions) * STD_FORCES,
                 lattice=(
                     _randn_like(lattice.Rbasis) * STD_STRESS
                     if lattice.movable

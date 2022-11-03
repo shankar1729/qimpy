@@ -1,0 +1,109 @@
+from __future__ import annotations
+import qimpy as qp
+import torch
+from typing import Tuple, Optional
+from ._gradient import Gradient
+
+
+class Stepper:
+    """Shared interface of dynamics and optimization with electronic system."""
+
+    system: qp.System  #: System being optimized currently
+    invRbasis0: torch.Tensor  #: Initial lattice vectors inverse (used to define strain)
+    drag_wavefunctions: bool  #: Whether to drag atomic components of wavefunctions
+    _lowdin: Optional[qp.ions.Lowdin]  #: Lowdin and wavefunction drag shared data
+
+    def __init__(
+        self,
+        system: qp.System,
+        *,
+        drag_wavefunctions: bool = True,
+    ) -> None:
+        self.system = system
+        self.drag_wavefunctions = drag_wavefunctions
+        self.invRbasis0 = system.lattice.invRbasis
+
+    def step(self, direction: Gradient, step_size: float) -> None:
+        """Update the geometry along `direction` by amount `step_size`"""
+        lattice = self.system.lattice
+
+        if self.drag_wavefunctions:
+            if self._lowdin is None:
+                self._lowdin = qp.ions.Lowdin(self.system.electrons.C)
+            self._lowdin.remove_atomic_projections()
+
+        delta_positions = step_size * (direction.ions @ lattice.invRbasis)
+        self.system.ions.positions += delta_positions
+        if lattice.movable:
+            lattice.update(
+                Rbasis=lattice.Rbasis
+                + step_size * (direction.lattice @ lattice.Rbasis),
+                report_change=False,
+            )
+            self.system.coulomb.update_lattice_dependent(self.system.ions.n_ions)
+
+        if self.drag_wavefunctions:
+            assert self._lowdin is not None
+            self._lowdin.restore_atomic_projections(delta_positions)
+            self._lowdin = None
+
+    def compute(self, require_grad: bool) -> Tuple[qp.Energy, Optional[Gradient]]:
+        """Compute energy and optionally ionic/lattice gradient."""
+        system = self.system
+        lattice = system.lattice
+        # Update ionic potentials and energies:
+        system.energy = qp.Energy()
+        system.ions.update(system)
+        # Optimize electrons:
+        qp.log.info("\n--- Electronic optimization ---\n")
+        system.electrons.run(system)
+        # Update forces / stresses if needed:
+        if require_grad:
+            system.geometry_grad()  # update forces / stress
+            gradient = self.constrain(
+                Gradient(
+                    ions=-system.ions.forces,
+                    lattice=(lattice.grad if lattice.movable else None),
+                )
+            )
+            return system.energy, gradient
+        else:
+            return system.energy, None
+
+    def report(self) -> None:
+        system = self.system
+        ions = system.ions
+        electrons = system.electrons
+        qp.log.info(f"\nEnergy components:\n{repr(system.energy)}")
+        qp.log.info("")
+        self._lowdin = qp.ions.Lowdin(electrons.C)
+        ions.Q, ions.M = self._lowdin.analyze(
+            electrons.fillings.f, electrons.spin_polarized
+        )
+        ions.report(report_grad=True)  # positions, forces, Lowdin Q/M
+        if system.lattice.compute_stress:
+            system.lattice.report(report_grad=True)  # lattice, stress
+            qp.log.info(f"Strain:\n{qp.utils.fmt(self.strain)}")
+            qp.log.info("")
+
+    @property
+    def strain(self) -> torch.Tensor:
+        eye = torch.eye(3, device=qp.rc.device)
+        return self.system.lattice.Rbasis @ self.invRbasis0 - eye
+
+    def constrain(self, v: Gradient) -> Gradient:
+        """Impose fixed atom / lattice direction constraints."""
+        self.symmetrize_(v)
+        v.ions -= v.ions.mean(dim=0)
+        self.symmetrize_(v)
+        return v
+
+    def symmetrize_(self, v: Gradient) -> None:
+        """Symmetrize gradient in-place."""
+        lattice = self.system.lattice
+        v.ions = (
+            self.system.symmetries.symmetrize_forces(v.ions @ lattice.Rbasis)
+            @ lattice.invRbasis
+        )
+        if v.lattice is not None:
+            v.lattice = self.system.symmetries.symmetrize_matrix(v.lattice)
