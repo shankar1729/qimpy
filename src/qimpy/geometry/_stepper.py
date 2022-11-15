@@ -22,6 +22,7 @@ class Stepper:
         self.system = system
         self.drag_wavefunctions = drag_wavefunctions
         self.invRbasis0 = system.lattice.invRbasis
+        self._lowdin = None
 
     def step(self, direction: Gradient, step_size: float) -> None:
         """Update the geometry along `direction` by amount `step_size`"""

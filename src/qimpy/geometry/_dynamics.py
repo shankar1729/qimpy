@@ -2,8 +2,11 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Union, Optional
+from typing import Union, Optional, List
 from qimpy.rc import MPI
+from ._stepper import Stepper
+from ._gradient import Gradient
+from qimpy.ions.symbols import ATOMIC_WEIGHTS, ATOMIC_NUMBERS
 
 
 class Dynamics(qp.TreeNode):
@@ -89,6 +92,59 @@ class Dynamics(qp.TreeNode):
         self.B0 = B0
         self.drag_wavefunctions = drag_wavefunctions
 
+    def get_accel(self) -> torch.Tensor:
+        """Obtain forces using the stepper and calculate acceleration."""
+        energy, gradient = self.stepper.compute(require_grad=True)
+        if gradient is not None:
+            return -gradient.ions / self.atomic_weights
+        else:
+            return torch.zeros_like(self.system.ions.velocities)
+
+    def compute_thermostat(self) -> torch.Tensor:
+        """Compute thermostat for the system."""
+        return torch.zeros_like(self.system.ions.velocities)  # Zero for now
+
+    def init_atomic_weights(self) -> None:
+        """Initialize the atomic weights for the system."""
+        # (maybe there's a better way to do this...)
+        collect_atomic_weights = list()
+        for i, sym in enumerate(self.system.ions.symbols):
+            collect_atomic_weights += \
+                list(self.system.ions.n_ions_type[i] * [ATOMIC_WEIGHTS[ATOMIC_NUMBERS[sym]]])
+        self.atomic_weights: Optional[torch.Tensor] = torch.tensor(
+            collect_atomic_weights).unsqueeze(1)
+
     def run(self, system: qp.System) -> None:
         self.system = system
-        # TODO: actually implement dynamics
+        self.init_atomic_weights()
+        self.stepper = Stepper(self.system, drag_wavefunctions=self.drag_wavefunctions)
+
+        # Temporary convenience function for logging...
+        def print_coords(tensor: torch.Tensor) -> None:
+            for coords in tensor:
+                qp.log.info(" ".join([f"{coord:18.10e}" for coord in coords]))
+            qp.log.info("")
+
+        vel = self.system.ions.velocities
+
+        # MD loop
+        for i in range(self.n_steps):
+            qp.log.info(f"Step {i}")
+            qp.log.info(f"Ionic Positions:")
+            print_coords(self.system.ions.positions)
+
+            # Compute first half step
+            accel = self.get_accel()
+            accel_thermostat_step1 = self.compute_thermostat()
+            vel += 0.5 * self.dt * (accel + accel_thermostat_step1)
+            self.stepper.step(Gradient(ions=vel, lattice=None), self.dt)
+            # Position-dependent acceleration update
+            accel = self.get_accel()
+            vel += 0.5 * self.dt * (accel + accel_thermostat_step1)
+            accel_thermostat_step2 = self.compute_thermostat()
+            vel += \
+                0.5 * self.dt * (accel_thermostat_step2 - accel_thermostat_step1)
+
+        # Print final state
+        qp.log.info(f"Ionic Positions:")
+        print_coords(self.system.ions.positions)
