@@ -1,7 +1,9 @@
-from typing import List
+import qimpy as qp
+from typing import List, Dict, Union
+import torch
 
 
-class Energy(dict):
+class Energy(Dict[str, Union[float, torch.Tensor]]):
     """Energy of system with access to components"""
 
     def __float__(self) -> float:
@@ -28,3 +30,10 @@ class Energy(dict):
         if "-TS" in self:
             return "F"  # Helmholtz free energy
         return "E"  # Energy
+
+    def sum_tensor(self) -> torch.Tensor:
+        result = torch.zeros(tuple(), dtype=torch.double, device=qp.rc.device)
+        for value in self.values():
+            assert isinstance(value, torch.Tensor)
+            result += value
+        return result
