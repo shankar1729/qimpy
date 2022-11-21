@@ -1,4 +1,3 @@
-import qimpy as qp
 from typing import List, Dict, Union
 import torch
 
@@ -32,8 +31,8 @@ class Energy(Dict[str, Union[float, torch.Tensor]]):
         return "E"  # Energy
 
     def sum_tensor(self) -> torch.Tensor:
-        result = torch.zeros(tuple(), dtype=torch.double, device=qp.rc.device)
+        result = None
         for value in self.values():
             assert isinstance(value, torch.Tensor)
-            result += value
+            result = value if (result is None) else (result + value)
         return result
