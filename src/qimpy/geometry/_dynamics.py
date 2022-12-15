@@ -2,7 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Union, Optional, List, overload, Literal
+from typing import Union, Optional, List
 from qimpy.rc import MPI
 from ._stepper import Stepper
 from ._gradient import Gradient
@@ -46,6 +46,7 @@ class Dynamics(qp.TreeNode):
         B0: float = 2.2e9 / 2.942e13,
         drag_wavefunctions: bool = True,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        langevin_gamma: Union[float, List[float], torch.Tensor] = 1.0,
     ) -> None:
         """
         Specify molecular dynamics parameters.
@@ -77,6 +78,8 @@ class Dynamics(qp.TreeNode):
             :yaml:`Characteristic bulk modulus for Berendsen barostat.`
         drag_wavefunctions
             :yaml:`Whether to drag atomic components of wavefunctions.`
+        langevin_gamma
+            :yaml:`Friction parameter for the Langevin thermostat method.`
         """
         super().__init__()
         self.dt = dt
@@ -91,15 +94,36 @@ class Dynamics(qp.TreeNode):
         self.chain_length_P = chain_length_P
         self.B0 = B0
         self.drag_wavefunctions = drag_wavefunctions
+        self.langevin_gamma = langevin_gamma
+
+        self.thermostat_methods = {"langevin": self.langevin_thermostat}
 
     def get_accel(self) -> torch.Tensor:
         """Obtain forces using the stepper and calculate acceleration."""
         energy, gradient = self.stepper.compute(require_grad=True)
         return -gradient.ions / self.atomic_weights
 
+    def langevin_thermostat(self) -> torch.Tensor:
+        """Implement Langevin thermostat."""
+        # Hardcoding since I couldn't find k_B in Hartrees/K anywhere else...
+        k_B = 3.166815e-6
+        if isinstance(self.langevin_gamma, list):
+            self.langevin_gamma = torch.unsqueeze(torch.FloatTensor(self.langevin_gamma),
+                                                  dim=-1)
+        prefactor = 2*self.T0*k_B/self.dt
+        variances = prefactor*torch.ones_like(self.atomic_weights)
+        variances *= self.atomic_weights
+        variances *= self.langevin_gamma
+        forces = torch.normal(mean=torch.zeros_like(self.system.ions.velocities),
+                              std=torch.sqrt(variances))/self.atomic_weights
+        return forces
+
     def compute_thermostat(self) -> torch.Tensor:
         """Compute thermostat for the system."""
-        return torch.zeros_like(self.system.ions.velocities)  # Zero for now
+        if self.thermostat is None:
+            return torch.zeros_like(self.system.ions.velocities)  # Zero for now
+        else:
+            return self.thermostat_methods.get(self.thermostat)()
 
     def init_atomic_weights(self) -> None:
         """Initialize the atomic weights for the system."""
