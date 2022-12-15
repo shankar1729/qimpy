@@ -114,9 +114,9 @@ class Dynamics(qp.TreeNode):
         variances = prefactor*torch.ones_like(self.atomic_weights)
         variances *= self.atomic_weights
         variances *= self.langevin_gamma
-        forces = torch.normal(mean=torch.zeros_like(self.system.ions.velocities),
+        accel = torch.normal(mean=torch.zeros_like(self.system.ions.velocities),
                               std=torch.sqrt(variances))/self.atomic_weights
-        return forces
+        return accel
 
     def compute_thermostat(self) -> torch.Tensor:
         """Compute thermostat for the system."""
