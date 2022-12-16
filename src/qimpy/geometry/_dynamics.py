@@ -108,14 +108,17 @@ class Dynamics(qp.TreeNode):
         # Hardcoding since I couldn't find k_B in Hartrees/K anywhere else...
         k_B = 3.166815e-6
         if isinstance(self.langevin_gamma, list):
-            self.langevin_gamma = torch.unsqueeze(torch.FloatTensor(self.langevin_gamma),
+            self.langevin_gamma = torch.unsqueeze(torch.as_tensor(self.langevin_gamma,
+                                                                  device=qp.rc.device),
                                                   dim=-1)
-        prefactor = 2*self.T0*k_B/self.dt
-        variances = prefactor*torch.ones_like(self.atomic_weights)
+        prefactor = 2 * self.T0 * k_B / self.dt
+        variances = prefactor * torch.ones_like(self.atomic_weights,
+                                                device=qp.rc.device)
         variances *= self.atomic_weights
         variances *= self.langevin_gamma
-        accel = torch.normal(mean=torch.zeros_like(self.system.ions.velocities),
-                              std=torch.sqrt(variances))/self.atomic_weights
+        accel = torch.normal(mean=torch.zeros_like(self.system.ions.velocities,
+                                                   device=qp.rc.device),
+                             std=torch.sqrt(variances)) / self.atomic_weights
         return accel
 
     def compute_thermostat(self) -> torch.Tensor:
@@ -134,7 +137,7 @@ class Dynamics(qp.TreeNode):
                 self.system.ions.n_ions_type[i] * [ATOMIC_WEIGHTS[ATOMIC_NUMBERS[sym]]]
             )
         self.atomic_weights: Optional[torch.Tensor] = torch.tensor(
-            collect_atomic_weights
+            collect_atomic_weights, device=qp.rc.device
         ).unsqueeze(1)
 
     def run(self, system: qp.System) -> None:
