@@ -105,13 +105,11 @@ class Dynamics(qp.TreeNode):
 
     def langevin_thermostat(self) -> torch.Tensor:
         """Implement Langevin thermostat."""
-        # Hardcoding since I couldn't find k_B in Hartrees/K anywhere else...
-        k_B = 3.166815e-6
         if isinstance(self.langevin_gamma, list):
             self.langevin_gamma = torch.unsqueeze(torch.as_tensor(self.langevin_gamma,
                                                                   device=qp.rc.device),
                                                   dim=-1)
-        prefactor = 2 * self.T0 * k_B / self.dt
+        prefactor = 2 * self.T0 / self.dt
         variances = prefactor * torch.ones_like(self.atomic_weights,
                                                 device=qp.rc.device)
         variances *= self.atomic_weights
