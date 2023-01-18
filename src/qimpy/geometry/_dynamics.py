@@ -128,11 +128,12 @@ class Dynamics(qp.TreeNode):
 
     def init_atomic_weights(self) -> None:
         """Initialize the atomic weights for the system."""
-        # (maybe there's a better way to do this...)
+        # (Temporary) AMU conversion for mass
+        amu = 1822.89
         collect_atomic_weights = list()
         for i, sym in enumerate(self.system.ions.symbols):
             collect_atomic_weights += list(
-                self.system.ions.n_ions_type[i] * [ATOMIC_WEIGHTS[ATOMIC_NUMBERS[sym]]]
+                self.system.ions.n_ions_type[i] * [amu*ATOMIC_WEIGHTS[ATOMIC_NUMBERS[sym]]]
             )
         self.atomic_weights: Optional[torch.Tensor] = torch.tensor(
             collect_atomic_weights, device=qp.rc.device
@@ -145,22 +146,32 @@ class Dynamics(qp.TreeNode):
 
         vel = self.system.ions.velocities
 
+        # Initial forces
+        accel = self.get_accel()
+        accel_thermostat_step1 = self.compute_thermostat()
+
         # MD loop
         for i in range(self.n_steps):
             qp.log.info(f"Step {i}")
 
-            accel = self.get_accel()
             self.report()
 
             # Compute first half step
-            accel_thermostat_step1 = self.compute_thermostat()
             vel += 0.5 * self.dt * (accel + accel_thermostat_step1)
+
+            # Position and position-dependent acceleration update
             self.stepper.step(Gradient(ions=vel, lattice=None), self.dt)
-            # Position-dependent acceleration update
             accel = self.get_accel()
+
+            # Second half-step estimator
             vel += 0.5 * self.dt * (accel + accel_thermostat_step1)
+
+            # Second half-step correction
             accel_thermostat_step2 = self.compute_thermostat()
             vel += 0.5 * self.dt * (accel_thermostat_step2 - accel_thermostat_step1)
+
+            # Calculate forces for next step
+            accel_thermostat_step1 = self.compute_thermostat()
 
         # Print final state
         self.report()
