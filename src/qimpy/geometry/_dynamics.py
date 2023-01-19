@@ -103,7 +103,7 @@ class Dynamics(qp.TreeNode):
         energy, gradient = self.stepper.compute(require_grad=True)
         return -gradient.ions / self.atomic_weights
 
-    def langevin_thermostat(self) -> torch.Tensor:
+    def langevin_thermostat(self, vel: torch.Tensor) -> torch.Tensor:
         """Implement Langevin thermostat."""
         if isinstance(self.langevin_gamma, list):
             self.langevin_gamma = torch.unsqueeze(torch.as_tensor(self.langevin_gamma,
@@ -117,14 +117,15 @@ class Dynamics(qp.TreeNode):
         accel = torch.normal(mean=torch.zeros_like(self.system.ions.velocities,
                                                    device=qp.rc.device),
                              std=torch.sqrt(variances)) / self.atomic_weights
+        accel = accel - self.langevin_gamma*(vel*self.atomic_weights)
         return accel
 
-    def compute_thermostat(self) -> torch.Tensor:
+    def compute_thermostat(self, vel: torch.Tensor) -> torch.Tensor:
         """Compute thermostat for the system."""
         if self.thermostat is None:
             return torch.zeros_like(self.system.ions.velocities)  # Zero for now
         else:
-            return self.thermostat_methods.get(self.thermostat)()
+            return self.thermostat_methods.get(self.thermostat)(vel)
 
     def init_atomic_weights(self) -> None:
         """Initialize the atomic weights for the system."""
@@ -148,7 +149,7 @@ class Dynamics(qp.TreeNode):
 
         # Initial forces
         accel = self.get_accel()
-        accel_thermostat_step1 = self.compute_thermostat()
+        accel_thermostat_step1 = self.compute_thermostat(vel)
 
         # MD loop
         for i in range(self.n_steps):
@@ -167,11 +168,11 @@ class Dynamics(qp.TreeNode):
             vel += 0.5 * self.dt * (accel + accel_thermostat_step1)
 
             # Second half-step correction
-            accel_thermostat_step2 = self.compute_thermostat()
+            accel_thermostat_step2 = self.compute_thermostat(vel)
             vel += 0.5 * self.dt * (accel_thermostat_step2 - accel_thermostat_step1)
 
             # Calculate forces for next step
-            accel_thermostat_step1 = self.compute_thermostat()
+            accel_thermostat_step1 = accel_thermostat_step2
 
         # Print final state
         self.report()
