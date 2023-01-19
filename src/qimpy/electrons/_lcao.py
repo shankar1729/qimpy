@@ -19,7 +19,7 @@ class LCAO(Minimize[MatrixArray]):
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         n_iterations: int = 30,
         energy_threshold: float = 1e-6,
-        gradient_threshold: float = 1e-8
+        gradient_threshold: float = 1e-8,
     ) -> None:
         """Set stopping criteria for initial subspace optimization.
 

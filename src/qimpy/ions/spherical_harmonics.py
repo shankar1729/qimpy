@@ -90,7 +90,7 @@ def get_harmonics_and_prime(
         Yprev = Y1
     for l in range(2, l_max + 1):
         # l > 1: compute from product of harmonics at l = 1 and l - 1:
-        lm_slice = slice(l ** 2, (l + 1) ** 2)
+        lm_slice = slice(l**2, (l + 1) ** 2)
         Yprod = Yprev[:, None] * Y1  # outer product of l = 1 and l - 1
         Yl = _YLM_RECUR[l] @ Yprod.flatten(0, 1)
         Y[lm_slice] = Yl.unflatten(1, shape)

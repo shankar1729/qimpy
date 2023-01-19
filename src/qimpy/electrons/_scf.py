@@ -36,7 +36,7 @@ class SCF(qp.utils.Pulay[qp.grid.FieldH]):
         q_kappa: Optional[float] = None,
         n_eig_steps: int = 2,
         eig_threshold: float = 1e-8,
-        mix_density: bool = True
+        mix_density: bool = True,
     ):
         """Initialize parameters of self-consistent field iteration (SCF).
 
@@ -115,11 +115,11 @@ class SCF(qp.utils.Pulay[qp.grid.FieldH]):
         Gsq = ((iG @ grid.lattice.Gbasis.T) ** 2).sum(dim=-1)
         # --- regularize Gsq by q_kappa or min(G!=0) as appropriate
         Gsq_min = qp.utils.globalreduce.min(Gsq[Gsq > 0.0], self.comm)
-        q_kappa_sq = 0.0 if (self.q_kappa is None) else (self.q_kappa ** 2)
+        q_kappa_sq = 0.0 if (self.q_kappa is None) else (self.q_kappa**2)
         Gsq_reg = (Gsq + q_kappa_sq) if q_kappa_sq else torch.clamp(Gsq, min=Gsq_min)
         # --- compute kernels
-        q_kerker_sq = self.q_kerker ** 2
-        q_metric_sq = self.q_metric ** 2
+        q_kerker_sq = self.q_kerker**2
+        q_metric_sq = self.q_metric**2
         self.K_kerker = Gsq_reg / (Gsq_reg + q_kerker_sq)
         self.K_metric = (
             (1.0 + q_metric_sq / Gsq_reg)

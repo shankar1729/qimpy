@@ -14,7 +14,7 @@ def get_harmonics_ref(l_max: int, r: np.ndarray) -> np.ndarray:
     for l in range(l_max + 1):
         result = np.zeros((2 * l + 1,) + r.shape[:-1])
         for m in range(0, l + 1):
-            ylm = ((-1) ** m) * (rMag ** l) * sph_harm(m, l, phi, theta)
+            ylm = ((-1) ** m) * (rMag**l) * sph_harm(m, l, phi, theta)
             if m == 0:
                 result[l] = ylm.real
             else:
@@ -49,7 +49,7 @@ def generate_harmonic_coefficients(l_max_hlf: int) -> None:
     # Calculate solid harmonics on a mesh covering unit cube:
     grids1d = 3 * (np.linspace(-1.0, 1.0, 2 * l_max),)  # avoids zero
     r = np.array(np.meshgrid(*grids1d)).reshape(3, -1).T
-    r_sq = (r ** 2).sum(axis=-1)
+    r_sq = (r**2).sum(axis=-1)
     ylm = get_harmonics_ref(l_max, r)
     # Calculate recursion coefficients:
     ERR_TOL = 1e-14
@@ -65,7 +65,7 @@ def generate_harmonic_coefficients(l_max_hlf: int) -> None:
     Y_1m_prefac = np.sqrt(0.75 / np.pi)
     qp.log.info(f"    ([], [], [{Y_00:.16f}]), ([], [], [{Y_1m_prefac:.16f}]),")
     for l in range(2, l_max + 1):
-        l_minus_1_slice = slice((l - 1) ** 2, l ** 2)
+        l_minus_1_slice = slice((l - 1) ** 2, l**2)
         y_product = ylm[l_minus_1_slice, None, :] * ylm[None, 1:4, :]
         y_product = y_product.reshape((2 * l - 1) * 3, -1)
         index_row = []

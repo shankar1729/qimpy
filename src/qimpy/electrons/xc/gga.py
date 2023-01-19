@@ -173,10 +173,10 @@ class _C_PBE(torch.nn.Module):
         super().__init__()
         self.ec_pw = SpinInterpolate(_C_PW)
         self.beta = 0.046 if sol else 0.06672455060314922
-        self.gamma = (1.0 - np.log(2.0)) / (np.pi ** 2)
+        self.gamma = (1.0 - np.log(2.0)) / (np.pi**2)
 
     def forward(
         self, rs: torch.Tensor, zeta: torch.Tensor, g: torch.Tensor, t2: torch.Tensor
     ) -> torch.Tensor:
         ec_unif = self.ec_pw(rs, zeta)  # underlying LDA correlation
-        return ec_unif + PW91_H0(self.gamma, self.beta, g ** 3, t2, ec_unif)
+        return ec_unif + PW91_H0(self.gamma, self.beta, g**3, t2, ec_unif)

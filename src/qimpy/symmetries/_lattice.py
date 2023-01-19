@@ -20,7 +20,7 @@ def _get_lattice_point_group(Rbasis: torch.Tensor, tolerance: float) -> torch.Te
     metric = Rreduced.T @ Rreduced
     metric_new = matrices.transpose(-2, -1) @ (metric @ matrices)
     metric_err = ((metric_new - metric) ** 2).sum(dim=(1, 2))
-    metric_err_limit = (tolerance ** 2) * (metric ** 2).sum()
+    metric_err_limit = (tolerance**2) * (metric**2).sum()
     sym = matrices[torch.where(metric_err < metric_err_limit)[0]]
 
     # Transform to original (unreduced) coordinates:
@@ -57,10 +57,10 @@ def _reduce_matrix33(M: torch.Tensor, tolerance: float) -> torch.Tensor:
     # Repeatedly transform till norm no longer reduces:
     T = torch.eye(3, device=M.device)
     MT = M.clone().detach()
-    norm = (M ** 2).sum()
+    norm = (M**2).sum()
     while True:
         MT_new = MT @ D
-        norm_new = (MT_new ** 2).sum(dim=(1, 2))
+        norm_new = (MT_new**2).sum(dim=(1, 2))
         i_min = norm_new.argmin()
         if norm_new[i_min] < norm * (1.0 - tolerance):
             T = T @ D[i_min]

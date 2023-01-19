@@ -61,7 +61,7 @@ def _get_space_group(
     rot_list = []
     trans_list = []
     ion_map_list = []
-    tol_sq = tolerance ** 2
+    tol_sq = tolerance**2
     for i_sym in range(lattice_sym.shape[0]):
         rot_cur = lattice_sym[i_sym]
 
@@ -91,7 +91,7 @@ def _get_space_group(
                 # compute intersection of (common_offsets, offsets_cur)
                 doffset = common_offsets[:, None, :] - offsets_cur[None, ...]
                 doffset -= torch.floor(0.5 + doffset)  # wrap to [-0.5,0.5)
-                is_common = ((doffset ** 2).sum(dim=-1) < tol_sq).any(dim=1)
+                is_common = ((doffset**2).sum(dim=-1) < tol_sq).any(dim=1)
                 common_offsets = common_offsets[is_common]
         if common_offsets is None:
             continue
@@ -101,7 +101,7 @@ def _get_space_group(
         for offset in common_offsets:
             doffset = offsets - offset[None, None, :]
             doffset -= torch.floor(0.5 + doffset)  # wrap to [-0.5,0.5)
-            ion_map_cur = (doffset ** 2).sum(dim=-1).argmin(dim=1)
+            ion_map_cur = (doffset**2).sum(dim=-1).argmin(dim=1)
             # Optimize offset by accounting for all atoms:
             doffset_best = doffset.view(-1, 3)[index_offset + ion_map_cur]
             offset_opt = offset + doffset_best.mean(axis=0)

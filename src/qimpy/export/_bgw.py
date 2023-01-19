@@ -12,7 +12,7 @@ class BGW(qp.TreeNode):
         *,
         system: qp.System,
         filename: str,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath()
+        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
     ) -> None:
         """Export data for BerkeleyGW.
 

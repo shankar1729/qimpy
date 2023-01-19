@@ -97,7 +97,7 @@ def _ke_tf(
 ) -> float:
     """Internal JIT-friendly implementation of Thomas-Fermi kinetic energy"""
     n_spins = n.shape[0]
-    prefactor = 0.3 * ((3 * (np.pi ** 2) * n_spins) ** (2.0 / 3.0)) * scale_factor
+    prefactor = 0.3 * ((3 * (np.pi**2) * n_spins) ** (2.0 / 3.0)) * scale_factor
     n.requires_grad_(requires_grad)
     E = prefactor * (n ** (5.0 / 3)).sum()
     if requires_grad:
@@ -131,7 +131,7 @@ def get_rs(n_tot: torch.Tensor) -> torch.Tensor:
 def get_spin_interp(zeta: torch.Tensor) -> torch.Tensor:
     """Compute spin interpolation function from fractional polarization `zeta`."""
     exponent = 4.0 / 3
-    scale = 1.0 / (2.0 ** exponent - 2.0)
+    scale = 1.0 / (2.0**exponent - 2.0)
     return ((1.0 + zeta) ** exponent + (1.0 - zeta) ** exponent - 2.0) * scale
 
 
@@ -241,7 +241,7 @@ class SpinInterpolate3(torch.nn.Module):
         ec_stiff = self.compute_stiff(rs)
         # Interpolate between spin channels:
         spin_interp = get_spin_interp(zeta)
-        zeta4 = zeta ** 4
+        zeta4 = zeta**4
         w1 = zeta4 * spin_interp
         w2 = (zeta4 - 1.0) * spin_interp * self.stiffness_scale
         return ec_para + w1 * (ec_ferro - ec_para) + w2 * ec_stiff
@@ -286,11 +286,14 @@ class _C_PW(torch.nn.Module):
     def __init__(self, spin_mode: str, high_precision: bool = True):
         super().__init__()
         # Select A based on precision setting (and store 2A):
-        self.A2 = 2.0 * {
-            "para": (0.0310907 if high_precision else 0.031091),
-            "ferro": (0.01554535 if high_precision else 0.015545),
-            "stiff": (0.0168869 if high_precision else 0.016887),
-        }[spin_mode]
+        self.A2 = (
+            2.0
+            * {
+                "para": (0.0310907 if high_precision else 0.031091),
+                "ferro": (0.01554535 if high_precision else 0.015545),
+                "stiff": (0.0168869 if high_precision else 0.016887),
+            }[spin_mode]
+        )
         # Remaining paramters (alpha, beta[1-4]):
         self.alpha, self.beta1, self.beta2, self.beta3, self.beta4 = {
             "para": (0.21370, 7.5957, 3.5876, 1.6382, 0.49294),
@@ -322,9 +325,9 @@ class _C_VWN(torch.nn.Module):
         self.A, self.b, self.c, self.x0 = {
             "para": (0.0310907, 3.72744, 12.9352, -0.10498),
             "ferro": (0.01554535, 7.06042, 18.0578, -0.32500),
-            "stiff": (1.0 / (6.0 * (np.pi ** 2)), 1.13107, 13.0045, -0.0047584),
+            "stiff": (1.0 / (6.0 * (np.pi**2)), 1.13107, 13.0045, -0.0047584),
         }[spin_mode]
-        self.Q = np.sqrt(4.0 * self.c - self.b ** 2)
+        self.Q = np.sqrt(4.0 * self.c - self.b**2)
 
     def forward(self, rs: torch.Tensor) -> torch.Tensor:
         # Commonly used combinations of rs:

@@ -25,7 +25,7 @@ def _get_projectors(
     iGk = basis.iG[:, basis_slice] + basis.k[:, None]  # fractional G + k
     Gk = iGk @ self.lattice.Gbasis.T  # Cartesian G + k (of this process)
     # Prepare interpolator for radial functions:
-    Gk_mag = (Gk ** 2).sum(dim=-1).sqrt()
+    Gk_mag = (Gk**2).sum(dim=-1).sqrt()
     Ginterp = Interpolator(Gk_mag, qp.ions.RadialFunction.DG)
     # Prepare output:
     nk_mine, n_basis = Gk_mag.shape

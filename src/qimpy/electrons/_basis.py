@@ -225,7 +225,7 @@ class Basis(qp.TreeNode):
     @property
     def n_ideal(self) -> float:
         """Ideal `n_avg_weighted` based on `ke_cutoff` G-sphere volume."""
-        return ((2.0 * self.ke_cutoff) ** 1.5) * self.lattice.volume / (6 * np.pi ** 2)
+        return ((2.0 * self.ke_cutoff) ** 1.5) * self.lattice.volume / (6 * np.pi**2)
 
     def get_ke(self, basis_slice: slice = slice(None)) -> torch.Tensor:
         """Kinetic energy (KE) of each plane wave in basis in :math:`E_h`

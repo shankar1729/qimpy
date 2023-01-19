@@ -94,7 +94,7 @@ def get_Rbasis(
     v0 = np.array((1.0, 0, 0))
     v1 = np.array((cos_gamma, sin_gamma, 0))
     v2 = np.array((cos_beta, (cos_alpha - cos_beta * cos_gamma) / sin_gamma, 0))
-    v2[2] = np.sqrt(1 - (v2 ** 2).sum())
+    v2[2] = np.sqrt(1 - (v2**2).sum())
     Rbasis = torch.tensor(np.array([a * v0, b * v1, c * v2]).T)
 
     # Apply modifications if any:

@@ -106,7 +106,7 @@ class Interpolator:
                 deriv:
             ]
         else:
-            f = (t ** powers) @ Interpolator._BLIP_TO_POLY
+            f = (t**powers) @ Interpolator._BLIP_TO_POLY
         # Construct the sparse marix interpolator:
         n_x = t.shape[0]
         indices = torch.empty((2, n_x, 6))

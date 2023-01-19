@@ -78,7 +78,7 @@ class RadialFunction:
         r_slice = slice(r_div.i_start, r_div.i_stop)
         r = radial_functions[0].r[r_slice]
         dr = radial_functions[0].dr[r_slice]
-        wr = (2.0 / 3) * (4 * np.pi) * (r ** 2 * dr)  # Simpson 1/3-rule odd weights
+        wr = (2.0 / 3) * (4 * np.pi) * (r**2 * dr)  # Simpson 1/3-rule odd weights
         wr[(r_div.i_start + 1) % 2 :: 2] *= 2.0  # ... modify to even weights
         if not r_div.i_start:
             wr[0] *= 0.5  # ... modify left end-point weight

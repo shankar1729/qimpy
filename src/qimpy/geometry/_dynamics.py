@@ -106,18 +106,23 @@ class Dynamics(qp.TreeNode):
     def langevin_thermostat(self, vel: torch.Tensor) -> torch.Tensor:
         """Implement Langevin thermostat."""
         if isinstance(self.langevin_gamma, list):
-            self.langevin_gamma = torch.unsqueeze(torch.as_tensor(self.langevin_gamma,
-                                                                  device=qp.rc.device),
-                                                  dim=-1)
+            self.langevin_gamma = torch.unsqueeze(
+                torch.as_tensor(self.langevin_gamma, device=qp.rc.device), dim=-1
+            )
         prefactor = 2 * self.T0 / self.dt
-        variances = prefactor * torch.ones_like(self.atomic_weights,
-                                                device=qp.rc.device)
+        variances = prefactor * torch.ones_like(
+            self.atomic_weights, device=qp.rc.device
+        )
         variances *= self.atomic_weights
         variances *= self.langevin_gamma
-        accel = torch.normal(mean=torch.zeros_like(self.system.ions.velocities,
-                                                   device=qp.rc.device),
-                             std=torch.sqrt(variances)) / self.atomic_weights
-        accel = accel - self.langevin_gamma*(vel*self.atomic_weights)
+        accel = (
+            torch.normal(
+                mean=torch.zeros_like(self.system.ions.velocities, device=qp.rc.device),
+                std=torch.sqrt(variances),
+            )
+            / self.atomic_weights
+        )
+        accel = accel - self.langevin_gamma * (vel * self.atomic_weights)
         return accel
 
     def compute_thermostat(self, vel: torch.Tensor) -> torch.Tensor:
@@ -134,7 +139,8 @@ class Dynamics(qp.TreeNode):
         collect_atomic_weights = list()
         for i, sym in enumerate(self.system.ions.symbols):
             collect_atomic_weights += list(
-                self.system.ions.n_ions_type[i] * [amu*ATOMIC_WEIGHTS[ATOMIC_NUMBERS[sym]]]
+                self.system.ions.n_ions_type[i]
+                * [amu * ATOMIC_WEIGHTS[ATOMIC_NUMBERS[sym]]]
             )
         self.atomic_weights: Optional[torch.Tensor] = torch.tensor(
             collect_atomic_weights, device=qp.rc.device

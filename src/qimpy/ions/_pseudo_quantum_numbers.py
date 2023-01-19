@@ -104,7 +104,7 @@ class PseudoQuantumNumbers:
         l = self.l[:, None]
         # Accumulate offsets into the Ylm overlaps array
         # These are sorted by l, j (=l+/-1/2), m_l (2l+1 entries) and s
-        i_ljms = i_lms + (2 * (l ** 2) - 2)  # offset from previous l
+        i_ljms = i_lms + (2 * (l**2) - 2)  # offset from previous l
         sel_plus = torch.where(j[self.i_rf] > self.l)[0]
         i_ljms[sel_plus] += 2 * (2 * l[sel_plus] + 1)  # offset from j = l-1/2
         return i_ljms.flatten()

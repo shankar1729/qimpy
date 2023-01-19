@@ -29,7 +29,7 @@ def test_ylm(r_ylm: Tuple[torch.Tensor, torch.Tensor]) -> None:
         qp.rc.device
     )
     for l in range(sh.L_MAX + 1):
-        l_slice = slice(l ** 2, (l + 1) ** 2)
+        l_slice = slice(l**2, (l + 1) ** 2)
         err = (ylm[l_slice] - ylm_ref[l_slice]).norm().item()
         rel_err = err / (ylm_ref[l_slice]).norm().item()
         rel_err_all.append(rel_err)
@@ -43,15 +43,15 @@ def test_ylm(r_ylm: Tuple[torch.Tensor, torch.Tensor]) -> None:
 def test_ylm_prod(r_ylm: Tuple[torch.Tensor, torch.Tensor]) -> None:
     qp.log.info("Testing product coefficients:")
     r, ylm = r_ylm
-    r_sq = (r ** 2).sum(dim=-1)
+    r_sq = (r**2).sum(dim=-1)
     if not sh._YLM_PROD:
         sh._initialize_device(qp.rc.device)
     rel_err_all = []
     dl_shape = (-1,) + (1,) * len(r_sq.shape)  # bcast with r_sq[None]
     for l1 in range(sh.L_MAX_HLF + 1):
-        l1_slice = slice(l1 ** 2, (l1 + 1) ** 2)
+        l1_slice = slice(l1**2, (l1 + 1) ** 2)
         for l2 in range(l1 + 1):
-            l2_slice = slice(l2 ** 2, (l2 + 1) ** 2)
+            l2_slice = slice(l2**2, (l2 + 1) ** 2)
             product_ref = ylm[l1_slice, None, :] * ylm[None, l2_slice, :]
             product = torch.zeros_like(product_ref)
             for m1 in range(-l1, l1 + 1):

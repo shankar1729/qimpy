@@ -47,7 +47,7 @@ class Coulomb:
         # volume and number of real space cells inversely proportional to it.
         # Also accounts for real space cost ~ Natoms^2/cell,
         # while reciprocal space cost ~ Natoms/cell.
-        self.sigma = (lattice.volume ** 2 / ((2 * np.pi) ** 3 * max(1, n_ions))) ** (
+        self.sigma = (lattice.volume**2 / ((2 * np.pi) ** 3 * max(1, n_ions))) ** (
             1.0 / 6
         )
 
@@ -125,7 +125,7 @@ class Coulomb:
         assert self.grid is rho.grid
         result = qp.grid.FieldH(self.grid, data=(self._kernel * rho.data))
         if correct_G0_width:
-            result.o += rho.o * (4 * np.pi * (-0.5 * (self.ion_width ** 2)))
+            result.o += rho.o * (4 * np.pi * (-0.5 * (self.ion_width**2)))
         return result
 
     def stress(self, rho1: qp.grid.FieldH, rho2: qp.grid.FieldH) -> torch.Tensor:
@@ -162,14 +162,14 @@ class Coulomb:
             Charges of each point charge
         """
         sigma = self.sigma
-        sigmaSq = sigma ** 2
+        sigmaSq = sigma**2
         eta = np.sqrt(0.5) / sigma
         lattice = self.grid.lattice
 
         # Position independent terms:
         Ztot = Z.sum()
-        ZsqTot = (Z ** 2).sum()
-        E_Gzero = 0.5 * ((4 * np.pi) * (-0.5 * sigmaSq * (Ztot ** 2)) / lattice.volume)
+        ZsqTot = (Z**2).sum()
+        E_Gzero = 0.5 * ((4 * np.pi) * (-0.5 * sigmaSq * (Ztot**2)) / lattice.volume)
         E_self = 0.5 * (-ZsqTot * eta * (2.0 / np.sqrt(np.pi)))
         E = E_Gzero + E_self
         if lattice.requires_grad:
@@ -187,7 +187,7 @@ class Coulomb:
         minus_E_r_by_r = (
             Eterm + (2.0 * eta / np.sqrt(np.pi)) * Zprod * torch.exp(-((eta * r) ** 2))
         ) / (
-            r ** 2
+            r**2
         )  # -(dE/dr)/r
         E += 0.5 * Eterm.sum()
         if positions.requires_grad:
@@ -203,7 +203,7 @@ class Coulomb:
         Sf = torch.exp((-2j * np.pi) * (self.iG @ pos.T))  # Translation phases
         SfZ = (Sf * Z[None, :]).sum(dim=-1)  # Charge structure factor
         G = self.iG @ lattice.Gbasis.T
-        Gsq = (G ** 2).sum(dim=-1)
+        Gsq = (G**2).sum(dim=-1)
         Eterm = (4 * np.pi / lattice.volume) * torch.exp((-0.5 * sigmaSq) * Gsq) / Gsq
         Erecip = 0.5 * (Eterm @ (SfZ.abs() ** 2))
         E += Erecip

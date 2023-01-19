@@ -37,7 +37,7 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
         band_division: Optional[qp.utils.TaskDivision] = None,
         n_bands: int = 0,
         n_spins: int = 0,
-        n_spinor: int = 0
+        n_spinor: int = 0,
     ) -> None:
         """Initialize wavefunctions of specified size or with given
         coefficients.

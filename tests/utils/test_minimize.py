@@ -83,7 +83,7 @@ class RandomFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
             v = M @ (self.x - self.x0).data.flatten()  # partial results, full array
             qp.rc.current_stream_synchronize()
             self.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(v), MPI.SUM)
-            E += (v ** 2).sum() ** (i_M + 1) * grid.dV
+            E += (v**2).sum() ** (i_M + 1) * grid.dV
         state.energy["E"] = E.item()
 
         if not energy_only:

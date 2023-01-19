@@ -182,7 +182,7 @@ def _read_upf(self: qp.ions.Pseudopotential, filename: str) -> None:
             self.rho_atom = qp.ions.RadialFunction(
                 self.r,
                 self.dr,
-                np.fromstring(section.text, sep=" ") / (4 * np.pi * (r ** 2)),
+                np.fromstring(section.text, sep=" ") / (4 * np.pi * (r**2)),
             )
 
         elif section.tag == "PP_SPIN_ORB":

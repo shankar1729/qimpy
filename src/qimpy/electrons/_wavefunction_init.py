@@ -14,7 +14,7 @@ def _randn(x: torch.Tensor) -> torch.Tensor:
         x ^= x << 13
         x ^= x >> 7
         x ^= x << 17
-        u.append(((0.5 ** 64) * x) + 0.5)
+        u.append(((0.5**64) * x) + 0.5)
     # Complex normal random number using Box-Muller transform:
     return torch.sqrt(-2.0 * torch.log(u[0])) * torch.exp(  # Magnitude
         (2j * np.pi) * u[1]

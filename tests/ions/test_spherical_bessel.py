@@ -9,7 +9,7 @@ from scipy.special import spherical_jn
 def test_jl(plt=None):
     x = np.logspace(-3, 3, 6000)
     l_max = 6
-    jl_ref = [spherical_jn(l, x) / (x ** l) for l in range(l_max + 1)]
+    jl_ref = [spherical_jn(l, x) / (x**l) for l in range(l_max + 1)]
     jl_test = qp.ions.spherical_bessel.jl_by_xl(
         l_max, torch.tensor(x, device=qp.rc.device)
     ).to(qp.rc.cpu)

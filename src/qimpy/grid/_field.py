@@ -56,7 +56,7 @@ class Field(qp.utils.Gradable[FieldType]):
         grid: qp.grid.Grid,
         *,
         shape_batch: Sequence[int] = tuple(),
-        data: Optional[torch.Tensor] = None
+        data: Optional[torch.Tensor] = None,
     ) -> None:
         """Initialize to zeros or specified `data`.
 

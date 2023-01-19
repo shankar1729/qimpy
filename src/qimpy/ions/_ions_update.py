@@ -133,13 +133,13 @@ class _LocalTerms:
         self.Vloc_coeff = torch.hstack(Vloc_coeff)
         self.n_core_coeff = torch.hstack(n_core_coeff)
         self.rho_kernel = -ions.Z.view(-1, 1, 1, 1) * torch.exp(
-            (-0.5 * (ion_width ** 2)) * Gsq
+            (-0.5 * (ion_width**2)) * Gsq
         )
 
         # Extra requirements for lattice gradient:
         if ions.lattice.requires_grad:
             self.Ginterp_prime = Interpolator(Gmag, qp.ions.RadialFunction.DG, deriv=1)
-            self.rho_kernel_prime = self.rho_kernel * (-(ion_width ** 2)) * Gmag
+            self.rho_kernel_prime = self.rho_kernel * (-(ion_width**2)) * Gmag
             G = G.permute(3, 0, 1, 2)  # bring gradient direction to front
             self.stress_kernel = qp.grid.FieldH(
                 grid,

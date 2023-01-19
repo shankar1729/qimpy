@@ -97,13 +97,13 @@ class Symmetries(qp.TreeNode):
         # Identify location of special entries:
         # --- identity
         id = torch.eye(3, device=qp.rc.device)  # identity matrix
-        id_diff = ((self.rot - id) ** 2).sum(dim=(1, 2)) + (self.trans ** 2).sum(dim=1)
+        id_diff = ((self.rot - id) ** 2).sum(dim=(1, 2)) + (self.trans**2).sum(dim=1)
         self.i_id = int(id_diff.argmin().item())
-        if id_diff[self.i_id] > tolerance ** 2:
+        if id_diff[self.i_id] > tolerance**2:
             raise ValueError("Identity operation not found in space group.")
         # ---  inversion (if present: list of indices, else [])
         self.i_inv = torch.where(
-            ((self.rot + id) ** 2).sum(dim=(1, 2)) < tolerance ** 2
+            ((self.rot + id) ** 2).sum(dim=(1, 2)) < tolerance**2
         )[0].tolist()
 
     @property

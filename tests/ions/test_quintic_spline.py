@@ -25,10 +25,10 @@ def test_interpolator():
     y_coeff = qp.ions.quintic_spline.get_coeff(y)  # blip coefficients
     assert (
         y_fine - qp.ions.quintic_spline.Interpolator(x_fine, dx, 0)(y_coeff)
-    ).norm() < dx ** 4
+    ).norm() < dx**4
     assert (
         y_prime_fine - qp.ions.quintic_spline.Interpolator(x_fine, dx, 1)(y_coeff)
-    ).norm() < dx ** 3
+    ).norm() < dx**3
     return dx, x_fine, y_fine, y_prime_fine, y_coeff
 
 
