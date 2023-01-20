@@ -3,8 +3,7 @@ import torch
 import pytest
 
 
-@pytest.mark.mpi_skip
-def test_interpolator():
+def get_test_data():
     def f_test(x):
         """Non-trivial test function with correct symmetries"""
         return torch.exp(-torch.sin(0.01 * x * x)) * torch.cos(0.1 * x)
@@ -23,13 +22,18 @@ def test_interpolator():
     y_fine = f_test(x_fine)
     y_prime_fine = f_test_prime(x_fine)
     y_coeff = qp.ions.quintic_spline.get_coeff(y)  # blip coefficients
+    return dx, x_fine, y_fine, y_prime_fine, y_coeff
+
+
+@pytest.mark.mpi_skip
+def test_interpolator():
+    dx, x_fine, y_fine, y_prime_fine, y_coeff = get_test_data()
     assert (
         y_fine - qp.ions.quintic_spline.Interpolator(x_fine, dx, 0)(y_coeff)
     ).norm() < dx**4
     assert (
         y_prime_fine - qp.ions.quintic_spline.Interpolator(x_fine, dx, 1)(y_coeff)
     ).norm() < dx**3
-    return dx, x_fine, y_fine, y_prime_fine, y_coeff
 
 
 def main():
@@ -54,7 +58,7 @@ def main():
     plt.legend()
 
     # Generate test data:
-    dx, x_fine, y_fine, y_prime_fine, y_coeff = test_interpolator()
+    dx, x_fine, y_fine, y_prime_fine, y_coeff = get_test_data()
 
     # Plot results:
     plt.figure()

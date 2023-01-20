@@ -3,7 +3,7 @@ import torch
 import qimpy as qp
 import numpy as np
 import functools
-from typing import ClassVar, Dict, List, Tuple, Union
+from typing import ClassVar, Union
 
 
 class StopWatch:
@@ -18,10 +18,10 @@ class StopWatch:
     t_start: Union[float, torch.cuda.Event]  #: start time of current event
 
     #: timing statistics: list of durations by name
-    _stats: ClassVar[Dict[str, List[float]]] = {}
+    _stats: ClassVar[dict[str, list[float]]] = {}
 
     #: CUDA events for asynchronous timing on GPUs
-    _cuda_events: ClassVar[List[Tuple[str, torch.cuda.Event, torch.cuda.Event]]] = []
+    _cuda_events: ClassVar[list[tuple[str, torch.cuda.Event, torch.cuda.Event]]] = []
 
     def __init__(self, name: str):
         """Start profiling a block of code named `name`."""

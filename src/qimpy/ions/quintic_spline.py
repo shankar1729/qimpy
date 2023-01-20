@@ -5,7 +5,7 @@ __all__ = ["get_coeff", "Interpolator"]
 import numpy as np
 import torch
 from scipy.linalg import solve_banded
-from typing import Optional, Tuple
+from typing import Optional
 
 
 def get_coeff(samples: torch.Tensor) -> torch.Tensor:
@@ -66,7 +66,7 @@ class Interpolator:
         y = interp(y_coeff)  # interpolate y_samples at locations x
     """
 
-    _shape: Tuple[int, ...]  #: Dimensions of x to reproduced at output
+    _shape: tuple[int, ...]  #: Dimensions of x to reproduced at output
     _mat: torch.Tensor  #: internal sparse matrix used for interpolation
     _BLIP_TO_POLY: Optional[torch.Tensor] = None  #: blip to poly transform
 

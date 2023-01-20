@@ -3,7 +3,7 @@ import qimpy as qp
 import torch
 from abc import abstractmethod
 from ._change import _change_real, _change_recip
-from typing import TypeVar, Any, Union, Tuple, Optional, Sequence
+from typing import TypeVar, Any, Union, Optional, Sequence
 from qimpy.rc import MPI
 
 
@@ -25,15 +25,15 @@ class Field(qp.utils.Gradable[FieldType]):
         """Data type for the Field type"""
 
     @abstractmethod
-    def shape_grid(self) -> Tuple[int, ...]:
+    def shape_grid(self) -> tuple[int, ...]:
         """Global grid shape for the Field type"""
 
     @abstractmethod
-    def shape_grid_mine(self) -> Tuple[int, ...]:
+    def shape_grid_mine(self) -> tuple[int, ...]:
         """Local grid shape (last 3 data dimensions) for the Field type"""
 
     @abstractmethod
-    def offset_grid_mine(self) -> Tuple[int, ...]:
+    def offset_grid_mine(self) -> tuple[int, ...]:
         """Offset of local grid dimensions into global grid for Field type"""
 
     @property
@@ -312,13 +312,13 @@ class FieldR(Field["FieldR"]):
     def dtype(self) -> torch.dtype:
         return torch.double
 
-    def shape_grid(self) -> Tuple[int, ...]:
+    def shape_grid(self) -> tuple[int, ...]:
         return self.grid.shape
 
-    def shape_grid_mine(self) -> Tuple[int, ...]:
+    def shape_grid_mine(self) -> tuple[int, ...]:
         return self.grid.shapeR_mine
 
-    def offset_grid_mine(self) -> Tuple[int, ...]:
+    def offset_grid_mine(self) -> tuple[int, ...]:
         return self.grid.split0.i_start, 0, 0
 
     @property
@@ -353,13 +353,13 @@ class FieldC(Field["FieldC"]):
     def dtype(self) -> torch.dtype:
         return torch.cdouble
 
-    def shape_grid(self) -> Tuple[int, ...]:
+    def shape_grid(self) -> tuple[int, ...]:
         return self.grid.shape
 
-    def shape_grid_mine(self) -> Tuple[int, ...]:
+    def shape_grid_mine(self) -> tuple[int, ...]:
         return self.grid.shapeR_mine
 
-    def offset_grid_mine(self) -> Tuple[int, ...]:
+    def offset_grid_mine(self) -> tuple[int, ...]:
         return self.grid.split0.i_start, 0, 0
 
     @property
@@ -390,13 +390,13 @@ class FieldH(Field["FieldH"]):
     def dtype(self) -> torch.dtype:
         return torch.cdouble
 
-    def shape_grid(self) -> Tuple[int, ...]:
+    def shape_grid(self) -> tuple[int, ...]:
         return self.grid.shapeH
 
-    def shape_grid_mine(self) -> Tuple[int, ...]:
+    def shape_grid_mine(self) -> tuple[int, ...]:
         return self.grid.shapeH_mine
 
-    def offset_grid_mine(self) -> Tuple[int, ...]:
+    def offset_grid_mine(self) -> tuple[int, ...]:
         return 0, 0, self.grid.split2H.i_start
 
     @property
@@ -430,13 +430,13 @@ class FieldG(Field["FieldG"]):
     def dtype(self) -> torch.dtype:
         return torch.cdouble
 
-    def shape_grid(self) -> Tuple[int, ...]:
+    def shape_grid(self) -> tuple[int, ...]:
         return self.grid.shape
 
-    def shape_grid_mine(self) -> Tuple[int, ...]:
+    def shape_grid_mine(self) -> tuple[int, ...]:
         return self.grid.shapeG_mine
 
-    def offset_grid_mine(self) -> Tuple[int, ...]:
+    def offset_grid_mine(self) -> tuple[int, ...]:
         return 0, 0, self.grid.split2.i_start
 
     @property

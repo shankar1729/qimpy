@@ -1,7 +1,7 @@
 import numpy as np
 import qimpy as qp
 import torch
-from typing import Optional, List
+from typing import Optional
 from qimpy.rc import MPI
 
 
@@ -71,7 +71,7 @@ class TaskDivisionCustom(TaskDivision):
         self.n_mine = n_mine
         self.n_each = 0  # not applicable for custom division
         # Compute remaining attributes:
-        self.n_prev = np.concatenate(([0], self.n_each_custom.cumsum()))
+        self.n_prev = np.concatenate((np.zeros(1), self.n_each_custom.cumsum()))
         self.n_tot = self.n_prev[-1]
         self.i_start = self.n_prev[self.i_proc]
         self.i_stop = self.n_prev[self.i_proc + 1]
@@ -81,7 +81,7 @@ class TaskDivisionCustom(TaskDivision):
         return int(np.searchsorted(self.n_prev, i, side="right"))
 
 
-def get_block_slices(n_tot: int, block_size: int) -> List[slice]:
+def get_block_slices(n_tot: int, block_size: int) -> list[slice]:
     """Split `n_tot` tasks into blocks of size `block_size`.
     Returns a list of slices for each block.
     All blocks will have equal size (equal to `block_size`),

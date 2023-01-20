@@ -1,8 +1,6 @@
 """Utilities to manipulate dictionaries used as input to constructors."""
 __all__ = ["key_cleanup", "flatten", "unflatten", "merge"]
 
-from typing import List
-
 
 def key_cleanup(params: dict) -> dict:
     """Clean-up dictionary keys for use in constructors.
@@ -42,7 +40,7 @@ def unflatten(d: dict) -> dict:
     return result
 
 
-def merge(d_list: List[dict]) -> dict:
+def merge(d_list: list[dict]) -> dict:
     """Merge a list of nested dictonaries `d_list`.
     The dictionaries are processed in order, with each dictionary overriding
     values associated with keys present in previous dictionaries."""

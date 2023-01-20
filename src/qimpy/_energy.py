@@ -1,8 +1,8 @@
-from typing import List, Dict, Union
+from typing import Union, Optional
 import torch
 
 
-class Energy(Dict[str, Union[float, torch.Tensor]]):
+class Energy(dict[str, Union[float, torch.Tensor]]):
     """Energy of system with access to components"""
 
     def __float__(self) -> float:
@@ -10,7 +10,7 @@ class Energy(Dict[str, Union[float, torch.Tensor]]):
         return float(sum(self.values()))
 
     def __repr__(self) -> str:
-        terms: List[List[str]] = [[], []]  # collect terms with +/- separately
+        terms: list[list[str]] = [[], []]  # collect terms with +/- separately
         for name, value in sorted(self.items()):
             term_index = 1 if (name[0] in "+-") else 0
             terms[term_index].append(f"{name:>9s} = {value:25.16f}")
@@ -30,7 +30,7 @@ class Energy(Dict[str, Union[float, torch.Tensor]]):
             return "F"  # Helmholtz free energy
         return "E"  # Energy
 
-    def sum_tensor(self) -> torch.Tensor:
+    def sum_tensor(self) -> Optional[torch.Tensor]:
         result = None
         for value in self.values():
             assert isinstance(value, torch.Tensor)

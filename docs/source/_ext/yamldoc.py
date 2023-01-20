@@ -7,9 +7,6 @@ from typing import (
     get_type_hints,
     get_args,
     get_origin,
-    Dict,
-    List,
-    Tuple,
     Optional,
     NamedTuple,
 )
@@ -39,7 +36,7 @@ class ClassInputDoc:
         cls: type,
         constructable: type,
         app: Sphinx,
-        classdocs: Dict[str, ClassInputDoc],
+        classdocs: dict[str, ClassInputDoc],
         outdir: str,
     ) -> None:
         """Write input documentation for `cls` in ReST format within `outdir`.
@@ -48,7 +45,7 @@ class ClassInputDoc:
         to avoid writing `cls`'s documentation multiple times for overlapping
         input documentation trees."""
         self.cls = cls
-        self.params: List[Parameter] = []
+        self.params: list[Parameter] = []
         self.path = get_path_from_class(cls)
         classdocs[self.path] = self
 
@@ -148,7 +145,7 @@ class ClassInputDoc:
                 fp.write("\n\n")
 
     @lru_cache
-    def get_yaml_template(self, linkprefix="") -> List[str]:
+    def get_yaml_template(self, linkprefix="") -> list[str]:
         """Return lines of a yaml template based on parameters.
         Recursively includes templates of component classes within."""
         result = []
@@ -256,7 +253,7 @@ def create_yamldoc_rst_files(app: Sphinx) -> None:
 
     # Document all classes in the QimPy object tree recursively:
     TreeNode = get_class_from_path("qimpy.TreeNode")
-    classdocs: Dict[str, ClassInputDoc] = {}
+    classdocs: dict[str, ClassInputDoc] = {}
     for classname in yamldoc_classnames:
         cls = get_class_from_path(classname)
         ClassInputDoc(cls, TreeNode, app, classdocs, yamldoc_dir)
@@ -286,10 +283,10 @@ def get_path_from_class(cls: type) -> str:
     return ".".join(module_elems)
 
 
-def get_parameters(docstr: str) -> Tuple[str, Dict[str, str]]:
+def get_parameters(docstr: str) -> tuple[str, dict[str, str]]:
     """Parse constructor docstring `docstr` into parameter descriptions.
     Returns header of constructor documentation, and for each parameter."""
-    result: Dict[str, str] = {}
+    result: dict[str, str] = {}
     lines = docstr.split("\n")
     parameter_start = len(lines)
     parameter_indent = -1  # indent amount of parameter
@@ -378,7 +375,7 @@ def yamltype(cls: type) -> str:
     return str(cls)
 
 
-def yaml_remove_split(docstr: str) -> Tuple[str, str]:
+def yaml_remove_split(docstr: str) -> tuple[str, str]:
     """Extract parameter summary within :yaml: tags in docstring,
     and clean up the :yaml: tag for the full docstring.
     Return cleaned up docstring, and summary version."""

@@ -3,7 +3,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 from qimpy.rc import MPI
 
 
@@ -123,7 +123,7 @@ class Davidson(qp.TreeNode):
 
     def _check_deig(
         self, deig: torch.Tensor, eig_threshold: float
-    ) -> Tuple[float, int]:
+    ) -> tuple[float, int]:
         """Return maximum change in eigenvalues and how many
         eigenvalues are converged at all spin and k"""
         n_bands = self.electrons.fillings.n_bands

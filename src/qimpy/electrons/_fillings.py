@@ -3,7 +3,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from scipy import optimize
-from typing import Optional, Dict, Union, NamedTuple, Callable, Tuple, List, Sequence
+from typing import Optional, Union, NamedTuple, Callable, Sequence
 from qimpy.rc import MPI
 
 
@@ -328,9 +328,9 @@ class Fillings(qp.TreeNode):
             NM_target = np.array([self.n_electrons])
             mu_B = np.array([self.mu])
             i_free = np.where([not self.mu_constrain])[0]
-        results: Dict[str, torch.Tensor] = {}  # populated with NM and S by compute_NM
+        results: dict[str, torch.Tensor] = {}  # populated with NM and S by compute_NM
 
-        def compute_NM(params: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        def compute_NM(params: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
             """Compute electron number and magnetization from eigenvalues.
             Here params are the entries in mu_B that are being optimized.
             Return error in corresponding NM entries, and its gradient
@@ -432,7 +432,7 @@ class Fillings(qp.TreeNode):
             f"  n_electrons: {n_electrons:.6f}{M_str}"
         )
 
-    def _save_checkpoint(self, cp_path: qp.utils.CpPath) -> List[str]:
+    def _save_checkpoint(self, cp_path: qp.utils.CpPath) -> list[str]:
         self.write_band_scalars(cp_path.relative("f"), self.f)
         cp_path.attrs["mu"] = self.mu
         return ["f", "mu"]
@@ -516,7 +516,7 @@ def _smearing_cold(
     return SmearingResults(f, f_eig, S)
 
 
-_smearing_funcs: Dict[str, SmearingFunc] = {
+_smearing_funcs: dict[str, SmearingFunc] = {
     "fermi": _smearing_fermi,
     "gauss": _smearing_gauss,
     "mp1": _smearing_mp1,

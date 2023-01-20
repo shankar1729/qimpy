@@ -1,11 +1,9 @@
-from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
 from ._lattice import _get_lattice_point_group, _symmetrize_lattice, _symmetrize_matrix
 from ._ions import _get_space_group, _symmetrize_positions, _symmetrize_forces
 from ._grid import _check_grid_shape, _get_grid_shape
-from typing import List, Dict
 
 
 class Symmetries(qp.TreeNode):
@@ -21,7 +19,7 @@ class Symmetries(qp.TreeNode):
     trans: torch.Tensor  #: Translations in fractional coordinates (n_sym x 3)
     ion_map: torch.Tensor  #: Ion index each ion maps to (n_sym x n_ions)
     i_id: int  #: Index of identity operation within space group
-    i_inv: List[int]  #: Indices of any inversion operations in space group
+    i_inv: list[int]  #: Indices of any inversion operations in space group
 
     symmetrize_lattice = _symmetrize_lattice
     symmetrize_matrix = _symmetrize_matrix
@@ -36,7 +34,7 @@ class Symmetries(qp.TreeNode):
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         lattice: qp.lattice.Lattice,
         ions: qp.ions.Ions,
-        axes: Dict[str, np.ndarray] = {},
+        axes: dict[str, np.ndarray] = {},
         tolerance: float = 1e-6,
     ) -> None:
         """Determine space group from `lattice` and `ions`.

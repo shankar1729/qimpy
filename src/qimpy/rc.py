@@ -20,7 +20,7 @@ import torch
 import qimpy as qp
 import numpy as np
 from psutil import cpu_count
-from typing import Optional, Dict
+from typing import Optional
 from mpi4py import MPI
 
 
@@ -57,7 +57,7 @@ torch.set_default_tensor_type(torch.DoubleTensor)
 torch.set_num_threads(1)  # to prevent overcommit between MPI processes
 
 # Declare type mappings from torch to MPI and numpy:
-mpi_type: Dict[torch.dtype, MPI.Datatype] = {
+mpi_type: dict[torch.dtype, MPI.Datatype] = {
     torch.int32: MPI.INT,
     torch.int64: MPI.LONG,
     torch.float32: MPI.FLOAT,
@@ -66,8 +66,8 @@ mpi_type: Dict[torch.dtype, MPI.Datatype] = {
     torch.complex128: MPI.DOUBLE_COMPLEX,
 }  #: Mapping from torch to MPI datatypes
 
-np_type: Dict[torch.dtype, type] = {
-    torch.bool: np.bool8,
+np_type: dict[torch.dtype, type] = {
+    torch.bool: np.bool_,
     torch.uint8: np.uint8,
     torch.int8: np.int8,
     torch.int16: np.int16,

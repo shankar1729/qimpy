@@ -3,7 +3,7 @@ import h5py
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Tuple, Any, Optional, NamedTuple
+from typing import Any, Optional, NamedTuple
 
 
 class Checkpoint(h5py.File):
@@ -18,7 +18,7 @@ class Checkpoint(h5py.File):
         qp.log.info(f"Opened checkpoint file '{filename}' for {mode_name}")
 
     def write_slice(
-        self, dset: Any, offset: Tuple[int, ...], data: torch.Tensor
+        self, dset: Any, offset: tuple[int, ...], data: torch.Tensor
     ) -> None:
         """Write a slice of data to dataset `dset` at offset `offset`
         from `data` (taking care of transfer to CPU if needed).
@@ -36,7 +36,7 @@ class Checkpoint(h5py.File):
         dset[index] = data.to(qp.rc.cpu).numpy()
 
     def read_slice(
-        self, dset: Any, offset: Tuple[int, ...], size: Tuple[int, ...]
+        self, dset: Any, offset: tuple[int, ...], size: tuple[int, ...]
     ) -> torch.Tensor:
         """Read a slice of data from data set `dset` in file,
         starting at `offset` and of length `size` in each dimension.
@@ -50,7 +50,7 @@ class Checkpoint(h5py.File):
         return torch.from_numpy(dset[index]).to(qp.rc.device)
 
     def create_dataset_complex(
-        self, path: str, shape: Tuple[int, ...], dtype: torch.dtype = torch.complex128
+        self, path: str, shape: tuple[int, ...], dtype: torch.dtype = torch.complex128
     ) -> Any:
         """Create a dataset at `path` suitable for a complex array of size
         `shape`. This creates a real array with a final dimension of length 2.
@@ -60,7 +60,7 @@ class Checkpoint(h5py.File):
         return self.create_dataset(path, shape=(shape + (2,)), dtype=dtype_real)
 
     def write_slice_complex(
-        self, dset: Any, offset: Tuple[int, ...], data: torch.Tensor
+        self, dset: Any, offset: tuple[int, ...], data: torch.Tensor
     ) -> None:
         """Same as :meth:`write_slice`, but for complex `data`. Converts data
         to real storage compatible with :meth:`create_dataset_complex`"""
@@ -68,7 +68,7 @@ class Checkpoint(h5py.File):
         self.write_slice(dset, offset + (0,), torch.view_as_real(data))
 
     def read_slice_complex(
-        self, dset: Any, offset: Tuple[int, ...], size: Tuple[int, ...]
+        self, dset: Any, offset: tuple[int, ...], size: tuple[int, ...]
     ) -> torch.Tensor:
         """Same as :meth:`read_slice`, but for complex `data`. Converts data
         from real storage as created by :meth:`create_dataset_complex`

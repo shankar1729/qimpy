@@ -1,7 +1,7 @@
 import qimpy as qp
 import numpy as np
 from scipy.special import sph_harm
-from typing import Sequence, Any, List, Tuple
+from typing import Sequence, Any
 
 
 def get_harmonics_ref(l_max: int, r: np.ndarray) -> np.ndarray:
@@ -24,7 +24,7 @@ def get_harmonics_ref(l_max: int, r: np.ndarray) -> np.ndarray:
     return np.concatenate(results, axis=0)
 
 
-def get_lm(l_max: int) -> List[Tuple[int, int]]:
+def get_lm(l_max: int) -> list[tuple[int, int]]:
     """Get list of all (l,m) in order up to (and including) l_max"""
     return [(l, m) for l in range(l_max + 1) for m in range(-l, l + 1)]
 
@@ -42,7 +42,6 @@ def generate_harmonic_coefficients(l_max_hlf: int) -> None:
     code that can be pasted into _spherical_harmonics_data.py."""
     l_max = 2 * l_max_hlf
     qp.log.info(
-        "from typing import List, Tuple, Dict\n\n"
         f"L_MAX: int = {l_max}  # Maximum l for harmonics\n"
         f"L_MAX_HLF: int = {l_max_hlf}  # Maximum l for products"
     )
@@ -55,11 +54,11 @@ def generate_harmonic_coefficients(l_max_hlf: int) -> None:
     ERR_TOL = 1e-14
     COEFF_TOL = 1e-8
     qp.log.info(
-        "CooIndices = Tuple[List[int], List[int], List[float]]\n\n"
+        "CooIndices = tuple[list[int], list[int], list[float]]\n\n"
         "# Recursion coefficients for computing real harmonics at l>1\n"
         "# from products of those at l = 1 and l-1. The integers index\n"
         "# a sparse matrix with (2l+1) rows and 3*(2l-1) columns.\n"
-        "YLM_RECUR: List[CooIndices] = ["
+        "YLM_RECUR: list[CooIndices] = ["
     )
     Y_00 = np.sqrt(0.25 / np.pi)
     Y_1m_prefac = np.sqrt(0.75 / np.pi)
@@ -116,8 +115,8 @@ def generate_harmonic_coefficients(l_max_hlf: int) -> None:
     qp.log.info(
         "# Clebsch-Gordon coefficients for products of real harmonics.\n"
         "# The integer indices correspond to l*(l+1)+m for each (l,m).\n"
-        "YLM_PROD: Dict[Tuple[int, int],"
-        " Tuple[List[int], List[float]]] = {"
+        "YLM_PROD: dict[tuple[int, int],"
+        " tuple[list[int], list[float]]] = {"
     )
     for ilm1, (l1, m1) in enumerate(lm_hlf):
         for ilm2, (l2, m2) in enumerate(lm_hlf[: ilm1 + 1]):

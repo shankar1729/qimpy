@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from functools import lru_cache
 from dataclasses import dataclass
-from typing import List, Set, Dict, Callable, Optional
+from typing import Set, Callable, Optional
 
 # List exported symbols for doc generation
 __all__ = [
@@ -125,7 +125,7 @@ class _FunctionalLibxc:
     has_correlation: bool  #: Whether functional includes correlation
     has_kinetic: bool  #: Whether functional includes kinetic energy
     has_energy: bool  #: Whether functional has meaningful total energy
-    output_labels: List[str]  #: Libxc names of output quantities
+    output_labels: list[str]  #: Libxc names of output quantities
 
     def __init__(self, spin_str: str, name: str, scale_factor: float) -> None:
         func = pylibxc.LibXCFunctional(name, spin_str)
@@ -199,8 +199,8 @@ class _FunctionalLibxc:
 
     def __call__(
         self,
-        inputs: Dict[str, np.ndarray],
-        outputs: Dict[str, np.ndarray],
+        inputs: dict[str, np.ndarray],
+        outputs: dict[str, np.ndarray],
         requires_grad: bool,
     ) -> None:
         out = self.functional.compute(
@@ -215,12 +215,12 @@ class _FunctionalLibxc:
 class FunctionalsLibxc(Functional):
     """Evaluate one or more functionals from Libxc together."""
 
-    _functionals: List[_FunctionalLibxc]  #: Individual Libxc functionals
+    _functionals: list[_FunctionalLibxc]  #: Individual Libxc functionals
 
     def __init__(
         self,
         spin_polarized: bool,
-        libxc_names: Dict[str, float],
+        libxc_names: dict[str, float],
     ) -> None:
         """Initialize from Libxc names with scale factors for each."""
         assert LIBXC_AVAILABLE

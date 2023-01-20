@@ -2,7 +2,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from ._fft import _init_grid_fft, _FFT, _IFFT, IndicesType
-from typing import Optional, Sequence, Tuple, Dict
+from typing import Optional, Sequence
 from qimpy.rc import MPI
 
 
@@ -21,16 +21,16 @@ class Grid(qp.TreeNode):
     i_proc: int  #: Rank within comm
     is_split: bool  #: Whether the grid is split over MPI
     ke_cutoff: float  #: Kinetic energy of Nyquist-frequency plane-waves
-    shape: Tuple[int, ...]  #: Global real-space grid dimensions
-    shapeH: Tuple[int, ...]  #: Global half-reciprocal-space grid dimensions
-    shapeR_mine: Tuple[int, ...]  #: Local real grid dimensions
-    shapeG_mine: Tuple[int, ...]  #: Local reciprocal grid dimensions
-    shapeH_mine: Tuple[int, ...]  #: Local half-reciprocal grid dimensions
+    shape: tuple[int, ...]  #: Global real-space grid dimensions
+    shapeH: tuple[int, ...]  #: Global half-reciprocal-space grid dimensions
+    shapeR_mine: tuple[int, ...]  #: Local real grid dimensions
+    shapeG_mine: tuple[int, ...]  #: Local reciprocal grid dimensions
+    shapeH_mine: tuple[int, ...]  #: Local half-reciprocal grid dimensions
     split0: qp.utils.TaskDivision  #: MPI split of real-space dimension 0
     split2: qp.utils.TaskDivision  #: MPI split of reciprocal dimension 2
     split2H: qp.utils.TaskDivision  #: MPI split of half-reciprocal dimension 2
-    _mesh1D: Dict[str, Tuple[torch.Tensor, ...]]  # Global 1D meshes
-    _mesh1D_mine: Dict[str, Tuple[torch.Tensor, ...]]  # Local 1D meshes
+    _mesh1D: dict[str, tuple[torch.Tensor, ...]]  # Global 1D meshes
+    _mesh1D_mine: dict[str, tuple[torch.Tensor, ...]]  # Local 1D meshes
     _indices_fft: IndicesType  #: All-to-all unscramble indices for `fft`
     _indices_ifft: IndicesType  #: All-to-all unscramble indices for `ifft`
     _indices_rfft: IndicesType  #: All-to-all unscramble indices for `rfft`

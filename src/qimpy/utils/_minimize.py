@@ -5,7 +5,7 @@ from ._minimize_lbfgs import _lbfgs
 from ._minimize_cg import _cg
 from ._minimize_line import LINE_MINIMIZE, Vector
 from abc import ABC, abstractmethod
-from typing import Generic, Sequence, Dict, NamedTuple, Optional, Union
+from typing import Generic, Sequence, NamedTuple, Optional, Union
 from qimpy.rc import MPI
 
 
@@ -61,7 +61,7 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
     #: are in addition to energy, included by default. Use a name bracketed by
     #: | | for always-positive norm-like quantities for clarity in output.
     #: These must correspond (in order) to the outputs of :meth:`compute`.
-    extra_thresholds: Dict[str, float]
+    extra_thresholds: dict[str, float]
 
     def __init__(
         self,
@@ -71,7 +71,7 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         name: str,
         n_iterations: int,
         energy_threshold: float,
-        extra_thresholds: Dict[str, float],
+        extra_thresholds: dict[str, float],
         n_consecutive: int,
         method: str,
         cg_type: str = "polak-ribiere",

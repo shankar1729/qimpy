@@ -3,10 +3,10 @@ import qimpy as qp
 import numpy as np
 import torch
 from ._stopwatch import stopwatch
-from typing import List, Tuple, TypeVar
+from typing import overload, Union
 
 
-def prime_factorization(N: int) -> List[int]:
+def prime_factorization(N: int) -> list[int]:
     """Get list of prime factors of `N` in ascending order"""
     factors = []
     p = 2
@@ -32,10 +32,22 @@ def fft_suitable(N: int) -> bool:
     return N == 1
 
 
-IntLike = TypeVar("IntLike", int, np.ndarray)
+@overload
+def ceildiv(num: int, den: int) -> int:
+    ...
 
 
-def ceildiv(num: IntLike, den: IntLike) -> IntLike:
+@overload
+def ceildiv(num: np.ndarray, den: Union[int, np.ndarray]) -> np.ndarray:
+    ...
+
+
+@overload
+def ceildiv(num: Union[int, np.ndarray], den: np.ndarray) -> np.ndarray:
+    ...
+
+
+def ceildiv(num, den):
     """Compute ceil(num/den) with purely integer operations"""
     return (num + den - 1) // den
 
@@ -177,7 +189,7 @@ def eighg(
     H: qp.utils.Waitable[torch.Tensor],
     O: torch.Tensor,
     use_cholesky: bool = True,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Solve Hermitian generalized eigenvalue problem.
     Specifically, find `E` and `V` that satisfy `H` @ `V` = `O` @ `V` @ `E`.
 

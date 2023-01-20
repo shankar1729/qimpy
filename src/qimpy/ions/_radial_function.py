@@ -1,7 +1,7 @@
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Optional, Union, List
+from typing import Optional, Union
 from qimpy.rc import MPI
 
 
@@ -57,7 +57,7 @@ class RadialFunction:
     @classmethod
     def transform(
         cls,
-        radial_functions: List["RadialFunction"],
+        radial_functions: list["RadialFunction"],
         Gmax: float,
         comm: MPI.Comm,
         name: str = "",

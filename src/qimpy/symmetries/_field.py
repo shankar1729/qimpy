@@ -2,7 +2,6 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Tuple
 
 
 class FieldSymmetrizer:
@@ -18,7 +17,7 @@ class FieldSymmetrizer:
         rot = grid.symmetries.rot.to(torch.long)  # rotations (lattice coords)
         trans = grid.symmetries.trans
 
-        def get_index(iH: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        def get_index(iH: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             """Unique index in half-reciprocal space.
             Also returns whether conjugation was required."""
             iH_wrapped = iH % shapeR

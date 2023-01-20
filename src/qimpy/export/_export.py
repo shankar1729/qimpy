@@ -1,6 +1,6 @@
 from __future__ import annotations
 import qimpy as qp
-from typing import Protocol, List, Optional, Union
+from typing import Protocol, Optional, Union
 
 
 class Exporter(Protocol):
@@ -14,7 +14,7 @@ class Export(qp.TreeNode):
     """Export data for other codes."""
 
     bgw: qp.export.BGW
-    exporters: List[Exporter]
+    exporters: list[Exporter]
 
     def __init__(
         self,

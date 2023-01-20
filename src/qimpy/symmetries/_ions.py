@@ -1,7 +1,6 @@
 from __future__ import annotations
 import qimpy as qp
 import torch
-from typing import Tuple
 
 
 def _get_space_group(
@@ -9,7 +8,7 @@ def _get_space_group(
     lattice: qp.lattice.Lattice,
     ions: qp.ions.Ions,
     tolerance: float,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Find space group given point group `lattice_sym` and `ions`. Accuracy
     of symmetry detection is specified by relative threshold `tolerance`.
 

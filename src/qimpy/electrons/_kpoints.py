@@ -2,7 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Union, Sequence, Tuple
+from typing import Union, Sequence
 from qimpy.rc import MPI
 
 
@@ -44,7 +44,7 @@ class Kpoints(qp.TreeNode):
 class Kmesh(Kpoints):
     """Uniform k-mesh sampling of Brillouin zone"""
 
-    size: Tuple[int, ...]  #: Dimensions of k-mesh
+    size: tuple[int, ...]  #: Dimensions of k-mesh
     i_reduced: torch.Tensor  #: Reduced index of each k-point in mesh
     i_sym: torch.Tensor  #: Symmetry index that maps mesh points to reduced set
     invert: torch.Tensor  #: Inversion factor (1, -1) in reduction of each k
@@ -128,7 +128,7 @@ class Kmesh(Kpoints):
         mesh -= torch.floor(0.5 + mesh)  # wrap to [-0.5,0.5)
 
         # Compute mapping of arbitrary k-points to mesh:
-        def mesh_map(k: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        def mesh_map(k: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             # Sizes and dimensions on torch:
             assert isinstance(size, np.ndarray)
             size_i = torch.tensor(size, dtype=torch.int, device=qp.rc.device)

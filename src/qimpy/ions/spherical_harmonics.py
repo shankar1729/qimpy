@@ -1,8 +1,6 @@
 """Calculate spherical harmonics and their product expansions."""
-from __future__ import annotations
 import qimpy.ions._spherical_harmonics_data as shdata
 import torch
-from typing import List, Tuple, Dict
 
 # List exported symbols for doc generation
 __all__ = [
@@ -16,8 +14,8 @@ __all__ = [
 
 
 # Versions of shdata converted to torch.Tensors on appropriate device
-_YLM_RECUR: List[torch.Tensor] = []
-_YLM_PROD: Dict[Tuple[int, int], Tuple[torch.Tensor, torch.Tensor]] = {}
+_YLM_RECUR: list[torch.Tensor] = []
+_YLM_PROD: dict[tuple[int, int], tuple[torch.Tensor, torch.Tensor]] = {}
 L_MAX: int = shdata.L_MAX  #: Maximum l for calculation of harmonics
 L_MAX_HLF: int = shdata.L_MAX_HLF  #: Maximum l of harmonics in products
 
@@ -55,7 +53,7 @@ def get_harmonics(l_max: int, r: torch.Tensor) -> torch.Tensor:
 
 def get_harmonics_and_prime(
     l_max: int, r: torch.Tensor, compute_prime=True
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Compute real solid harmonics :math:`r^l Y_{lm}(r)` for each l <= l_max.
     First return value is harmonics with l=0, followed by all m for l=1, and so on
     till l_max along first dimension. Remaining dimensions are same as input `r`.
@@ -119,7 +117,7 @@ def get_harmonics_tilde(l_max: int, G: torch.Tensor) -> torch.Tensor:
 
 def get_harmonics_tilde_and_prime(
     l_max: int, G: torch.Tensor, compute_prime=True
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Same as :func:`get_harmonics_and_prime`, but in reciprocal space.
     The result contains an extra phase of :math:`(iG)^l`, as discussed
     in `get_harmonics_tilde`."""

@@ -4,7 +4,7 @@ import numpy as np
 from ._optimizable import Optimizable, ConvergenceCheck
 from collections import deque
 from abc import ABC, abstractmethod
-from typing import TypeVar, Generic, Sequence, Dict, Deque
+from typing import TypeVar, Generic, Sequence, Deque
 from qimpy.rc import MPI
 
 
@@ -34,7 +34,7 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
     #: Use a name bracketed by | | for always-positive norm-like
     #: quantities for clarity in output. These must correspond (in order)
     #: to the extra values output by :meth:`cycle`.
-    extra_thresholds: Dict[str, float]
+    extra_thresholds: dict[str, float]
 
     def __init__(
         self,
@@ -45,7 +45,7 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
         n_iterations: int,
         energy_threshold: float,
         residual_threshold: float,
-        extra_thresholds: Dict[str, float],
+        extra_thresholds: dict[str, float],
         n_consecutive: int,
         n_history: int,
         mix_fraction: float,

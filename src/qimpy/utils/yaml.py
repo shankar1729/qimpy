@@ -31,7 +31,7 @@ def _process_includes(d: dict, already_included: tuple) -> dict:
     include_names = d.pop("include", [])
     if include_names:
         if isinstance(include_names, str):
-            include_names = [include_names]  # convert single str to List[str]
+            include_names = [include_names]  # convert single str to list[str]
         d_list = []
         for include_name in include_names:
             if include_name in already_included:

@@ -82,11 +82,13 @@ def _read_upf(self: qp.ions.Pseudopotential, filename: str) -> None:
     r = None
     for entry in section:
         if entry.tag == "PP_R":
+            assert entry.text is not None
             r = np.fromstring(entry.text, sep=" ")
             if not r[0]:  # avoid divide by 0 below
                 r[0] = 1e-3 * r[1]
             self.r = torch.tensor(r, device=qp.rc.device)
         elif entry.tag == "PP_RAB":
+            assert entry.text is not None
             self.dr = torch.tensor(
                 np.fromstring(entry.text, sep=" "), device=qp.rc.device
             )
@@ -102,12 +104,14 @@ def _read_upf(self: qp.ions.Pseudopotential, filename: str) -> None:
 
         elif section.tag == "PP_NLCC":
             # Nonlinear / partial core correction (optional):
+            assert section.text is not None
             self.n_core = qp.ions.RadialFunction(
                 self.r, self.dr, np.fromstring(section.text, sep=" ")
             )
 
         elif section.tag == "PP_LOCAL":
             # Local potential:
+            assert section.text is not None
             self.ion_width = np.inf  # No range separation yet
             self.Vloc = qp.ions.RadialFunction(
                 self.r, self.dr, 0.5 * np.fromstring(section.text, sep=" ")
@@ -119,6 +123,7 @@ def _read_upf(self: qp.ions.Pseudopotential, filename: str) -> None:
             l_beta = np.zeros(n_beta, dtype=int)  # angular momenta
             for entry in section:
                 if entry.tag.startswith("PP_BETA."):
+                    assert entry.text is not None
                     # Check projector number:
                     i_beta = int(entry.tag[8:]) - 1
                     assert (i_beta >= 0) and (i_beta < n_beta)
@@ -130,6 +135,7 @@ def _read_upf(self: qp.ions.Pseudopotential, filename: str) -> None:
                 elif entry.tag == "PP_DIJ":
                     # Get descreened 'D' matrix of pseudopotential:
                     if n_beta:
+                        assert entry.text is not None
                         self.D = torch.tensor(
                             np.fromstring(entry.text, sep=" ") * 0.5,
                             device=qp.rc.device,
@@ -146,11 +152,13 @@ def _read_upf(self: qp.ions.Pseudopotential, filename: str) -> None:
             )
 
         elif section.tag == "PP_PSWFC":
+            assert section.text is not None
             psi = np.zeros((n_psi, len(r)))  # orbitals
             l_psi = np.zeros(n_psi, dtype=int)  # angular momenta
             self.eig_psi = np.zeros(n_psi)  # eigenvalue by orbital
             for entry in section:
                 if entry.tag.startswith("PP_CHI."):
+                    assert entry.text is not None
                     # Check orbital number:
                     i_psi = int(entry.tag[7:]) - 1
                     assert (i_psi >= 0) and (i_psi < n_psi)
@@ -179,6 +187,7 @@ def _read_upf(self: qp.ions.Pseudopotential, filename: str) -> None:
 
         elif section.tag == "PP_RHOATOM":
             # Read atom electron density (removing 4 pi r^2 factor in PS file):
+            assert section.text is not None
             self.rho_atom = qp.ions.RadialFunction(
                 self.r,
                 self.dr,

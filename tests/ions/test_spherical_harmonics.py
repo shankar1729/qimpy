@@ -2,12 +2,11 @@ import qimpy as qp
 import numpy as np
 from qimpy.ions import spherical_harmonics as sh
 from qimpy.ions.spherical_harmonics_generate import get_harmonics_ref
-from typing import Tuple
 import torch
 import pytest
 
 
-def get_r_ylm() -> Tuple[torch.Tensor, torch.Tensor]:
+def get_r_ylm() -> tuple[torch.Tensor, torch.Tensor]:
     """Get test data for all the harmonics tests."""
     torch.manual_seed(0)
     r = torch.randn(10, 10000, 3, device=qp.rc.device)
@@ -16,12 +15,12 @@ def get_r_ylm() -> Tuple[torch.Tensor, torch.Tensor]:
 
 
 @pytest.fixture(scope="module")
-def r_ylm() -> Tuple[torch.Tensor, torch.Tensor]:
+def r_ylm() -> tuple[torch.Tensor, torch.Tensor]:
     return get_r_ylm()
 
 
 @pytest.mark.mpi_skip
-def test_ylm(r_ylm: Tuple[torch.Tensor, torch.Tensor]) -> None:
+def test_ylm(r_ylm: tuple[torch.Tensor, torch.Tensor]) -> None:
     qp.log.info("Testing spherical harmonics:")
     r, ylm = r_ylm
     rel_err_all = []
@@ -40,7 +39,7 @@ def test_ylm(r_ylm: Tuple[torch.Tensor, torch.Tensor]) -> None:
 
 
 @pytest.mark.mpi_skip
-def test_ylm_prod(r_ylm: Tuple[torch.Tensor, torch.Tensor]) -> None:
+def test_ylm_prod(r_ylm: tuple[torch.Tensor, torch.Tensor]) -> None:
     qp.log.info("Testing product coefficients:")
     r, ylm = r_ylm
     r_sq = (r**2).sum(dim=-1)
@@ -77,7 +76,7 @@ def test_ylm_prod(r_ylm: Tuple[torch.Tensor, torch.Tensor]) -> None:
 
 
 @pytest.mark.mpi_skip
-def test_ylm_prime(r_ylm: Tuple[torch.Tensor, torch.Tensor]) -> None:
+def test_ylm_prime(r_ylm: tuple[torch.Tensor, torch.Tensor]) -> None:
     qp.log.info("Testing derivatives:")
     # Analytical calculation:
     r, ylm = r_ylm

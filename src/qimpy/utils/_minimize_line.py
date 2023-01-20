@@ -2,7 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 from ._optimizable import Optimizable
-from typing import TypeVar, Callable, Dict, Tuple
+from typing import TypeVar, Callable
 
 
 Vector = TypeVar("Vector", bound=Optimizable)
@@ -10,7 +10,7 @@ Vector = TypeVar("Vector", bound=Optimizable)
 
 LineMinimize = Callable[
     ["qp.utils.Minimize[Vector]", Vector, float, "qp.utils.MinimizeState[Vector]"],
-    Tuple[float, float, bool],
+    tuple[float, float, bool],
 ]
 
 
@@ -19,7 +19,7 @@ def _constant(
     direction: Vector,
     step_size_test: float,
     state: qp.utils.MinimizeState[Vector],
-) -> Tuple[float, float, bool]:
+) -> tuple[float, float, bool]:
     """Take a pre-specified step size."""
     step_size = step_size_test  # Constant specified step size
     self.step(direction, step_size)
@@ -37,7 +37,7 @@ def _quadratic(
     direction: Vector,
     step_size_test: float,
     state: qp.utils.MinimizeState[Vector],
-) -> Tuple[float, float, bool]:
+) -> tuple[float, float, bool]:
     """Take a quadratic step calculated from an energy-only test step.
     Adjusts step size to back off if energy increases."""
 
@@ -152,7 +152,7 @@ def _wolfe(
     direction: Vector,
     step_size_test: float,
     state: qp.utils.MinimizeState[Vector],
-) -> Tuple[float, float, bool]:
+) -> tuple[float, float, bool]:
     """Take cubic steps till the Wolfe energy and gradient criteria are
     satisfied. This uses a full energy and gradient test step, and does not
     take a cubic step at all if the Wolfe criteria is satisfied at first."""
@@ -245,7 +245,7 @@ def _wolfe(
     return E, step_size_prev, True
 
 
-LINE_MINIMIZE: Dict[str, LineMinimize] = {
+LINE_MINIMIZE: dict[str, LineMinimize] = {
     "constant": _constant,
     "quadratic": _quadratic,
     "wolfe": _wolfe,

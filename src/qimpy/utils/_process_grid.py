@@ -1,7 +1,7 @@
 import qimpy as qp
 import numpy as np
 from functools import lru_cache
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Sequence
 from qimpy.rc import MPI
 
 
@@ -114,7 +114,8 @@ class ProcessGrid:
             (slice(None) if mask_i else index_i)
             for index_i, mask_i in zip(index_cur, mask)
         )
-        proc_list = np.arange(self.n_procs).reshape(shape)[index].flatten()
+        proc_list_all = np.arange(self.n_procs).reshape(shape)
+        proc_list = proc_list_all[index].flatten()  # type: ignore
         return self.comm.Create_group(self.comm.Get_group().Incl(proc_list))
 
     def _check_report(self) -> None:
@@ -126,7 +127,7 @@ class ProcessGrid:
         unknown_str = " (-1's determined later)" if n_unknown else ""
         qp.log.info(f"Process grid: {dims_str}{unknown_str}")
 
-    def _fill_unkwown(self, shape: np.ndarray) -> Tuple[np.ndarray, int]:
+    def _fill_unkwown(self, shape: np.ndarray) -> tuple[np.ndarray, int]:
         """Fill in unknown dimensions in special cases where possible.
         Returns modified shape and number of dimensions that remain unknown."""
 

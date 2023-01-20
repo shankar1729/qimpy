@@ -1,7 +1,6 @@
 from __future__ import annotations
 import qimpy as qp
 import numpy as np
-from typing import Dict, Tuple
 from ._minimize_line import LINE_MINIMIZE, Vector
 
 
@@ -107,7 +106,7 @@ def _cg(self: qp.utils.Minimize[Vector]) -> qp.Energy:
 
 def _initialize_convergence_checks(
     self: qp.utils.Minimize[Vector], state: qp.utils.MinimizeState[Vector]
-) -> Dict[str, qp.utils.ConvergenceCheck]:
+) -> dict[str, qp.utils.ConvergenceCheck]:
     """Initialize convergence checkers for energy and `extra_thresholds`."""
     Ename = state.energy.name
     checks = {
@@ -125,10 +124,10 @@ def _check_convergence(
     self: qp.utils.Minimize[Vector],
     state: qp.utils.MinimizeState[Vector],
     i_iter: int,
-    checks: Dict[str, qp.utils.ConvergenceCheck],
+    checks: dict[str, qp.utils.ConvergenceCheck],
     E: float,
     E_prev: float,
-) -> Tuple[float, float, bool]:
+) -> tuple[float, float, bool]:
     """Check and report convergence progress."""
     # Report convergence progress:
     Ename = state.energy.name

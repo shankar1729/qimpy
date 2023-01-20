@@ -1,8 +1,7 @@
-from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Union, Optional, Dict, List, Any, Sequence
+from typing import Union, Optional, Any, Sequence
 from qimpy.rc import MPI
 
 
@@ -88,7 +87,7 @@ class System(qp.TreeNode):
         self.checkpoint_out = checkpoint if checkpoint_out is None else checkpoint_out
 
         # Determine any global axes that break symmetries:
-        axes: Dict[str, np.ndarray] = {}
+        axes: dict[str, np.ndarray] = {}
         _add_axis(axes, "magnetization", electrons, ["fillings", "M"])
         _add_axis(axes, "magnetic field", electrons, ["fillings", "B"])
         # TODO: similarly account for applied electric fields
@@ -174,7 +173,7 @@ class System(qp.TreeNode):
 
 
 def _add_axis(
-    axes: Dict[str, np.ndarray], name: str, obj: Any, path: List[str]
+    axes: dict[str, np.ndarray], name: str, obj: Any, path: list[str]
 ) -> None:
     """Add `name`d axis that should reduce symmetries to `axes`. Check from
     `path` within object `obj`, which could be a dictionary of parameters."""

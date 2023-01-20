@@ -1,6 +1,6 @@
 from __future__ import annotations
 import qimpy as qp
-from typing import List, Union, TypeVar, Type, final
+from typing import Union, TypeVar, Type, final
 
 
 ClassType = TypeVar("ClassType")
@@ -13,7 +13,7 @@ class TreeNode:
     such as from YAML files, and to output to checkpoints such as in HDF5
     files preserving the same tree structure."""
 
-    child_names: List[str]  #: Names of attributes with child objects.
+    child_names: list[str]  #: Names of attributes with child objects.
 
     def __init__(self, **kwargs):
         self.child_names = []
@@ -31,7 +31,7 @@ class TreeNode:
             for child_name in self.child_names:
                 getattr(self, child_name).save_checkpoint(cp_path.relative(child_name))
 
-    def _save_checkpoint(self, cp_path: qp.utils.CpPath) -> List[str]:
+    def _save_checkpoint(self, cp_path: qp.utils.CpPath) -> list[str]:
         """Override to save required quantities to `cp_path`.
         Return names of objects saved (for logging)."""
         return []

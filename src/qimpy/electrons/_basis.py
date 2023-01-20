@@ -1,10 +1,11 @@
 from __future__ import annotations
 import qimpy as qp
 import numpy as np
+import math
 import torch
 from ._basis_ops import _apply_ke, _apply_potential, _collect_density
 from ._basis_real import BasisReal
-from typing import Optional, Tuple, Union
+from typing import Optional, Union
 from qimpy.rc import MPI
 
 
@@ -34,7 +35,7 @@ class Basis(qp.TreeNode):
     fft_index: torch.Tensor  #: Index of each plane wave in reciprocal grid
     fft_block_size: int  #: Number of bands to FFT together
     mpi_block_size: int  #: Number of bands to MPI transfer together
-    PadIndex = Tuple[
+    PadIndex = tuple[
         slice, torch.Tensor, slice, slice, torch.Tensor
     ]  #: Indexing datatype for `pad_index` and `pad_index_mine`
     pad_index: PadIndex  #: Which basis entries are padding (beyond `n`)
@@ -270,7 +271,7 @@ class Basis(qp.TreeNode):
                 return 1  # Irrelevant since no FFTs to perform anyway
             # TODO: better heuristics on how much data to FFT at once
             min_data = 16_000_000 if qp.rc.use_cuda else 100_000
-            min_block = qp.utils.ceildiv(min_data, n_batch * np.prod(self.grid.shape))
+            min_block = qp.utils.ceildiv(min_data, n_batch * math.prod(self.grid.shape))
             max_block = qp.utils.ceildiv(n_bands, 16)  # based on memory limit
             block_size = min(min_block, max_block)
         # Report selected block-size once:

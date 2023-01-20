@@ -1,7 +1,7 @@
 from __future__ import annotations
 import qimpy as qp
 import torch
-from typing import Tuple, Optional, overload, Literal
+from typing import Optional, overload, Literal
 from ._gradient import Gradient
 
 
@@ -49,14 +49,14 @@ class Stepper:
             self._lowdin = None
 
     @overload
-    def compute(self, require_grad: Literal[True]) -> Tuple[qp.Energy, Gradient]:
+    def compute(self, require_grad: Literal[True]) -> tuple[qp.Energy, Gradient]:
         ...
 
     @overload
-    def compute(self, require_grad: Literal[False]) -> Tuple[qp.Energy, None]:
+    def compute(self, require_grad: Literal[False]) -> tuple[qp.Energy, None]:
         ...
 
-    def compute(self, require_grad: bool) -> Tuple[qp.Energy, Optional[Gradient]]:
+    def compute(self, require_grad: bool) -> tuple[qp.Energy, Optional[Gradient]]:
         """Compute energy and optionally ionic/lattice gradient."""
         system = self.system
         lattice = system.lattice

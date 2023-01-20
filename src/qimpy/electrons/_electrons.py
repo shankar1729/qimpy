@@ -3,7 +3,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from ._hamiltonian import _hamiltonian
-from typing import Union, Optional, List
+from typing import Union, Optional
 from qimpy.rc import MPI
 
 
@@ -450,7 +450,7 @@ class Electrons(qp.TreeNode):
         if isinstance(self.kpoints, qp.electrons.Kpath):
             self.kpoints.plot(self, "bandstruct.pdf")
 
-    def _save_checkpoint(self, cp_path: qp.utils.CpPath) -> List[str]:
+    def _save_checkpoint(self, cp_path: qp.utils.CpPath) -> list[str]:
         (~self.n_tilde).write(cp_path.relative("n"))
         (~self.n_tilde.grad).write(cp_path.relative("V_ks"))
         self.fillings.write_band_scalars(cp_path.relative("eig"), self.eig)

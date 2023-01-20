@@ -1,9 +1,8 @@
 """Chemical symbols, atomic numbers and atomic weights."""
 import numpy as np
-from typing import Dict
 
 
-ATOMIC_NUMBERS: Dict[str, int] = {
+ATOMIC_NUMBERS: dict[str, int] = {
     # Period 1:
     "H": 1,
     "He": 2,

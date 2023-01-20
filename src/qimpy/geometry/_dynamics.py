@@ -2,7 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Union, Optional, List
+from typing import Union, Optional
 from qimpy.rc import MPI
 from ._stepper import Stepper
 from ._gradient import Gradient
@@ -46,7 +46,7 @@ class Dynamics(qp.TreeNode):
         B0: float = 2.2e9 / 2.942e13,
         drag_wavefunctions: bool = True,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
-        langevin_gamma: Union[float, List[float], torch.Tensor] = 1.0,
+        langevin_gamma: Union[float, list[float], torch.Tensor] = 1.0,
     ) -> None:
         """
         Specify molecular dynamics parameters.

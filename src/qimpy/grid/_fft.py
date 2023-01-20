@@ -3,11 +3,11 @@ import qimpy as qp
 import numpy as np
 import torch
 from qimpy.utils import TaskDivision, BufferView
-from typing import Tuple, Callable
+from typing import Callable
 from qimpy.rc import MPI
 
 
-IndicesType = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+IndicesType = tuple[torch.Tensor, torch.Tensor, torch.Tensor]
 FunctionFFT = Callable[[torch.Tensor, str], torch.Tensor]
 
 
@@ -20,7 +20,7 @@ class _FFT(torch.autograd.Function):
         return _fft(grid, input, norm="forward")
 
     @staticmethod
-    def backward(ctx, grad_output: torch.Tensor) -> Tuple[None, torch.Tensor]:  # type: ignore
+    def backward(ctx, grad_output: torch.Tensor) -> tuple[None, torch.Tensor]:  # type: ignore
         return None, _ifft(ctx.grid, grad_output, norm="backward")
 
 
@@ -33,7 +33,7 @@ class _IFFT(torch.autograd.Function):
         return _ifft(grid, input, norm="forward")
 
     @staticmethod
-    def backward(ctx, grad_output: torch.Tensor) -> Tuple[None, torch.Tensor]:  # type: ignore
+    def backward(ctx, grad_output: torch.Tensor) -> tuple[None, torch.Tensor]:  # type: ignore
         return None, _fft(ctx.grid, grad_output, norm="backward")
 
 
@@ -152,8 +152,8 @@ def parallel_transform(
     comm: MPI.Comm,
     v: torch.Tensor,
     norm: str,
-    shape_in: Tuple[int, ...],
-    shape_out: Tuple[int, ...],
+    shape_in: tuple[int, ...],
+    shape_out: tuple[int, ...],
     fft_before: FunctionFFT,
     fft_after: FunctionFFT,
     in_prev: np.ndarray,

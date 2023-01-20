@@ -11,7 +11,7 @@ from ._ions_atomic import (
     get_atomic_density,
 )
 from ._ions_update import update, accumulate_geometry_grad, _collect_ps_matrix
-from typing import Optional, Union, List
+from typing import Optional, Union
 
 
 class Ions(qp.TreeNode):
@@ -21,10 +21,10 @@ class Ions(qp.TreeNode):
     fractional: bool  #: use fractional coordinates in input/output
     n_ions: int  #: number of ions
     n_types: int  #: number of distinct ion types
-    n_ions_type: List[int]  #: number of ions of each type
-    symbols: List[str]  #: symbol for each ion type
-    slices: List[slice]  #: slice to get each ion type
-    pseudopotentials: List[qp.ions.Pseudopotential]  #: pseudopotential for each type
+    n_ions_type: list[int]  #: number of ions of each type
+    symbols: list[str]  #: symbol for each ion type
+    slices: list[slice]  #: slice to get each ion type
+    pseudopotentials: list[qp.ions.Pseudopotential]  #: pseudopotential for each type
     positions: torch.Tensor  #: fractional positions of each ion (n_ions x 3)
     velocities: torch.Tensor  #: Cartesian velocities of each ion (n_ions x 3)
     types: torch.Tensor  #: type of each ion (n_ions, int)
@@ -57,8 +57,8 @@ class Ions(qp.TreeNode):
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         lattice: qp.lattice.Lattice,
         fractional: bool = True,
-        coordinates: Optional[List] = None,
-        pseudopotentials: Optional[Union[str, List[str]]] = None,
+        coordinates: Optional[list] = None,
+        pseudopotentials: Optional[Union[str, list[str]]] = None,
     ) -> None:
         """Initialize geometry and pseudopotentials.
 

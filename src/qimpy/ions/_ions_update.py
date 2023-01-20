@@ -96,6 +96,7 @@ def accumulate_geometry_grad(self: qp.ions.Ions, system: qp.System) -> None:
     self.n_core_tilde.requires_grad_(False, clear=True)
 
     # Symmetrize:
+    assert self.positions.grad is not None
     self.positions.grad = system.symmetries.symmetrize_forces(self.positions.grad)
     if system.lattice.requires_grad:
         system.lattice.grad = system.symmetries.symmetrize_matrix(
@@ -209,6 +210,7 @@ class _LocalTerms:
         """Propagate structure factor gradient to forces."""
         grid = self.system.grid
         pos_grad = self.ions.positions.grad
+        assert pos_grad is not None
         inv_volume = 1.0 / grid.lattice.volume
         d_by_dpos = self.iG.permute(3, 0, 1, 2)[None] * (-2j * np.pi * inv_volume)
         for slice_i, SF_grad_i in zip(self.ions.slices, SF_grad):

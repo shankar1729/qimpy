@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from . import lda, gga
 from .functional import Functional, get_libxc_functional_names, FunctionalsLibxc
-from typing import List, Dict, Union
+from typing import Union
 from qimpy.rc import MPI
 
 
@@ -13,7 +13,7 @@ N_CUT = 1e-16  # Regularization threshold for densities
 class XC(qp.TreeNode):
     """Exchange-correlation functional."""
 
-    _functionals: List[Functional]  #: list of functionals that add up to XC
+    _functionals: list[Functional]  #: list of functionals that add up to XC
     need_sigma: bool  #: whether overall functional needs gradient
     need_lap: bool  #: whether overall functional needs laplacian
     need_tau: bool  #: whether overall functional needs KE density
@@ -23,7 +23,7 @@ class XC(qp.TreeNode):
         *,
         spin_polarized: bool,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
-        functional: Union[str, List[str]] = "gga-pbe",
+        functional: Union[str, list[str]] = "gga-pbe",
     ):
         """Initialize exchange-correlation functional.
 
@@ -59,7 +59,7 @@ class XC(qp.TreeNode):
 
         # Initialize internal and LibXC functional objects:
         self._functionals = []
-        libxc_names: Dict[str, float] = {}  # Libxc names with scale factors
+        libxc_names: dict[str, float] = {}  # Libxc names with scale factors
         for func_name in functional:
             if "*" in func_name:
                 tokens = func_name.split("*")
@@ -265,7 +265,7 @@ if XC.__init__.__doc__:
     )
 
 
-def _get_functionals(name: str, scale_factor: float) -> List[Union[Functional, str]]:
+def _get_functionals(name: str, scale_factor: float) -> list[Union[Functional, str]]:
     """Get list of Functional objects associated with a functional `name`.
     For Libxc functionals, a validated list of strings is returned so that
     all the Libxc evaluations can be consolidated in a single wrapper.
