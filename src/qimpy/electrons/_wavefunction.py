@@ -4,7 +4,6 @@ import torch
 from ._wavefunction_init import _randomize, _randomize_selected, _RandomizeSelected
 from ._wavefunction_split import _split_bands, _split_basis
 from ._wavefunction_arithmetic import _mul, _imul, _add, _iadd, _sub, _isub
-from ._wavefunction_bandwise import _band_norm, _band_ke, _band_spin, _constrain
 from ._wavefunction_slice import _getitem, _setitem, _cat
 from ._wavefunction_dot import _norm, _dot, _dot_O, _overlap, _matmul, _orthonormalize
 from typing import Callable, Optional, Union
@@ -68,6 +67,7 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
             in new wavefunctions (instead of the value in basis).
             Used only if coeff is None, and n_bands or band_division is given
         """
+        super().__init__()
         self.basis = basis
         self.band_division = band_division
         self._proj_invalidate()
@@ -222,10 +222,60 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
         else:
             return self
 
+    def band_norm(self: qp.electrons.Wavefunction) -> torch.Tensor:
+        """Return per-band norm of wavefunctions."""
+        assert not self.band_division
+        basis = self.basis
+        coeff_sq = qp.utils.abs_squared(self.coeff)
+        if basis.real_wavefunctions:
+            result = (coeff_sq @ basis.real.Gweight_mine).sum(dim=-1)
+        else:
+            result = coeff_sq.sum(dim=(-2, -1))
+        basis.allreduce_in_place(result)
+        return result.sqrt()
+
+    def band_ke(self: qp.electrons.Wavefunction) -> torch.Tensor:
+        """Return per-band kinetic energy of wavefunctions."""
+        assert not self.band_division
+        basis = self.basis
+        ke = basis.get_ke(basis.mine)
+        if basis.real_wavefunctions:
+            ke *= basis.real.Gweight_mine
+        result = torch.einsum("skbxg, kg -> skb", qp.utils.abs_squared(self.coeff), ke)
+        basis.allreduce_in_place(result)
+        return result
+
+    def band_spin(self: qp.electrons.Wavefunction) -> torch.Tensor:
+        """Return per-band spin of wavefunctions (must be spinorial).
+        Result dimensions are 3 x 1 x nk x n_bands."""
+        assert not self.band_division
+        assert self.spinorial
+        rho_s = torch.einsum("skbxg, skbyg -> skbxy", self.coeff, self.coeff.conj())
+        self.basis.allreduce_in_place(rho_s)
+        return torch.cat(
+            (
+                2.0 * rho_s[..., 1, 0].real,  # Sx
+                2.0 * rho_s[..., 1, 0].imag,  # Sy
+                rho_s[..., 0, 0].real - rho_s[..., 1, 1].real,  # Sz
+            )
+        )  # Convert spin density matrix per band (rho_s) to spin vector per band
+
+    def constrain(self: qp.electrons.Wavefunction) -> None:
+        """Enforce basis constraints on wavefunction coefficients.
+        This includes setting padded coefficients to zero, and imposing
+        Hermitian symmetry in Gz = 0 coefficients for real wavefunctions.
+        """
+        basis = self.basis
+        # Padded coefficients:
+        pad_index = basis.pad_index if self.band_division else basis.pad_index_mine
+        self.coeff[pad_index] = 0.0
+        # Real wavefunction symmetry:
+        if basis.real_wavefunctions:
+            basis.real.symmetrize(self.coeff)
+
     # Function types for checking imported methods:
     UnaryOpAsync = Callable[["Wavefunction"], qp.utils.Waitable["Wavefunction"]]
     UnaryOp = Callable[["Wavefunction"], "Wavefunction"]
-    UnaryOpT = Callable[["Wavefunction"], torch.Tensor]
     UnaryOpS = Callable[["Wavefunction"], float]
     BinaryOp = Callable[["Wavefunction", "Wavefunction"], "Wavefunction"]
     BinaryOpAsyncT = Callable[
@@ -238,9 +288,6 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
     split_bands: UnaryOpAsync = _split_bands
     split_basis: UnaryOpAsync = _split_basis
     norm: UnaryOpS = _norm
-    band_norm: UnaryOpT = _band_norm
-    band_ke: UnaryOpT = _band_ke
-    band_spin: UnaryOpT = _band_spin
     dot_O: BinaryOpAsyncT = _dot_O  # dot product through overlap operator
     dot: BinaryOpAsyncT = _dot  # bare dot product
     __xor__: BinaryOpAsyncT = _dot  # convenient shorthand C1 ^ C2 for dot product
@@ -258,4 +305,3 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
     __getitem__ = _getitem
     __setitem__ = _setitem
     cat = _cat  # join wavefunctions
-    constrain = _constrain
