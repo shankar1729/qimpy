@@ -321,4 +321,5 @@ class Ions(qp.TreeNode):
         This converts from the fractional energy gradient in `positions.grad`,
         which should have already been calculated.
         """
+        assert self.positions.grad is not None
         return -self.positions.grad.detach() @ self.lattice.invRbasis

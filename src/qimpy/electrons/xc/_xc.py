@@ -174,6 +174,7 @@ class XC(qp.TreeNode):
             Sets the gradient contribution to `X_in.grad` from `x.grad`.
             In vector-spin mode, this also contributes to `n_in.grad`, even
             when `x` is not `n` because `n` determines `Mhat`."""
+            assert x.grad is not None
             if n_densities == 1:
                 X_in.grad = qp.grid.FieldR(grid, data=x.grad)
                 return
@@ -207,10 +208,12 @@ class XC(qp.TreeNode):
 
         if requires_grad:
             watch = qp.utils.StopWatch("xc.propagate_grad")
+            assert n.grad is not None
             n.grad[clamp_sel] = 0.0  # account for any clamping
             from_magnetization_grad(n, n_in)
             # --- contributions from GGA gradients:
             if self.need_sigma:
+                assert sigma.grad is not None
                 Dn.grad = torch.zeros_like(Dn)
                 for s1 in range(n_spins):
                     for s2 in range(s1, n_spins):

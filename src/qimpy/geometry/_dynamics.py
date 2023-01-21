@@ -132,23 +132,18 @@ class Dynamics(qp.TreeNode):
         else:
             return self.thermostat_methods.get(self.thermostat)(vel)
 
-    def init_atomic_weights(self) -> None:
+    def get_atomic_weights(self) -> torch.Tensor:
         """Initialize the atomic weights for the system."""
-        # (Temporary) AMU conversion for mass
-        amu = 1822.89
-        collect_atomic_weights = list()
-        for i, sym in enumerate(self.system.ions.symbols):
-            collect_atomic_weights += list(
-                self.system.ions.n_ions_type[i]
-                * [amu * ATOMIC_WEIGHTS[ATOMIC_NUMBERS[sym]]]
-            )
-        self.atomic_weights: Optional[torch.Tensor] = torch.tensor(
-            collect_atomic_weights, device=qp.rc.device
-        ).unsqueeze(1)
+        amu = 1822.89  # (Temporary) AMU conversion for mass
+        ions = self.system.ions
+        atomic_weights = np.empty(ions.n_ions)
+        for ion_slice, symbol in zip(ions.slices, ions.symbols):
+            atomic_weights[ion_slice] = amu * ATOMIC_WEIGHTS[ATOMIC_NUMBERS[symbol]]
+        return torch.tensor(atomic_weights, device=qp.rc.device).unsqueeze(1)
 
     def run(self, system: qp.System) -> None:
         self.system = system
-        self.init_atomic_weights()
+        self.atomic_weights = self.get_atomic_weights()
         self.stepper = Stepper(self.system, drag_wavefunctions=self.drag_wavefunctions)
 
         vel = self.system.ions.velocities
