@@ -1,12 +1,12 @@
 from __future__ import annotations
 import qimpy as qp
 import torch
-from ._wavefunction_init import _randomize, _randomize_selected, _RandomizeSelected
+from ._wavefunction_init import _randomize, _randomize_selected
 from ._wavefunction_split import _split_bands, _split_basis
 from ._wavefunction_arithmetic import _mul, _imul, _add, _iadd, _sub, _isub
 from ._wavefunction_slice import _getitem, _setitem, _cat
 from ._wavefunction_dot import _norm, _dot, _dot_O, _overlap, _matmul, _orthonormalize
-from typing import Callable, Optional, Union
+from typing import Optional
 
 
 class Wavefunction(qp.utils.Gradable["Wavefunction"]):
@@ -107,10 +107,12 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
             ions = self.basis.ions
             if self.band_division:
                 assert ions.beta_full is not None
-                self._proj = (ions.beta_full ^ self).wait()
+                beta = ions.beta_full
             else:
-                self._proj = (ions.beta ^ self).wait()
+                beta = ions.beta
+            self._proj = (beta ^ self).wait()
             self._proj_version = ions.beta_version
+            assert self._proj is not None
             return self._proj
 
     def _proj_invalidate(self) -> None:
@@ -196,14 +198,6 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
         offset = (0, k_division.i_start, 0, 0, basis.division.i_start)
         checkpoint.write_slice_complex(dset, offset, self.coeff[..., :basis_n_mine])
 
-    def randomize(
-        self: qp.electrons.Wavefunction,
-        seed: int = 0,
-        b_start: int = 0,
-        b_stop: Optional[int] = None,
-    ) -> None:
-        _randomize(self, seed, b_start, b_stop)
-
     @property
     def spinorial(self) -> bool:
         """Whether this wavefunction has spinor components."""
@@ -273,35 +267,25 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
         if basis.real_wavefunctions:
             basis.real.symmetrize(self.coeff)
 
-    # Function types for checking imported methods:
-    UnaryOpAsync = Callable[["Wavefunction"], qp.utils.Waitable["Wavefunction"]]
-    UnaryOp = Callable[["Wavefunction"], "Wavefunction"]
-    UnaryOpS = Callable[["Wavefunction"], float]
-    BinaryOp = Callable[["Wavefunction", "Wavefunction"], "Wavefunction"]
-    BinaryOpAsyncT = Callable[
-        ["Wavefunction", "Wavefunction"], qp.utils.Waitable[torch.Tensor]
-    ]  # binary operation that returns a tensor asynchronously
-    ScaleOp = Callable[["Wavefunction", Union[float, torch.Tensor]], "Wavefunction"]
-
-    randomize.__doc__ = _randomize.__doc__  # randomize stub'd above
-    randomize_selected: _RandomizeSelected = _randomize_selected
-    split_bands: UnaryOpAsync = _split_bands
-    split_basis: UnaryOpAsync = _split_basis
-    norm: UnaryOpS = _norm
-    dot_O: BinaryOpAsyncT = _dot_O  # dot product through overlap operator
-    dot: BinaryOpAsyncT = _dot  # bare dot product
-    __xor__: BinaryOpAsyncT = _dot  # convenient shorthand C1 ^ C2 for dot product
-    overlap: UnaryOp = _overlap  # apply overlap operator to wavefunction
+    randomize = _randomize
+    randomize_selected = _randomize_selected
+    split_bands = _split_bands
+    split_basis = _split_basis
+    norm = _norm
+    dot_O = _dot_O  # dot product through overlap operator
+    dot = _dot  # bare dot product
+    __xor__ = _dot  # convenient shorthand C1 ^ C2 for dot product
+    overlap = _overlap  # apply overlap operator to wavefunction
     matmul = _matmul  # transform by a matrix in band space
     __matmul__ = _matmul  # shorthand C @ M for matmul
-    orthonormalize: UnaryOp = _orthonormalize
-    __mul__: ScaleOp = _mul  # scalar multiply
-    __rmul__: ScaleOp = _mul  # scalar multiply is commutative
-    __imul__: ScaleOp = _imul  # scale
-    __add__: BinaryOp = _add
-    __iadd__: BinaryOp = _iadd
-    __sub__: BinaryOp = _sub
-    __isub__: BinaryOp = _isub
+    orthonormalize = _orthonormalize
+    __mul__ = _mul  # scalar multiply
+    __rmul__ = _mul  # scalar multiply is commutative
+    __imul__ = _imul  # scale
+    __add__ = _add
+    __iadd__ = _iadd
+    __sub__ = _sub
+    __isub__ = _isub
     __getitem__ = _getitem
     __setitem__ = _setitem
     cat = _cat  # join wavefunctions

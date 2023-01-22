@@ -2,7 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Callable, Optional
+from typing import Optional
 
 
 def _randn(x: torch.Tensor) -> torch.Tensor:
@@ -120,11 +120,6 @@ def _randomize(
     # Bandwidth limit:
     ke = basis.get_ke(slice(basis_start, basis_stop))[None, :, None, None, :]
     coeff_cur *= 1.0 / (1.0 + ((4.0 / 3) * ke) ** 6)  # damp-out high-KE coefficients
-
-
-_RandomizeSelected = Callable[
-    ["qp.electrons.Wavefunction", torch.Tensor, torch.Tensor, torch.Tensor, int], None
-]
 
 
 @qp.utils.stopwatch(name="Wavefunction.randomize_sel")

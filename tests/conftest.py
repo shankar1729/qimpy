@@ -1,4 +1,5 @@
 import pytest
+import qimpy as qp
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -9,3 +10,8 @@ def pytest_report_teststatus(report, config):
     if category == "passed":
         verbose_word = f"{verbose_word} in {report.duration:.2f}s"
         outcome.force_result((category, short_letter, verbose_word))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def init_run_config():
+    qp.rc.init()
