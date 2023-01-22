@@ -320,8 +320,10 @@ class Fillings(qp.TreeNode):
                     2, 2, 1, 1
                 )
                 M_len = 1
-            NM_target = np.concatenate(([self.n_electrons], self.M.to(qp.rc.cpu)))
-            mu_B = np.concatenate(([self.mu], self.B.to(qp.rc.cpu)))
+            NM_target = np.concatenate(
+                (np.array([self.n_electrons]), self.M.to(qp.rc.cpu).numpy())
+            )
+            mu_B = np.concatenate((np.array([self.mu]), self.B.to(qp.rc.cpu).numpy()))
             i_free = np.where([not self.mu_constrain] + [self.M_constrain] * M_len)[0]
         else:
             w_NM = torch.ones((1, 1, 1, 1), device=qp.rc.device)
@@ -522,36 +524,3 @@ _smearing_funcs: dict[str, SmearingFunc] = {
     "mp1": _smearing_mp1,
     "cold": _smearing_cold,
 }
-
-
-if __name__ == "__main__":
-
-    def main():
-        """Check derivatives and plot comparison of smearing functions."""
-        import matplotlib.pyplot as plt
-
-        torch.set_default_tensor_type(torch.DoubleTensor)
-        mu = 0.3
-        kT = 0.01
-        eig = torch.linspace(mu - 20 * kT, mu + 20 * kT, 4001)
-        deig = eig[1] - eig[0]
-        for name, func in _smearing_funcs.items():
-            f, f_eig, S = func(eig, mu, 2 * kT)
-            f_eig_num = (f[2:] - f[:-2]) / (2 * deig)
-            f_eig_err = (f_eig[1:-1] - f_eig_num).norm() / f_eig_num.norm()
-            print(
-                f"{name:>5s}:  Err(f_eig): {f_eig_err:.2e}"
-                f"  integral(S): {S.sum()*deig:f}"
-            )
-            e = (eig - mu) / kT  # dimensionless energy
-            for i, (result, result_name) in enumerate(
-                [(f, "$f$"), (f_eig, r"$df/d\varepsilon$"), (S, "$S$")]
-            ):
-                plt.figure(i)
-                plt.plot(e, result, label=name)
-                plt.xlabel(r"$(\varepsilon-\mu)/k_BT$")
-                plt.ylabel(result_name)
-                plt.legend()
-        plt.show()
-
-    main()
