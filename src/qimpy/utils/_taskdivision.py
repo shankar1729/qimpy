@@ -71,7 +71,9 @@ class TaskDivisionCustom(TaskDivision):
         self.n_mine = n_mine
         self.n_each = 0  # not applicable for custom division
         # Compute remaining attributes:
-        self.n_prev = np.concatenate((np.zeros(1), self.n_each_custom.cumsum()))
+        self.n_prev = np.concatenate((np.zeros(1), self.n_each_custom.cumsum())).astype(
+            int
+        )
         self.n_tot = self.n_prev[-1]
         self.i_start = self.n_prev[self.i_proc]
         self.i_stop = self.n_prev[self.i_proc + 1]
