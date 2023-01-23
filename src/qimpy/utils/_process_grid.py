@@ -1,6 +1,6 @@
 import qimpy as qp
 import numpy as np
-from functools import lru_cache
+import functools
 from typing import Optional, Sequence
 from qimpy.rc import MPI
 
@@ -71,7 +71,7 @@ class ProcessGrid:
         self.shape[dim] = n_procs_dim[-1]
         self._check_report()
 
-    @lru_cache
+    @functools.cache
     def get_comm(self, dim_names: str) -> MPI.Comm:
         """Get communicator for a hyper-plane spanning `dim_names`.
         The resulting communicator will connect processes whose index in

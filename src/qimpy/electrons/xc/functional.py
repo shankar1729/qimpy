@@ -3,7 +3,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from functools import lru_cache
+import functools
 from dataclasses import dataclass
 from typing import Set, Callable, Optional
 
@@ -101,7 +101,7 @@ class Functional:
         return _apply(n, sigma, lap, tau, requires_grad, self.scale_factor)
 
 
-@lru_cache
+@functools.cache
 def get_libxc_functional_names() -> Set[str]:
     """Get set of available Libxc functionals.
     (Empty if Libxc is not available.)"""

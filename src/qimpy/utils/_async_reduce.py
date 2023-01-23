@@ -1,11 +1,11 @@
 import qimpy as qp
 import numpy as np
 import torch
-from functools import lru_cache
+import functools
 from qimpy.rc import MPI
 
 
-@lru_cache
+@functools.cache
 def is_async_reduce_supported(is_cuda: bool) -> bool:
     """Determine whether async reduce is supported."""
     if is_cuda:

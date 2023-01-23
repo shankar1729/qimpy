@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from functools import lru_cache
+import functools
 from typing import Optional
 
 
@@ -203,7 +203,7 @@ class PseudoQuantumNumbers:
             return pauli.flatten(3, 4).flatten(1, 2)  # just combine as, bS indices
 
 
-@lru_cache
+@functools.cache
 def get_Ylm_to_spin_angle(l: int) -> np.ndarray:
     """Create 2(2l+1) x 2(2l+1) matrix transforming from (m, s) to (j, mj).
     The (m, s) indices are along the first dimension, with inner s index.
@@ -241,7 +241,7 @@ def get_Ylm_to_spin_angle(l: int) -> np.ndarray:
     )  # s, m -> combined (m, s)
 
 
-@lru_cache
+@functools.cache
 def get_Ylm_to_spin_angle_all(l_max: int) -> np.ndarray:
     """Cumulative spin angle transformation matrix up to l = `l_max`.
     Result is block-diagonal with dimension (4(l_max+1)^2 - 2) x 2(l_max+1)^2,
@@ -268,7 +268,7 @@ def get_Ylm_to_spin_angle_all(l_max: int) -> np.ndarray:
         return C_tot
 
 
-@lru_cache
+@functools.cache
 def get_Ylm_overlaps(l_max: int) -> np.ndarray:
     """Compute spin-angle overlap matrix of Ylm up to `l_max`.
     Contains overlaps for (l=0, j=1/2), (l=1, j=1/2), (l=1, j=3/2) etc.,
