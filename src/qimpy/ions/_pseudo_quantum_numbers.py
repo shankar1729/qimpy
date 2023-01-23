@@ -31,7 +31,7 @@ class PseudoQuantumNumbers:
         read from a pseudoptential, while the members of this class are for
         each projector function including spherical harmonics."""
         self.n_tot = int((2 * l + 1).sum().item())
-        self.l_max = int(l.max().item())
+        self.l_max = int(l.max().item() if len(l) else -1)
         self.n = torch.zeros(self.n_tot, dtype=torch.long, device=l.device)
         self.l = torch.zeros_like(self.n)
         self.m = torch.zeros_like(self.n)
