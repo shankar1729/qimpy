@@ -15,3 +15,19 @@ def pytest_report_teststatus(report, config):
 @pytest.fixture(scope="session", autouse=True)
 def init_run_config():
     qp.rc.init()
+
+
+def pytest_collection_modifyitems(config, items):
+    # Modify pytest-mpi to deselect instead of skip mpi/non-mpi tests based on mode:
+    with_mpi = config.getoption("--with-mpi")
+    deselect_mark = "mpi_skip" if with_mpi else "mpi"
+    removed = []
+    kept = []
+    for item in items:
+        if item.get_closest_marker(deselect_mark):
+            removed.append(item)
+        else:
+            kept.append(item)
+    if removed:
+        config.hook.pytest_deselected(items=removed)
+        items[:] = kept
