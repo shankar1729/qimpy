@@ -18,8 +18,14 @@ class MinimizeState(Generic[Vector]):
     K_gradient: Vector  #: Preconditioned version of `gradient`
 
     def __init__(self):
+        self.clear()
+
+    def clear(self) -> None:
         self.energy = qp.Energy()
         self.extra = []
+        for attr_name in ("gradient", "K_gradient"):
+            if hasattr(self, attr_name):
+                delattr(self, attr_name)
 
 
 class Minimize(Generic[Vector], ABC, qp.TreeNode):
@@ -151,7 +157,7 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
     def safe_step_size(self, direction: Vector) -> float:
         """Override to return maximum safe step size along `direction`, if any.
         By default, there is no upper bound on step size."""
-        return np.finfo(np.float64).max
+        return float(np.finfo(np.float64).max)
 
     def minimize(self) -> qp.Energy:
         """Minimize, and return optimized energy of system"""
@@ -199,10 +205,7 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
     def _compute(self, state: MinimizeState[Vector], energy_only: bool) -> float:
         """Internal helper to prepare `state`, call `compute`
         and return `_sync`'d energy."""
-        MinimizeState.__init__(state)  # prevent use of old results
-        for attr_name in ("gradient", "K_gradient"):
-            if hasattr(state, attr_name):
-                delattr(state, attr_name)
+        state.clear()  # prevent use of old results
         self.compute(state, energy_only)
         return self._sync(float(state.energy))
 

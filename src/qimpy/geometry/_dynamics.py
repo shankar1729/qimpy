@@ -101,6 +101,7 @@ class Dynamics(qp.TreeNode):
     def get_accel(self) -> torch.Tensor:
         """Obtain forces using the stepper and calculate acceleration."""
         energy, gradient = self.stepper.compute(require_grad=True)
+        assert gradient is not None
         return -gradient.ions / self.atomic_weights
 
     def langevin_thermostat(self, vel: torch.Tensor) -> torch.Tensor:
@@ -130,7 +131,7 @@ class Dynamics(qp.TreeNode):
         if self.thermostat is None:
             return torch.zeros_like(self.system.ions.velocities)  # Zero for now
         else:
-            return self.thermostat_methods.get(self.thermostat)(vel)
+            return self.thermostat_methods[self.thermostat](vel)
 
     def get_atomic_weights(self) -> torch.Tensor:
         """Initialize the atomic weights for the system."""

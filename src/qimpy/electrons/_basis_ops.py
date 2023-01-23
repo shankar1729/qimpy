@@ -125,7 +125,7 @@ class _KernelCommon:
         if self.need_move:
             n_bands = C_tot.n_bands()
             mpi_block_size = basis.get_mpi_block_size(
-                np.prod(coeff.shape[:2]), n_bands, self.fft_block_size
+                int(np.prod(coeff.shape[:2])), n_bands, self.fft_block_size
             )
             self.mpi_block_slices = qp.utils.get_block_slices(n_bands, mpi_block_size)
 

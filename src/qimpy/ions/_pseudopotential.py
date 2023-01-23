@@ -156,7 +156,7 @@ class Pseudopotential:
                     " Pulay correction."
                 )
                 return 0.0
-            result = np.interp(ke_cutoff, ke_cutoffs, corrections)
+            result = float(np.interp(ke_cutoff, ke_cutoffs, corrections))
             qp.log.info(
                 f"Pulay dE/drho_basis = {result:.6f} Eh a0^3 for {self.element}"
             )

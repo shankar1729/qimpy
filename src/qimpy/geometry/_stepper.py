@@ -1,7 +1,7 @@
 from __future__ import annotations
 import qimpy as qp
 import torch
-from typing import Optional, overload, Literal
+from typing import Optional
 from ._gradient import Gradient
 
 
@@ -47,14 +47,6 @@ class Stepper:
             assert self._lowdin is not None
             self._lowdin.restore_atomic_projections(delta_positions)
             self._lowdin = None
-
-    @overload
-    def compute(self, require_grad: Literal[True]) -> tuple[qp.Energy, Gradient]:
-        ...
-
-    @overload
-    def compute(self, require_grad: Literal[False]) -> tuple[qp.Energy, None]:
-        ...
 
     def compute(self, require_grad: bool) -> tuple[qp.Energy, Optional[Gradient]]:
         """Compute energy and optionally ionic/lattice gradient."""

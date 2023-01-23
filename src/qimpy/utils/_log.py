@@ -44,16 +44,12 @@ def log_config(
     i_proc = (mpi_comm if mpi_comm else MPI.COMM_WORLD).Get_rank()
     is_head = i_proc == 0
     filemode = "a" if append else "w"
-    filename = None
+    filename = ""
     if is_head and output_file:
         filename = output_file
     if (not is_head) and mpi_log:
         filename = mpi_log + "." + str(i_proc)
-    handler = (
-        logging.FileHandler(filename, mode=filemode)
-        if filename
-        else logging.StreamHandler(sys.stdout)
-    )
+    handler = get_handler(filename, filemode)
 
     # Set log format:
     handler.setFormatter(
@@ -86,3 +82,10 @@ def fmt(tensor: Union[torch.Tensor, np.ndarray], **kwargs) -> str:
         else tensor,
         **kwargs
     )
+
+
+def get_handler(filename: str, filemode: str) -> logging.Handler:
+    if filename:
+        return logging.FileHandler(filename, mode=filemode)
+    else:
+        return logging.StreamHandler(sys.stdout)

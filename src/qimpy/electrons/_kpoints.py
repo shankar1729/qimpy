@@ -284,7 +284,7 @@ class Kpath(Kpoints):
         gap_cut = 0.5  # threshold on semi-core gap at which to break y-axis
         i_gaps = np.where(gaps > gap_cut)[0] + 1
         split_axis = len(i_gaps) > 0
-        i_band_edges = np.concatenate(([0], i_gaps, [n_bands]))
+        i_band_edges = np.concatenate((np.zeros(1), i_gaps, np.full(1, n_bands)))
         band_ranges = list(zip(i_band_edges[:-1], i_band_edges[1:]))
 
         # Plot

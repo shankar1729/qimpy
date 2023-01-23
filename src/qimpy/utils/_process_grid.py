@@ -115,7 +115,7 @@ class ProcessGrid:
             for index_i, mask_i in zip(index_cur, mask)
         )
         proc_list_all = np.arange(self.n_procs).reshape(shape)
-        proc_list = proc_list_all[index].flatten()  # type: ignore
+        proc_list: Sequence[int] = proc_list_all[index].flatten()  # type: ignore
         return self.comm.Create_group(self.comm.Get_group().Incl(proc_list))
 
     def _check_report(self) -> None:

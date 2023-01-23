@@ -321,9 +321,9 @@ class Fillings(qp.TreeNode):
                 )
                 M_len = 1
             NM_target = np.concatenate(
-                (np.array([self.n_electrons]), self.M.to(qp.rc.cpu).numpy())
+                (np.full(1, self.n_electrons), self.M.to(qp.rc.cpu).numpy())
             )
-            mu_B = np.concatenate((np.array([self.mu]), self.B.to(qp.rc.cpu).numpy()))
+            mu_B = np.concatenate((np.full(1, self.mu), self.B.to(qp.rc.cpu).numpy()))
             i_free = np.where([not self.mu_constrain] + [self.M_constrain] * M_len)[0]
         else:
             w_NM = torch.ones((1, 1, 1, 1), device=qp.rc.device)

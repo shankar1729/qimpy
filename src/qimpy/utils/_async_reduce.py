@@ -36,7 +36,7 @@ class Iallreduce_in_place:
             # Determine division for MPI transpose:
             n_procs = comm.Get_size()
             division = qp.utils.TaskDivision(
-                n_tot=np.prod(buf.shape), n_procs=n_procs, i_proc=comm.Get_rank()
+                n_tot=int(np.prod(buf.shape)), n_procs=n_procs, i_proc=comm.Get_rank()
             )
             send_counts = np.diff(division.n_prev)
             send_offset = division.n_prev[:-1]
