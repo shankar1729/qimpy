@@ -38,10 +38,10 @@ def unit_representer(
     return dumper.represent_scalar("!unit", repr(unit))
 
 
-def unit_constructor(loader, node) -> float:
+def unit_constructor(loader, node) -> Unit:
     value = loader.construct_scalar(node)
     assert isinstance(value, str)
-    return float(Unit.parse(value))
+    return Unit.parse(value)
 
 
 # Add reresenter (for dumping units in yaml):
