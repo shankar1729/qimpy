@@ -7,6 +7,7 @@ from qimpy.rc import MPI
 from ._stepper import Stepper
 from ._gradient import Gradient
 from qimpy.ions.symbols import ATOMIC_WEIGHTS, ATOMIC_NUMBERS
+from qimpy.utils import Unit
 
 
 class Dynamics(qp.TreeNode):
@@ -18,14 +19,14 @@ class Dynamics(qp.TreeNode):
     dt: float  #: Time step
     n_steps: int  #: Number of MD steps
     thermostat: Optional[str]  #: Thermostat/barostat method
-    T0: float = 298.0 / 3.157e5  #: Initial temperature / temperature set point
-    P0: Optional[float] = None  #: Pressure set point
+    T0: float  #: Initial temperature / temperature set point
+    P0: Optional[float]  #: Pressure set point
     stress0: Optional[Union[np.ndarray, torch.Tensor]]  #: Stress set point
-    t_damp_T: float = 50.0 / 0.02419  #: Thermostat damping time
-    t_damp_P: float = 100.0 / 0.02419  #: Barostat damping time
-    chain_length_T: int = 3  #: Nose-Hoover chain length for thermostat
-    chain_length_P: int = 3  #: Nose-Hoover chain length for barostat
-    B0: float = 2.2e9 / 2.942e13  #: Characteristic bulk modulus for Berendsen barostat
+    t_damp_T: float  #: Thermostat damping time
+    t_damp_P: float  #: Barostat damping time
+    chain_length_T: int  #: Nose-Hoover chain length for thermostat
+    chain_length_P: int  #: Nose-Hoover chain length for barostat
+    B0: float  #: Characteristic bulk modulus for Berendsen barostat
     drag_wavefunctions: bool  #: Whether to drag atomic components of wavefunctions
 
     def __init__(

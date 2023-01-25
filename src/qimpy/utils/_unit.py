@@ -11,7 +11,7 @@ class Unit(NamedTuple):
     unit: str
 
     def __repr__(self) -> str:
-        return f"Unit({self.value} * {self.unit})"
+        return f"{self.value} * {self.unit}"
 
     def __float__(self) -> float:
         return self.value * MAP[self.unit]
