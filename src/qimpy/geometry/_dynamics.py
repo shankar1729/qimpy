@@ -37,7 +37,7 @@ class Dynamics(qp.TreeNode):
         dt: float,
         n_steps: int,
         thermostat: Optional[str] = None,
-        T0: float = 298.0 / 3.157e5,
+        T0: float = Unit(298., 'K'),
         P0: Optional[float] = None,
         stress0: Optional[Union[np.ndarray, torch.Tensor]] = None,
         t_damp_T: float = 50.0 / 0.02419,
