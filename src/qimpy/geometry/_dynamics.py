@@ -124,7 +124,7 @@ class Dynamics(qp.TreeNode):
             )
             / self.atomic_weights
         )
-        accel = accel - self.langevin_gamma * (vel * self.atomic_weights)
+        accel = accel - self.langevin_gamma * vel
         return accel
 
     def compute_thermostat(self, vel: torch.Tensor) -> torch.Tensor:
