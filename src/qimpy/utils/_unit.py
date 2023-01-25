@@ -26,6 +26,11 @@ class Unit:
 
     MAP: ClassVar[dict[str, float]] = {
         "Angstrom": 1.0 / 0.5291772
+        "Ha": 1.0,
+        "K": 1 / 3.157e5,
+        "s": 1 / 2.419e-17,
+        "fs": 1 / 0.02419,
+        "Pa": 1 / 2.942e13,
     }  #: Mapping from unit names to values
 
 
@@ -44,7 +49,7 @@ def unit_constructor(loader, node) -> Unit:
     return Unit.parse(value)
 
 
-# Add reresenter (for dumping units in yaml):
+# Add representer (for dumping units in yaml):
 yaml.add_representer(Unit, unit_representer)
 yaml.SafeDumper.add_representer(Unit, unit_representer)
 
