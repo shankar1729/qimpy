@@ -18,7 +18,7 @@ def load(filename: str, already_included: tuple = tuple()) -> dict:
 
 def dump(d: dict) -> str:
     """Convert nested dictionary to YAML-format string."""
-    return yaml.dump(d, default_flow_style=None)
+    return yaml.dump(d, default_flow_style=None, allow_unicode=True)
 
 
 def _process_includes(d: dict, already_included: tuple) -> dict:
