@@ -36,6 +36,7 @@ __all__ = (
     "Checkpoint",
     "CpPath",
     "Unit",
+    "UnitOrFloat",
 )
 
 from ._math import (
@@ -63,4 +64,4 @@ from ._taskdivision import TaskDivision, TaskDivisionCustom, get_block_slices
 from ._bufferview import BufferView
 from ._async_reduce import Iallreduce_in_place
 from ._checkpoint import Checkpoint, CpPath
-from ._unit import Unit
+from ._unit import Unit, UnitOrFloat

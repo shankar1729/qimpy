@@ -7,7 +7,7 @@ from qimpy.rc import MPI
 from ._stepper import Stepper
 from ._gradient import Gradient
 from qimpy.ions.symbols import ATOMIC_WEIGHTS, ATOMIC_NUMBERS
-from qimpy.utils import Unit
+from qimpy.utils import Unit, UnitOrFloat
 
 
 class Dynamics(qp.TreeNode):
@@ -37,7 +37,7 @@ class Dynamics(qp.TreeNode):
         dt: float,
         n_steps: int,
         thermostat: Optional[str] = None,
-        T0: Union[float, Unit] = Unit(298., 'K'),
+        T0: UnitOrFloat = Unit(298.0, "K"),
         P0: Optional[float] = None,
         stress0: Optional[Union[np.ndarray, torch.Tensor]] = None,
         t_damp_T: float = 50.0 / 0.02419,

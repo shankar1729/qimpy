@@ -1,10 +1,12 @@
 from __future__ import annotations
-from typing import NamedTuple, Union
+from dataclasses import dataclass
+from typing import Union, ClassVar
 import yaml
 import re
 
 
-class Unit(NamedTuple):
+@dataclass
+class Unit:
     """Represent value and unit combination."""
 
     value: float
@@ -14,7 +16,7 @@ class Unit(NamedTuple):
         return f"{self.value} * {self.unit}"
 
     def __float__(self) -> float:
-        return self.value * MAP[self.unit]
+        return self.value * Unit.MAP[self.unit]
 
     @staticmethod
     def parse(text: str) -> Unit:
@@ -22,10 +24,12 @@ class Unit(NamedTuple):
         value = float(value_text.rstrip())  # make sure value converts
         return Unit(value, unit_text.lstrip())  # unit matched when needed
 
+    MAP: ClassVar[dict[str, float]] = {
+        "Angstrom": 1.0 / 0.5291772
+    }  #: Mapping from unit names to values
 
-MAP: dict[str, float] = {
-    "Angstrom": 1.0 / 0.5291772
-}  #: Mapping from unit names to values
+
+UnitOrFloat = Union[Unit, float]
 
 
 def unit_representer(
