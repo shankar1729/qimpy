@@ -184,6 +184,7 @@ if __name__ == "__main__":
     input_dict.setdefault("checkpoint", os.path.splitext(args.input_file)[0] + ".h5")
     # --- Include processed input in log:
     qp.log.info(f"\n# Processed input:\n{qp.utils.yaml.dump(input_dict)}")
+    input_dict = qp.utils.dict.remove_units(input_dict)  # Remove units
 
     # Initialize system with input parameters:
     system = qp.System(process_grid_shape=args.process_grid, **input_dict)

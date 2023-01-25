@@ -1,5 +1,8 @@
 """Utilities to manipulate dictionaries used as input to constructors."""
-__all__ = ["key_cleanup", "flatten", "unflatten", "merge"]
+__all__ = ["key_cleanup", "flatten", "unflatten", "merge", "remove_units"]
+
+from typing import Callable, Union
+from ._unit import Unit
 
 
 def key_cleanup(params: dict) -> dict:
@@ -48,3 +51,38 @@ def merge(d_list: list[dict]) -> dict:
     for d in d_list:
         result.update(flatten(d))
     return unflatten(result)
+
+
+def remove_units(d: dict) -> dict:
+    """Recursively remove any units (convert each qimpy.utils.Unit to float)."""
+    return {
+        key: (
+            value
+            if ((remover := units_remover.get(value.__class__)) is None)
+            else remover(value)
+        )
+        for key, value in d.items()
+    }
+
+
+LT = Union[list, tuple]
+
+
+def remove_units_list(lt: LT) -> LT:
+    """Same as `remove_units` but for `list` or `tuple` objects instead."""
+    return lt.__class__(
+        (
+            value
+            if ((remover := units_remover.get(value.__class__)) is None)
+            else remover(value)
+        )
+        for value in lt
+    )
+
+
+units_remover: dict[type, Callable] = {
+    dict: remove_units,
+    list: remove_units_list,
+    tuple: remove_units_list,
+    Unit: float,
+}
