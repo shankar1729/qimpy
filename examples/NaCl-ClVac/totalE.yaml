@@ -4,7 +4,7 @@ lattice:
   vector1: [0, 0.5, 0.5] #Note: vectors in rows like other codes.
   vector2: [0.5, 0, 0.5] #Also, not ambiguous as separate vectors,
   vector3: [0.5, 0.5, 0] #compared to the 3x3 matrix of JDFTx.
-  scale: 11.37 * Å  #for 2x2x2 supercell (could be a length 3 list/tuple)
+  scale: 11.37 Å  #for 2x2x2 supercell (could be a length 3 list/tuple)
   movable: yes #optimize lattice vectors
 
 ions:
