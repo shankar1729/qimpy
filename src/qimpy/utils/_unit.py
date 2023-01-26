@@ -24,15 +24,7 @@ class Unit:
         value = float(value_text.rstrip())  # make sure value converts
         return Unit(value, unit_text.lstrip())  # unit matched when needed
 
-    MAP: ClassVar[dict[str, float]] = {
-        "Å": 1.0 / 0.5291772,
-        "Angstrom": 1.0 / 0.5291772,
-        "Ha": 1.0,
-        "K": 1 / 3.157e5,
-        "s": 1 / 2.419e-17,
-        "fs": 1 / 0.02419,
-        "Pa": 1 / 2.942e13,
-    }  #: Mapping from unit names to values
+    MAP: ClassVar[dict[str, float]] = {}  #: Mapping from unit names to values
 
 
 UnitOrFloat = Union[Unit, float]
@@ -62,3 +54,19 @@ yaml.SafeLoader.add_constructor("!unit", unit_constructor)
 unit_pattern = re.compile(r"-?(0|[1-9][0-9]*)(\.[0-9]*)?([eE][-+]?[0-9]+)?\s*\*\s*")
 yaml.add_implicit_resolver("!unit", unit_pattern)
 yaml.SafeLoader.add_implicit_resolver("!unit", unit_pattern, None)
+
+
+def _initialize_unit_map():
+    """Initialize values of non-atomic units in terms of atomic units."""
+    Unit.MAP = {
+        "Å": 1.0 / 0.5291772,
+        "Angstrom": 1.0 / 0.5291772,
+        "Ha": 1.0,
+        "K": 1 / 3.157e5,
+        "s": 1 / 2.419e-17,
+        "fs": 1 / 0.02419,
+        "Pa": 1 / 2.942e13,
+    }
+
+
+_initialize_unit_map()
