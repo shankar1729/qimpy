@@ -59,6 +59,6 @@ yaml.add_constructor("!unit", unit_constructor)
 yaml.SafeLoader.add_constructor("!unit", unit_constructor)
 
 # Add implicit resolver (so that !unit is not needed):
-unit_pattern = re.compile(r"-?(0|[1-9][0-9]*)(\.[0-9]*)?([eE][-+]?[0-9]+)?\s+\S+")
+unit_pattern = re.compile(r"[-+]?(0|[1-9][0-9]*)(\.[0-9]*)?([eE][-+]?[0-9]+)?\s+\S+")
 yaml.add_implicit_resolver("!unit", unit_pattern)
 yaml.SafeLoader.add_implicit_resolver("!unit", unit_pattern, None)
