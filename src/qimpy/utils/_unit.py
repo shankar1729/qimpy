@@ -13,16 +13,16 @@ class Unit:
     unit: str
 
     def __repr__(self) -> str:
-        return f"{self.value} * {self.unit}"
+        return f"{self.value} {self.unit}"
 
     def __float__(self) -> float:
         return self.value * Unit.MAP[self.unit]
 
     @staticmethod
     def parse(text: str) -> Unit:
-        value_text, unit_text = text.split("*")  # ensures no extra / missing tokens
-        value = float(value_text.rstrip())  # make sure value converts
-        return Unit(value, unit_text.lstrip())  # unit matched when needed
+        value_text, unit_text = text.split()  # ensures no extra / missing tokens
+        value = float(value_text)  # make sure value converts
+        return Unit(value, unit_text)  # unit matched when needed
 
     MAP: ClassVar[dict[str, float]] = {
         "Å": 1.0 / 0.5291772,
@@ -59,6 +59,6 @@ yaml.add_constructor("!unit", unit_constructor)
 yaml.SafeLoader.add_constructor("!unit", unit_constructor)
 
 # Add implicit resolver (so that !unit is not needed):
-unit_pattern = re.compile(r"-?(0|[1-9][0-9]*)(\.[0-9]*)?([eE][-+]?[0-9]+)?\s*\*\s*")
+unit_pattern = re.compile(r"-?(0|[1-9][0-9]*)(\.[0-9]*)?([eE][-+]?[0-9]+)?\s+\S+")
 yaml.add_implicit_resolver("!unit", unit_pattern)
 yaml.SafeLoader.add_implicit_resolver("!unit", unit_pattern, None)
