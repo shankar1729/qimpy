@@ -35,6 +35,8 @@ def main() -> None:
             dynamics=dict(
                 dt=float(Unit(0.5, "fs")),
                 n_steps=100,
+                thermostat="langevin",
+                langevin_gamma=1.0 / float(Unit(10, "fs")),
                 report_callback=analyze,
             ),
         ),
