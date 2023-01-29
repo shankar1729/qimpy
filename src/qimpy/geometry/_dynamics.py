@@ -16,6 +16,7 @@ class Dynamics(qp.TreeNode):
     """
 
     system: qp.System  #: System being optimized currently
+    comm: MPI.Comm  #: Communictaor over which forces consistent
     dt: float  #: Time step
     n_steps: int  #: Number of MD steps
     thermostat: Optional[str]  #: Thermostat/barostat method
@@ -27,6 +28,7 @@ class Dynamics(qp.TreeNode):
     chain_length_T: int  #: Nose-Hoover chain length for thermostat
     chain_length_P: int  #: Nose-Hoover chain length for barostat
     B0: float  #: Characteristic bulk modulus for Berendsen barostat
+    langevin_gamma: float  #: Damping rate for Langevin thermostat
     drag_wavefunctions: bool  #: Whether to drag atomic components of wavefunctions
     report_callback: Optional[Callable[[Dynamics, int], None]]  #: Callback from report
 
@@ -46,10 +48,10 @@ class Dynamics(qp.TreeNode):
         chain_length_T: int = 3,
         chain_length_P: int = 3,
         B0: UnitOrFloat = Unit(2.2, "GPa"),
+        langevin_gamma: float = 1.0,
         drag_wavefunctions: bool = True,
         report_callback: Optional[Callable[[Dynamics, int], None]] = None,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
-        langevin_gamma: Union[float, list[float], torch.Tensor] = 1.0,
     ) -> None:
         """
         Specify molecular dynamics parameters.
@@ -79,16 +81,17 @@ class Dynamics(qp.TreeNode):
             :yaml:`Nose-Hoover chain length for barostat.`
         B0
             :yaml:`Characteristic bulk modulus for Berendsen barostat.`
+        langevin_gamma
+            :yaml:`Friction parameter for the Langevin thermostat method.`
         drag_wavefunctions
             :yaml:`Whether to drag atomic components of wavefunctions.`
         report_callback
             Optional function to call at each step during `report`.
             Use this to perform additional reportig / data collection.
             The functional will be called as `report_callback(dynamics, i_iter)`.
-        langevin_gamma
-            :yaml:`Friction parameter for the Langevin thermostat method.`
         """
         super().__init__()
+        self.comm = comm
         self.dt = dt
         self.n_steps = n_steps
         self.thermostat = thermostat
@@ -114,41 +117,31 @@ class Dynamics(qp.TreeNode):
 
     def langevin_thermostat(self, vel: torch.Tensor) -> torch.Tensor:
         """Implement Langevin thermostat."""
-        if isinstance(self.langevin_gamma, list):
-            self.langevin_gamma = torch.unsqueeze(
-                torch.as_tensor(self.langevin_gamma, device=qp.rc.device), dim=-1
-            )
-        prefactor = 2 * self.T0 / self.dt
-        variances = prefactor * torch.ones_like(
-            self.atomic_weights, device=qp.rc.device
-        )
-        variances *= self.atomic_weights
-        variances *= self.langevin_gamma
-        accel = (
-            torch.normal(
-                mean=torch.zeros_like(self.system.ions.velocities, device=qp.rc.device),
-                std=torch.sqrt(variances),
-            )
-            / self.atomic_weights
-        )
-        accel = accel - self.langevin_gamma * vel
+        # Generate MPI-consistent random numbers for noise term:
+        rand = torch.randn_like(vel)
+        self.comm.Bcast(qp.utils.BufferView(rand))
+        # Compute acceleration from stochastic and damping terms:
+        variances = 2 * self.langevin_gamma * self.T0 / (self.dt * self.atomic_weights)
+        accel = rand * variances.sqrt()
+        accel -= self.langevin_gamma * vel
         return accel
 
     def compute_thermostat(self, vel: torch.Tensor) -> torch.Tensor:
         """Compute thermostat for the system."""
         if self.thermostat is None:
-            return torch.zeros_like(self.system.ions.velocities)  # Zero for now
+            return torch.zeros_like(vel)  # Zero for now
         else:
             return self.thermostat_methods[self.thermostat](vel)
 
     def get_atomic_weights(self) -> torch.Tensor:
         """Initialize the atomic weights for the system."""
-        amu = 1822.89  # (Temporary) AMU conversion for mass
         ions = self.system.ions
         atomic_weights = np.empty(ions.n_ions)
         for ion_slice, symbol in zip(ions.slices, ions.symbols):
-            atomic_weights[ion_slice] = amu * ATOMIC_WEIGHTS[ATOMIC_NUMBERS[symbol]]
-        return torch.tensor(atomic_weights, device=qp.rc.device).unsqueeze(1)
+            atomic_weights[ion_slice] = ATOMIC_WEIGHTS[ATOMIC_NUMBERS[symbol]]
+        # Convert to atomic units (in terms of m_e):
+        amu = float(Unit(1.0, "amu"))
+        return torch.tensor(atomic_weights, device=qp.rc.device).unsqueeze(1) * amu
 
     def run(self, system: qp.System) -> None:
         self.system = system

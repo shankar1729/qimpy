@@ -1,4 +1,5 @@
 import os
+import torch
 import matplotlib.pyplot as plt
 import qimpy as qp
 from qimpy.utils import Unit
@@ -8,6 +9,7 @@ def main() -> None:
     qp.utils.log_config()  # default set up to log from MPI head alone
     qp.log.info("Using QimPy " + qp.__version__)
     qp.rc.init()
+    torch.manual_seed(1234)
 
     # Callback function to analyze trajetcory:
     def analyze(dynamics: qp.geometry.Dynamics, i_iter: int) -> None:
@@ -24,7 +26,7 @@ def main() -> None:
         lattice=dict(system="cubic", modification="face-centered", a=14.0),
         ions=dict(
             pseudopotentials=os.path.join(ps_path, "$ID_ONCV_PBE.upf"),
-            coordinates=[["H", 0.0, 0.0, 0.0], ["H", 0.1, 0.2, 1.4]],
+            coordinates=[["H", 0.0, 0.0, 0.0], ["H", 0.3, 0.2, 1.4]],
             fractional=False,
         ),
         electrons=dict(
@@ -36,7 +38,7 @@ def main() -> None:
                 dt=float(Unit(0.5, "fs")),
                 n_steps=100,
                 thermostat="langevin",
-                langevin_gamma=1.0 / float(Unit(10, "fs")),
+                langevin_gamma=1.0 / float(Unit(20, "fs")),
                 report_callback=analyze,
             ),
         ),
