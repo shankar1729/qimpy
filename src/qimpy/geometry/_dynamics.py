@@ -40,11 +40,11 @@ class Dynamics(qp.TreeNode):
         T0: UnitOrFloat = Unit(298.0, "K"),
         P0: Optional[float] = None,
         stress0: Optional[Union[np.ndarray, torch.Tensor]] = None,
-        t_damp_T: float = 50.0 / 0.02419,
-        t_damp_P: float = 100.0 / 0.02419,
+        t_damp_T: UnitOrFloat = Unit(50.0, "fs"),
+        t_damp_P: UnitOrFloat = Unit(100.0, "fs"),
         chain_length_T: int = 3,
         chain_length_P: int = 3,
-        B0: float = 2.2e9 / 2.942e13,
+        B0: UnitOrFloat = Unit(2.2, "GPa"),
         drag_wavefunctions: bool = True,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         langevin_gamma: Union[float, list[float], torch.Tensor] = 1.0,
@@ -89,11 +89,11 @@ class Dynamics(qp.TreeNode):
         self.T0 = float(T0)
         self.P0 = P0
         self.stress0 = stress0
-        self.t_damp_T = t_damp_T
-        self.t_damp_P = t_damp_P
+        self.t_damp_T = float(t_damp_T)
+        self.t_damp_P = float(t_damp_P)
         self.chain_length_T = chain_length_T
         self.chain_length_P = chain_length_P
-        self.B0 = B0
+        self.B0 = float(B0)
         self.drag_wavefunctions = drag_wavefunctions
         self.langevin_gamma = langevin_gamma
 

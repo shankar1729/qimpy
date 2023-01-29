@@ -102,6 +102,8 @@ def _initialize_unit_map():
         Pa=Pa,
         kPa=1e3 * Pa,
         bar=1e5 * Pa,
+        MPa=1e6 * Pa,
+        GPa=1e9 * Pa,
         mmHg=133.322387415 * Pa,
         V=V,
         Ohm=Ohm,
