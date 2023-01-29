@@ -36,7 +36,7 @@ def main() -> None:
         geometry=dict(
             dynamics=dict(
                 dt=float(Unit(0.5, "fs")),
-                n_steps=100,
+                n_steps=1000,
                 thermostat="langevin",
                 langevin_gamma=1.0 / float(Unit(20, "fs")),
                 report_callback=analyze,
@@ -51,6 +51,7 @@ def main() -> None:
     plt.plot(bond_distances)
     plt.xlabel("Time step")
     plt.ylabel("Bond length [$a_0$]")
+    plt.savefig("bond-length.pdf", bbox_inches="tight")
     plt.show()
 
 
