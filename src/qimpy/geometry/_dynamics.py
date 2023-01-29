@@ -2,7 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Union, Optional
+from typing import Union, Optional, Callable
 from qimpy.rc import MPI
 from ._stepper import Stepper
 from ._gradient import Gradient
@@ -28,6 +28,7 @@ class Dynamics(qp.TreeNode):
     chain_length_P: int  #: Nose-Hoover chain length for barostat
     B0: float  #: Characteristic bulk modulus for Berendsen barostat
     drag_wavefunctions: bool  #: Whether to drag atomic components of wavefunctions
+    report_callback: Optional[Callable[[Dynamics, int], None]]  #: Callback from report
 
     def __init__(
         self,
@@ -46,6 +47,7 @@ class Dynamics(qp.TreeNode):
         chain_length_P: int = 3,
         B0: UnitOrFloat = Unit(2.2, "GPa"),
         drag_wavefunctions: bool = True,
+        report_callback: Optional[Callable[[Dynamics, int], None]] = None,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         langevin_gamma: Union[float, list[float], torch.Tensor] = 1.0,
     ) -> None:
@@ -79,6 +81,10 @@ class Dynamics(qp.TreeNode):
             :yaml:`Characteristic bulk modulus for Berendsen barostat.`
         drag_wavefunctions
             :yaml:`Whether to drag atomic components of wavefunctions.`
+        report_callback
+            Optional function to call at each step during `report`.
+            Use this to perform additional reportig / data collection.
+            The functional will be called as `report_callback(dynamics, i_iter)`.
         langevin_gamma
             :yaml:`Friction parameter for the Langevin thermostat method.`
         """
@@ -95,6 +101,7 @@ class Dynamics(qp.TreeNode):
         self.chain_length_P = chain_length_P
         self.B0 = float(B0)
         self.drag_wavefunctions = drag_wavefunctions
+        self.report_callback = report_callback
         self.langevin_gamma = langevin_gamma
 
         self.thermostat_methods = {"langevin": self.langevin_thermostat}
@@ -179,6 +186,8 @@ class Dynamics(qp.TreeNode):
 
     def report(self, i_iter: int) -> None:
         self.stepper.report()
+        if self.report_callback is not None:
+            self.report_callback(self, i_iter)
         E = self.system.energy
         qp.log.info(
             f"Dynamics: {i_iter}  {E.name}: {float(E):+.11f}  t[s]: {qp.rc.clock():.2f}"
