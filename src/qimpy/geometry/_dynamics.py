@@ -155,10 +155,10 @@ class Dynamics(qp.TreeNode):
         accel_thermostat_step1 = self.compute_thermostat(vel)
 
         # MD loop
-        for i in range(self.n_steps):
-            qp.log.info(f"Step {i}")
-
-            self.report()
+        for i_iter in range(self.n_steps + 1):
+            self.report(i_iter)
+            if i_iter == self.n_steps:
+                break
 
             # Compute first half step
             vel += 0.5 * self.dt * (accel + accel_thermostat_step1)
@@ -177,8 +177,9 @@ class Dynamics(qp.TreeNode):
             # Calculate forces for next step
             accel_thermostat_step1 = accel_thermostat_step2
 
-        # Print final state
-        self.report()
-
-    def report(self):
+    def report(self, i_iter: int) -> None:
         self.stepper.report()
+        E = self.system.energy
+        qp.log.info(
+            f"Dynamics: {i_iter}  {E.name}: {float(E):+.11f}  t[s]: {qp.rc.clock():.2f}"
+        )
