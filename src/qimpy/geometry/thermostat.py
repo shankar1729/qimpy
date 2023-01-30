@@ -156,10 +156,16 @@ class Berendsen(qp.TreeNode):
         dynamics = self.dynamics
         nDOF = 3 * len(dynamics.masses)  # TODO
         KE_target = 0.5 * nDOF * dynamics.T0
-        KE = 0.5 * (dynamics.masses * velocity.ions.square()).sum()
-        gamma = 0.5 * (KE / KE_target - 1.0) / dynamics.t_damp_T
-        accel_thermo = Gradient(ions=(-gamma * velocity.ions))
-        return velocity + (acceleration + accel_thermo) * dt
+
+        def total_acceleration(v: Gradient) -> Gradient:
+            """Compute total acceleration, including velocity dependent part."""
+            KE = 0.5 * (dynamics.masses * v.ions.square()).sum()
+            gamma = 0.5 * (KE / KE_target - 1.0) / dynamics.t_damp_T
+            return acceleration - Gradient(ions=(gamma * v.ions))
+
+        # Propagate correct to second order including v-dependent acceleration:
+        velocity_half = velocity + total_acceleration(velocity) * (0.5 * dt)
+        return velocity + total_acceleration(velocity_half) * dt
 
 
 class Langevin(qp.TreeNode):
