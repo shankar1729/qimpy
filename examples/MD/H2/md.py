@@ -36,9 +36,9 @@ def main() -> None:
         geometry=dict(
             dynamics=dict(
                 dt=float(Unit(0.5, "fs")),
-                n_steps=1000,
-                thermostat="langevin",
-                langevin_gamma=1.0 / float(Unit(20, "fs")),
+                n_steps=100,
+                thermostat=dict(langevin={}),
+                t_damp_T=Unit(20, "fs"),
                 report_callback=analyze,
             ),
         ),

@@ -32,25 +32,20 @@ class Geometry(qp.TreeNode):
         Parameters
         ----------
         fixed
-            Electronic optimization only at a fixed geometry.
+            :yaml:`Electronic optimization only at a fixed geometry.`
         relax
             :yaml:`Geometry relaxation of ions, and optionally, also the lattice.`
         dynamics
             :yaml:`Molecular dynamics of ions, and optionally, also the lattice.`
         """
         super().__init__()
+        ChildOptions = qp.TreeNode.ChildOptions
         self.add_child_one_of(
             "action",
             checkpoint_in,
-            qp.TreeNode.ChildOptions(
-                "fixed", qp.geometry.Fixed, fixed, comm=comm, lattice=lattice
-            ),
-            qp.TreeNode.ChildOptions(
-                "relax", qp.geometry.Relax, relax, comm=comm, lattice=lattice
-            ),
-            qp.TreeNode.ChildOptions(
-                "dynamics", qp.geometry.Dynamics, dynamics, comm=comm, lattice=lattice
-            ),
+            ChildOptions("fixed", qp.geometry.Fixed, fixed, comm=comm, lattice=lattice),
+            ChildOptions("relax", qp.geometry.Relax, relax, comm=comm, lattice=lattice),
+            ChildOptions("dynamics", qp.geometry.Dynamics, dynamics, comm=comm),
             have_default=True,
         )
 

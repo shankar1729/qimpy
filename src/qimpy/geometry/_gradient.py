@@ -8,7 +8,7 @@ class Gradient:
     """Geometry gradient used for relaxation / dynamics."""
 
     ions: torch.Tensor  #: ionic gradient (forces)
-    lattice: Optional[torch.Tensor]  #: lattice gradient (stress)
+    lattice: Optional[torch.Tensor] = None  #: lattice gradient (stress)
 
     def clone(self) -> "Gradient":
         return Gradient(

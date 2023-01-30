@@ -174,7 +174,7 @@ class ClassInputDoc:
             i_comment.append(line.find("  :yamlcomment:"))
             i_comment_printed.append(printed_length(line[: i_comment[-1]]))
         # --- determine common location at which they should start:
-        comment_start = max(i_comment_printed)
+        comment_start = max(i_comment_printed) if i_comment_printed else 0
         # --- insert padding:
         for i_line, line in enumerate(result):
             padloc = i_comment[i_line]  # location to insert padding at
@@ -283,11 +283,11 @@ def get_path_from_class(cls: type) -> str:
     return ".".join(module_elems)
 
 
-def get_parameters(docstr: str) -> tuple[str, dict[str, str]]:
+def get_parameters(docstr: Optional[str]) -> tuple[str, dict[str, str]]:
     """Parse constructor docstring `docstr` into parameter descriptions.
     Returns header of constructor documentation, and for each parameter."""
     result: dict[str, str] = {}
-    lines = docstr.split("\n")
+    lines = [] if (docstr is None) else docstr.split("\n")
     parameter_start = len(lines)
     parameter_indent = -1  # indent amount of parameter
     desc_indent = -1  # indent amount of parameter description
