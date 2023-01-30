@@ -153,7 +153,13 @@ class Berendsen(qp.TreeNode):
 
     def step(self, velocity: Gradient, acceleration: Gradient, dt: float) -> Gradient:
         """Return velocity after `dt`, given current `velocity` and `acceleration`."""
-        raise NotImplementedError
+        dynamics = self.dynamics
+        nDOF = 3 * len(dynamics.masses)  # TODO
+        KE_target = 0.5 * nDOF * dynamics.T0
+        KE = 0.5 * (dynamics.masses * velocity.ions.square()).sum()
+        gamma = 0.5 * (KE / KE_target - 1.0) / dynamics.t_damp_T
+        accel_thermo = Gradient(ions=(-gamma * velocity.ions))
+        return velocity + (acceleration + accel_thermo) * dt
 
 
 class Langevin(qp.TreeNode):

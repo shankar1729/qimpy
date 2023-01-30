@@ -35,10 +35,10 @@ def main() -> None:
         ),
         geometry=dict(
             dynamics=dict(
-                dt=float(Unit(0.5, "fs")),
-                n_steps=100,
-                thermostat=dict(langevin={}),
-                t_damp_T=Unit(20, "fs"),
+                dt=float(Unit(1.0, "fs")),
+                n_steps=200,
+                thermostat=dict(berendsen={}),
+                t_damp_T=Unit(10, "fs"),
                 report_callback=analyze,
             ),
         ),
