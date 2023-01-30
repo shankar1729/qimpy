@@ -152,7 +152,7 @@ class Berendsen(qp.TreeNode):
         self.B0 = float(B0)
 
     def extra_acceleration(self, velocity: Gradient) -> Gradient:
-        """Extra  velocity-dependent acceleration due to thermostat."""
+        """Extra velocity-dependent acceleration due to thermostat."""
         dynamics = self.dynamics
         nDOF = 3 * len(dynamics.masses)  # TODO: account for center of mass, constraints
         KE_target = 0.5 * nDOF * dynamics.T0
@@ -179,17 +179,22 @@ class Langevin(qp.TreeNode):
         super().__init__()
         self.dynamics = dynamics
 
+    def extra_acceleration(self, velocity: Gradient) -> Gradient:
+        """Extra velocity-dependent acceleration due to thermostat."""
+        return velocity * (-1.0 / self.dynamics.t_damp_T)
+
     def step(self, velocity: Gradient, acceleration: Gradient, dt: float) -> Gradient:
         """Return velocity after `dt`, given current `velocity` and `acceleration`."""
-        # Generate MPI-consistent random numbers for noise term:
         dynamics = self.dynamics
+        # Generate MPI-consistent stochastic acceleration (not velocity dependent):
         rand = torch.randn_like(velocity.ions)
         self.dynamics.comm.Bcast(qp.utils.BufferView(rand))
-        # Compute acceleration from stochastic and damping terms:
-        gamma = 1.0 / dynamics.t_damp_T
-        variances = 2 * gamma * dynamics.T0 / (dt * dynamics.masses)
-        accel_thermo = Gradient(ions=(rand * variances.sqrt() - gamma * velocity.ions))
-        return velocity + (acceleration + accel_thermo) * dt
+        variances = 2 * dynamics.T0 / (dynamics.masses * (dynamics.t_damp_T * dt))
+        acceleration_noise = Gradient(ions=(rand * variances.sqrt()))
+        # Take step including velocity-dependent damping:
+        return second_order_step(
+            velocity, acceleration + acceleration_noise, self.extra_acceleration, dt
+        )
 
 
 def second_order_step(
