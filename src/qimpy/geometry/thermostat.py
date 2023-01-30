@@ -1,6 +1,6 @@
 """Geometry actions: relaxation and dynamics."""
 from __future__ import annotations
-from typing import Union, Protocol
+from typing import Union, Protocol, Callable
 import torch
 import qimpy as qp
 from qimpy.utils import Unit, UnitOrFloat
@@ -151,21 +151,18 @@ class Berendsen(qp.TreeNode):
         self.dynamics = dynamics
         self.B0 = float(B0)
 
+    def extra_acceleration(self, velocity: Gradient) -> Gradient:
+        """Extra  velocity-dependent acceleration due to thermostat."""
+        dynamics = self.dynamics
+        nDOF = 3 * len(dynamics.masses)  # TODO: account for center of mass, constraints
+        KE_target = 0.5 * nDOF * dynamics.T0
+        KE = 0.5 * (dynamics.masses * velocity.ions.square()).sum()
+        gamma = 0.5 * (KE / KE_target - 1.0) / dynamics.t_damp_T
+        return Gradient(ions=(-gamma * velocity.ions))  # TODO: barostat contributions
+
     def step(self, velocity: Gradient, acceleration: Gradient, dt: float) -> Gradient:
         """Return velocity after `dt`, given current `velocity` and `acceleration`."""
-        dynamics = self.dynamics
-        nDOF = 3 * len(dynamics.masses)  # TODO
-        KE_target = 0.5 * nDOF * dynamics.T0
-
-        def total_acceleration(v: Gradient) -> Gradient:
-            """Compute total acceleration, including velocity dependent part."""
-            KE = 0.5 * (dynamics.masses * v.ions.square()).sum()
-            gamma = 0.5 * (KE / KE_target - 1.0) / dynamics.t_damp_T
-            return acceleration - Gradient(ions=(gamma * v.ions))
-
-        # Propagate correct to second order including v-dependent acceleration:
-        velocity_half = velocity + total_acceleration(velocity) * (0.5 * dt)
-        return velocity + total_acceleration(velocity_half) * dt
+        return second_order_step(velocity, acceleration, self.extra_acceleration, dt)
 
 
 class Langevin(qp.TreeNode):
@@ -193,3 +190,17 @@ class Langevin(qp.TreeNode):
         variances = 2 * gamma * dynamics.T0 / (dt * dynamics.masses)
         accel_thermo = Gradient(ions=(rand * variances.sqrt() - gamma * velocity.ions))
         return velocity + (acceleration + accel_thermo) * dt
+
+
+def second_order_step(
+    velocity: Gradient,
+    acceleration0: Gradient,
+    acceleration: Callable[[Gradient], Gradient],
+    dt: float,
+) -> Gradient:
+    """
+    Integrate dv/dt = acceleration0 + acceleration(v) over dt to second order.
+    Start from v = velocity at time t, and return velocity at t+dt.
+    """
+    velocity_half = velocity + (acceleration0 + acceleration(velocity)) * (0.5 * dt)
+    return velocity + (acceleration0 + acceleration(velocity_half)) * dt
