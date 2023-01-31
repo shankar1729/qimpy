@@ -37,7 +37,7 @@ def main() -> None:
             dynamics=dict(
                 dt=float(Unit(1.0, "fs")),
                 n_steps=200,
-                thermostat=dict(langevin={}),
+                thermostat="berendsen",
                 t_damp_T=Unit(10, "fs"),
                 report_callback=analyze,
             ),

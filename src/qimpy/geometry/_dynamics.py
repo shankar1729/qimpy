@@ -39,7 +39,7 @@ class Dynamics(qp.TreeNode):
         comm: MPI.Comm,
         dt: float,
         n_steps: int,
-        thermostat: Union[Thermostat, dict, None] = None,
+        thermostat: Union[str, Thermostat, dict, None] = None,
         T0: UnitOrFloat = Unit(298.0, "K"),
         P0: Optional[float] = None,
         stress0: Optional[Union[np.ndarray, torch.Tensor]] = None,
@@ -61,6 +61,8 @@ class Dynamics(qp.TreeNode):
             :yaml:`Number of MD steps.`
         thermostat
             :yaml:`Thermostat/barostat method.`
+            Specify name of thermostat eg. 'nose-hoover' if using default options
+            for that thermostat method, and dictionary of parameters if not.
         T0
             :yaml:`Initial temperature / temperature set point.`
         P0

@@ -40,7 +40,7 @@ class TreeNode:
         self,
         attr_name: str,
         cls: Type[TreeNodeType],
-        params: Union[TreeNodeType, dict, None],
+        params: Union[TreeNodeType, dict, str, None],
         checkpoint_in: qp.utils.CpPath,
         attr_version_name: str = "",
         **kwargs,
@@ -60,9 +60,20 @@ class TreeNode:
         could be `k-mesh` (:class:`Kmesh`) or `k-path` (:class:`Kmesh`).
         For such cases, use `add_child_one_of` instead, which wraps `add_child`
         and handles the selection of which version of the child to use.
+
+        Finally, this routine supports a special case when `params` is str.
+        In this case, `params` becomes a `dict` mapping that str to `{}`.
+        This is a useful shortcut for a child which has one of many sub-objects.
+        The str specifies the name of the sub-object with default parameters.
+        The full dict version must be used instead to specify non-default values.
+        Typically, the child will use `add_child_one_of` for its initialization.
+        This is convenient to simplify syntax for geometry, thermostat etc.
         """
         if params is None:
             params = {}  # Logic below can focus on dict vs cls now.
+
+        if isinstance(params, str):
+            params = {params: {}}  # Shortcut for sub-object with default parameters.
 
         # Try all the valid possibilities:
         if isinstance(params, dict):
