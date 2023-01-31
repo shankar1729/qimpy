@@ -344,6 +344,7 @@ YAML_TYPE = {
     dict: ":yamltype:`dict`",
     tuple: ":yamltype:`tuple`",
     type(None): ":yamltype:`null`",
+    get_class_from_path("qimpy.utils.Unit"): ":yamltype:`Unit`",
 }
 
 
