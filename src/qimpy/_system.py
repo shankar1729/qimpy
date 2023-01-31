@@ -29,7 +29,7 @@ class System(qp.TreeNode):
         symmetries: Union[qp.symmetries.Symmetries, dict, None] = None,
         electrons: Union[qp.electrons.Electrons, dict, None] = None,
         grid: Union[qp.grid.Grid, dict, None] = None,
-        geometry: Union[qp.geometry.Geometry, dict, None] = None,
+        geometry: Union[qp.geometry.Geometry, dict, str, None] = None,
         export: Union[qp.export.Export, dict, None] = None,
         checkpoint: Optional[str] = None,
         checkpoint_out: Optional[str] = None,
@@ -54,6 +54,8 @@ class System(qp.TreeNode):
             :yaml:`Charge-density grid.`
         geometry
             :yaml:`Geometry actions such as relaxation and dynamics.`
+            Specify name of geometry action eg. 'relax' if using default options for
+            that action, and if not, specify an explicit  dictionary of parameters.
         export
             :yaml:`Export data for other codes.`
         checkpoint

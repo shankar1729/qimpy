@@ -16,5 +16,7 @@ electrons:
   fillings:
     M: 1
 
+geometry: fixed
+
 checkpoint: null  # disable reading checkpoint
 checkpoint-out: Hatom.h5  # but still create it

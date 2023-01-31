@@ -22,7 +22,7 @@ class Relax(qp.utils.Minimize[Gradient]):
         *,
         comm: MPI.Comm,
         lattice: qp.lattice.Lattice,
-        n_iterations: int,
+        n_iterations: int = 20,
         energy_threshold: float = 5e-5,
         fmax_threshold: float = 5e-4,
         stress_threshold: float = 1e-5,

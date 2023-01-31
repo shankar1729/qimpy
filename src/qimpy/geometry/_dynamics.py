@@ -39,7 +39,7 @@ class Dynamics(qp.TreeNode):
         comm: MPI.Comm,
         dt: float,
         n_steps: int,
-        thermostat: Union[str, Thermostat, dict, None] = None,
+        thermostat: Union[Thermostat, dict, str, None] = None,
         T0: UnitOrFloat = Unit(298.0, "K"),
         P0: Optional[float] = None,
         stress0: Optional[Union[np.ndarray, torch.Tensor]] = None,
@@ -68,7 +68,7 @@ class Dynamics(qp.TreeNode):
         P0
             :yaml:`Pressure set point.`
         stress0
-            :yaml:`Stress set point.`
+            :yaml:`Stressthermostat method set point.`
         t_damp_T
             :yaml:`Thermostat damping time.`
         t_damp_P
