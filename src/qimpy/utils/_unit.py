@@ -14,16 +14,31 @@ class Unit:
     unit: str
 
     def __repr__(self) -> str:
+        """String representation at full precision."""
         return f"{self.value} {self.unit}"
+
+    def __str__(self) -> str:
+        """String representation at 3-digit float precision."""
+        return self.format(".3f")
+
+    def format(self, format_string: str) -> str:
+        """String representation with custom `format_string`."""
+        return f"{self.value:{format_string}} {self.unit}"
 
     def __float__(self) -> float:
         return self.value * Unit.MAP[self.unit]
 
     @staticmethod
     def parse(text: str) -> Unit:
-        value_text, unit_text = text.split()  # ensures no extra / missing tokens
+        """Extract value and unit from text representation."""
+        value_text, unit = text.split()  # ensures no extra / missing tokens
         value = float(value_text)  # make sure value converts
-        return Unit(value, unit_text)  # unit matched when needed
+        return Unit(value, unit)  # unit matched when needed
+
+    @staticmethod
+    def convert(value_au: float, unit: str) -> Unit:
+        """Convert `value_au` in atomic units to the selected `unit`."""
+        return Unit(value_au / Unit.MAP[unit], unit)
 
     MAP: ClassVar[dict[str, float]] = {}  #: Mapping from unit names to values
 

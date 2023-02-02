@@ -17,7 +17,7 @@ class Dynamics(qp.TreeNode):
     """
 
     system: qp.System  #: System being optimized currently
-    masses: torch.Tensor  #: Mass of each ion in system (Dim: n_ions x 1)
+    masses: torch.Tensor  #: Mass of each ion in system (Dim: n_ions x 1 for bcast)
     stepper: Stepper
     comm: MPI.Comm  #: Communictaor over which forces consistent
     dt: float  #: Time step
@@ -31,6 +31,10 @@ class Dynamics(qp.TreeNode):
     B0: float  #: Characteristic bulk modulus for Berendsen barostat
     langevin_gamma: float  #: Damping rate for Langevin thermostat
     drag_wavefunctions: bool  #: Whether to drag atomic components of wavefunctions
+    P: Optional[float]  #: Current pressure (available if `lattice.compute_stress`)
+    T: float  #: Current temperature
+    KE: float  #: Current kinetic energy
+    stress: Optional[torch.Tensor]  #: Current stress including kinetic contributions
     report_callback: Optional[Callable[[Dynamics, int], None]]  #: Callback from report
 
     def __init__(
@@ -106,7 +110,7 @@ class Dynamics(qp.TreeNode):
 
         # MD loop
         for i_iter in range(self.n_steps + 1):
-            self.report(i_iter)
+            self.report(i_iter, velocity)
             if i_iter == self.n_steps:
                 break
 
@@ -126,13 +130,22 @@ class Dynamics(qp.TreeNode):
         assert gradient is not None
         return Gradient(ions=(-gradient.ions / self.masses))
 
-    def report(self, i_iter: int) -> None:
-        self.stepper.report()
+    def report(self, i_iter: int, velocity: Gradient) -> None:
+        # Update velocity-dependent quantities:
+        self.KE = self.get_KE(velocity.ions)
+        self.T = self.get_T(self.KE)
+        self.stress = self.get_stress(velocity.ions)
+        self.P = Dynamics.get_pressure(self.stress)
+        # Report positions, forces, stresses etc.:
+        self.stepper.report(total_stress=self.stress)
         if self.report_callback is not None:
             self.report_callback(self, i_iter)
         E = self.system.energy
         qp.log.info(
-            f"Dynamics: {i_iter}  {E.name}: {float(E):+.11f}  t[s]: {qp.rc.clock():.2f}"
+            f"Dynamics: {i_iter}  {E.name}: {float(E):+.11f}"
+            f"  KE: {self.KE:.6f}  T: {Unit.convert(self.T, 'K')}"
+            f"  P: {'null' if (self.P is None) else Unit.convert(self.P, 'bar')}"
+            f"  t[s]: {qp.rc.clock():.2f}"
         )
 
     @staticmethod
@@ -144,3 +157,32 @@ class Dynamics(qp.TreeNode):
         # Convert to atomic units (in terms of m_e):
         amu = float(Unit(1.0, "amu"))
         return torch.tensor(atomic_weights, device=qp.rc.device).unsqueeze(1) * amu
+
+    def get_stress(self, velocity: torch.Tensor) -> Optional[torch.Tensor]:
+        """Compute total stress tensor including ion `velocity` contributions."""
+        lattice = self.system.lattice
+        if not lattice.compute_stress:
+            return None
+        kinetic_stress = (-1.0 / lattice.volume) * torch.einsum(
+            "a, ai, aj -> ij", self.masses.squeeze(), velocity, velocity
+        )
+        return kinetic_stress + self.system.lattice.stress
+
+    @staticmethod
+    def get_pressure(stress: Optional[torch.Tensor]) -> Optional[float]:
+        if stress is None:
+            return None
+        return (-1.0 / 3) * torch.trace(stress).item()
+
+    def get_KE(self, velocity: torch.Tensor) -> float:
+        """Compute kinetic energy from ion `velocity`."""
+        return 0.5 * (self.masses * velocity.square()).sum().item()
+
+    def get_T(self, KE: float) -> float:
+        """Compute temperature from kinetic energy `KE`."""
+        return KE / (0.5 * self.nDOF)
+
+    @property
+    def nDOF(self) -> int:
+        """Number of degrees of freedom in the dynamics."""
+        return 3 * len(self.masses)  # TODO: account for center of mass, constraints

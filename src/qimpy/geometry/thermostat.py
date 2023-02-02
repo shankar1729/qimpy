@@ -154,10 +154,8 @@ class Berendsen(qp.TreeNode):
     def extra_acceleration(self, velocity: Gradient) -> Gradient:
         """Extra velocity-dependent acceleration due to thermostat."""
         dynamics = self.dynamics
-        nDOF = 3 * len(dynamics.masses)  # TODO: account for center of mass, constraints
-        KE_target = 0.5 * nDOF * dynamics.T0
-        KE = 0.5 * (dynamics.masses * velocity.ions.square()).sum()
-        gamma = 0.5 * (KE / KE_target - 1.0) / dynamics.t_damp_T
+        T = dynamics.get_T(dynamics.get_KE(velocity.ions))
+        gamma = 0.5 * (T / dynamics.T0 - 1.0) / dynamics.t_damp_T
         return Gradient(ions=(-gamma * velocity.ions))  # TODO: barostat contributions
 
     def step(self, velocity: Gradient, acceleration: Gradient, dt: float) -> Gradient:

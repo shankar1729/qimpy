@@ -14,13 +14,17 @@ def main() -> None:
     # Callback function to analyze trajectory:
     def analyze(dynamics: qp.geometry.Dynamics, i_iter: int) -> None:
         energies.append(float(dynamics.system.energy))
-        volumes.append(dynamics.system.lattice.volume)
+        volumes.append(dynamics.system.lattice.volume / Unit.MAP["Angstrom"] ** 3)
+        pressures.append(Unit.convert(dynamics.P, "bar").value)
+        temperatures.append(Unit.convert(dynamics.T, "K").value)
 
     energies = []  # to be populated by analyze()
     volumes = []  # to be populated by analyze()
+    pressures = []  # to be populated by analyze()
+    temperatures = []  # to be populated by analyze()
     ps_path = "../../../../../JDFTx/build_testing/pseudopotentials/SG15"
     system = qp.System(
-        lattice=dict(system="cubic", a=float(Unit(5.43, "Å")), movable=False),
+        lattice=dict(system="cubic", a=float(Unit(5.43, "Å")), compute_stress=True),
         ions=dict(
             pseudopotentials=os.path.join(ps_path, "$ID_ONCV_PBE.upf"),
             coordinates=[
@@ -43,7 +47,7 @@ def main() -> None:
         geometry=dict(
             dynamics=dict(
                 dt=float(Unit(2.0, "fs")),
-                n_steps=100,
+                n_steps=10,
                 thermostat="berendsen",
                 t_damp_T=Unit(10, "fs"),
                 report_callback=analyze,
@@ -55,18 +59,18 @@ def main() -> None:
     qp.utils.StopWatch.print_stats()
 
     if qp.rc.is_head:
-        # Visualize trajectory:
-        plt.figure()
-        plt.xlabel("Time step")
-        plt.ylabel("Energy [$E_h$]")
-        plt.plot(energies)
-        plt.savefig("energy.pdf", bbox_inches="tight")
-
-        plt.figure()
-        plt.xlabel("Time step")
-        plt.ylabel("Volume [$a_0^3$]")
-        plt.plot(volumes)
-        plt.savefig("volume.pdf", bbox_inches="tight")
+        # Visualize trajectory properties:
+        for quantity, ylabel, filename in (
+            (energies, "Energy [$E_h$]", "energy.pdf"),
+            (volumes, r"Volume [$\AA^3$]", "volume.pdf"),
+            (pressures, "$P$ [bar]", "pressure.pdf"),
+            (temperatures, "$T$ [K]", "temperature.pdf"),
+        ):
+            plt.figure()
+            plt.xlabel("Time step")
+            plt.ylabel(ylabel)
+            plt.plot(quantity)
+            plt.savefig(filename, bbox_inches="tight")
         plt.show()
 
 

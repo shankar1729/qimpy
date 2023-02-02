@@ -71,7 +71,7 @@ class Stepper:
         else:
             return system.energy, None
 
-    def report(self) -> None:
+    def report(self, total_stress: Optional[torch.Tensor] = None) -> None:
         system = self.system
         ions = system.ions
         electrons = system.electrons
@@ -84,6 +84,8 @@ class Stepper:
         ions.report(report_grad=True)  # positions, forces, Lowdin Q/M
         if system.lattice.compute_stress:
             system.lattice.report(report_grad=True)  # lattice, stress
+            if total_stress is not None:  # total stress including kinetic contributions
+                qp.log.info(f"Stress+kinetic [Eh/a0^3]:\n{qp.utils.fmt(total_stress)}")
             qp.log.info(f"Strain:\n{qp.utils.fmt(self.strain)}")
             qp.log.info("")
 
