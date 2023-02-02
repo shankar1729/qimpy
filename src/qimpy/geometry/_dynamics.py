@@ -133,7 +133,7 @@ class Dynamics(qp.TreeNode):
 
     def thermal_velocities(self, T: float, seed: int) -> torch.Tensor:
         """Thermal velocity distribution at `T`, randomized with `seed`."""
-        generator = torch.Generator()
+        generator = torch.Generator(device=qp.rc.device)
         generator.manual_seed(seed)
         velocities = (
             torch.randn(
