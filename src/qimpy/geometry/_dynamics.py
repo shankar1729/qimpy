@@ -23,6 +23,7 @@ class Dynamics(qp.TreeNode):
     dt: float  #: Time step
     n_steps: int  #: Number of MD steps
     thermostat: Thermostat  #: Thermostat/barostat method
+    seed: int  #: Random seed for initial velocities
     T0: float  #: Initial temperature / temperature set point
     P0: Optional[float]  #: Pressure set point
     stress0: Optional[Union[np.ndarray, torch.Tensor]]  #: Stress set point
@@ -44,6 +45,7 @@ class Dynamics(qp.TreeNode):
         dt: float,
         n_steps: int,
         thermostat: Union[Thermostat, dict, str, None] = None,
+        seed: int = 1234,
         T0: UnitOrFloat = Unit(298.0, "K"),
         P0: Optional[float] = None,
         stress0: Optional[Union[np.ndarray, torch.Tensor]] = None,
@@ -67,6 +69,8 @@ class Dynamics(qp.TreeNode):
             :yaml:`Thermostat/barostat method.`
             Specify name of thermostat eg. 'nose-hoover' if using default options
             for that thermostat method, and dictionary of parameters if not.
+        seed
+            :yaml:`Random seed for initial velocities.`
         T0
             :yaml:`Initial temperature / temperature set point.`
         P0
@@ -88,6 +92,7 @@ class Dynamics(qp.TreeNode):
         self.comm = comm
         self.dt = dt
         self.n_steps = n_steps
+        self.seed = seed
         self.T0 = float(T0)
         self.P0 = P0
         self.stress0 = stress0
@@ -105,6 +110,8 @@ class Dynamics(qp.TreeNode):
         self.stepper = Stepper(self.system, drag_wavefunctions=self.drag_wavefunctions)
 
         # Initial velocity and acceleration:
+        if not self.system.ions.velocities.norm().item():  # velocities not read in
+            self.system.ions.velocities = self.thermal_velocities(self.T0, self.seed)
         velocity = Gradient(ions=self.system.ions.velocities)
         acceleration = self.get_acceleration()
 
@@ -123,6 +130,25 @@ class Dynamics(qp.TreeNode):
 
             # Second half-step velocity update
             velocity = self.thermostat.step(velocity, acceleration, 0.5 * self.dt)
+
+    def thermal_velocities(self, T: float, seed: int) -> torch.Tensor:
+        """Thermal velocity distribution at `T`, randomized with `seed`."""
+        generator = torch.Generator()
+        generator.manual_seed(seed)
+        velocities = (
+            torch.randn(
+                *self.system.ions.velocities.shape,
+                generator=generator,
+                device=qp.rc.device,
+            )
+            / self.masses.sqrt()
+        )
+        self.comm.Bcast(qp.utils.BufferView(velocities))
+        # TODO: account for center of mass, constraints
+        # Normalize to set temperature:
+        T_current = self.get_T(self.get_KE(velocities))
+        velocities *= np.sqrt(T / T_current)
+        return velocities
 
     def get_acceleration(self) -> Gradient:
         """Obtain forces using the stepper and calculate accelerations."""
