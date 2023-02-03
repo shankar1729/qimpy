@@ -51,57 +51,18 @@ class Coulomb:
             1.0 / 6
         )
 
-        # Compute Ewald real and reciprocal meshes:
-        def get_mesh(
-            Rbasis: torch.Tensor,
-            Gbasis: torch.Tensor,
-            sigma: float,
-            include_margin: bool,
-            exclude_zero: bool,
-        ) -> torch.Tensor:
-            """Create mesh that includes all non-zero terms based on sigma,
-            optionally including a margin of 1 in grid units,
-            and optionaly excluding the zero (origin) point"""
-            Rcut = qp.grid.N_SIGMAS_PER_WIDTH * sigma
-            # Create parallelopiped mesh:
-            RlengthInv = Gbasis.norm(dim=0).to(qp.rc.cpu) / (2 * np.pi)
-            Ncut = 1 + torch.ceil(Rcut * RlengthInv).to(torch.int)
-            iRgrids = [
-                torch.arange(-N, N + 1, device=qp.rc.device, dtype=torch.double)
-                for N in Ncut
-            ]
-            iR = (
-                torch.stack(torch.meshgrid(*tuple(iRgrids), indexing="ij")).flatten(1).T
-            )
-            if exclude_zero:
-                iR = iR[torch.where(iR.abs().sum(dim=-1))[0]]
-            # Add margin mesh:
-            marginGrid = torch.tensor(
-                [-1, +1] if include_margin else [0], device=qp.rc.device
-            )
-            iMargin = (
-                torch.stack(torch.meshgrid([marginGrid] * 3, indexing="ij"))
-                .flatten(1)
-                .T
-            )
-            iRmargin = iR[None, ...] + iMargin[:, None, :]
-            # Select points within Rcut (including margin):
-            RmagMin = (iRmargin @ Rbasis.T).norm(dim=-1).min(dim=0)[0]
-            return iR[torch.where(RmagMin <= Rcut)[0]]
-
-        # --- real-space mesh
+        # Create real and reciprocal space meshes:
         self.iR = get_mesh(
+            self.sigma,
             lattice.Rbasis,
             lattice.Gbasis,
-            self.sigma,
             include_margin=True,
             exclude_zero=False,
         )
-        # --- reciprocal space mesh (flip R <-> G, sigma <-> 1/sigma)
         self.iG = get_mesh(
-            lattice.Gbasis,
-            lattice.Rbasis,
-            1.0 / self.sigma,
+            1.0 / self.sigma,  # flip sigma <-> 1/sigma for reciprocal
+            lattice.Gbasis,  # fli R <-> G for reciprocal
+            lattice.Rbasis,  # flip R <-> G for reciprocal
             include_margin=False,
             exclude_zero=True,
         )
@@ -222,3 +183,41 @@ class Coulomb:
             )
             lattice.grad -= Erecip * torch.eye(3, device=Z.device)
         return E
+
+
+# Compute Ewald real and reciprocal meshes:
+def get_mesh(
+    sigma: float,
+    Rbasis: torch.Tensor,
+    Gbasis: torch.Tensor,
+    include_margin: bool,
+    exclude_zero: bool,
+) -> torch.Tensor:
+    """Create mesh to cover non-negligible terms of Gaussian with width `sigma`.
+    The mesh is integral in the coordinates specified by `Rbasis`,
+    with `Gbasis` being the corresponding reciprocal basis.
+    Negligible is defined at double precision using `qp.grid.N_SIGMAS_PER_WIDTH`.
+    Optionally, include a margin of 1 in grid units if `include_margin`.
+    Optionally, exclude the zero (origin) point if `exclude_zero`."""
+    Rcut = qp.grid.N_SIGMAS_PER_WIDTH * sigma
+
+    # Create parallelopiped mesh:
+    RlengthInv = Gbasis.norm(dim=0).to(qp.rc.cpu) / (2 * np.pi)
+    Ncut = 1 + torch.ceil(Rcut * RlengthInv).to(torch.int)
+    iRgrids = tuple(
+        torch.arange(-N, N + 1, device=qp.rc.device, dtype=torch.double) for N in Ncut
+    )
+    iR = torch.stack(torch.meshgrid(*iRgrids, indexing="ij")).flatten(1).T
+    if exclude_zero:
+        iR = iR[torch.where(iR.abs().sum(dim=-1))[0]]
+
+    # Add margin mesh:
+    marginGrid = torch.tensor(
+        [-1, 0, +1] if include_margin else [0], device=qp.rc.device
+    )
+    iMargin = torch.stack(torch.meshgrid([marginGrid] * 3, indexing="ij")).flatten(1).T
+    iRmargin = iR[None, ...] + iMargin[:, None, :]
+
+    # Select points within Rcut (including margin):
+    RmagMin = (iRmargin @ Rbasis.T).norm(dim=-1).min(dim=0)[0]
+    return iR[torch.where(RmagMin <= Rcut)[0]]
