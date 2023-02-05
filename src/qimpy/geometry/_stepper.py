@@ -11,6 +11,7 @@ class Stepper:
     system: qp.System  #: System being optimized currently
     invRbasis0: torch.Tensor  #: Initial lattice vectors inverse (used to define strain)
     drag_wavefunctions: bool  #: Whether to drag atomic components of wavefunctions
+    isotropic: bool  #: Whether to force lattice changes to be isotropic (NPT mode)
     _lowdin: Optional[qp.ions.Lowdin]  #: Lowdin and wavefunction drag shared data
 
     def __init__(
@@ -18,9 +19,11 @@ class Stepper:
         system: qp.System,
         *,
         drag_wavefunctions: bool = True,
+        isotropic: bool = False,
     ) -> None:
         self.system = system
         self.drag_wavefunctions = drag_wavefunctions
+        self.isotropic = isotropic
         self.invRbasis0 = system.lattice.invRbasis
         self._lowdin = None
 
@@ -98,6 +101,9 @@ class Stepper:
         """Impose fixed atom / lattice direction constraints."""
         self.symmetrize_(v)
         v.ions -= v.ions.mean(dim=0)
+        if self.isotropic and (v.lattice is not None):
+            isotropic_strain = torch.trace(v.lattice) / 3.0
+            v.lattice = isotropic_strain * torch.eye(3, device=qp.rc.device)
         self.symmetrize_(v)
         return v
 

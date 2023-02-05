@@ -103,7 +103,11 @@ class Dynamics(qp.TreeNode):
             self.stress0 = -float(P0) * torch.eye(3, device=qp.rc.device)
         else:
             self.isotropic = False
-            self.stress0 = torch.tensor(stress0)
+            self.stress0 = (
+                stress0
+                if isinstance(stress0, torch.Tensor)
+                else torch.tensor(stress0, device=qp.rc.device)
+            )
             assert self.stress0.shape == (3, 3)
         self.t_damp_T = float(t_damp_T)
         self.t_damp_P = float(t_damp_P)
@@ -116,7 +120,11 @@ class Dynamics(qp.TreeNode):
     def run(self, system: qp.System) -> None:
         self.system = system
         self.masses = Dynamics.get_masses(system.ions)
-        self.stepper = Stepper(self.system, drag_wavefunctions=self.drag_wavefunctions)
+        self.stepper = Stepper(
+            self.system,
+            drag_wavefunctions=self.drag_wavefunctions,
+            isotropic=self.isotropic,
+        )
 
         # Initial velocity and acceleration:
         if not self.system.ions.velocities.norm().item():  # velocities not read in
@@ -132,6 +140,7 @@ class Dynamics(qp.TreeNode):
 
             # First half-step velocity update
             velocity = self.thermostat.step(velocity, acceleration, 0.5 * self.dt)
+            velocity = self.stepper.constrain(velocity)
 
             # Position and position-dependent acceleration update
             self.stepper.step(velocity, self.dt)
@@ -139,6 +148,7 @@ class Dynamics(qp.TreeNode):
 
             # Second half-step velocity update
             velocity = self.thermostat.step(velocity, acceleration, 0.5 * self.dt)
+            velocity = self.stepper.constrain(velocity)
 
     def thermal_velocities(self, T: float, seed: int) -> torch.Tensor:
         """Thermal velocity distribution at `T`, randomized with `seed`."""

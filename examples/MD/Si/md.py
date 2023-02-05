@@ -48,8 +48,10 @@ def main() -> None:
             dynamics=dict(
                 dt=float(Unit(2.0, "fs")),
                 n_steps=100,
+                stress0=torch.eye(3) * float(Unit(1.0, "bar")),
                 thermostat=dict(berendsen=dict(B0=Unit(95, "GPa"))),
                 t_damp_T=Unit(10, "fs"),
+                t_damp_P=Unit(20, "fs"),
                 report_callback=analyze,
             ),
         ),
