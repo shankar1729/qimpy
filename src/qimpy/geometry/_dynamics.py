@@ -129,8 +129,9 @@ class Dynamics(qp.TreeNode):
         # Initial velocity and acceleration:
         if not self.system.ions.velocities.norm().item():  # velocities not read in
             self.system.ions.velocities = self.thermal_velocities(self.T0, self.seed)
-        velocity = Gradient(ions=self.system.ions.velocities)
+        velocity = self.create_gradient(self.system.ions.velocities)
         acceleration = self.get_acceleration()
+        thermostat_method = self.thermostat.method
 
         # MD loop
         for i_iter in range(self.n_steps + 1):
@@ -139,7 +140,7 @@ class Dynamics(qp.TreeNode):
                 break
 
             # First half-step velocity update
-            velocity = self.thermostat.step(velocity, acceleration, 0.5 * self.dt)
+            velocity = thermostat_method.step(velocity, acceleration, 0.5 * self.dt)
             velocity = self.stepper.constrain(velocity)
 
             # Position and position-dependent acceleration update
@@ -147,7 +148,7 @@ class Dynamics(qp.TreeNode):
             acceleration = self.get_acceleration()
 
             # Second half-step velocity update
-            velocity = self.thermostat.step(velocity, acceleration, 0.5 * self.dt)
+            velocity = thermostat_method.step(velocity, acceleration, 0.5 * self.dt)
             velocity = self.stepper.constrain(velocity)
 
     def thermal_velocities(self, T: float, seed: int) -> torch.Tensor:
@@ -163,7 +164,7 @@ class Dynamics(qp.TreeNode):
             / self.masses.sqrt()
         )
         self.comm.Bcast(qp.utils.BufferView(velocities))
-        # TODO: account for center of mass, constraints
+        # TODO: account for constraints
         # Normalize to set temperature:
         T_current = self.get_T(self.get_KE(velocities))
         velocities *= np.sqrt(T / T_current)
@@ -173,11 +174,7 @@ class Dynamics(qp.TreeNode):
         """Acceleration due to ionic forces."""
         energy, gradient = self.stepper.compute(require_grad=True)
         assert gradient is not None
-        lattice = self.system.lattice
-        return Gradient(
-            ions=(-gradient.ions / self.masses),
-            lattice=(torch.zeros_like(lattice.Rbasis) if lattice.movable else None),
-        )
+        return self.create_gradient(-gradient.ions / self.masses)
 
     def report(self, i_iter: int, velocity: Gradient) -> None:
         # Update velocity-dependent quantities:
@@ -236,3 +233,12 @@ class Dynamics(qp.TreeNode):
     def nDOF(self) -> int:
         """Number of degrees of freedom in the dynamics."""
         return 3 * len(self.masses) - 3  # TODO: account for constraints
+
+    def create_gradient(self, ions: torch.Tensor) -> Gradient:
+        """Create gradient from ionic part, initializing optional parts correctly."""
+        gradient = Gradient(ions=ions)
+        lattice_movable = self.system.lattice.movable
+        if lattice_movable:
+            gradient.lattice = torch.zeros((3, 3), device=qp.rc.device)
+        self.thermostat.method.initialize_gradient(gradient, lattice_movable)
+        return gradient

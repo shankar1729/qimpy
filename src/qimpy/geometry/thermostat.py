@@ -20,7 +20,7 @@ __all__ = [
 class Thermostat(qp.TreeNode):
     """Select between possible geometry actions."""
 
-    thermostat_method: ThermostatMethod
+    method: ThermostatMethod
 
     def __init__(
         self,
@@ -49,7 +49,7 @@ class Thermostat(qp.TreeNode):
         super().__init__()
         ChildOptions = qp.TreeNode.ChildOptions
         self.add_child_one_of(
-            "thermostat_method",
+            "method",
             checkpoint_in,
             ChildOptions("nve", NVE, nve, dynamics=dynamics),
             ChildOptions("nose_hoover", NoseHoover, nose_hoover, dynamics=dynamics),
@@ -58,16 +58,16 @@ class Thermostat(qp.TreeNode):
             have_default=True,
         )
 
-    def step(self, velocity: Gradient, acceleration: Gradient, dt: float) -> Gradient:
-        """Return velocity after `dt`, given current `velocity` and `acceleration`."""
-        return self.thermostat_method.step(velocity, acceleration, dt)
-
 
 class ThermostatMethod(Protocol):
     """Class requirements to use as a thermostat method."""
 
     def step(self, velocity: Gradient, acceleration: Gradient, dt: float) -> Gradient:
         """Return velocity after `dt`, given current `velocity` and `acceleration`."""
+        ...
+
+    def initialize_gradient(self, gradient: Gradient, lattice_movable: bool) -> None:
+        """Initialize optional terms in `gradient` needed by this thermostat to zero."""
         ...
 
 
@@ -88,6 +88,9 @@ class NVE(qp.TreeNode):
     def step(self, velocity: Gradient, acceleration: Gradient, dt: float) -> Gradient:
         """Return velocity after `dt`, given current `velocity` and `acceleration`."""
         return velocity + acceleration * dt
+
+    def initialize_gradient(self, gradient: Gradient, lattice_movable: bool) -> None:
+        """No optional `gradient` terms for this thermostat method."""
 
 
 class NoseHoover(qp.TreeNode):
@@ -124,6 +127,12 @@ class NoseHoover(qp.TreeNode):
     def step(self, velocity: Gradient, acceleration: Gradient, dt: float) -> Gradient:
         """Return velocity after `dt`, given current `velocity` and `acceleration`."""
         raise NotImplementedError
+
+    def initialize_gradient(self, gradient: Gradient, lattice_movable: bool) -> None:
+        """Initialize `thermostat` and, if needed, `barostat` terms in `gradient`."""
+        gradient.thermostat = torch.zeros(self.chain_length_T, device=qp.rc.device)
+        if lattice_movable:
+            gradient.barostat = torch.zeros(self.chain_length_P, device=qp.rc.device)
 
 
 class Berendsen(qp.TreeNode):
@@ -173,6 +182,9 @@ class Berendsen(qp.TreeNode):
         """Return velocity after `dt`, given current `velocity` and `acceleration`."""
         return second_order_step(velocity, acceleration, self.extra_acceleration, dt)
 
+    def initialize_gradient(self, gradient: Gradient, lattice_movable: bool) -> None:
+        """No optional `gradient` terms for this thermostat method."""
+
 
 class Langevin(qp.TreeNode):
     """Langevin stochastic thermostat and/or barostat."""
@@ -204,6 +216,9 @@ class Langevin(qp.TreeNode):
         return second_order_step(
             velocity, acceleration + acceleration_noise, self.extra_acceleration, dt
         )
+
+    def initialize_gradient(self, gradient: Gradient, lattice_movable: bool) -> None:
+        """No optional `gradient` terms for this thermostat method."""
 
 
 def second_order_step(
