@@ -25,8 +25,8 @@ class Dynamics(qp.TreeNode):
     thermostat: Thermostat  #: Thermostat/barostat method
     seed: int  #: Random seed for initial velocities
     T0: float  #: Initial temperature / temperature set point
-    P0: Optional[float]  #: Pressure set point
-    stress0: Optional[Union[np.ndarray, torch.Tensor]]  #: Stress set point
+    stress0: torch.Tensor  #: Stress set point (used only if `lattice.movable`)
+    isotropic: bool  #: Whether lattice change is isotropic (NPT, vs. N-stress-T mode)
     t_damp_T: float  #: Thermostat damping time
     t_damp_P: float  #: Barostat damping time
     B0: float  #: Characteristic bulk modulus for Berendsen barostat
@@ -47,7 +47,7 @@ class Dynamics(qp.TreeNode):
         thermostat: Union[Thermostat, dict, str, None] = None,
         seed: int = 1234,
         T0: UnitOrFloat = Unit(298.0, "K"),
-        P0: Optional[float] = None,
+        P0: UnitOrFloat = Unit(1.0, "bar"),
         stress0: Optional[Union[np.ndarray, torch.Tensor]] = None,
         t_damp_T: UnitOrFloat = Unit(50.0, "fs"),
         t_damp_P: UnitOrFloat = Unit(100.0, "fs"),
@@ -74,9 +74,13 @@ class Dynamics(qp.TreeNode):
         T0
             :yaml:`Initial temperature / temperature set point.`
         P0
-            :yaml:`Pressure set point.`
+            :yaml:`Pressure set point for NPT, if lattice.movable is True.`
+            Note that this is overridden by `stress0`, if that is specified.
         stress0
-            :yaml:`Stressthermostat method set point.`
+            :yaml:`Stress set point for N-stress-T, if lattice.movable is True.`
+            If specified and lattice.movable, strain tensor will fluctuate
+            during dynamics, instead of only volume in NPT mode.
+            (Set to None and specify `P0` instead for NPT mode.)
         t_damp_T
             :yaml:`Thermostat damping time.`
         t_damp_P
@@ -94,8 +98,13 @@ class Dynamics(qp.TreeNode):
         self.n_steps = n_steps
         self.seed = seed
         self.T0 = float(T0)
-        self.P0 = P0
-        self.stress0 = stress0
+        if stress0 is None:
+            self.isotropic = True
+            self.stress0 = -float(P0) * torch.eye(3, device=qp.rc.device)
+        else:
+            self.isotropic = False
+            self.stress0 = torch.tensor(stress0)
+            assert self.stress0.shape == (3, 3)
         self.t_damp_T = float(t_damp_T)
         self.t_damp_P = float(t_damp_P)
         self.drag_wavefunctions = drag_wavefunctions
@@ -151,13 +160,18 @@ class Dynamics(qp.TreeNode):
         return velocities
 
     def get_acceleration(self) -> Gradient:
-        """Obtain forces using the stepper and calculate accelerations."""
+        """Acceleration due to ionic forces."""
         energy, gradient = self.stepper.compute(require_grad=True)
         assert gradient is not None
-        return Gradient(ions=(-gradient.ions / self.masses))
+        lattice = self.system.lattice
+        return Gradient(
+            ions=(-gradient.ions / self.masses),
+            lattice=(torch.zeros_like(lattice.Rbasis) if lattice.movable else None),
+        )
 
     def report(self, i_iter: int, velocity: Gradient) -> None:
         # Update velocity-dependent quantities:
+        self.system.ions.velocities = velocity.ions
         self.KE = self.get_KE(velocity.ions)
         self.T = self.get_T(self.KE)
         self.stress = self.get_stress(velocity.ions)
@@ -192,7 +206,7 @@ class Dynamics(qp.TreeNode):
         kinetic_stress = (-1.0 / lattice.volume) * torch.einsum(
             "a, ai, aj -> ij", self.masses.squeeze(), velocity, velocity
         )
-        return kinetic_stress + self.system.lattice.stress
+        return kinetic_stress + self.system.lattice.stress.detach()
 
     @staticmethod
     def get_pressure(stress: Optional[torch.Tensor]) -> Optional[float]:

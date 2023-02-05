@@ -146,6 +146,10 @@ class Berendsen(qp.TreeNode):
 
         B0
             :yaml:`Characteristic bulk modulus for Berendsen barostat.`
+            Default value corresponds to water, which should be acceptable for
+            typical liquid simulations, but maybe too small for most solids.
+            Make sure to set correct order of magnitude of `B0` in order for
+            pressure to be equilibrated on the expected `t_damp_P` time scale.
         """
         super().__init__()
         self.dynamics = dynamics
@@ -156,7 +160,14 @@ class Berendsen(qp.TreeNode):
         dynamics = self.dynamics
         T = dynamics.get_T(dynamics.get_KE(velocity.ions))
         gamma = 0.5 * (T / dynamics.T0 - 1.0) / dynamics.t_damp_T
-        return Gradient(ions=(-gamma * velocity.ions))  # TODO: barostat contributions
+        acceleration = Gradient(ions=(-gamma * velocity.ions))
+        # Optional barostat contributions:
+        if dynamics.system.lattice.movable:
+            dstress = dynamics.stress0 - dynamics.get_stress(velocity.ions)
+            velocity.lattice = dstress / (dynamics.t_damp_P * self.B0)
+            acceleration.ions -= velocity.ions @ velocity.lattice.T
+            acceleration.lattice = torch.zeros_like(velocity.lattice)
+        return acceleration
 
     def step(self, velocity: Gradient, acceleration: Gradient, dt: float) -> Gradient:
         """Return velocity after `dt`, given current `velocity` and `acceleration`."""

@@ -24,7 +24,7 @@ def main() -> None:
     temperatures = []  # to be populated by analyze()
     ps_path = "../../../../../JDFTx/build_testing/pseudopotentials/SG15"
     system = qp.System(
-        lattice=dict(system="cubic", a=float(Unit(5.43, "Å")), compute_stress=True),
+        lattice=dict(system="cubic", a=float(Unit(5.43, "Å")), movable=True),
         ions=dict(
             pseudopotentials=os.path.join(ps_path, "$ID_ONCV_PBE.upf"),
             coordinates=[
@@ -48,7 +48,7 @@ def main() -> None:
             dynamics=dict(
                 dt=float(Unit(2.0, "fs")),
                 n_steps=100,
-                thermostat="berendsen",
+                thermostat=dict(berendsen=dict(B0=Unit(95, "GPa"))),
                 t_damp_T=Unit(10, "fs"),
                 report_callback=analyze,
             ),
