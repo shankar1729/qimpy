@@ -235,4 +235,4 @@ class Dynamics(qp.TreeNode):
     @property
     def nDOF(self) -> int:
         """Number of degrees of freedom in the dynamics."""
-        return 3 * len(self.masses)  # TODO: account for center of mass, constraints
+        return 3 * len(self.masses) - 3  # TODO: account for constraints
