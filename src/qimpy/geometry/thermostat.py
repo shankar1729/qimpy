@@ -158,7 +158,7 @@ class NoseHoover(qp.TreeNode):
             assert velocity.lattice is not None
             gamma_extra = torch.trace(velocity.lattice) / nDOF
             acceleration.ions -= velocity.ions * gamma_extra
-            acceleration.ions += velocity.ions @ velocity.lattice.T
+            acceleration.ions -= velocity.ions @ velocity.lattice.T
 
             # Lattice acceleration due to barostat coupling:
             omega_sq_L = (1.0 / dynamics.t_damp_P) ** 2
