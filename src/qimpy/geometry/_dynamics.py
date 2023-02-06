@@ -164,7 +164,7 @@ class Dynamics(qp.TreeNode):
             / self.masses.sqrt()
         )
         self.comm.Bcast(qp.utils.BufferView(velocities))
-        # TODO: account for constraints
+        velocities = self.stepper.constrain(self.create_gradient(velocities)).ions
         # Normalize to set temperature:
         T_current = self.get_T(self.get_KE(velocities))
         velocities *= np.sqrt(T / T_current)
