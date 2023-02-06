@@ -124,9 +124,64 @@ class NoseHoover(qp.TreeNode):
         self.chain_length_T = chain_length_T
         self.chain_length_P = chain_length_P
 
+    def extra_acceleration(self, velocity: Gradient) -> Gradient:
+        """Extra velocity-dependent acceleration due to thermostat/barostat."""
+        dynamics = self.dynamics
+        nDOF = dynamics.nDOF
+
+        # Damp ionic velocities due to thermostat coupling:
+        assert velocity.thermostat is not None
+        gamma = velocity.thermostat[0]
+        acceleration = dynamics.create_gradient(-gamma * velocity.ions)
+
+        # Coupling to previous thermostat DOF / system:
+        T = dynamics.get_T(dynamics.get_KE(velocity.ions))
+        omega_sq = (1.0 / dynamics.t_damp_T) ** 2
+        assert acceleration.thermostat is not None
+        acceleration.thermostat[0] = omega_sq * (T / dynamics.T0 - 1.0)
+        acceleration.thermostat[1] = nDOF * (velocity.thermostat[0] ** 2) - omega_sq
+        acceleration.thermostat[2:] = (velocity.thermostat[1:-1] ** 2) - omega_sq
+
+        # Coupling to next thermostat DOF:
+        acceleration.thermostat[:-1] -= (
+            velocity.thermostat[:-1] * velocity.thermostat[1:]
+        )
+
+        lattice = dynamics.system.lattice
+        if lattice.movable:
+            n_free_L = 1 if dynamics.isotropic else 3  # TODO: lattice constraint DOFs
+            nDOF_L = (n_free_L * (n_free_L + 1)) // 2
+
+            # Ionic acceleration due to strain rate:
+            assert velocity.lattice is not None
+            gamma_extra = torch.trace(velocity.lattice) / nDOF
+            acceleration.ions -= velocity.ions * gamma_extra
+            acceleration.ions += velocity.ions @ velocity.lattice.T
+
+            # Lattice acceleration due to barostat coupling:
+            omega_sq_L = (1.0 / dynamics.t_damp_P) ** 2
+            dstress = dynamics.stress0 - dynamics.get_stress(velocity.ions)
+            assert velocity.barostat is not None
+            acceleration.lattice = (omega_sq_L / ((nDOF + n_free_L) * dynamics.T0)) * (
+                lattice.volume * dstress + T * torch.eye(3, device=qp.rc.device)
+            ) - velocity.barostat[0] * velocity.lattice
+
+            # Coupling to previous barostat DOF / system:
+            assert acceleration.barostat is not None
+            acceleration.barostat[0] = (
+                (nDOF + n_free_L) / nDOF_L
+            ) * velocity.lattice.square().sum() - omega_sq_L
+            acceleration.barostat[1] = nDOF_L * (velocity.barostat[0] ** 2) - omega_sq_L
+            acceleration.barostat[2:] = (velocity.barostat[1:-1] ** 2) - omega_sq_L
+
+            # Coupling to next barostat DOF:
+            acceleration.barostat[:-1] -= velocity.barostat[:-1] * velocity.barostat[1:]
+
+        return acceleration
+
     def step(self, velocity: Gradient, acceleration: Gradient, dt: float) -> Gradient:
         """Return velocity after `dt`, given current `velocity` and `acceleration`."""
-        raise NotImplementedError
+        return second_order_step(velocity, acceleration, self.extra_acceleration, dt)
 
     def initialize_gradient(self, gradient: Gradient, lattice_movable: bool) -> None:
         """Initialize `thermostat` and, if needed, `barostat` terms in `gradient`."""
@@ -165,7 +220,7 @@ class Berendsen(qp.TreeNode):
         self.B0 = float(B0)
 
     def extra_acceleration(self, velocity: Gradient) -> Gradient:
-        """Extra velocity-dependent acceleration due to thermostat."""
+        """Extra velocity-dependent acceleration due to thermostat/barostat."""
         dynamics = self.dynamics
         T = dynamics.get_T(dynamics.get_KE(velocity.ions))
         gamma = 0.5 * (T / dynamics.T0 - 1.0) / dynamics.t_damp_T
