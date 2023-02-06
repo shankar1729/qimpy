@@ -127,7 +127,7 @@ class Dynamics(qp.TreeNode):
         )
 
         # Initial velocity and acceleration:
-        if not self.system.ions.velocities.norm().item():  # velocities not read in
+        if self.system.ions.velocities is None:  # velocities not read in
             self.system.ions.velocities = self.thermal_velocities(self.T0, self.seed)
         velocity = self.create_gradient(self.system.ions.velocities)
         acceleration = self.get_acceleration()
@@ -157,7 +157,7 @@ class Dynamics(qp.TreeNode):
         generator.manual_seed(seed)
         velocities = (
             torch.randn(
-                *self.system.ions.velocities.shape,
+                *self.system.ions.positions.shape,
                 generator=generator,
                 device=qp.rc.device,
             )

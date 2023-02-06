@@ -26,7 +26,7 @@ class Ions(qp.TreeNode):
     slices: list[slice]  #: slice to get each ion type
     pseudopotentials: list[qp.ions.Pseudopotential]  #: pseudopotential for each type
     positions: torch.Tensor  #: fractional positions of each ion (n_ions x 3)
-    velocities: torch.Tensor  #: Cartesian velocities of each ion (n_ions x 3)
+    velocities: Optional[torch.Tensor]  #: Cartesian velocities of each ion (n_ions x 3)
     types: torch.Tensor  #: type of each ion (n_ions, int)
     Q: Optional[torch.Tensor]  #: initial / Lowdin charge (oxidation state) for each ion
     M: Optional[torch.Tensor]  #: initial / Lowdin magnetic moment for each ion
@@ -69,9 +69,10 @@ class Ions(qp.TreeNode):
             Note that positions in memory and checkpoint files are always fractional.
         coordinates
             :yaml:`List of [symbol, x, y, z, args] for each ion in unit cell.`
-            Here, symbol is the chemical symbol of the element,
-            x, y and z are in the selected coordinate system.
-            Optional args is a dictionary of additional per-ion
+            Here, `symbol` is the chemical symbol of the element, while
+            `x`, `y` and `z` are positions in fractional or Cartesian
+            coordinates for `fractional` = True or False respectively.
+            Optional `args` is a dictionary of additional per-ion
             parameters that may include:
 
                 * `Q`: initial oxidation state / charge for the ion.
@@ -82,6 +83,7 @@ class Ions(qp.TreeNode):
                   is spinorial. Only specify in spin-polarized calculations.
                   This can be used to tune initial magnetization for LCAO,
                   or to specify magnetic order for symmetry detection.
+                * `v`: initial velocities [vx, vy, vz] in Cartesian coordinates.
                 * Relaxation constraints: TODO
 
             Ions of the same type (symbol) must be specified consecutively.
@@ -109,6 +111,7 @@ class Ions(qp.TreeNode):
         self.slices = []  # slice to get each ion type
         positions = []  # position of each ion
         types = []  # type of each ion (index into symbols)
+        velocities = []  # initial velocities
         Q_initial = []  # initial charge / oxidation states
         M_initial = []  # initial magnetic moments
         type_start = 0
@@ -134,6 +137,7 @@ class Ions(qp.TreeNode):
             # Add type and position of current ion:
             types.append(self.n_types - 1)
             positions.append([float(x) for x in coord[1:4]])
+            velocities.append(attrib.get("v", None))
             Q_initial.append(attrib.get("Q", None))
             M_initial.append(attrib.get("M", None))
             self.n_ions += 1
@@ -157,8 +161,18 @@ class Ions(qp.TreeNode):
         self.velocities = torch.zeros_like(self.positions)
         self.positions.grad = torch.full_like(self.positions, np.nan)
         self.types = torch.tensor(types, device=qp.rc.device, dtype=torch.long)
+        # --- Fill in missing velocities (if any specified):
+        if velocities.count(None) == self.n_ions:
+            self.velocities = None  # no velocities specified
+        else:
+            v_default = [0.0, 0.0, 0.0]
+            self.velocities = torch.tensor(
+                [(v_default if (v is None) else v) for v in velocities],
+                device=qp.rc.device,
+                dtype=torch.double,
+            )
         # --- Fill in missing oxidation states (if any specified):
-        if Q_initial.count(None) == len(Q_initial):
+        if Q_initial.count(None) == self.n_ions:
             self.Q = None  # no charge specified
         else:
             self.Q = torch.tensor(
@@ -249,13 +263,17 @@ class Ions(qp.TreeNode):
             .numpy()
         )
         types = self.types.to(qp.rc.cpu).numpy()
+        v = None if (self.velocities is None) else self.velocities.to(qp.rc.cpu).numpy()
         Q = None if (self.Q is None) else self.Q.to(qp.rc.cpu).numpy()
         M = None if (self.M is None) else self.M.to(qp.rc.cpu).numpy()
-        any_attribs = not ((Q is None) and (M is None))
+        any_attribs = not ((v is None) and (Q is None) and (M is None))
         for i_ion, (pos_x, pos_y, pos_z) in enumerate(positions):
             if any_attribs:
                 # Generate attribute string:
                 attribs = {}
+                if v is not None:
+                    vx, vy, vz = v[i_ion]
+                    attribs["v"] = f"[{vx:+.3e}, {vy:+.3e}, {vz:+.3e}]"
                 if Q is not None:
                     attribs["Q"] = f"{Q[i_ion]:+.5f}"
                 if M is not None:
