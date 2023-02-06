@@ -52,6 +52,8 @@ class ConvergenceCheck(Deque[bool]):
     def check(self, v: float) -> bool:
         """Return if converged, given latest quantity `v` to check."""
         self.append(abs(v) < self.threshold)
+        if len(self) < self.n_check:
+            return False  # not enough data to pass yet
         return all(converged for converged in self)
 
 
