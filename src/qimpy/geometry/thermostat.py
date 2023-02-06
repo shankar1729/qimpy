@@ -121,6 +121,8 @@ class NoseHoover(qp.TreeNode):
         """
         super().__init__()
         self.dynamics = dynamics
+        assert chain_length_T >= 3
+        assert chain_length_P >= 3
         self.chain_length_T = chain_length_T
         self.chain_length_P = chain_length_P
 
