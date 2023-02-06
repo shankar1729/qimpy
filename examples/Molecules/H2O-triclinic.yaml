@@ -1,0 +1,28 @@
+lattice:
+  system: triclinic  # for low-symmetry test of force/strain transformations and transpose correctness
+  a: 20.
+  b: 15.
+  c: 18.
+  alpha: 80.
+  beta: 95.
+  gamma: 75.
+  compute-stress: yes
+
+ions:
+  pseudopotentials:
+    - ../../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
+  fractional: no
+  coordinates:
+    - [H, 0., -1.432, +0.6, {Q: 0.2}]
+    - [H, 0., +1.432, +0.6, {Q: 0.2}]
+    - [O, 0.,  0.000, -0.6, {Q: -0.4}]
+
+electrons:
+  basis:
+    real-wavefunctions: yes
+
+geometry:
+  relax:
+    n-iterations: 10
+
+checkpoint: null  # disable reading checkpoint

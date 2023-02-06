@@ -36,12 +36,11 @@ class Stepper:
                 self._lowdin = qp.ions.Lowdin(self.system.electrons.C)
             self._lowdin.remove_atomic_projections()
 
-        delta_positions = step_size * (direction.ions @ lattice.invRbasis)
+        delta_positions = step_size * (direction.ions @ lattice.invRbasis.T)
         self.system.ions.positions += delta_positions
         if lattice.movable:
             lattice.update(
-                Rbasis=lattice.Rbasis
-                + step_size * (direction.lattice @ lattice.Rbasis),
+                lattice.Rbasis + step_size * (direction.lattice @ lattice.Rbasis),
                 report_change=False,
             )
             self.system.coulomb.update_lattice_dependent(self.system.ions.n_ions)
