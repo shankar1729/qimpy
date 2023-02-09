@@ -172,7 +172,14 @@ class Symmetries(qp.TreeNode):
     ) -> list[int]:
         """Find indices of operations `(rot_in, trans_in)` within `(rot, trans)`.
         Raise KeyError if any operations are not found within specified `tolerance`."""
-        raise NotImplementedError
+        diff_mat = ((rot_in[:, None] - rot[None]) ** 2).sum(dim=(2, 3))
+        diff_mat += ((trans_in[:, None] - trans[None]) ** 2).sum(dim=2)
+        values, indices = diff_mat.min(dim=1)
+        indices_not_found = torch.where(values > tolerance**2)[0].tolist()
+        if indices_not_found:
+            raise KeyError(f"Overrides at indices {indices_not_found}")
+        assert len(torch.unique(indices)) == len(indices)  # Ensure no duplicates
+        return indices
 
     @staticmethod
     def check_group(rot: torch.Tensor, trans: torch.Tensor) -> None:

@@ -27,4 +27,6 @@ geometry:
 checkpoint: null  # disable reading checkpoint
 
 symmetries:
-  override: identity
+  override:
+    - [[1, 0, 0], [0, 1, 0], [0, 0, 1], [0.0, 0.0, 0.0]]
+    - [[1, 0, 0], [0, -1, 0], [0, 0, 1], [0.0, 0.0, 0.0]]
