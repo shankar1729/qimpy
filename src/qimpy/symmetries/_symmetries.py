@@ -1,6 +1,7 @@
 import qimpy as qp
 import numpy as np
 import torch
+from typing import Union
 from ._lattice import _get_lattice_point_group, _symmetrize_lattice, _symmetrize_matrix
 from ._ions import _get_space_group, _symmetrize_positions, _symmetrize_forces
 from ._grid import _check_grid_shape, _get_grid_shape
@@ -36,6 +37,7 @@ class Symmetries(qp.TreeNode):
         ions: qp.ions.Ions,
         axes: dict[str, np.ndarray] = {},
         tolerance: float = 1e-6,
+        override: Union[None, str, list, np.ndarray] = None,
     ) -> None:
         """Determine space group from `lattice` and `ions`.
 
@@ -43,6 +45,15 @@ class Symmetries(qp.TreeNode):
         ----------
         tolerance
             :yaml:`Threshold for detecting symmetries.`
+        override
+            :yaml:`Override with identity-only or manual list of operations.`
+            By default (`override` = None), use automatically-detected symmetries.
+            If `override` = 'identity', disable symmetries by only keeping identity.
+            Otherwise, specify a `N x 4 x 3` array or nested list of `N` operations,
+            each as a `4 x 3` matrix, where the first three rows are the rotation
+            `rot` and the final row is the translation `trans` of the space group
+            operation. The operations are specified in lattice coordinates, which
+            means that `rot` must be composed only of integers.
         """
         super().__init__()
         self.lattice = lattice
@@ -52,7 +63,22 @@ class Symmetries(qp.TreeNode):
         rot, trans, ion_map = Symmetries.detect(lattice, ions, axes, tolerance)
 
         # Down-select to manual symmetries (if any):
-        # TODO
+        if override is not None:
+            if isinstance(override, str):
+                assert override == "identity"
+                sel = [Symmetries.find_identity(rot, trans, tolerance)]
+            else:
+                ops = torch.tensor(override, device=qp.rc.device)
+                assert len(ops.shape) == 3
+                assert ops.shape[-2:] == (4, 3)
+                rot_in = ops[:, :3, :]
+                trans_in = ops[:, 3, :]
+                sel = Symmetries.find(rot, trans, rot_in, trans_in, tolerance)
+            qp.log.info(f"Override: {len(sel)} space-group symmetries")
+            rot = rot[sel]
+            trans = trans[sel]
+            ion_map = ion_map[sel]
+            Symmetries.check_group(rot, trans)
 
         # Set and enforce symmetries:
         self.rot = rot
@@ -79,7 +105,7 @@ class Symmetries(qp.TreeNode):
         lattice_sym = Symmetries.reduce_axes(lattice_sym, lattice, axes, tolerance)
         # Space group:
         rot, trans, ion_map = _get_space_group(lattice_sym, lattice, ions, tolerance)
-        qp.log.info(f"Found {rot.shape[0]} space-group symmetries with basis:")
+        qp.log.info(f"Found {rot.shape[0]} space-group symmetries with basis")
         return rot, trans, ion_map
 
     @staticmethod
@@ -105,9 +131,8 @@ class Symmetries(qp.TreeNode):
         for rot, trans in zip(
             self.rot.to(qp.rc.cpu, dtype=torch.int), self.trans.to(qp.rc.cpu)
         ):
-            row_strs = [qp.utils.fmt(row) for row in rot]
-            row_strs.append(qp.utils.fmt(trans))
-            qp.log.info(f"- {row_strs}")
+            rot_str = ", ".join(qp.utils.fmt(row) for row in rot)
+            qp.log.info(f"- [{rot_str}, {qp.utils.fmt(trans)}]")
         qp.log.debug("Ion map:\n" + qp.utils.fmt(self.ion_map))
 
     def enforce(self, lattice: qp.lattice.Lattice, ions: qp.ions.Ions) -> None:
@@ -136,6 +161,24 @@ class Symmetries(qp.TreeNode):
         id = torch.eye(3, device=qp.rc.device)
         inv_diff = ((rot + id) ** 2).sum(dim=(1, 2))
         return torch.where(inv_diff < tolerance**2)[0].tolist()
+
+    @staticmethod
+    def find(
+        rot: torch.Tensor,
+        trans: torch.Tensor,
+        rot_in: torch.Tensor,
+        trans_in: torch.Tensor,
+        tolerance: float,
+    ) -> list[int]:
+        """Find indices of operations `(rot_in, trans_in)` within `(rot, trans)`.
+        Raise KeyError if any operations are not found within specified `tolerance`."""
+        raise NotImplementedError
+
+    @staticmethod
+    def check_group(rot: torch.Tensor, trans: torch.Tensor) -> None:
+        """Check that operations `(rot, trans)` form a group.
+        Raises exceptions if any group condition not satisfied."""
+        raise NotImplementedError
 
     @property
     def rot_cart(self) -> torch.Tensor:

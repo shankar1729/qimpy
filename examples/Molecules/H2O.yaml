@@ -25,3 +25,6 @@ geometry:
     n-iterations: 10
 
 checkpoint: null  # disable reading checkpoint
+
+symmetries:
+  override: identity
