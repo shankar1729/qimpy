@@ -78,7 +78,7 @@ class Symmetries(qp.TreeNode):
             rot = rot[sel]
             trans = trans[sel]
             ion_map = ion_map[sel]
-            Symmetries.check_group(rot, trans)
+            Symmetries.check_group(rot, trans, tolerance)
 
         # Set and enforce symmetries:
         self.rot = rot
@@ -174,18 +174,35 @@ class Symmetries(qp.TreeNode):
         Raise KeyError if any operations are not found within specified `tolerance`."""
         diff_mat = ((rot_in[:, None] - rot[None]) ** 2).sum(dim=(2, 3))
         diff_mat += ((trans_in[:, None] - trans[None]) ** 2).sum(dim=2)
-        values, indices = diff_mat.min(dim=1)
-        indices_not_found = torch.where(values > tolerance**2)[0].tolist()
+        diff_min, indices = diff_mat.min(dim=1)
+        indices_not_found = torch.where(diff_min > tolerance**2)[0].tolist()
         if indices_not_found:
             raise KeyError(f"Overrides at indices {indices_not_found}")
         assert len(torch.unique(indices)) == len(indices)  # Ensure no duplicates
         return indices
 
     @staticmethod
-    def check_group(rot: torch.Tensor, trans: torch.Tensor) -> None:
+    def check_group(rot: torch.Tensor, trans: torch.Tensor, tolerance: float) -> None:
         """Check that operations `(rot, trans)` form a group.
         Raises exceptions if any group condition not satisfied."""
-        raise NotImplementedError
+        i_id = Symmetries.find_identity(rot, trans, tolerance)
+
+        # Construct multiplication of all pairs of operations:
+        rot_pair = torch.einsum("iab, jbc -> ijac", rot, rot)
+        trans_pair = torch.einsum("iab, jb -> ija", rot, trans) + trans[:, None, :]
+
+        # Map multiplication results back onto original:
+        diff_mat = ((rot_pair[:, :, None] - rot[None, None]) ** 2).sum(dim=(3, 4))
+        diff_mat += ((trans_pair[:, :, None] - trans[None, None]) ** 2).sum(dim=3)
+        diff_min, indices_pair = diff_mat.min(dim=2)
+        indices_not_found = torch.nonzero(diff_min > tolerance**2)
+        if len(indices_not_found) > 0:
+            raise KeyError(f"Group not closed for pairs {indices_not_found.tolist()}")
+
+        # Multiplication now closed (and associative by definition); check inverse:
+        inv_not_found = torch.nonzero(abs(indices_pair - i_id).min(dim=1)[0])
+        if len(inv_not_found) > 0:
+            raise KeyError(f"Group inverse not found for {inv_not_found.tolist()}")
 
     @property
     def rot_cart(self) -> torch.Tensor:

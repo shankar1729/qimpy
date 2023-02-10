@@ -25,8 +25,3 @@ geometry:
     n-iterations: 10
 
 checkpoint: null  # disable reading checkpoint
-
-symmetries:
-  override:
-    - [[1, 0, 0], [0, 1, 0], [0, 0, 1], [0.0, 0.0, 0.0]]
-    - [[1, 0, 0], [0, -1, 0], [0, 0, 1], [0.0, 0.0, 0.0]]
