@@ -5,6 +5,7 @@ import torch
 from typing import Union, Optional, Callable
 from qimpy.rc import MPI
 from ._stepper import Stepper
+from ._history import History
 from ._gradient import Gradient
 from .thermostat import Thermostat
 from qimpy.ions.symbols import ATOMIC_WEIGHTS, ATOMIC_NUMBERS
@@ -36,6 +37,7 @@ class Dynamics(qp.TreeNode):
     T: float  #: Current temperature
     KE: float  #: Current kinetic energy
     stress: Optional[torch.Tensor]  #: Current stress including kinetic contributions
+    history: Optional[History]  #: Utility to save trajectory data
     report_callback: Optional[Callable[[Dynamics, int], None]]  #: Callback from report
     checkpoint: Optional[qp.utils.Checkpoint]  #: Output checkpoint
 
@@ -53,6 +55,7 @@ class Dynamics(qp.TreeNode):
         t_damp_T: UnitOrFloat = Unit(50.0, "fs"),
         t_damp_P: UnitOrFloat = Unit(100.0, "fs"),
         drag_wavefunctions: bool = True,
+        save_history: bool = True,
         report_callback: Optional[Callable[[Dynamics, int], None]] = None,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
     ) -> None:
@@ -88,9 +91,14 @@ class Dynamics(qp.TreeNode):
             :yaml:`Barostat damping time.`
         drag_wavefunctions
             :yaml:`Whether to drag atomic components of wavefunctions.`
+        save_history
+            :yaml:`Whether to save history along the trajectory.`
+            Saved quantities include positions, forces, velocities, temperature,
+            pressure, potential and total stress (if available),
+            and lattice (if movable).
         report_callback
             Optional function to call at each step during `report`.
-            Use this to perform additional reportig / data collection.
+            Use this to perform additional reporting / data collection.
             The functional will be called as `report_callback(dynamics, i_iter)`.
         """
         super().__init__()
@@ -113,6 +121,10 @@ class Dynamics(qp.TreeNode):
         self.t_damp_T = float(t_damp_T)
         self.t_damp_P = float(t_damp_P)
         self.drag_wavefunctions = drag_wavefunctions
+        if save_history:
+            self.add_child("history", History, {}, checkpoint_in, comm=comm)
+        else:
+            self.history = None
         self.report_callback = report_callback
         self.checkpoint = None
         self.add_child(

@@ -123,8 +123,11 @@ class CpPath(NamedTuple):
     @property
     def attrs(self):
         """Access attributes at `path` within `checkpoint`."""
-        assert self.checkpoint is not None
-        return self.checkpoint[self.path].attrs
+        checkpoint, path = self
+        assert checkpoint is not None
+        if (path not in checkpoint) and checkpoint.writable:
+            checkpoint.create_group(path)
+        return checkpoint[path].attrs
 
 
 class CpContext(NamedTuple):

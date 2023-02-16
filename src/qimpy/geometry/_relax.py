@@ -6,6 +6,7 @@ from typing import Union, Optional
 from qimpy.rc import MPI
 from ._gradient import Gradient
 from ._stepper import Stepper
+from ._history import History
 
 
 class Relax(qp.utils.Minimize[Gradient]):
@@ -15,6 +16,7 @@ class Relax(qp.utils.Minimize[Gradient]):
 
     latticeK: float  #: Preconditioning factor of lattice relative to ions
     drag_wavefunctions: bool  #: Whether to drag atomic components of wavefunctions
+    history: Optional[History]  #: Utility to save trajectory data
     stepper: Stepper  #: Interface to move ions/lattice and compute forces/stress
     checkpoint: Optional[qp.utils.Checkpoint]  #: Output checkpoint
 
@@ -34,6 +36,7 @@ class Relax(qp.utils.Minimize[Gradient]):
         n_history: int = 15,
         converge_on: Union[str, int] = "all",
         drag_wavefunctions: bool = True,
+        save_history: bool = True,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
     ) -> None:
         """
@@ -76,6 +79,12 @@ class Relax(qp.utils.Minimize[Gradient]):
             applicable thresholds must be satisfied. If set to an integer between 1
             and the number of applicable thresholds, require that many thresholds to
             be satisfied simultaneously to achieve convergence.
+        drag_wavefunctions
+            :yaml:`Whether to drag atomic components of wavefunctions.`
+        save_history
+            :yaml:`Whether to save history along the trajectory.`
+            Saved quantities include positions, forces, energies,
+            stress (if available) and lattice (if movable).
         """
         extra_thresholds = {"fmax": fmax_threshold}
         if lattice.movable:
@@ -95,6 +104,10 @@ class Relax(qp.utils.Minimize[Gradient]):
             converge_on=converge_on,
         )
         self.drag_wavefunctions = drag_wavefunctions
+        if save_history:
+            self.add_child("history", History, {}, checkpoint_in, comm=comm)
+        else:
+            self.history = None
         self.checkpoint = None
 
     def run(self, system: qp.System) -> None:
@@ -180,3 +193,27 @@ class Relax(qp.utils.Minimize[Gradient]):
             )
         )
         self.finite_difference_test(direction)
+
+    def _save_checkpoint(
+        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
+    ) -> list[str]:
+        stage, i_iter = context
+        saved_list: list[str] = []
+        if stage == "geometry":
+            cp_path.attrs["i_iter"] = i_iter
+            saved_list.append("i_iter")
+
+            # Prepare for trajectory output if needed:
+            if self.history is not None:
+                save_map = self.history.save_map
+                system = self.stepper.system
+                save_map["energy"] = torch.tensor(float(system.energy))
+                ions = system.ions
+                save_map["positions"] = ions.positions
+                save_map["forces"] = ions.forces
+                lattice = system.lattice
+                if lattice.movable:
+                    save_map["Rbasis"] = lattice.Rbasis
+                if lattice.compute_stress:
+                    save_map["stress"] = lattice.stress
+        return saved_list
