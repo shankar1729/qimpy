@@ -53,7 +53,6 @@ class Ions(qp.TreeNode):
     def __init__(
         self,
         *,
-        process_grid: qp.utils.ProcessGrid,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         lattice: qp.lattice.Lattice,
         fractional: bool = True,
@@ -126,9 +125,10 @@ class Ions(qp.TreeNode):
         self.Z_tot = self.Z[self.types].sum().item()
         qp.log.info(f"\nTotal ion charge, Z_tot: {self.Z_tot:g}")
 
-        # Initialize / check replica process grid dimension:
-        n_replicas = 1  # this will eventually change for NEB / phonon DFPT
-        process_grid.provide_n_tasks("r", n_replicas)
+    @property
+    def n_replicas(self) -> int:
+        """Number of replicas used in future NEB / phonons support."""
+        return 1
 
     def _process_coordinates(self, coordinates: Optional[list]) -> None:
         if coordinates is None:

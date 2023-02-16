@@ -100,9 +100,9 @@ class System(qp.TreeNode):
             qp.ions.Ions,
             ions,
             checkpoint_in,
-            process_grid=self.process_grid,
             lattice=self.lattice,
         )
+        self.process_grid.provide_n_tasks("r", self.ions.n_replicas)
         self.add_child(
             "symmetries",
             qp.symmetries.Symmetries,

@@ -48,10 +48,9 @@ def get_reference_field(
 @functools.cache
 def get_grid_inputs() -> tuple[qp.lattice.Lattice, qp.symmetries.Symmetries]:
     """Get dummy lattice etc. needed to create grid."""
-    process_grid = qp.utils.ProcessGrid(qp.rc.comm, "rkb")
     lattice = qp.lattice.Lattice(
         system="triclinic", a=2.1, b=2.2, c=2.3, alpha=75, beta=80, gamma=85
     )  # pick one with no symmetries
-    ions = qp.ions.Ions(process_grid=process_grid, lattice=lattice)
+    ions = qp.ions.Ions(lattice=lattice)
     symmetries = qp.symmetries.Symmetries(lattice=lattice, ions=ions)
     return lattice, symmetries
