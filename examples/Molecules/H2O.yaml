@@ -24,4 +24,4 @@ geometry:
   relax:
     n-iterations: 10
 
-checkpoint: null  # disable reading checkpoint
+# checkpoint: null  # disable reading checkpoint

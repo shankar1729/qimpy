@@ -19,19 +19,29 @@ class TreeNode:
         self.child_names = []
 
     @final
-    def save_checkpoint(self, cp_path: qp.utils.CpPath) -> None:
+    def save_checkpoint(
+        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
+    ) -> None:
         """Save `self` and all children in hierarchy to `cp_path`.
+        Here, `context` helps identify why/when this checkpoint is being called,
+        e.g. at a geometry step, or at the end of the simulation.
         Override `_save_checkpoint` to implement the save functionality."""
         if cp_path.checkpoint is not None:
+            if not cp_path.path:  # root call of the checkpoint write
+                qp.log.info("\nWriting to checkpoint file:")
             # Save quantities in self:
-            saved = self._save_checkpoint(cp_path)
+            saved = self._save_checkpoint(cp_path, context)
             if saved:
                 qp.log.info(f'  {cp_path.path} <- {", ".join(saved)}')
             # Recur down the hierarchy:
             for child_name in self.child_names:
-                getattr(self, child_name).save_checkpoint(cp_path.relative(child_name))
+                getattr(self, child_name).save_checkpoint(
+                    cp_path.relative(child_name), context
+                )
 
-    def _save_checkpoint(self, cp_path: qp.utils.CpPath) -> list[str]:
+    def _save_checkpoint(
+        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
+    ) -> list[str]:
         """Override to save required quantities to `cp_path`.
         Return names of objects saved (for logging)."""
         return []

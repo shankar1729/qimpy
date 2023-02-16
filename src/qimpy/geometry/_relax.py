@@ -2,7 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import torch
 import os
-from typing import Union
+from typing import Union, Optional
 from qimpy.rc import MPI
 from ._gradient import Gradient
 from ._stepper import Stepper
@@ -16,6 +16,7 @@ class Relax(qp.utils.Minimize[Gradient]):
     latticeK: float  #: Preconditioning factor of lattice relative to ions
     drag_wavefunctions: bool  #: Whether to drag atomic components of wavefunctions
     stepper: Stepper  #: Interface to move ions/lattice and compute forces/stress
+    checkpoint: Optional[qp.utils.Checkpoint]  #: Output checkpoint
 
     def __init__(
         self,
@@ -94,28 +95,29 @@ class Relax(qp.utils.Minimize[Gradient]):
             converge_on=converge_on,
         )
         self.drag_wavefunctions = drag_wavefunctions
+        self.checkpoint = None
 
     def run(self, system: qp.System) -> None:
-        self.stepper = Stepper(system, drag_wavefunctions=self.drag_wavefunctions)
         qp.log.info(
             "\n--- Geometry relaxation ---\n"
             if self.n_iterations
             else "\n--- Fixed geometry ---\n"
         )
+        self.stepper = Stepper(system, drag_wavefunctions=self.drag_wavefunctions)
         self.latticeK = (
             system.lattice.move_scale.mean() / system.lattice.volume ** (1.0 / 3)
         ) ** 2  # effectively bring lattice derivatives to same dimensions as forces
         if os.environ.get("QIMPY_FDTEST_RELAX", "0") in {"1", "yes"}:
             self._run_fd_test()  # finite difference test if needed
+        if system.checkpoint_out:
+            self.checkpoint = qp.utils.Checkpoint(system.checkpoint_out, mode="a")
         self.minimize()
         del self.stepper
 
         # Check point at end:
-        if system.checkpoint_out:
+        if self.checkpoint is not None:
             system.save_checkpoint(
-                qp.utils.CpPath(
-                    checkpoint=qp.utils.Checkpoint(system.checkpoint_out, mode="w")
-                )
+                qp.utils.CpPath(checkpoint=self.checkpoint), qp.utils.CpContext("end")
             )
 
     def step(self, direction: Gradient, step_size: float) -> None:
@@ -143,8 +145,12 @@ class Relax(qp.utils.Minimize[Gradient]):
                 state.extra.append(system.lattice.stress.norm().item())  # |stress|
 
     def report(self, i_iter: int) -> bool:
+        if self.checkpoint is not None:
+            self.stepper.system.save_checkpoint(
+                qp.utils.CpPath(checkpoint=self.checkpoint),
+                qp.utils.CpContext("geometry", i_iter),
+            )
         self.stepper.report()
-        # TODO: checkpoint handling at each relax step
         return False  # State not changed by report
 
     def _run_fd_test(self):

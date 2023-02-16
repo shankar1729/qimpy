@@ -295,14 +295,13 @@ class Field(qp.utils.Gradable[FieldType]):
         assert checkpoint is not None
         shape_batch = self.data.shape[:-3]
         dtype: torch.dtype = self.data.dtype
-        dtype_np = qp.rc.np_type[dtype]
         shape = shape_batch + self.shape_grid()  # global dimensions
         offset = (0,) * len(shape_batch) + self.offset_grid_mine()
         if dtype.is_complex:
             dset = checkpoint.create_dataset_complex(path, shape=shape, dtype=dtype)
             checkpoint.write_slice_complex(dset, offset, self.data)
         else:
-            dset = checkpoint.create_dataset(path, shape=shape, dtype=dtype_np)
+            dset = checkpoint.create_dataset_real(path, shape=shape, dtype=dtype)
             checkpoint.write_slice(dset, offset, self.data)
 
 

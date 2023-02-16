@@ -35,6 +35,7 @@ __all__ = (
     "Iallreduce_in_place",
     "Checkpoint",
     "CpPath",
+    "CpContext",
     "Unit",
     "UnitOrFloat",
 )
@@ -63,5 +64,5 @@ from ._minimize import Minimize, MinimizeState
 from ._taskdivision import TaskDivision, TaskDivisionCustom, get_block_slices
 from ._bufferview import BufferView
 from ._async_reduce import Iallreduce_in_place
-from ._checkpoint import Checkpoint, CpPath
+from ._checkpoint import Checkpoint, CpPath, CpContext
 from ._unit import Unit, UnitOrFloat

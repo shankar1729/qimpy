@@ -49,6 +49,17 @@ class Checkpoint(h5py.File):
         )
         return torch.from_numpy(dset[index]).to(qp.rc.device)
 
+    def create_dataset_real(
+        self, path: str, shape: tuple[int, ...], dtype: torch.dtype = torch.float64
+    ) -> Any:
+        """Create a dataset at `path` suitable for a real array of size `shape`.
+        Unlike `h5py.File.create_dataset`, this does not fail if the dataset exists,
+        and instead removes the existing dataset. Additionally, `dtype` is translated
+        from torch to numpy for convenience."""
+        if path in self:
+            del self[path]
+        return self.create_dataset(path, shape=shape, dtype=qp.rc.np_type[dtype])
+
     def create_dataset_complex(
         self, path: str, shape: tuple[int, ...], dtype: torch.dtype = torch.complex128
     ) -> Any:
@@ -56,6 +67,8 @@ class Checkpoint(h5py.File):
         `shape`. This creates a real array with a final dimension of length 2.
         This format is used by :meth:`write_slice_complex` and
         :meth:`read_slice_complex`."""
+        if path in self:
+            del self[path]
         dtype_real = np.float64 if (dtype == torch.complex128) else np.float32
         return self.create_dataset(path, shape=(shape + (2,)), dtype=dtype_real)
 
@@ -112,3 +125,10 @@ class CpPath(NamedTuple):
         """Access attributes at `path` within `checkpoint`."""
         assert self.checkpoint is not None
         return self.checkpoint[self.path].attrs
+
+
+class CpContext(NamedTuple):
+    """Identify from where/when a checkpoint is being written."""
+
+    stage: str  #: Stage of calculation being checkpointed e.g. "geometry", "end"
+    i_iter: int = 0  #: Iteration number of that stage

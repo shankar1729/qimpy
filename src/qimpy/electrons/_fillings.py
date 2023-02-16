@@ -434,7 +434,9 @@ class Fillings(qp.TreeNode):
             f"  n_electrons: {n_electrons:.6f}{M_str}"
         )
 
-    def _save_checkpoint(self, cp_path: qp.utils.CpPath) -> list[str]:
+    def _save_checkpoint(
+        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
+    ) -> list[str]:
         self.write_band_scalars(cp_path.relative("f"), self.f)
         cp_path.attrs["mu"] = self.mu
         return ["f", "mu"]
@@ -448,9 +450,7 @@ class Fillings(qp.TreeNode):
         k_division = el.kpoints.division
         shape = (el.n_spins, k_division.n_tot, self.n_bands)
         offset = (0, k_division.i_start, 0)
-        dset = checkpoint.create_dataset(
-            path, shape=shape, dtype=qp.rc.np_type[v.dtype]
-        )
+        dset = checkpoint.create_dataset_real(path, shape=shape, dtype=v.dtype)
         if el.basis.division.i_proc == 0:
             checkpoint.write_slice(dset, offset, v[:, :, : self.n_bands])
 

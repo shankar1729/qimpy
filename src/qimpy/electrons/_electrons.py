@@ -450,12 +450,14 @@ class Electrons(qp.TreeNode):
         if isinstance(self.kpoints, qp.electrons.Kpath):
             self.kpoints.plot(self, "bandstruct.pdf")
 
-    def _save_checkpoint(self, cp_path: qp.utils.CpPath) -> list[str]:
+    def _save_checkpoint(
+        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
+    ) -> list[str]:
         (~self.n_tilde).write(cp_path.relative("n"))
         (~self.n_tilde.grad).write(cp_path.relative("V_ks"))
         self.fillings.write_band_scalars(cp_path.relative("eig"), self.eig)
         saved_list = ["n", "V_ks", "eig"]
-        if self.save_wavefunction:
+        if self.save_wavefunction and (context.stage == "end"):
             n_bands = self.fillings.n_bands
             self.C[:, :, :n_bands].write(cp_path.relative("C"))
             saved_list.append("C")
