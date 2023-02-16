@@ -24,6 +24,6 @@ geometry:
   relax:
     n-iterations: 10
 
-checkpoint: null  # disable reading checkpoint
-checkpoint-out: H2O.h5
+# checkpoint: null  # disable reading checkpoint
+# checkpoint-out: H2O.h5
 

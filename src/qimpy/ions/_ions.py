@@ -134,17 +134,13 @@ class Ions(qp.TreeNode):
         if coordinates is None:
             coordinates = []
         assert isinstance(coordinates, list)
-        self.n_ions = 0  # number of ions
-        self.n_types = 0  # number of distinct ion types
-        self.symbols = []  # symbol for each ion type
-        self.n_ions_type = []  # numebr of ions of each type
-        self.slices = []  # slice to get each ion type
+        symbols: list[str] = []  # symbol for each ion type
+        n_types = 0  # number of ion types encountered so far
         positions = []  # position of each ion
         types = []  # type of each ion (index into symbols)
         velocities = []  # initial velocities
         Q_initial = []  # initial charge / oxidation states
         M_initial = []  # initial magnetic moments
-        type_start = 0
         for coord in coordinates:
             # Check for optional attributes:
             if len(coord) == 4:
@@ -157,27 +153,15 @@ class Ions(qp.TreeNode):
                 raise ValueError("each ion must be 4 entries + optional dict")
             # Add new symbol or append to existing:
             symbol = str(coord[0])
-            if (not self.symbols) or (symbol != self.symbols[-1]):
-                self.symbols.append(symbol)
-                self.n_types += 1
-                if type_start != self.n_ions:
-                    self.slices.append(slice(type_start, self.n_ions))
-                    self.n_ions_type.append(self.n_ions - type_start)
-                    type_start = self.n_ions
+            if (not symbols) or (symbol != symbols[-1]):
+                symbols.append(symbol)
+                n_types += 1
             # Add type and position of current ion:
-            types.append(self.n_types - 1)
+            types.append(n_types - 1)
             positions.append([float(x) for x in coord[1:4]])
             velocities.append(attrib.get("v", None))
             Q_initial.append(attrib.get("Q", None))
             M_initial.append(attrib.get("M", None))
-            self.n_ions += 1
-        if type_start != self.n_ions:
-            self.slices.append(slice(type_start, self.n_ions))  # for last type
-            self.n_ions_type.append(self.n_ions - type_start)
-
-        # Check order:
-        if len(set(self.symbols)) < self.n_types:
-            raise ValueError("coordinates must group ions of same type together")
 
         # Convert to tensors before storing in class object:
         self.positions = (
@@ -190,6 +174,8 @@ class Ions(qp.TreeNode):
             self.positions = self.positions @ self.lattice.invRbasisT
         self.positions.grad = None
         self.types = torch.tensor(types, device=qp.rc.device, dtype=torch.long)
+        self.symbols = symbols
+        self._set_counts_slices()  # uses types and symbols, sets n_ions, slices etc.
         self.velocities = self._process_velocities(velocities)
         self.Q = self._process_Q_initial(Q_initial)
         self.M = self._process_M_initial(M_initial)
@@ -372,4 +358,27 @@ class Ions(qp.TreeNode):
     def _read_checkpoint(self, cp_path: qp.utils.CpPath) -> None:
         checkpoint, path = cp_path
         assert checkpoint is not None
-        # TODO
+        self.symbols = cp_path.attrs["symbols"].split(",")
+        self.types = cp_path.read("types")
+        self.positions = cp_path.read("positions")
+        self.velocities = cp_path.read_optional("velocities")
+        forces = cp_path.read_optional("forces")
+        if forces is not None:
+            self.positions.grad = -forces @ self.lattice.Rbasis
+        self.Q = cp_path.read_optional("Q")
+        self.M = cp_path.read_optional("M")
+        self._set_counts_slices()
+
+    def _set_counts_slices(self) -> None:
+        """Update all counts and slices based on `self.types`"""
+        unique, counts = torch.unique_consecutive(self.types, return_counts=True)
+        self.n_ions = len(self.types)
+        self.n_types = len(unique)
+        self.n_ions_type = counts.tolist()
+        if len(set(self.symbols)) < self.n_types:
+            raise ValueError("coordinates must group ions of same type together")
+        slice_ends = counts.cumsum(dim=0).tolist()
+        self.slices = [
+            slice(slice_end - slice_len, slice_end)
+            for slice_end, slice_len in zip(slice_ends, self.n_ions_type)
+        ]

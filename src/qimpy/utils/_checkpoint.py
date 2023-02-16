@@ -150,7 +150,7 @@ class CpPath(NamedTuple):
         if report:
             qp.log.info(f"Loading {name}")
         dset = checkpoint[path]
-        return torch.from_numpy(dset).to(qp.rc.device)
+        return torch.from_numpy(dset[...]).to(qp.rc.device)
 
     def read_optional(self, name: str, report: bool = True) -> Optional[torch.Tensor]:
         """Handle optional dataset with `read`, returning None if not found."""
