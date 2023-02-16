@@ -39,7 +39,7 @@ class Dynamics(qp.TreeNode):
     stress: Optional[torch.Tensor]  #: Current stress including kinetic contributions
     history: Optional[History]  #: Utility to save trajectory data
     report_callback: Optional[Callable[[Dynamics, int], None]]  #: Callback from report
-    checkpoint: Optional[qp.utils.Checkpoint]  #: Output checkpoint
+    i_iter_start: int  #: Starting iteration number (when continuing from checkpoint)
 
     def __init__(
         self,
@@ -126,7 +126,7 @@ class Dynamics(qp.TreeNode):
         else:
             self.history = None
         self.report_callback = report_callback
-        self.checkpoint = None
+        self.i_iter_start = checkpoint_in.attrs["i_iter"] if checkpoint_in else 0
         self.add_child(
             "thermostat", Thermostat, thermostat, checkpoint_in, dynamics=self
         )
@@ -139,8 +139,6 @@ class Dynamics(qp.TreeNode):
             drag_wavefunctions=self.drag_wavefunctions,
             isotropic=self.isotropic,
         )
-        if system.checkpoint_out:
-            self.checkpoint = qp.utils.Checkpoint(system.checkpoint_out, mode="a")
 
         # Initial velocity and acceleration:
         if self.system.ions.velocities is None:  # velocities not read in
@@ -168,10 +166,11 @@ class Dynamics(qp.TreeNode):
             velocity = self.stepper.constrain(velocity)
 
         # Check point at end:
-        if self.checkpoint is not None:
-            system.save_checkpoint(
-                qp.utils.CpPath(checkpoint=self.checkpoint), qp.utils.CpContext("end")
-            )
+        if system.checkpoint_out:
+            with qp.utils.Checkpoint(system.checkpoint_out, mode="a") as checkpoint:
+                system.save_checkpoint(
+                    qp.utils.CpPath(checkpoint), qp.utils.CpContext("end")
+                )
 
     def thermal_velocities(self, T: float, seed: int) -> torch.Tensor:
         """Thermal velocity distribution at `T`, randomized with `seed`."""
@@ -200,22 +199,23 @@ class Dynamics(qp.TreeNode):
 
     def report(self, i_iter: int, velocity: Gradient) -> None:
         # Update velocity-dependent quantities:
-        self.system.ions.velocities = velocity.ions
+        system = self.system
+        system.ions.velocities = velocity.ions
         self.KE = self.get_KE(velocity.ions)
         self.T = self.get_T(self.KE)
         self.stress = self.get_stress(velocity.ions)
         self.P = Dynamics.get_pressure(self.stress)
         # Checkpoint:
-        if self.checkpoint is not None:
-            self.stepper.system.save_checkpoint(
-                qp.utils.CpPath(checkpoint=self.checkpoint),
-                qp.utils.CpContext("geometry", i_iter),
-            )
+        if system.checkpoint_out:
+            with qp.utils.Checkpoint(system.checkpoint_out, mode="a") as checkpoint:
+                system.save_checkpoint(
+                    qp.utils.CpPath(checkpoint), qp.utils.CpContext("geometry", i_iter)
+                )
         # Report positions, forces, stresses etc.:
         self.stepper.report(total_stress=self.stress)
         if self.report_callback is not None:
             self.report_callback(self, i_iter)
-        E = self.system.energy
+        E = system.energy
         qp.log.info(
             f"Dynamics: {i_iter}  {E.name}: {float(E):+.11f}"
             f"  KE: {self.KE:.6f}  T: {Unit.convert(self.T, 'K')}"

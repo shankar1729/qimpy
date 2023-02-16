@@ -72,6 +72,7 @@ def main() -> None:
                 report_callback=analyze,
             ),
         ),
+        checkpoint="md.h5",
     )
     system.run()
     qp.rc.report_end()
