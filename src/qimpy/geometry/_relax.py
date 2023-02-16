@@ -93,6 +93,7 @@ class Relax(qp.utils.Minimize[Gradient]):
             checkpoint_in=checkpoint_in,
             comm=comm,
             name="Relax",
+            i_iter_start=(checkpoint_in.attrs["i_iter"] if checkpoint_in else 0),
             n_iterations=n_iterations,
             energy_threshold=energy_threshold,
             extra_thresholds=extra_thresholds,

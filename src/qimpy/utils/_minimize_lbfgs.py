@@ -30,7 +30,7 @@ def _lbfgs(self: qp.utils.Minimize[Vector]) -> qp.Energy:
     gamma = 0.0  # current scaling factor, updated each iteration
 
     # Iterate till convergence (or iteration limit):
-    for i_iter in range(self.n_iterations + 1):
+    for i_iter in range(self.i_iter_start, self.n_iterations + 1):
         # Optional reporting:
         if self.report(i_iter):
             qp.log.info(

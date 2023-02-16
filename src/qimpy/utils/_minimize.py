@@ -51,6 +51,7 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
 
     comm: MPI.Comm  #: Communicator over which algorithm operates in unison
     name: str  #: Name of algorithm instance used in reporting eg. 'Ionic'
+    i_iter_start: int  #: Starting iteration number (eg. if continuing from checkpoint)
     n_iterations: int  #: Maximum number of iterations
     energy_threshold: float  #: Convergence threshold on energy change
     n_consecutive: int  #: Number of consecutive iterations threshold must be satisfied
@@ -83,6 +84,7 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         cg_type: str = "polak-ribiere",
         line_minimize: str = "auto",
         step_size: Optional[dict] = None,
+        i_iter_start: int = 0,
         n_history: int = 15,
         wolfe: Optional[dict] = None,
         converge_on: Union[str, int] = "any",
@@ -91,6 +93,7 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         super().__init__()
         self.comm = comm
         self.name = name
+        self.i_iter_start = i_iter_start
         self.n_iterations = n_iterations
         self.energy_threshold = energy_threshold
         self.extra_thresholds = extra_thresholds
