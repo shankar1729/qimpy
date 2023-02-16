@@ -47,4 +47,4 @@ class History(qp.TreeNode):
                 maxshape=(None,) + data.shape,  # resizable infinitely along first axis
             )
         if self.comm.rank == 0:
-            dset[-1, ...] = data.to(qp.rc.cpu).detach().numpy()
+            dset[-1, ...] = data.to(qp.rc.cpu).numpy()

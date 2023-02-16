@@ -97,13 +97,43 @@ class Ions(qp.TreeNode):
         """
         super().__init__()
         qp.log.info("\n--- Initializing Ions ---")
+        self.lattice = lattice
+        self.fractional = fractional
+        if checkpoint_in:
+            self._read_checkpoint(checkpoint_in)
+        else:
+            self._process_coordinates(coordinates)
+        self.report(report_grad=False)  # reports read-in coordinates
 
-        # Read ionic coordinates:
+        # Initialize pseudopotentials:
+        if pseudopotentials is None:
+            pseudopotentials = []
+        if isinstance(pseudopotentials, str):
+            pseudopotentials = [pseudopotentials]
+        pseudopotential_filenames = [
+            self._get_pseudopotential_filename(symbol, pseudopotentials)
+            for symbol in self.symbols
+        ]
+        self.pseudopotentials = [
+            qp.ions.Pseudopotential(filename) for filename in pseudopotential_filenames
+        ]
+        self.beta_version = 0
+
+        # Calculate total ionic charge (needed for number of electrons):
+        self.Z = torch.tensor(
+            [ps.Z for ps in self.pseudopotentials], device=qp.rc.device
+        )
+        self.Z_tot = self.Z[self.types].sum().item()
+        qp.log.info(f"\nTotal ion charge, Z_tot: {self.Z_tot:g}")
+
+        # Initialize / check replica process grid dimension:
+        n_replicas = 1  # this will eventually change for NEB / phonon DFPT
+        process_grid.provide_n_tasks("r", n_replicas)
+
+    def _process_coordinates(self, coordinates: Optional[list]) -> None:
         if coordinates is None:
             coordinates = []
         assert isinstance(coordinates, list)
-        self.lattice = lattice
-        self.fractional = fractional
         self.n_ions = 0  # number of ions
         self.n_types = 0  # number of distinct ion types
         self.symbols = []  # symbol for each ion type
@@ -155,96 +185,75 @@ class Ions(qp.TreeNode):
             if positions
             else torch.empty((0, 3), device=qp.rc.device)
         )
-        if not fractional:
+        if not self.fractional:
             # Convert Cartesian input to fractional coordinates:
-            self.positions = self.positions @ lattice.invRbasisT
-        self.velocities = torch.zeros_like(self.positions)
-        self.positions.grad = torch.full_like(self.positions, np.nan)
+            self.positions = self.positions @ self.lattice.invRbasisT
+        self.positions.grad = None
         self.types = torch.tensor(types, device=qp.rc.device, dtype=torch.long)
-        # --- Fill in missing velocities (if any specified):
+        self.velocities = self._process_velocities(velocities)
+        self.Q = self._process_Q_initial(Q_initial)
+        self.M = self._process_M_initial(M_initial)
+
+    def _process_velocities(self, velocities: list) -> Optional[torch.Tensor]:
+        """Fill in missing velocities (if any specified)."""
         if velocities.count(None) == self.n_ions:
-            self.velocities = None  # no velocities specified
-        else:
-            v_default = [0.0, 0.0, 0.0]
-            self.velocities = torch.tensor(
-                [(v_default if (v is None) else v) for v in velocities],
-                device=qp.rc.device,
-                dtype=torch.double,
-            )
-        # --- Fill in missing oxidation states (if any specified):
+            return None  # no velocities specified
+        v_default = [0.0, 0.0, 0.0]
+        return torch.tensor(
+            [(v_default if (v is None) else v) for v in velocities],
+            device=qp.rc.device,
+            dtype=torch.double,
+        )
+
+    def _process_Q_initial(self, Q_initial: list) -> Optional[torch.Tensor]:
+        """Fill in missing oxidation states (if any specified)."""
         if Q_initial.count(None) == self.n_ions:
-            self.Q = None  # no charge specified
-        else:
-            self.Q = torch.tensor(
-                [(0.0 if (Q is None) else Q) for Q in Q_initial],
-                device=qp.rc.device,
-                dtype=torch.double,
-            )
-        # --- Fill in missing magnetizations (if any specified):
+            return None  # no charge specified
+        return torch.tensor(
+            [(0.0 if (Q is None) else Q) for Q in Q_initial],
+            device=qp.rc.device,
+            dtype=torch.double,
+        )
+
+    def _process_M_initial(self, M_initial: list) -> Optional[torch.Tensor]:
+        """Fill in missing magnetizations (if any specified)."""
         M_lengths = set(
             [(len(M) if isinstance(M, list) else 1) for M in M_initial if M]
         )
+        if not M_lengths:
+            return None
         if len(M_lengths) > 1:
             raise ValueError("All M must be same type: 3-vector or scalar")
-        elif len(M_lengths) == 1:
-            M_length = next(iter(M_lengths))
-            assert (M_length == 1) or (M_length == 3)
-            M_default = [0.0, 0.0, 0.0] if (M_length == 3) else 0.0
-            self.M = torch.tensor(
-                [(M_default if (M is None) else M) for M in M_initial],
-                device=qp.rc.device,
-                dtype=torch.double,
-            )
-        else:
-            self.M = None
-        self.report(report_grad=False)
-
-        # Initialize pseudopotentials:
-        self.pseudopotentials = []
-        if pseudopotentials is None:
-            pseudopotentials = []
-        if isinstance(pseudopotentials, str):
-            pseudopotentials = [pseudopotentials]
-        for i_type, symbol in enumerate(self.symbols):
-            fname = None  # full filename for this ion type
-            symbol_variants = [symbol.lower(), symbol.upper(), symbol.capitalize()]
-            # Check each filename provided in order:
-            for ps_name in pseudopotentials:
-                if ps_name.count("$ID"):
-                    # wildcard syntax
-                    for symbol_variant in symbol_variants:
-                        fname_test = ps_name.replace("$ID", symbol_variant)
-                        if pathlib.Path(fname_test).exists():
-                            fname = fname_test  # found
-                            break
-                else:
-                    # specific filename
-                    basename = pathlib.PurePath(ps_name).stem
-                    ps_symbol = re.split(r"[_\-\.]+", basename)[0]
-                    if ps_symbol in symbol_variants:
-                        fname = ps_name
-                        if not pathlib.Path(fname).exists():
-                            raise FileNotFoundError(fname)
-                        break
-                if fname:
-                    break
-            # Read pseudopotential file:
-            if fname:
-                self.pseudopotentials.append(qp.ions.Pseudopotential(fname))
-            else:
-                raise ValueError(f"no pseudopotential found for {symbol}")
-        self.beta_version = 0
-
-        # Calculate total ionic charge (needed for number of electrons):
-        self.Z = torch.tensor(
-            [ps.Z for ps in self.pseudopotentials], device=qp.rc.device
+        M_length = next(iter(M_lengths))
+        assert (M_length == 1) or (M_length == 3)
+        M_default = [0.0, 0.0, 0.0] if (M_length == 3) else 0.0
+        return torch.tensor(
+            [(M_default if (M is None) else M) for M in M_initial],
+            device=qp.rc.device,
+            dtype=torch.double,
         )
-        self.Z_tot = self.Z[self.types].sum().item()
-        qp.log.info(f"\nTotal ion charge, Z_tot: {self.Z_tot:g}")
 
-        # Initialize / check replica process grid dimension:
-        n_replicas = 1  # this will eventually change for NEB / phonon DFPT
-        process_grid.provide_n_tasks("r", n_replicas)
+    def _get_pseudopotential_filename(
+        self, symbol: str, pseudopotentials: list[str]
+    ) -> str:
+        """Find exact pseudopotential filename for symbol from filename templates."""
+        symbol_variants = [symbol.lower(), symbol.upper(), symbol.capitalize()]
+        for ps_name in pseudopotentials:
+            if ps_name.count("$ID"):
+                # wildcard syntax
+                for symbol_variant in symbol_variants:
+                    filename_test = ps_name.replace("$ID", symbol_variant)
+                    if pathlib.Path(filename_test).exists():
+                        return filename_test  # found
+            else:
+                # specific filename
+                basename = pathlib.PurePath(ps_name).stem
+                ps_symbol = re.split(r"[_\-\.]+", basename)[0]
+                if ps_symbol in symbol_variants:
+                    if not pathlib.Path(ps_name).exists():
+                        raise FileNotFoundError(ps_name)
+                    return ps_name
+        raise ValueError(f"no pseudopotential found for {symbol}")
 
     def report(self, report_grad: bool) -> None:
         """Report ionic positions / attributes, and optionally forces if `report_grad`."""
@@ -341,3 +350,26 @@ class Ions(qp.TreeNode):
         """
         assert self.positions.grad is not None
         return -self.positions.grad.detach() @ self.lattice.invRbasis
+
+    def _save_checkpoint(
+        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
+    ) -> list[str]:
+        # TODO: decide how / whether pseudopotentials are checkpoint'd
+        cp_path.attrs["symbols"] = ",".join(self.symbols)
+        saved_list = ["symbols"]
+        saved_list.append(cp_path.write("types", self.types))
+        saved_list.append(cp_path.write("positions", self.positions.detach()))
+        if self.velocities is not None:
+            saved_list.append(cp_path.write("velocities", self.velocities))
+        if self.positions.grad is not None:
+            saved_list.append(cp_path.write("forces", self.forces))
+        if self.Q is not None:
+            saved_list.append(cp_path.write("Q", self.Q))
+        if self.M is not None:
+            saved_list.append(cp_path.write("M", self.M))
+        return saved_list
+
+    def _read_checkpoint(self, cp_path: qp.utils.CpPath) -> None:
+        checkpoint, path = cp_path
+        assert checkpoint is not None
+        # TODO

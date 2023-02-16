@@ -209,11 +209,11 @@ class Relax(qp.utils.Minimize[Gradient]):
                 system = self.stepper.system
                 save_map["energy"] = torch.tensor(float(system.energy))
                 ions = system.ions
-                save_map["positions"] = ions.positions
+                save_map["positions"] = ions.positions.detach()
                 save_map["forces"] = ions.forces
                 lattice = system.lattice
                 if lattice.movable:
                     save_map["Rbasis"] = lattice.Rbasis
                 if lattice.compute_stress:
-                    save_map["stress"] = lattice.stress
+                    save_map["stress"] = lattice.stress.detach()
         return saved_list

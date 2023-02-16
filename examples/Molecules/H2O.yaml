@@ -1,6 +1,6 @@
 lattice:
   system: cubic
-  a: 20.  # bohrs
+  a: 10.  # bohrs
   compute-stress: yes
 
 ions:
@@ -24,4 +24,6 @@ geometry:
   relax:
     n-iterations: 10
 
-# checkpoint: null  # disable reading checkpoint
+checkpoint: null  # disable reading checkpoint
+checkpoint-out: H2O.h5
+

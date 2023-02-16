@@ -129,6 +129,36 @@ class CpPath(NamedTuple):
             checkpoint.create_group(path)
         return checkpoint[path].attrs
 
+    def write(self, name: str, data: torch.Tensor) -> str:
+        """Write `data` available on all processes to `name` within current path.
+        This is convenient for small tensors that are not split over MPI.
+        For complex data, pass a real view that has a final dimension of length 2.
+        Returns `name`, which is convenient for accumulating the names of
+        written datasets during reporting."""
+        checkpoint, path = self.relative(name)
+        assert checkpoint is not None
+        dset = checkpoint.create_dataset_real(path, data.shape, data.dtype)
+        if qp.rc.is_head:
+            dset[...] = data.to(qp.rc.cpu).numpy()
+        return name
+
+    def read(self, name: str, report: bool = True) -> torch.Tensor:
+        """Read entire dataset from `name`, reporting to log if `report`."""
+        checkpoint, path = self.relative(name)
+        assert checkpoint is not None
+        assert path in checkpoint
+        if report:
+            qp.log.info(f"Loading {name}")
+        dset = checkpoint[path]
+        return torch.from_numpy(dset).to(qp.rc.device)
+
+    def read_optional(self, name: str, report: bool = True) -> Optional[torch.Tensor]:
+        """Handle optional dataset with `read`, returning None if not found."""
+        try:
+            return self.read(name, report)
+        except AssertionError:
+            return None
+
 
 class CpContext(NamedTuple):
     """Identify from where/when a checkpoint is being written."""
