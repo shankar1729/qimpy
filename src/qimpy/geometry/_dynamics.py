@@ -148,7 +148,7 @@ class Dynamics(qp.TreeNode):
         thermostat_method = self.thermostat.method
 
         # MD loop
-        for i_iter in range(self.n_steps + 1):
+        for i_iter in range(self.i_iter_start, self.n_steps + 1):
             self.report(i_iter, velocity)
             if i_iter == self.n_steps:
                 break
@@ -270,3 +270,33 @@ class Dynamics(qp.TreeNode):
             gradient.lattice = torch.zeros((3, 3), device=qp.rc.device)
         self.thermostat.method.initialize_gradient(gradient, lattice_movable)
         return gradient
+
+    def _save_checkpoint(
+        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
+    ) -> list[str]:
+        stage, i_iter = context
+        saved_list: list[str] = []
+        if stage == "geometry":
+            cp_path.attrs["i_iter"] = i_iter
+            saved_list.append("i_iter")
+
+            # Prepare for trajectory output if needed:
+            if self.history is not None:
+                save_map = self.history.save_map
+                system = self.stepper.system
+                save_map["energy"] = torch.tensor(float(system.energy))
+                ions = system.ions
+                save_map["positions"] = ions.positions.detach()
+                save_map["forces"] = ions.forces
+                assert ions.velocities is not None
+                save_map["velocities"] = ions.velocities
+                save_map["T"] = torch.tensor(float(self.T))
+                lattice = system.lattice
+                if lattice.movable:
+                    save_map["Rbasis"] = lattice.Rbasis
+                if self.stress is not None:
+                    assert self.P is not None
+                    save_map["P"] = torch.tensor(float(self.P))
+                    save_map["stress"] = lattice.stress.detach()  # potential only
+                    save_map["stress_total"] = self.stress  # including kinetic
+        return saved_list
