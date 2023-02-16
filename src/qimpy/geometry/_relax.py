@@ -18,7 +18,6 @@ class Relax(qp.utils.Minimize[Gradient]):
     drag_wavefunctions: bool  #: Whether to drag atomic components of wavefunctions
     history: Optional[History]  #: Utility to save trajectory data
     stepper: Stepper  #: Interface to move ions/lattice and compute forces/stress
-    checkpoint: Optional[qp.utils.Checkpoint]  #: Output checkpoint
 
     def __init__(
         self,
@@ -109,7 +108,6 @@ class Relax(qp.utils.Minimize[Gradient]):
             self.add_child("history", History, {}, checkpoint_in, comm=comm)
         else:
             self.history = None
-        self.checkpoint = None
 
     def run(self, system: qp.System) -> None:
         qp.log.info(
@@ -123,16 +121,15 @@ class Relax(qp.utils.Minimize[Gradient]):
         ) ** 2  # effectively bring lattice derivatives to same dimensions as forces
         if os.environ.get("QIMPY_FDTEST_RELAX", "0") in {"1", "yes"}:
             self._run_fd_test()  # finite difference test if needed
-        if system.checkpoint_out:
-            self.checkpoint = qp.utils.Checkpoint(system.checkpoint_out, mode="a")
         self.minimize()
         del self.stepper
 
         # Check point at end:
-        if self.checkpoint is not None:
-            system.save_checkpoint(
-                qp.utils.CpPath(checkpoint=self.checkpoint), qp.utils.CpContext("end")
-            )
+        if system.checkpoint_out:
+            with qp.utils.Checkpoint(system.checkpoint_out, mode="a") as checkpoint:
+                system.save_checkpoint(
+                    qp.utils.CpPath(checkpoint), qp.utils.CpContext("end")
+                )
 
     def step(self, direction: Gradient, step_size: float) -> None:
         """Update the geometry along `direction` by amount `step_size`"""
@@ -159,11 +156,12 @@ class Relax(qp.utils.Minimize[Gradient]):
                 state.extra.append(system.lattice.stress.norm().item())  # |stress|
 
     def report(self, i_iter: int) -> bool:
-        if self.checkpoint is not None:
-            self.stepper.system.save_checkpoint(
-                qp.utils.CpPath(checkpoint=self.checkpoint),
-                qp.utils.CpContext("geometry", i_iter),
-            )
+        system = self.stepper.system
+        if system.checkpoint_out:
+            with qp.utils.Checkpoint(system.checkpoint_out, mode="a") as checkpoint:
+                system.save_checkpoint(
+                    qp.utils.CpPath(checkpoint), qp.utils.CpContext("geometry", i_iter)
+                )
         self.stepper.report()
         return False  # State not changed by report
 
