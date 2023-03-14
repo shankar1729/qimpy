@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import h5py
 import qimpy as qp
 import numpy as np
@@ -10,12 +11,45 @@ class Checkpoint(h5py.File):
     """Helper for checkpoint load/save from HDF5 files."""
 
     writable: bool  #: Whether file has been opened for writing
+    filename_move: str  #: If non-empty, move to this filename upon closing
 
-    def __init__(self, filename: str, *, mode: str = "r") -> None:
-        super().__init__(filename, mode, driver="mpio", comm=qp.rc.comm)
-        self.writable = not mode.startswith("r")
-        mode_name = "writing:" if self.writable else "reading"
-        qp.log.info(f"Opened checkpoint file '{filename}' for {mode_name}")
+    def __init__(
+        self,
+        filename: str,
+        *,
+        writable: bool = False,
+        rotate: bool = True,
+    ) -> None:
+        """Open a HDF5 checkpoint file `filename` for read or write based on `writable`.
+
+        In write mode, if `rotate` (the default), the file is first written to
+        `filename` + '.part' and then rotated into `filename` upon closing
+        (with a previously existing `filename` moved into `filename` + '.bak').
+        This prevents corruption of the checkpoint if the job is terminated
+        due to time limit while the checkpoint is being written.
+        """
+        self.writable = writable
+        if writable and rotate:
+            filename_open = filename + ".part"  # Open this filename for writing,
+            self.filename_move = filename  # and move to this one when done.
+        else:
+            filename_open = filename  # Directly open the target filename,
+            self.filename_move = ""  # and don't move at the end
+        mode = "w" if writable else "r"  # don't allow r+, a etc. for safety
+        super().__init__(filename_open, mode, driver="mpio", comm=qp.rc.comm)
+        mode_name = "writing:" if writable else "reading"
+        qp.log.info(f"\nOpened checkpoint file '{filename_open}' for {mode_name}")
+
+    def close(self):
+        """Close the file, and perform rotations if applicable."""
+        filename = self.filename  # remember where the file was before closing
+        super().close()  # actually close the file
+        if self.filename_move and qp.rc.is_head:
+            if os.path.isfile(self.filename_move):
+                qp.log.info(f"Moving {self.filename_move} -> {self.filename_move}.bak")
+                os.replace(self.filename_move, self.filename_move + ".bak")
+            qp.log.info(f"Moving {filename} -> {self.filename_move}")
+            os.rename(filename, self.filename_move)
 
     def write_slice(
         self, dset: Any, offset: tuple[int, ...], data: torch.Tensor

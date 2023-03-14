@@ -9,7 +9,7 @@ from ._history import History
 from ._gradient import Gradient
 from .thermostat import Thermostat
 from qimpy.ions.symbols import ATOMIC_WEIGHTS, ATOMIC_NUMBERS
-from qimpy.utils import Unit, UnitOrFloat
+from qimpy.utils import Unit, UnitOrFloat, Checkpoint, CpPath, CpContext
 
 
 class Dynamics(qp.TreeNode):
@@ -57,7 +57,7 @@ class Dynamics(qp.TreeNode):
         drag_wavefunctions: bool = True,
         save_history: bool = True,
         report_callback: Optional[Callable[[Dynamics, int], None]] = None,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        checkpoint_in: CpPath = CpPath(),
     ) -> None:
         """
         Specify molecular dynamics parameters.
@@ -167,10 +167,8 @@ class Dynamics(qp.TreeNode):
 
         # Check point at end:
         if system.checkpoint_out:
-            with qp.utils.Checkpoint(system.checkpoint_out, mode="a") as checkpoint:
-                system.save_checkpoint(
-                    qp.utils.CpPath(checkpoint), qp.utils.CpContext("end")
-                )
+            with Checkpoint(system.checkpoint_out, writable=True) as cp:
+                system.save_checkpoint(CpPath(cp), CpContext("end"))
 
     def thermal_velocities(self, T: float, seed: int) -> torch.Tensor:
         """Thermal velocity distribution at `T`, randomized with `seed`."""
@@ -207,10 +205,8 @@ class Dynamics(qp.TreeNode):
         self.P = Dynamics.get_pressure(self.stress)
         # Checkpoint:
         if system.checkpoint_out:
-            with qp.utils.Checkpoint(system.checkpoint_out, mode="a") as checkpoint:
-                system.save_checkpoint(
-                    qp.utils.CpPath(checkpoint), qp.utils.CpContext("geometry", i_iter)
-                )
+            with Checkpoint(system.checkpoint_out, writable=True) as cp:
+                system.save_checkpoint(CpPath(cp), CpContext("geometry", i_iter))
         # Report positions, forces, stresses etc.:
         self.stepper.report(total_stress=self.stress)
         if self.report_callback is not None:
@@ -271,9 +267,7 @@ class Dynamics(qp.TreeNode):
         self.thermostat.method.initialize_gradient(gradient, lattice_movable)
         return gradient
 
-    def _save_checkpoint(
-        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
-    ) -> list[str]:
+    def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
         stage, i_iter = context
         saved_list: list[str] = []
         if stage == "geometry":

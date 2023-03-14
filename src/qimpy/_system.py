@@ -75,17 +75,12 @@ class System(qp.TreeNode):
             comm if comm else qp.rc.comm, "rkb", process_grid_shape
         )
         # Set in and out checkpoints:
-        try:
-            checkpoint_in = qp.utils.CpPath(
-                checkpoint=(
-                    None
-                    if (checkpoint is None)
-                    else qp.utils.Checkpoint(checkpoint, mode="r")
-                )
-            )
-        except OSError:  # Raised by h5py when file not readable
-            qp.log.info(f"Cannot load checkpoint file '{checkpoint}'")
-            checkpoint_in = qp.utils.CpPath()
+        checkpoint_in = qp.utils.CpPath()
+        if checkpoint is not None:
+            try:
+                checkpoint_in = qp.utils.CpPath(qp.utils.Checkpoint(checkpoint))
+            except OSError:  # Raised by h5py when file not readable
+                qp.log.info(f"Cannot load checkpoint file '{checkpoint}'")
         self.checkpoint_out = checkpoint if checkpoint_out is None else checkpoint_out
 
         # Determine any global axes that break symmetries:

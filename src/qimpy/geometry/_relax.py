@@ -4,6 +4,7 @@ import torch
 import os
 from typing import Union, Optional
 from qimpy.rc import MPI
+from qimpy.utils import Checkpoint, CpPath, CpContext
 from ._gradient import Gradient
 from ._stepper import Stepper
 from ._history import History
@@ -36,7 +37,7 @@ class Relax(qp.utils.Minimize[Gradient]):
         converge_on: Union[str, int] = "all",
         drag_wavefunctions: bool = True,
         save_history: bool = True,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        checkpoint_in: CpPath = CpPath(),
     ) -> None:
         """
         Specify geometry relaxation algorithm and convergence parameters.
@@ -126,10 +127,8 @@ class Relax(qp.utils.Minimize[Gradient]):
 
         # Check point at end:
         if system.checkpoint_out:
-            with qp.utils.Checkpoint(system.checkpoint_out, mode="a") as checkpoint:
-                system.save_checkpoint(
-                    qp.utils.CpPath(checkpoint), qp.utils.CpContext("end")
-                )
+            with Checkpoint(system.checkpoint_out, writable=True) as cp:
+                system.save_checkpoint(CpPath(cp), CpContext("end"))
 
     def step(self, direction: Gradient, step_size: float) -> None:
         """Update the geometry along `direction` by amount `step_size`"""
@@ -158,10 +157,8 @@ class Relax(qp.utils.Minimize[Gradient]):
     def report(self, i_iter: int) -> bool:
         system = self.stepper.system
         if system.checkpoint_out:
-            with qp.utils.Checkpoint(system.checkpoint_out, mode="a") as checkpoint:
-                system.save_checkpoint(
-                    qp.utils.CpPath(checkpoint), qp.utils.CpContext("geometry", i_iter)
-                )
+            with Checkpoint(system.checkpoint_out, writable=True) as cp:
+                system.save_checkpoint(CpPath(cp), CpContext("geometry", i_iter))
         self.stepper.report()
         return False  # State not changed by report
 
@@ -193,9 +190,7 @@ class Relax(qp.utils.Minimize[Gradient]):
         )
         self.finite_difference_test(direction)
 
-    def _save_checkpoint(
-        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
-    ) -> list[str]:
+    def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
         stage, i_iter = context
         saved_list: list[str] = []
         if stage == "geometry":

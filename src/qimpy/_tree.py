@@ -27,8 +27,6 @@ class TreeNode:
         e.g. at a geometry step, or at the end of the simulation.
         Override `_save_checkpoint` to implement the save functionality."""
         if cp_path.checkpoint is not None:
-            if not cp_path.path:  # root call of the checkpoint write
-                qp.log.info("\nWriting to checkpoint file:")
             # Save quantities in self:
             saved = self._save_checkpoint(cp_path, context)
             if saved:
