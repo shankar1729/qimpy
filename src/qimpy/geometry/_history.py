@@ -1,21 +1,64 @@
 from __future__ import annotations
 import torch
 import qimpy as qp
+import numpy as np
 from qimpy.rc import MPI
+from typing import Union
 
 
 class History(qp.TreeNode):
     """Helper to save history along trajectory."""
 
     comm: MPI.Comm
-    save_map: dict[str, torch.Tensor]  # Names and data for quantities to save
+    iter_division: qp.utils.TaskDivision  # Division of iterations over MPI
+    i_iter: int  # Current iteration / last iteration for which history available
+    save_map: dict[str, np.ndarray]  # Names and data for quantities to save
 
     def __init__(
-        self, *, comm: MPI.Comm, checkpoint_in: qp.utils.CpPath = qp.utils.CpPath()
+        self,
+        *,
+        comm: MPI.Comm,
+        n_max: int,
+        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
     ) -> None:
         super().__init__()
         self.comm = comm
+        self.iter_division = qp.utils.TaskDivision(
+            n_tot=n_max, n_procs=comm.size, i_proc=comm.rank
+        )
+        self.i_iter = 0
         self.save_map = {}
+
+        if checkpoint_in:
+            checkpoint, path = checkpoint_in
+            assert checkpoint is not None
+            group = checkpoint[path]
+            self.i_iter = group.attrs["i_iter"]
+            i_start = self.iter_division.i_start
+            i_stop = min(self.iter_division.i_stop, self.i_iter + 1)
+            n_in = i_stop - i_start  # number of iterations to be read at this process
+            for name in group.keys():
+                dset = group[name]  # version in file
+                data = np.empty(
+                    (self.iter_division.n_mine,) + dset.shape[1:], dtype=dset.dtype
+                )  # for version in memory, split over MPI
+                if n_in > 0:
+                    data[:n_in] = dset[i_start:i_stop]
+                self.save_map[name] = data
+
+    def add(self, name: str, value: Union[float, torch.Tensor]) -> None:
+        """Add current `value` for variable `name` to history."""
+        data = (
+            np.array(value) if isinstance(value, float) else value.to(qp.rc.cpu).numpy()
+        )
+        if name not in self.save_map:
+            assert self.i_iter == 0  # if not, previous history must have been read in
+            self.save_map[name] = np.empty(
+                (self.iter_division.n_mine,) + data.shape, dtype=data.dtype
+            )
+        if self.iter_division.is_mine(self.i_iter):
+            i_out = self.i_iter - self.iter_division.i_start  # local index
+            self.save_map[name][i_out] = data
 
     def _save_checkpoint(
         self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
@@ -23,28 +66,22 @@ class History(qp.TreeNode):
         stage, i_iter = context
         saved_list = []
         if stage == "geometry":
+            assert i_iter == self.i_iter
+            cp_path.attrs["i_iter"] = i_iter
             for name, data in self.save_map.items():
-                self.save(cp_path.relative(name), data, i_iter)
+                self._save(cp_path.relative(name), data)
                 saved_list.append(name)
         return saved_list
 
-    def save(self, cp_path: qp.utils.CpPath, data: torch.Tensor, i_iter: int) -> None:
-        """Save history of `data` for `i_iter`'th iteration to `cp_path`.
-        When the dataset doesn't exist, it will be created with size
-        `(i_iter + 1,) + data.shape`, resizable along the first dimension.
-        Data is assumed consistent across `comm`, and is written from head."""
+    def _save(self, cp_path: qp.utils.CpPath, data: np.ndarray) -> None:
+        """Save history `data` up to `i_iter`'th iteration to `cp_path`."""
         checkpoint, path = cp_path
         assert checkpoint is not None
-        if path in checkpoint:
-            dset = checkpoint[path]
-            assert dset.shape[1:] == data.shape
-            dset.resize(i_iter + 1, axis=0)
-        else:
-            dset = checkpoint.create_dataset(
-                path,
-                shape=(i_iter + 1,) + data.shape,
-                dtype=qp.rc.np_type[data.dtype],
-                maxshape=(None,) + data.shape,  # resizable infinitely along first axis
-            )
-        if self.comm.rank == 0:
-            dset[-1, ...] = data.to(qp.rc.cpu).numpy()
+        dset = checkpoint.create_dataset(
+            path, shape=(self.i_iter + 1,) + data.shape[1:], dtype=data.dtype
+        )
+        i_start = self.iter_division.i_start
+        i_stop = min(self.iter_division.i_stop, self.i_iter + 1)
+        n_out = i_stop - i_start
+        if n_out > 0:
+            dset[i_start:i_stop] = data[:n_out]

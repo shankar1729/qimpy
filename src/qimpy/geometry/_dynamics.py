@@ -122,7 +122,9 @@ class Dynamics(qp.TreeNode):
         self.t_damp_P = float(t_damp_P)
         self.drag_wavefunctions = drag_wavefunctions
         if save_history:
-            self.add_child("history", History, {}, checkpoint_in, comm=comm)
+            self.add_child(
+                "history", History, {}, checkpoint_in, comm=comm, n_max=n_steps
+            )
         else:
             self.history = None
         self.report_callback = report_callback
@@ -275,22 +277,23 @@ class Dynamics(qp.TreeNode):
             saved_list.append("i_iter")
 
             # Prepare for trajectory output if needed:
-            if self.history is not None:
-                save_map = self.history.save_map
+            history = self.history
+            if history is not None:
                 system = self.stepper.system
-                save_map["energy"] = torch.tensor(float(system.energy))
-                ions = system.ions
-                save_map["positions"] = ions.positions.detach()
-                save_map["forces"] = ions.forces
-                assert ions.velocities is not None
-                save_map["velocities"] = ions.velocities
-                save_map["T"] = torch.tensor(float(self.T))
                 lattice = system.lattice
+                ions = system.ions
+                history.i_iter = i_iter
+                history.add("energy", float(system.energy))
+                history.add("positions", ions.positions.detach())
+                history.add("forces", ions.forces)
+                assert ions.velocities is not None
+                history.add("velocities", ions.velocities)
+                history.add("T", self.T)
                 if lattice.movable:
-                    save_map["Rbasis"] = lattice.Rbasis
+                    history.add("Rbasis", lattice.Rbasis)
                 if self.stress is not None:
                     assert self.P is not None
-                    save_map["P"] = torch.tensor(float(self.P))
-                    save_map["stress"] = lattice.stress.detach()  # potential only
-                    save_map["stress_total"] = self.stress  # including kinetic
+                    history.add("P", self.P)
+                    history.add("stress", lattice.stress.detach())  # potential only
+                    history.add("stress_total", self.stress)  # including kinetic
         return saved_list

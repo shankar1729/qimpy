@@ -106,7 +106,9 @@ class Relax(qp.utils.Minimize[Gradient]):
         )
         self.drag_wavefunctions = drag_wavefunctions
         if save_history:
-            self.add_child("history", History, {}, checkpoint_in, comm=comm)
+            self.add_child(
+                "history", History, {}, checkpoint_in, comm=comm, n_max=n_iterations
+            )
         else:
             self.history = None
 
@@ -198,16 +200,17 @@ class Relax(qp.utils.Minimize[Gradient]):
             saved_list.append("i_iter")
 
             # Prepare for trajectory output if needed:
-            if self.history is not None:
-                save_map = self.history.save_map
+            history = self.history
+            if history is not None:
                 system = self.stepper.system
-                save_map["energy"] = torch.tensor(float(system.energy))
-                ions = system.ions
-                save_map["positions"] = ions.positions.detach()
-                save_map["forces"] = ions.forces
                 lattice = system.lattice
+                ions = system.ions
+                history.i_iter = i_iter
+                history.add("energy", float(system.energy))
+                history.add("positions", ions.positions.detach())
+                history.add("forces", ions.forces)
                 if lattice.movable:
-                    save_map["Rbasis"] = lattice.Rbasis
+                    history.add("Rbasis", lattice.Rbasis)
                 if lattice.compute_stress:
-                    save_map["stress"] = lattice.stress.detach()
+                    history.add("stress", lattice.stress.detach())
         return saved_list

@@ -87,11 +87,8 @@ class Checkpoint(h5py.File):
         self, path: str, shape: tuple[int, ...], dtype: torch.dtype = torch.float64
     ) -> Any:
         """Create a dataset at `path` suitable for a real array of size `shape`.
-        Unlike `h5py.File.create_dataset`, this does not fail if the dataset exists,
-        and instead removes the existing dataset. Additionally, `dtype` is translated
+        Additionally, `dtype` is translated
         from torch to numpy for convenience."""
-        if path in self:
-            del self[path]
         return self.create_dataset(path, shape=shape, dtype=qp.rc.np_type[dtype])
 
     def create_dataset_complex(
@@ -101,8 +98,6 @@ class Checkpoint(h5py.File):
         `shape`. This creates a real array with a final dimension of length 2.
         This format is used by :meth:`write_slice_complex` and
         :meth:`read_slice_complex`."""
-        if path in self:
-            del self[path]
         dtype_real = np.float64 if (dtype == torch.complex128) else np.float32
         return self.create_dataset(path, shape=(shape + (2,)), dtype=dtype_real)
 
