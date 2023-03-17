@@ -135,10 +135,30 @@ class NoseHoover(qp.TreeNode):
         self.dynamics = dynamics
         assert chain_length_T >= 3
         assert chain_length_P >= 3
-        self.chain_length_T = chain_length_T
-        self.chain_length_P = chain_length_P
-        self.thermostat_velocity = torch.zeros(self.chain_length_T, device=qp.rc.device)
-        self.barostat_velocity = None
+        if checkpoint_in:
+            attrs = checkpoint_in.attrs
+            self.chain_length_T = attrs["chain_length_T"]
+            self.chain_length_P = attrs["chain_length_P"]
+            self.thermostat_velocity = checkpoint_in.read("thermostat_velocity")
+            self.barostat_velocity = checkpoint_in.read_optional("barostat_velocity")
+        else:
+            self.chain_length_T = chain_length_T
+            self.chain_length_P = chain_length_P
+            self.thermostat_velocity = torch.zeros(chain_length_T, device=qp.rc.device)
+            self.barostat_velocity = None
+
+    def _save_checkpoint(
+        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["chain_length_T"] = self.chain_length_T
+        attrs["chain_length_P"] = self.chain_length_P
+        saved_list = ["chain_length_T", "chain_length_P", "thermostat_velocty"]
+        cp_path.write("thermostat_velocity", self.thermostat_velocity)
+        if self.barostat_velocity is not None:
+            cp_path.write("barostat_velocity", self.barostat_velocity)
+            saved_list.append("barostat_velocity")
+        return saved_list
 
     def extra_acceleration(self, velocity: Gradient) -> Gradient:
         """Extra velocity-dependent acceleration due to thermostat/barostat."""
@@ -246,7 +266,13 @@ class Berendsen(qp.TreeNode):
         """
         super().__init__()
         self.dynamics = dynamics
-        self.B0 = float(B0)
+        self.B0 = checkpoint_in.attrs["B0"] if checkpoint_in else float(B0)
+
+    def _save_checkpoint(
+        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
+    ) -> list[str]:
+        cp_path.attrs["B0"] = self.B0
+        return ["B0"]
 
     def extra_acceleration(self, velocity: Gradient) -> Gradient:
         """Extra velocity-dependent acceleration due to thermostat/barostat."""
@@ -257,22 +283,23 @@ class Berendsen(qp.TreeNode):
         # Optional barostat contributions:
         if dynamics.system.lattice.movable:
             dstress = dynamics.stress0 - dynamics.get_stress(velocity.ions)
-            velocity.lattice = dstress / (dynamics.t_damp_P * self.B0)
-            acceleration.ions -= velocity.ions @ velocity.lattice.T
-            acceleration.lattice = torch.zeros_like(velocity.lattice)
+            strain_rate = dstress / (dynamics.t_damp_P * self.B0)
+            velocity.lattice = strain_rate
+            acceleration.ions -= velocity.ions @ strain_rate.T
+            acceleration.lattice = torch.zeros_like(strain_rate)
         return acceleration
 
     def step(self, velocity: Gradient, acceleration: Gradient, dt: float) -> Gradient:
         """Return velocity after `dt`, given current `velocity` and `acceleration`."""
         return second_order_step(velocity, acceleration, self.extra_acceleration, dt)
 
-    def initialize_gradient(self, gradient: Gradient, lattice_movable: bool) -> None:
+    def initialize_gradient(self, gradient: Gradient) -> None:
         """No optional `gradient` terms for this thermostat method."""
 
-    def get_velocity(self, velocity: Gradient, lattice_movable: bool) -> None:
+    def get_velocity(self, velocity: Gradient) -> None:
         """No optional velocity components for this thermostat method."""
 
-    def set_velocity(self, velocity: Gradient, lattice_movable: bool) -> None:
+    def set_velocity(self, velocity: Gradient) -> None:
         """No optional velocity components for this thermostat method."""
 
 
