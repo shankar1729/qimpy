@@ -14,6 +14,7 @@ class TreeNode:
     files preserving the same tree structure."""
 
     child_names: list[str]  #: Names of attributes with child objects.
+    _attr_version_map: dict[str, str]  #: Version of children having variants (if any)
 
     def __init__(self, **kwargs):
         self.child_names = []
@@ -27,6 +28,11 @@ class TreeNode:
         e.g. at a geometry step, or at the end of the simulation.
         Override `_save_checkpoint` to implement the save functionality."""
         if cp_path.checkpoint is not None:
+            # Mark selected variants of children, if required:
+            if hasattr(self, "_attr_version_map"):
+                attrs = cp_path.attrs
+                for attr_name, attr_version_name in self._attr_version_map.items():
+                    attrs[attr_name] = attr_version_name
             # Save quantities in self:
             saved = self._save_checkpoint(cp_path, context)
             if saved:
@@ -120,16 +126,49 @@ class TreeNode:
         At most one of the child options should have a `params` that is not None.
         If `have_default`, create child with the first class and default `params`.
         Otherwise, at least one of the child options should have a non-None `params`.
+
+        If loading from `checkpoint_in`, this will search for attribute named
+        `attr_name` in the checkpoint and use that to select the child if none
+        are specified.  If parameters for a different child are specified,
+        that takes precedence and checkpoint_in will be suppressed for that
+        child's initialization (as the data within would be incompatible).
         """
+        # Check checkpoint for child version it contains if any:
+        attr_version_name_checkpoint = (
+            checkpoint_in.attrs[attr_name]
+            if (checkpoint_in and (attr_name in checkpoint_in.attrs))
+            else ""
+        )
+
+        # Check argument list:
         arg_options = [arg for arg in args if (arg.params is not None)]
         if len(arg_options) > 1:
             arg_option_names = ", ".join(arg.attr_version_name for arg in arg_options)
             raise ValueError(f"Cannot use more than one of {arg_option_names}")
-        if not (arg_options or have_default):
+        if not (arg_options or have_default or attr_version_name_checkpoint):
             arg_names = ", ".join(arg.attr_version_name for arg in args)
             raise ValueError(f"At least one of {arg_names} must be specified")
-        # Add the selected / default child:
-        arg_sel = arg_options[0] if arg_options else args[0]
+
+        # Determine child based on arguments, checkpoint or default:
+        if arg_options:
+            arg_sel = arg_options[0]  # parameters explicitly specified
+        elif attr_version_name_checkpoint:
+            for arg in args:
+                if arg.attr_version_name == attr_version_name_checkpoint:
+                    arg_sel = arg  # version selected by checkpoint
+                    break
+        else:
+            arg_sel = args[0]  # default
+
+        # Remember selected variant for writing to checkpoint:
+        if not hasattr(self, "_attr_version_map"):
+            self._attr_version_map = {}
+        self._attr_version_map[attr_name] = arg_sel.attr_version_name
+
+        # Prevent loading data from inconsistent checkpoint:
+        if arg_sel.attr_version_name != attr_version_name_checkpoint:
+            checkpoint_in = qp.utils.CpPath()
+
         self.add_child(
             attr_name,
             arg_sel.cls,
