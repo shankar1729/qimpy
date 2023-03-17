@@ -136,18 +136,22 @@ class Dynamics(qp.TreeNode):
     def run(self, system: qp.System) -> None:
         self.system = system
         self.masses = Dynamics.get_masses(system.ions)
-        self.stepper = Stepper(
+        stepper = Stepper(
             self.system,
             drag_wavefunctions=self.drag_wavefunctions,
             isotropic=self.isotropic,
         )
+        self.stepper = stepper
+        thermostat_method = self.thermostat.method
 
         # Initial velocity and acceleration:
-        if self.system.ions.velocities is None:  # velocities not read in
-            self.system.ions.velocities = self.thermal_velocities(self.T0, self.seed)
-        velocity = self.create_gradient(self.system.ions.velocities)
+        if (ion_velocities := system.ions.velocities) is None:  # velocities not read in
+            ion_velocities = self.thermal_velocities(self.T0, self.seed)
+        velocity = self.create_gradient(ion_velocities)
+        if (strain_rate := system.lattice.strain_rate) is not None:
+            velocity.lattice = strain_rate
+        thermostat_method.get_velocity(velocity)
         acceleration = self.get_acceleration()
-        thermostat_method = self.thermostat.method
 
         # MD loop
         for i_iter in range(self.i_iter_start, self.n_steps + 1):
@@ -157,15 +161,15 @@ class Dynamics(qp.TreeNode):
 
             # First half-step velocity update
             velocity = thermostat_method.step(velocity, acceleration, 0.5 * self.dt)
-            velocity = self.stepper.constrain(velocity)
+            velocity = stepper.constrain(velocity)
 
             # Position and position-dependent acceleration update
-            self.stepper.step(velocity, self.dt)
+            stepper.step(velocity, self.dt)
             acceleration = self.get_acceleration()
 
             # Second half-step velocity update
             velocity = thermostat_method.step(velocity, acceleration, 0.5 * self.dt)
-            velocity = self.stepper.constrain(velocity)
+            velocity = stepper.constrain(velocity)
 
         # Check point at end:
         if system.checkpoint_out:
@@ -198,17 +202,23 @@ class Dynamics(qp.TreeNode):
         return self.create_gradient(-gradient.ions / self.masses)
 
     def report(self, i_iter: int, velocity: Gradient) -> None:
-        # Update velocity-dependent quantities:
+        # Update velocities stored within each component:
         system = self.system
         system.ions.velocities = velocity.ions
+        system.lattice.strain_rate = velocity.lattice
+        self.thermostat.method.set_velocity(velocity)
+
+        # Update velocity-dependent quantities:
         self.KE = self.get_KE(velocity.ions)
         self.T = self.get_T(self.KE)
         self.stress = self.get_stress(velocity.ions)
         self.P = Dynamics.get_pressure(self.stress)
+
         # Checkpoint:
         if system.checkpoint_out:
             with Checkpoint(system.checkpoint_out, writable=True) as cp:
                 system.save_checkpoint(CpPath(cp), CpContext("geometry", i_iter))
+
         # Report positions, forces, stresses etc.:
         self.stepper.report(total_stress=self.stress)
         if self.report_callback is not None:
@@ -263,10 +273,9 @@ class Dynamics(qp.TreeNode):
     def create_gradient(self, ions: torch.Tensor) -> Gradient:
         """Create gradient from ionic part, initializing optional parts correctly."""
         gradient = Gradient(ions=ions)
-        lattice_movable = self.system.lattice.movable
-        if lattice_movable:
+        if self.system.lattice.movable:
             gradient.lattice = torch.zeros((3, 3), device=qp.rc.device)
-        self.thermostat.method.initialize_gradient(gradient, lattice_movable)
+        self.thermostat.method.initialize_gradient(gradient)
         return gradient
 
     def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:

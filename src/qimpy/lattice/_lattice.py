@@ -16,6 +16,7 @@ class Lattice(qp.TreeNode):
     compute_stress: bool  #: Whether to compute and report stress
     grad: torch.Tensor  #: Lattice gradient of energy := dE/dRbasis @ Rbasis.T
     _requires_grad: bool  #: Internal flag to control collection of lattice gradients
+    strain_rate: Optional[torch.Tensor]  #: Strain rate (for lattice-movable dynamics)
 
     movable: bool  #: Whether lattice can be moved in geometry relaxation / dynamics
     move_scale: torch.Tensor  #: Scale factors to precondition / constrain lattice move
@@ -133,6 +134,7 @@ class Lattice(qp.TreeNode):
         self.update(self.Rbasis.to(qp.rc.device), report_change=False)
         self.compute_stress = compute_stress or movable
         self.requires_grad_(False, clear=True)  # initialize gradient
+        self.strain_rate = None
         self.report(report_grad=False)
 
         # Optimization / constraints:

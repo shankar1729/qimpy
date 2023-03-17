@@ -1,6 +1,6 @@
 """Geometry actions: relaxation and dynamics."""
 from __future__ import annotations
-from typing import Union, Protocol, Callable
+from typing import Union, Protocol, Callable, Optional
 import torch
 import qimpy as qp
 from qimpy.utils import Unit, UnitOrFloat
@@ -64,11 +64,15 @@ class ThermostatMethod(Protocol):
 
     def step(self, velocity: Gradient, acceleration: Gradient, dt: float) -> Gradient:
         """Return velocity after `dt`, given current `velocity` and `acceleration`."""
-        ...
 
-    def initialize_gradient(self, gradient: Gradient, lattice_movable: bool) -> None:
+    def initialize_gradient(self, gradient: Gradient) -> None:
         """Initialize optional terms in `gradient` needed by this thermostat to zero."""
-        ...
+
+    def get_velocity(self, velocity: Gradient) -> None:
+        """Get optional velocity components used by this thermostat in `velocity`."""
+
+    def set_velocity(self, velocity: Gradient) -> None:
+        """Set optional velocity components used by this thermostat from `velocity`."""
 
 
 class NVE(qp.TreeNode):
@@ -89,8 +93,14 @@ class NVE(qp.TreeNode):
         """Return velocity after `dt`, given current `velocity` and `acceleration`."""
         return velocity + acceleration * dt
 
-    def initialize_gradient(self, gradient: Gradient, lattice_movable: bool) -> None:
+    def initialize_gradient(self, gradient: Gradient) -> None:
         """No optional `gradient` terms for this thermostat method."""
+
+    def get_velocity(self, velocity: Gradient) -> None:
+        """No optional velocity components for this thermostat method."""
+
+    def set_velocity(self, velocity: Gradient) -> None:
+        """No optional velocity components for this thermostat method."""
 
 
 class NoseHoover(qp.TreeNode):
@@ -99,6 +109,8 @@ class NoseHoover(qp.TreeNode):
     dynamics: qp.geometry.Dynamics
     chain_length_T: int  #: Nose-Hoover chain length for thermostat
     chain_length_P: int  #: Nose-Hoover chain length for barostat
+    thermostat_velocity: torch.Tensor  #: Velocity of extra thermostat DOFs
+    barostat_velocity: Optional[torch.Tensor]  #: Velocity of extra barostat DOFs
 
     def __init__(
         self,
@@ -125,6 +137,8 @@ class NoseHoover(qp.TreeNode):
         assert chain_length_P >= 3
         self.chain_length_T = chain_length_T
         self.chain_length_P = chain_length_P
+        self.thermostat_velocity = torch.zeros(self.chain_length_T, device=qp.rc.device)
+        self.barostat_velocity = None
 
     def extra_acceleration(self, velocity: Gradient) -> Gradient:
         """Extra velocity-dependent acceleration due to thermostat/barostat."""
@@ -185,11 +199,24 @@ class NoseHoover(qp.TreeNode):
         """Return velocity after `dt`, given current `velocity` and `acceleration`."""
         return second_order_step(velocity, acceleration, self.extra_acceleration, dt)
 
-    def initialize_gradient(self, gradient: Gradient, lattice_movable: bool) -> None:
+    def initialize_gradient(self, gradient: Gradient) -> None:
         """Initialize `thermostat` and, if needed, `barostat` terms in `gradient`."""
         gradient.thermostat = torch.zeros(self.chain_length_T, device=qp.rc.device)
-        if lattice_movable:
+        if self.dynamics.system.lattice.movable:
             gradient.barostat = torch.zeros(self.chain_length_P, device=qp.rc.device)
+
+    def get_velocity(self, velocity: Gradient) -> None:
+        """Get `thermostat` and optional `barostat` components within `velocity`."""
+        velocity.thermostat = self.thermostat_velocity
+        if self.barostat_velocity is not None:
+            velocity.barostat = self.barostat_velocity
+
+    def set_velocity(self, velocity: Gradient) -> None:
+        """Set `thermostat` and optional `barostat` components from `velocity`."""
+        assert velocity.thermostat is not None
+        self.thermostat_velocity = velocity.thermostat
+        if velocity.barostat is not None:
+            self.barostat_velocity = velocity.barostat
 
 
 class Berendsen(qp.TreeNode):
@@ -242,6 +269,12 @@ class Berendsen(qp.TreeNode):
     def initialize_gradient(self, gradient: Gradient, lattice_movable: bool) -> None:
         """No optional `gradient` terms for this thermostat method."""
 
+    def get_velocity(self, velocity: Gradient, lattice_movable: bool) -> None:
+        """No optional velocity components for this thermostat method."""
+
+    def set_velocity(self, velocity: Gradient, lattice_movable: bool) -> None:
+        """No optional velocity components for this thermostat method."""
+
 
 class Langevin(qp.TreeNode):
     """Langevin stochastic thermostat and/or barostat."""
@@ -274,8 +307,14 @@ class Langevin(qp.TreeNode):
             velocity, acceleration + acceleration_noise, self.extra_acceleration, dt
         )
 
-    def initialize_gradient(self, gradient: Gradient, lattice_movable: bool) -> None:
+    def initialize_gradient(self, gradient: Gradient) -> None:
         """No optional `gradient` terms for this thermostat method."""
+
+    def get_velocity(self, velocity: Gradient) -> None:
+        """No optional velocity components for this thermostat method."""
+
+    def set_velocity(self, velocity: Gradient) -> None:
+        """No optional velocity components for this thermostat method."""
 
 
 def second_order_step(
