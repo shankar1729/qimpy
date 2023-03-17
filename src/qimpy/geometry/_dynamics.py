@@ -123,7 +123,7 @@ class Dynamics(qp.TreeNode):
         self.drag_wavefunctions = drag_wavefunctions
         if save_history:
             self.add_child(
-                "history", History, {}, checkpoint_in, comm=comm, n_max=n_steps
+                "history", History, {}, checkpoint_in, comm=comm, n_max=(n_steps + 1)
             )
         else:
             self.history = None
@@ -280,11 +280,9 @@ class Dynamics(qp.TreeNode):
 
     def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
         stage, i_iter = context
-        saved_list: list[str] = []
+        saved_list = ["i_iter"]
+        cp_path.attrs["i_iter"] = i_iter if (stage == "geometry") else self.n_steps
         if stage == "geometry":
-            cp_path.attrs["i_iter"] = i_iter
-            saved_list.append("i_iter")
-
             # Prepare for trajectory output if needed:
             history = self.history
             if history is not None:

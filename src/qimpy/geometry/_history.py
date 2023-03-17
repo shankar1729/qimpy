@@ -63,14 +63,11 @@ class History(qp.TreeNode):
     def _save_checkpoint(
         self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
     ) -> list[str]:
-        stage, i_iter = context
+        cp_path.attrs["i_iter"] = self.i_iter
         saved_list = []
-        if stage == "geometry":
-            assert i_iter == self.i_iter
-            cp_path.attrs["i_iter"] = i_iter
-            for name, data in self.save_map.items():
-                self._save(cp_path.relative(name), data)
-                saved_list.append(name)
+        for name, data in self.save_map.items():
+            self._save(cp_path.relative(name), data)
+            saved_list.append(name)
         return saved_list
 
     def _save(self, cp_path: qp.utils.CpPath, data: np.ndarray) -> None:
