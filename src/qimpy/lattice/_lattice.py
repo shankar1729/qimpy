@@ -37,9 +37,9 @@ class Lattice(qp.TreeNode):
         vector2: Optional[Sequence[float]] = None,
         vector3: Optional[Sequence[float]] = None,
         scale: Optional[Union[float, Sequence[float]]] = None,
-        compute_stress: bool = False,
-        movable: bool = False,
-        move_scale: Sequence[float] = (1.0, 1.0, 1.0),
+        compute_stress: Optional[bool] = None,
+        movable: Optional[bool] = None,
+        move_scale: Optional[Sequence[float]] = None,
     ) -> None:
         """Initialize from lattice vectors or lengths and angles.
         Either specify a lattice `system` and optional `modification`,
@@ -95,52 +95,92 @@ class Lattice(qp.TreeNode):
         compute_stress
             :yaml:`Whether to compute and report stress.`
             Enable to report stress regardless of whether lattice is `movable`.
+            Defaults to False if unspecified.
             (Stresses are always computed when lattice is `movable`.)
         movable
             :yaml:`Whether to move lattice during geometry relaxation / dynamics.`
+            Defaults to False if unspecified.
         move_scale
             :yaml:`Scale factor for moving each lattice vector.`
             Set to zero for some directions to constrain lattice relaxation
             or dynamics. Can also adjust the magnitude to precondition lattice
             motion relative to the ions (internal coordinates).
+            Defaults to (1, 1, 1) if unspecified.
         """
         super().__init__()
         qp.log.info("\n--- Initializing Lattice ---")
 
-        # Get unscaled lattice vectors:
-        if system:
-            self.Rbasis = get_Rbasis(system, modification, a, b, c, alpha, beta, gamma)
+        if checkpoint_in:
+            attrs = checkpoint_in.attrs
+            self.compute_stress = attrs["compute_stress"]
+            self.movable = attrs["movable"]
+            self.move_scale = checkpoint_in.read("move_scale")
+            self.strain_rate = checkpoint_in.read_optional("strain_rate")
+            self.Rbasis = checkpoint_in.read("Rbasis")
+            stress = checkpoint_in.read_optional("stress")  # converted to grad below
         else:
-            # Direct specification of lattice vectors:
-            def check_vectors(**kwargs):
-                for key, value in kwargs.items():
-                    if value is None:
-                        raise KeyError(key + " must be specified")
-                    try:
-                        np.array(value, dtype=float).reshape(3)
-                    except ValueError:
-                        raise ValueError(key + " must contain 3 numbers")
+            self.compute_stress = False
+            self.movable = False
+            self.move_scale = torch.ones(3, device=qp.rc.device)
+            self.strain_rate = None
+            stress = None
 
-            check_vectors(vector1=vector1, vector2=vector2, vector3=vector3)
-            self.Rbasis = torch.tensor([vector1, vector2, vector3]).T
+            # Get unscaled lattice vectors:
+            if system:
+                self.Rbasis = get_Rbasis(
+                    system, modification, a, b, c, alpha, beta, gamma
+                )
+            else:
+                # Direct specification of lattice vectors:
+                def check_vectors(**kwargs):
+                    for key, value in kwargs.items():
+                        if value is None:
+                            raise KeyError(key + " must be specified")
+                        try:
+                            np.array(value, dtype=float).reshape(3)
+                        except ValueError:
+                            raise ValueError(key + " must contain 3 numbers")
 
-        # Apply scale if needed:
-        if scale:
-            scale_vector = torch.tensor(scale).flatten()
-            assert len(scale_vector) in (1, 3)
-            self.Rbasis = scale_vector[None, :] * self.Rbasis
+                check_vectors(vector1=vector1, vector2=vector2, vector3=vector3)
+                self.Rbasis = torch.tensor([vector1, vector2, vector3]).T
+
+            # Apply scale if needed:
+            if scale and (not checkpoint_in):
+                scale_vector = torch.tensor(scale).flatten()
+                assert len(scale_vector) in (1, 3)
+                self.Rbasis = scale_vector[None, :] * self.Rbasis
 
         # Compute dependent quantities:
         self.update(self.Rbasis.to(qp.rc.device), report_change=False)
-        self.compute_stress = compute_stress or movable
-        self.requires_grad_(False, clear=True)  # initialize gradient
-        self.strain_rate = None
         self.report(report_grad=False)
+        self.requires_grad_(False, clear=True)  # initialize gradient
+        if stress is not None:
+            self.grad = self.volume * stress
 
-        # Optimization / constraints:
-        self.movable = movable
-        self.move_scale = torch.tensor(move_scale, device=qp.rc.device)
-        assert self.move_scale.shape == (3,)
+        # Optionally override optimization / constraints settings:
+        if movable is not None:
+            self.movable = movable
+            self.compute_stress = self.compute_stress or movable
+        if compute_stress is not None:
+            self.compute_stress = compute_stress or self.movable
+        if move_scale is not None:
+            self.move_scale = torch.tensor(move_scale, device=qp.rc.device)
+            assert self.move_scale.shape == (3,)
+
+    def _save_checkpoint(
+        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["compute_stress"] = self.compute_stress
+        attrs["movable"] = self.movable
+        saved_list = ["compute_stress", "movable"]
+        saved_list.append(cp_path.write("move_scale", self.move_scale))
+        if self.strain_rate is not None:
+            saved_list.append(cp_path.write("strain_rate", self.strain_rate))
+        saved_list.append(cp_path.write("Rbasis", self.Rbasis))
+        if self.compute_stress:
+            saved_list.append(cp_path.write("stress", self.stress.detach()))
+        return saved_list
 
     def update(self, Rbasis: torch.Tensor, report_change: bool = True) -> None:
         """Update lattice vectors and dependent quantities.

@@ -65,8 +65,8 @@ def main() -> None:
             dynamics=dict(
                 dt=float(Unit(2.0, "fs")),
                 n_steps=100,
-                thermostat=dict(berendsen=dict(B0=Unit(95.0, "GPa"))),
-                # thermostat="nose-hoover",
+                # thermostat=dict(berendsen=dict(B0=Unit(95.0, "GPa"))),
+                thermostat="nose-hoover",
                 t_damp_T=Unit(10, "fs"),
                 t_damp_P=Unit(100, "fs"),
                 report_callback=analyze,
