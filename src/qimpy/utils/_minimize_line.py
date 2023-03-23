@@ -47,9 +47,7 @@ def _quadratic(
     E_orig = E
     g_d = self._sync(state.gradient.vdot(direction))
     if g_d >= 0.0:
-        qp.log.info(
-            f"{self.name}: Bad step direction with positive" " gradient component"
-        )
+        qp.log.info(f"{self.name}: Bad step direction with positive gradient component")
         return E_orig, step_size_prev, False
 
     # Test step and quadratic step size prediction:
@@ -74,7 +72,7 @@ def _quadratic(
             continue
         # Predict step size (quadratic based on gradient and two energies):
         step_size = (
-            0.5 * (step_size_test**2) * g_d / (step_size_test * g_d + E - E_test)
+            0.5 * (step_size_test**2) * g_d / (step_size_test * g_d + (E - E_test))
         )
         # Check reasonableness of predicted step:
         if step_size < 0.0:
