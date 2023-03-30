@@ -155,6 +155,28 @@ class Field(qp.utils.Gradable[FieldType]):
             return NotImplemented
         return self
 
+    def integral(self) -> torch.Tensor:
+        r"""Compute integral over unit cell, retaining batch dimensions in output."""
+        data = self.data
+        grid = self.grid
+        if self.is_tilde:
+            # Integral depends on G=0 component alone:
+            result = (
+                self.o * grid.lattice.volume
+                if (grid.i_proc == 0)
+                else torch.zeros(data.shape[:-3], device=data.device, dtype=data.dtype)
+            )
+            if type(self) == FieldH:
+                result = result.real  # due to Hermitian symmetry
+        else:
+            result = data.sum(dim=(-3, -2, -1)) * grid.dV
+        # Collect over MPI if needed:
+        if self.grid.comm is not None:
+            result = result.contiguous()
+            qp.rc.current_stream_synchronize()
+            self.grid.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(result), MPI.SUM)
+        return result
+
     def dot(self: FieldType, other: FieldType) -> torch.Tensor:
         r"""Compute broadcasted inner product :math:`\int a^\dagger b`.
         This includes appropriate volume / mesh prefactors to convert it

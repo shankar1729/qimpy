@@ -5,12 +5,14 @@ from qimpy.grid._field import FieldType
 from . import get_sequential_grid, get_parallel_grid, get_reference_field
 
 
-def get_shape_batch_field_combinations() -> Sequence[
-    tuple[Sequence[int], Sequence[int], Type[FieldType]]
-]:
+def get_shape_batch_field_combinations(
+    include_tilde: bool,
+) -> Sequence[tuple[Sequence[int], Sequence[int], Type[FieldType]]]:
     shapes = ((48, 64, 96), (64, 72, 128))
     n_batches = ((2, 3), tuple())
-    field_types = (qp.grid.FieldR, qp.grid.FieldC, qp.grid.FieldH, qp.grid.FieldG)
+    field_types = [qp.grid.FieldR, qp.grid.FieldC]
+    if include_tilde:
+        field_types += [qp.grid.FieldH, qp.grid.FieldG]
     return [
         (shape, n_batch, field_type)
         for shape, n_batch in zip(shapes, n_batches)
@@ -19,7 +21,9 @@ def get_shape_batch_field_combinations() -> Sequence[
 
 
 @pytest.mark.mpi
-@pytest.mark.parametrize("shape, n_batch, cls", get_shape_batch_field_combinations())
+@pytest.mark.parametrize(
+    "shape, n_batch, cls", get_shape_batch_field_combinations(include_tilde=True)
+)
 def test_fft(
     shape: Sequence[int], n_batch: Sequence[int], cls: Type[FieldType], n_repeat=0
 ) -> None:
@@ -47,7 +51,9 @@ def test_fft(
 def main():
     qp.utils.log_config()
     qp.rc.init()
-    for shape, n_batch, field_type in get_shape_batch_field_combinations():
+    for shape, n_batch, field_type in get_shape_batch_field_combinations(
+        include_tilde=True
+    ):
         test_fft(shape, n_batch, field_type, n_repeat=10)
     qp.utils.StopWatch.print_stats()
 

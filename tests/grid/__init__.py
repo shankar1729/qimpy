@@ -42,6 +42,13 @@ def get_reference_field(
         bcast_shape = [1] * len(shape_full)
         bcast_shape[i_dim] = -1
         result.data += stride * cur_offset.view(bcast_shape)
+    # Introduce imaginary parts where not zero in general:
+    if result.dtype().is_complex:
+        result.data *= 1 + 0.1j
+        if cls is qp.grid.FieldH:
+            i2_real = torch.where(grid.weight2H == 1.0)[0]
+            for i2 in i2_real.tolist():
+                result.data[..., i2] = result.data[..., i2].real
     return result
 
 
