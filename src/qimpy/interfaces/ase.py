@@ -3,12 +3,12 @@ import qimpy as qp
 from qimpy.utils import Unit
 
 
-class ASECalculator(Calculator):
+class QimPy(Calculator):
 
     implemented_properties = ["energy", "forces"]
 
     def __init__(self, **kwargs):
-        """Qimpy ASE Calculator
+        """Qimpy calculator for ASE
 
         restart: str
             Prefix for restart file.  May contain a directory. Default
