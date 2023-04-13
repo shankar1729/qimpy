@@ -142,7 +142,11 @@ class Lattice(qp.TreeNode):
                             raise ValueError(key + " must contain 3 numbers")
 
                 check_vectors(vector1=vector1, vector2=vector2, vector3=vector3)
-                self.Rbasis = torch.tensor([vector1, vector2, vector3]).T
+
+                # Avoid torch warning by passing lattice vectors as ndarray
+                self.Rbasis = torch.tensor(
+                    np.stack([vector1, vector2, vector3], axis=0)
+                ).T
 
             # Apply scale if needed:
             if scale and (not checkpoint_in):
