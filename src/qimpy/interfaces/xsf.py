@@ -5,6 +5,8 @@ import argparse
 import h5py
 import numpy as np
 from qimpy.utils import Unit
+from typing import Optional
+
 
 def print_header(f, animated=False, animsteps=None):
     if animated:
@@ -22,9 +24,7 @@ def print_positions(f, symbols, positions, n):
     f.write(f"PRIMCOORD {n}\n")
     f.write(f"  {len(positions)} 1\n")
     for i, pos in enumerate(positions):
-        f.write(
-            f"  {symbols[i]} {pos[0]:10.6f} {pos[1]:10.6f} {pos[2]:10.6f}\n"
-        )
+        f.write(f"  {symbols[i]} {pos[0]:10.6f} {pos[1]:10.6f} {pos[2]:10.6f}\n")
 
 
 def print_dataset(f, lattice_vecs, dataset_symbol, dataset):
@@ -46,7 +46,12 @@ def print_dataset(f, lattice_vecs, dataset_symbol, dataset):
     f.write("END_BLOCK_DATAGRID_3D\n")
 
 
-def write_xsf(checkpoint, xsf_file, animated=False, dataset_symbol=None):
+def write_xsf(
+    checkpoint: str,
+    xsf_file: str,
+    animated: bool = False,
+    dataset_symbol: Optional[str] = None,
+) -> None:
     h5_file = h5py.File(checkpoint, "r")
     ions = h5_file["ions"]
     types = ions["types"][:]
@@ -54,7 +59,7 @@ def write_xsf(checkpoint, xsf_file, animated=False, dataset_symbol=None):
         np.array(ions.attrs["symbols"].split(",")),
         np.unique(types, return_counts=True)[1],
     )
-    to_ang = Unit.convert(1, 'Angstrom').value
+    to_ang = Unit.convert(1, "Angstrom").value
     lattice = h5_file["lattice"]
     history = h5_file["geometry/action/history"]
 
@@ -95,10 +100,8 @@ def write_xsf(checkpoint, xsf_file, animated=False, dataset_symbol=None):
             dataset = h5_file[f"electrons/{dataset_symbol}"][0]
             print_dataset(f, lattice_vecs, dataset_symbol, dataset)
 
-    return
 
-
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="write XSF file from HDF5 checkpoint file"
     )
