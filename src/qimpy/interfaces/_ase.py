@@ -1,9 +1,11 @@
-from ase import Atoms
 from ase.calculators.calculator import Calculator
+import qimpy as qp
+from qimpy.utils import Unit
+
 
 class ASECalculator(Calculator):
 
-    implemented_properties = ['energy', 'forces']
+    implemented_properties = ["energy", "forces"]
 
     def __init__(self, **kwargs):
         """Qimpy ASE Calculator
@@ -31,6 +33,42 @@ class ASECalculator(Calculator):
         """
         Calculator.__init__(self, **kwargs)
 
-    def calculate(self, atoms=None, properties=['energy'],
-                  system_changes=[]):
-        ...
+    def calculate(self, atoms=None, properties=["energy"], system_changes=[]):
+        angstrom = Unit.MAP["Angstrom"]
+        # Obtain lattice parameters and structure
+
+        # Get lattice vectors (3x3 array):
+        lattice = atoms.get_cell()[:] * angstrom
+
+        # Get atomic positions
+        positions = atoms.get_scaled_positions()
+
+        # Get symbols
+        symbols = atoms.get_chemical_symbols()
+
+        input_dict = dict()
+
+        input_dict["lattice"] = {
+            "vector1": lattice[0],
+            "vector2": lattice[1],
+            "vector3": lattice[2],
+            "movable": False,
+        }
+
+        # Horrible hardcode but default pseudopotentials need to be specified...
+        input_dict["ions"] = {
+            "coordinates": list(),
+            "fractional": True,
+            "pseudopotentials": "../../../jdftx/build/pseudopotentials/SG15/$ID_ONCV_PBE.upf",
+        }
+
+        for i in range(len(symbols)):
+            input_dict["ions"]["coordinates"].append(
+                [symbols[i]] + positions[i].tolist()
+            )
+
+        qp.rc.init()
+        system = qp.System(**input_dict)
+        system.run()
+
+        self.results = {"energy": float(system.energy)}
