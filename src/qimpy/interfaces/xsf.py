@@ -1,6 +1,49 @@
+"""
+This is used as: python -m qimpy.interfaces.xsf -c checkpoint.h5 -x crystal.xsf
+"""
+import argparse
 import h5py
 import numpy as np
-import argparse
+from qimpy.utils import Unit
+
+def print_header(f, animated=False, animsteps=None):
+    if animated:
+        f.write(f"ANIMSTEPS {animsteps}\n")
+    f.write("CRYSTAL\n")
+
+
+def print_lattice_vecs(f, lattice_vecs, n):
+    f.write(f"PRIMVEC {n}\n")
+    for vec in lattice_vecs.T:
+        f.write(f"{vec[0]:10.6f} {vec[1]:10.6f} {vec[2]:10.6f}\n")
+
+
+def print_positions(f, symbols, positions, n):
+    f.write(f"PRIMCOORD {n}\n")
+    f.write(f"  {len(positions)} 1\n")
+    for i, pos in enumerate(positions):
+        f.write(
+            f"  {symbols[i]} {pos[0]:10.6f} {pos[1]:10.6f} {pos[2]:10.6f}\n"
+        )
+
+
+def print_dataset(f, lattice_vecs, dataset_symbol, dataset):
+    f.write("BEGIN_BLOCK_DATAGRID_3D\n")
+    f.write(f" {dataset_symbol}\n")
+    f.write(f" BEGIN_DATAGRID_3D_{dataset_symbol}\n")
+    f.write(f"  {dataset.shape[0]} {dataset.shape[1]} {dataset.shape[2]}\n")
+    f.write("    0.000000   0.000000   0.000000\n")
+    for vec in lattice_vecs.T:
+        f.write(f"  {vec[0]:10.6f} {vec[1]:10.6f} {vec[2]:10.6f}\n")
+
+    for k in range(dataset.shape[2]):
+        for j in range(dataset.shape[1]):
+            for i in range(dataset.shape[0]):
+                f.write(f" {dataset[i, j, k]:e}")
+            f.write("\n")
+
+    f.write(" END_DATAGRID_3D\n")
+    f.write("END_BLOCK_DATAGRID_3D\n")
 
 
 def write_xsf(checkpoint, xsf_file, animated=False, dataset_symbol=None):
@@ -11,7 +54,7 @@ def write_xsf(checkpoint, xsf_file, animated=False, dataset_symbol=None):
         np.array(ions.attrs["symbols"].split(",")),
         np.unique(types, return_counts=True)[1],
     )
-    to_ang = 0.529177249  # from qimpy
+    to_ang = Unit.convert(1, 'Angstrom').value
     lattice = h5_file["lattice"]
     history = h5_file["geometry/action/history"]
 
@@ -19,8 +62,7 @@ def write_xsf(checkpoint, xsf_file, animated=False, dataset_symbol=None):
         if animated:
             fractional_positions = history["positions"][:]
             animsteps = fractional_positions.shape[0]
-            f.write(f"ANIMSTEPS {animsteps}\n")
-            f.write("CRYSTAL\n")
+            print_header(f, animated, animsteps)
 
             if lattice.attrs["movable"]:
                 lattice_vecs = history["Rbasis"][:] * to_ang
@@ -28,68 +70,30 @@ def write_xsf(checkpoint, xsf_file, animated=False, dataset_symbol=None):
                     "ijk,ilk->ilj", lattice_vecs, fractional_positions
                 )
                 for n, vec_n, pos_n in zip(range(animsteps), lattice_vecs, positions):
-                    f.write(f"PRIMVEC {n+1}\n")
-                    for vec in vec_n.T:
-                        f.write(f"{vec[0]:10.6f} {vec[1]:10.6f} {vec[2]:10.6f}\n")
-
-                    f.write(f"PRIMCOORD {n+1}\n")
-                    f.write(f"  {len(pos_n)} 1\n")
-                    for i, pos in enumerate(pos_n):
-                        f.write(
-                            f"  {symbols[i]} {pos[0]:10.6f} {pos[1]:10.6f} {pos[2]:10.6f}\n"
-                        )
+                    print_lattice_vecs(f, vec_n, f"{n+1}")
+                    print_positions(f, symbols, pos_n, f"{n+1}")
 
             else:
                 lattice_vecs = lattice["Rbasis"][:] * to_ang
                 positions = np.einsum("ij,klj->kli", lattice_vecs, fractional_positions)
-                f.write("PRIMVEC\n")
-                for vec in lattice_vecs.T:
-                    f.write(f"{vec[0]:10.6f} {vec[1]:10.6f} {vec[2]:10.6f}\n")
+                print_lattice_vecs(f, lattice_vecs, "")
 
                 for n, pos_n in enumerate(positions):
-                    f.write(f"PRIMCOORD {n+1}\n")
-                    f.write(f"  {len(pos_n)} 1\n")
-                    for i, pos in enumerate(pos_n):
-                        f.write(
-                            f"  {symbols[i]} {pos[0]:10.6f} {pos[1]:10.6f} {pos[2]:10.6f}\n"
-                        )
+                    print_positions(f, symbols, pos_n, f"{n+1}")
 
         else:
             lattice_vecs = lattice["Rbasis"][:] * to_ang
             fractional_positions = ions["positions"][:]
             positions = (lattice_vecs @ fractional_positions.T).T
-            f.write("CRYSTAL\n")
-            f.write("PRIMVEC\n")
-            for vec in lattice_vecs.T:
-                f.write(f"{vec[0]:10.6f} {vec[1]:10.6f} {vec[2]:10.6f}\n")
-
-            f.write("PRIMCOORD\n")
-            f.write(f"  {len(positions)} 1\n")
-            for i, pos in enumerate(positions):
-                f.write(
-                    f"  {symbols[i]} {pos[0]:10.6f} {pos[1]:10.6f} {pos[2]:10.6f}\n"
-                )
+            print_header(f)
+            print_lattice_vecs(f, lattice_vecs, "")
+            print_positions(f, symbols, positions, "")
 
             if dataset_symbol is None:
                 return
 
             dataset = h5_file[f"electrons/{dataset_symbol}"][0]
-            f.write("BEGIN_BLOCK_DATAGRID_3D\n")
-            f.write(f" {dataset_symbol}\n")
-            f.write(f" BEGIN_DATAGRID_3D_{dataset_symbol}\n")
-            f.write(f"  {dataset.shape[0]} {dataset.shape[1]} {dataset.shape[2]}\n")
-            f.write("    0.000000   0.000000   0.000000\n")
-            for vec in lattice_vecs.T:
-                f.write(f"  {vec[0]:10.6f} {vec[1]:10.6f} {vec[2]:10.6f}\n")
-
-            for k in range(dataset.shape[2]):
-                for j in range(dataset.shape[1]):
-                    for i in range(dataset.shape[0]):
-                        f.write(f" {dataset[i, j, k]:e}")
-                    f.write("\n")
-
-            f.write(" END_DATAGRID_3D\n")
-            f.write("END_BLOCK_DATAGRID_3D\n")
+            print_dataset(f, lattice_vecs, dataset_symbol, dataset)
 
     return
 
