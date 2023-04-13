@@ -7,7 +7,7 @@ class QimPy(Calculator):
 
     implemented_properties = ["energy", "forces"]
 
-    def __init__(self, **kwargs):
+    def __init__(self, pseudopotentials: str, **kwargs) -> None:
         """Qimpy calculator for ASE
 
         restart: str
@@ -32,9 +32,13 @@ class QimPy(Calculator):
             unit-cell updated from file.
         """
         Calculator.__init__(self, **kwargs)
+        self.pseudopotentials = pseudopotentials
 
-    def calculate(self, atoms=None, properties=["energy"], system_changes=[]):
+    def calculate(self, atoms=None, properties=["energy"], system_changes=[]) -> None:
+        # Necessary units (to match ASE)
         angstrom = Unit.MAP["Angstrom"]
+        eV = Unit.MAP["eV"]
+
         # Obtain lattice parameters and structure
 
         # Get lattice vectors (3x3 array):
@@ -59,7 +63,7 @@ class QimPy(Calculator):
         input_dict["ions"] = {
             "coordinates": list(),
             "fractional": True,
-            "pseudopotentials": "../../../jdftx/build/pseudopotentials/SG15/$ID_ONCV_PBE.upf",
+            "pseudopotentials": self.pseudopotentials,
         }
 
         for i in range(len(symbols)):
@@ -71,4 +75,4 @@ class QimPy(Calculator):
         system = qp.System(**input_dict)
         system.run()
 
-        self.results = {"energy": float(system.energy)}
+        self.results = {"energy": float(system.energy) * eV}
