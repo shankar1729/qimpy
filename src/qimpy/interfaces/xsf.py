@@ -1,33 +1,36 @@
-"""
-This is used as: python -m qimpy.interfaces.xsf -c checkpoint.h5 -x crystal.xsf
-"""
 import argparse
+from typing import Optional, TextIO
 import h5py
 import numpy as np
 from qimpy.utils import Unit
-from typing import Optional
 
 
-def print_header(f, animated=False, animsteps=None):
+def print_header(
+    f: TextIO, animated: bool = False, animsteps: Optional[int] = None
+) -> None:
     if animated:
         f.write(f"ANIMSTEPS {animsteps}\n")
     f.write("CRYSTAL\n")
 
 
-def print_lattice_vecs(f, lattice_vecs, n):
+def print_lattice_vecs(f: TextIO, lattice_vecs: np.ndarray, n: str) -> None:
     f.write(f"PRIMVEC {n}\n")
     for vec in lattice_vecs.T:
         f.write(f"{vec[0]:10.6f} {vec[1]:10.6f} {vec[2]:10.6f}\n")
 
 
-def print_positions(f, symbols, positions, n):
+def print_positions(
+    f: TextIO, symbols: np.ndarray, positions: np.ndarray, n: str
+) -> None:
     f.write(f"PRIMCOORD {n}\n")
     f.write(f"  {len(positions)} 1\n")
     for i, pos in enumerate(positions):
         f.write(f"  {symbols[i]} {pos[0]:10.6f} {pos[1]:10.6f} {pos[2]:10.6f}\n")
 
 
-def print_dataset(f, lattice_vecs, dataset_symbol, dataset):
+def print_dataset(
+    f: TextIO, lattice_vecs: np.ndarray, dataset_symbol: str, dataset: np.ndarray
+) -> None:
     f.write("BEGIN_BLOCK_DATAGRID_3D\n")
     f.write(f" {dataset_symbol}\n")
     f.write(f" BEGIN_DATAGRID_3D_{dataset_symbol}\n")
@@ -52,6 +55,40 @@ def write_xsf(
     animated: bool = False,
     dataset_symbol: Optional[str] = None,
 ) -> None:
+    """Write XSF file from HDF5 checkpoint file.
+
+    Parameters
+    ----------
+    checkpoint
+        Checkpoint file in HDF5 format.
+    xsf_file
+        Output file in XSF format.
+    animated
+        Make output an animated XSF file.
+    dataset_symbol
+        Add 3d data to XSF file such as electron density (dataset_symbol=n).
+
+    Usage
+    -----
+    :code:`python -m qimpy.interfaces.xsf [-h] -c FILE [-x FILE] [-a] [-d SYMBOL]`
+
+    Command-line parameters (obtained using :code:`python -m qimpy.interfaces.xsf -h`):
+
+    .. code-block:: bash
+
+        python -m qimpy.interfaces.xsf [-h] -c FILE [-x FILE] [-a] [-d SYMBOL]
+
+    write XSF file from HDF5 checkpoint file
+
+    options:
+      -h, --help            show this help message and exit
+      -c FILE, --checkpoint-file FILE
+                            checkpoint file in HDF5 format
+      -x FILE, --xsf-file FILE
+                            output file in XSF format (crystal.xsf if unspecified)
+      -a, --animated        make output an animated XSF file
+      -d SYMBOL, --data-symbol SYMBOL
+                            add 3d data to XSF file such as electron density (SYMBOL=n)"""
     h5_file = h5py.File(checkpoint, "r")
     ions = h5_file["ions"]
     types = ions["types"][:]
@@ -103,7 +140,8 @@ def write_xsf(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="write XSF file from HDF5 checkpoint file"
+        prog="python -m qimpy.interfaces.xsf",
+        description="write XSF file from HDF5 checkpoint file",
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
