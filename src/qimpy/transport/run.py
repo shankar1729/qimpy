@@ -2,8 +2,43 @@
 
 Typical usage:
 
-TODO
-"""
+:code:`mpirun [mpi-options] python -m qimpy.run -i INPUT_FILE [qimpy-options]`
+
+Command-line parameters (obtained using :code:`python -m qimpy.run -h`):
+
+.. code-block:: bash
+
+    python -m qimpy.transport (-h | -v | -i FILE) [-o FILE] [-c C] [-p Pr Pk]
+                           [-n] [-d] [-m FILE] [-V]
+
+Run a QimPy transport calculation from an input file
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -v, --version         print version information and quit
+  -i FILE, --input-file FILE
+                        input file in YAML format
+  -o FILE, --output-file FILE
+                        output file (stdout if unspecified)
+  -c C, --cores C       number of cores per process (overridden by SLURM)
+
+  -p Pr Pk, --process-grid Pr Pk
+                        dimensions of process grid: real-space x kpoints, whose
+                        product must match process count; any -1 will be set to
+                        distribute available tasks for that dimension most equally.
+                        Default: -1 -1 implies all dimensions set automatically.
+
+  -n, --dry-run         quit after initialization (to check input file)
+  -d, --no-append       overwrite output file instead of appending
+  -m FILE, --mpi-log FILE
+                        file prefix for debug logs from other MPI processes
+  -V, --verbose         print extra information in log for debugging
+
+
+Note that qimpy must be installed to the python path for these to work in any
+directory. For development, run `python setup.py develop --user` in the root
+directory of the source repository to make the above usage possible without
+instaling from pip/conda."""
 
 import qimpy as qp
 import argparse

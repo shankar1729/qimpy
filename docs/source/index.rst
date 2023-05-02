@@ -6,4 +6,5 @@ QimPy Documentation
 
     api
     inputfile
+    transportinput
     tutorials/index

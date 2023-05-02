@@ -1,2 +1,9 @@
+geometry:
+  vertices: []
+  edges: []
+
+material:
+  fname: material.dat
+
 checkpoint: wing.h5
 
