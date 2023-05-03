@@ -53,7 +53,9 @@ class Geometry(TreeNode):
 
 
 class QuadraticSpline:
-
+    v0: torch.Tensor  #: Starting point
+    v1: torch.Tensor  #: End point
+    v_mid: torch.Tensor  #: Mid point (can be used to curve the segment)
     n_points: int  #: Number of basis points along edge
     coeff: torch.Tensor  #: Quadratic coefficients
 
@@ -63,25 +65,33 @@ class QuadraticSpline:
         """
         Create quadratic spline from `v0` to `v1` via `v_mid` with `n_points` points.
         """
+        self.v0 = v0
+        self.v1 = v1
+        self.v_mid = v_mid
         self.n_points = n_points
 
         # Solve for coefficients:
-        Lhs = (
-            (n_points * torch.tensor([0, 0.5, 1]))[:, None] ** torch.arange(3)[None, :]
-        ).to(rc.device)
+        Lhs = (torch.tensor([0, 0.5, 1])[:, None] ** torch.arange(3)[None, :]).to(
+            rc.device
+        )
         rhs = torch.stack((v0, v_mid, v1))
         self.coeff = torch.linalg.solve(Lhs, rhs)
 
     def value(self, x: torch.Tensor) -> torch.Tensor:
-        """Get spline coordinate values for a sequence of x."""
+        """Get spline coordinate values for a sequence of fractional coordinates x."""
         return (x[:, None] ** torch.arange(3, device=rc.device)[None, :]) @ self.coeff
 
     @property
     def points(self) -> torch.Tensor:
         """Get spline points at original resolution, including end points."""
-        return self.value(
-            torch.arange(self.n_points + 1, dtype=torch.double, device=rc.device)
-        )
+        assert self.n_points > 0
+        return self.value(torch.linspace(0.0, 1.0, self.n_points + 1, device=rc.device))
+
+    def length(self, n_segments: int = 20) -> float:
+        """Compute length of edge, using n_segments if n_points is not specified."""
+        N = self.n_points if (self.n_points > 0) else n_segments
+        points = self.value(torch.linspace(0.0, 1.0, N + 1, device=rc.device))
+        return torch.diff(points, dim=0).norm(dim=1).sum().item()
 
 
 def _make_check_tensor(
