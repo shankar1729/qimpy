@@ -1,21 +1,7 @@
 import qimpy as qp
 from _advect import Advect, to_numpy
-
-
-@qp.utils.stopwatch(name="plot_streamlines")
-def plot_streamlines(advect, plt, contour_kwargs, stream_kwargs):
-    contour_kwargs.setdefault("levels", 100)
-    contour_kwargs.setdefault("cmap", "bwr")
-    stream_kwargs.setdefault("density", 2.0)
-    stream_kwargs.setdefault("linewidth", 1.0)
-    stream_kwargs.setdefault("color", "k")
-    stream_kwargs.setdefault("arrowsize", 1.0)
-    x = to_numpy(advect.x[advect.non_ghost])
-    y = to_numpy(advect.y[advect.non_ghost])
-    v = to_numpy(advect.velocity)
-    rho = to_numpy(advect.density)
-    plt.contourf(x, y, rho.T, **contour_kwargs)
-    plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
+import numpy as np
+import torch
 
 
 def main():
@@ -31,16 +17,21 @@ def main():
     x_y_top_left = [0.5, 1.0]
 
     x_y_corners = [x_y_bottom_left, x_y_bottom_right, x_y_top_right, x_y_top_left]
-    sim = Advect(x_y_corners)
+    sim = Advect(x_y_corners, contact_width=0.0)
+    sigma = 0.05
+    print(sim.rho.shape)
+    sim.rho[:, :, 0] = torch.tensor(
+        np.exp(-((sim.X - sim.Nx / 2) ** 2 + (sim.Y - sim.Ny / 2) ** 2) / sigma**2)
+    )
     for time_step in range(256):
         qp.log.info(f"{time_step = }")
         sim.time_step()
 
     # Plot only at end (for easier performance benchmarking of time steps):
     qp.log.info("Plotting density and streamlines")
-    plot_streamlines(sim, plt, dict(levels=100), dict(linewidth=1.0))
     plt.gca().set_aspect("equal")
     plt.savefig("contour_final.png", bbox_inches="tight", dpi=200)
+    sim.plot_streamlines(plt, dict(levels=100), dict(linewidth=1.0))
 
     qp.utils.StopWatch.print_stats()
 
