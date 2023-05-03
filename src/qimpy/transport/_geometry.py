@@ -106,6 +106,7 @@ def _make_check_tensor(
             assert result_shape_i == dim_i
     return result
 
+
 def affine(X, Y, x_y_corners):
     #    a = [a0, a1, a2, a3, a4, a5, a6, a7]
 

@@ -43,7 +43,7 @@ class Advect(Geometry):
 
         self.v_x = v_F * self.theta.cos()
         self.v_y = v_F * self.theta.sin()
-        #self.v = torch.stack((self.v_x, self.v_y)).T
+        # self.v = torch.stack((self.v_x, self.v_y)).T
 
         X = np.arange(0, self.N1, 1)
         Y = np.arange(0, self.N2, 1)
@@ -88,7 +88,6 @@ class Advect(Geometry):
         self.v_Y = self.v_Y.reshape(
             (self.Nx + 2 * self.N_ghost, self.Ny + 2 * self.N_ghost, self.N_theta)
         )
-
 
         # Initialize distribution function:
         self.rho_shape = (len(self.x), len(self.y), N_theta)
@@ -213,7 +212,7 @@ def v_prime(rho: torch.Tensor, v: torch.Tensor, axis: int) -> torch.Tensor:
 
     # Reconstruction
     half_slope = 0.5 * slope_minmod(rho)
-    
+
     # Riemann selection based on velocity:
     result_minus = rho - half_slope
     result_plus = (rho + half_slope).roll(+1, dims=-1)

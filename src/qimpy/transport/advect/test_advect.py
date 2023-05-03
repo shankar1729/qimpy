@@ -35,7 +35,9 @@ def main():
     x_y_corners = [x_y_bottom_left, x_y_bottom_right, x_y_top_right, x_y_top_left]
     sim = Advect(x_y_corners, contact_width=0.0)
     sigma = 0.05
-    sim.rho = torch.tensor(np.exp(-((sim.X - sim.Lx / 2)**2 + (sim.Y - sim.Ly / 2)**2) / sigma**2))
+    sim.rho = torch.tensor(
+        np.exp(-((sim.X - sim.Lx / 2) ** 2 + (sim.Y - sim.Ly / 2) ** 2) / sigma**2)
+    )
     for time_step in range(256):
         qp.log.info(f"{time_step = }")
         sim.time_step()
