@@ -47,11 +47,15 @@ class Advect(Geometry):
 
         X = np.arange(0, self.N1, 1)
         Y = np.arange(0, self.N2, 1)
+        Theta = np.arange(0, self.N_theta, 1)
+
         self.dX = X[1] - X[0]
         self.dY = Y[1] - Y[0]
         X, Y = np.meshgrid(X, Y, indexing="ij")
-        self.X = X
-        self.Y = Y
+        self.X, self.Y = torch.nn.functional.pad(
+            torch.tensor(X), [self.N_ghost] * 4
+        ), torch.nn.functional.pad(torch.tensor(Y), [self.N_ghost] * 4)
+
         jac_inv = jacobian_inv(X, Y, affine, x_y_corners)
         dX_dx = jac_inv[0][0]
         dX_dy = jac_inv[0][1]
@@ -143,6 +147,19 @@ class Advect(Geometry):
     def density(self):
         """Density at each point (integrate over momenta)."""
         return self.rho[self.non_ghost, self.non_ghost].sum(dim=2) * self.dtheta
+
+    @qp.utils.stopwatch(name="plot_streamlines")
+    def plot_streamlines(self, plt, contour_kwargs, stream_kwargs):
+        contour_kwargs.setdefault("levels", 100)
+        contour_kwargs.setdefault("cmap", "bwr")
+        stream_kwargs.setdefault("density", 2.0)
+        stream_kwargs.setdefault("linewidth", 1.0)
+        stream_kwargs.setdefault("color", "k")
+        stream_kwargs.setdefault("arrowsize", 1.0)
+        x = to_numpy(self.x[self.non_ghost])
+        y = to_numpy(self.y[self.non_ghost])
+        rho = to_numpy(self.density)
+        plt.contourf(x, y, rho.T, **contour_kwargs)
 
 
 def to_numpy(f: torch.Tensor) -> np.ndarray:
