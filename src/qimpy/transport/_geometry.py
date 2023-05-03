@@ -51,6 +51,12 @@ class Geometry(TreeNode):
             v_mid = (0.5 * (v0 + v1)) if (i_mid < 0) else self.vertices[i_mid]
             self.edge_splines.append(QuadraticSpline(v0, v1, v_mid, n_points))
 
+        # Construct equivalence classes of opposite edges in quads:
+        # edge_class = np.arange(self.edges.shape[0])
+        edge_pairs = self.quads.reshape(-1, 2, 2).transpose(-1, -2).flatten(0, 1)
+        for edge1, edge2 in edge_pairs.to(rc.cpu).numpy():
+            print(edge1, edge2)
+
 
 class QuadraticSpline:
     v0: torch.Tensor  #: Starting point
@@ -105,6 +111,7 @@ def _make_check_tensor(
         if dim_i >= 0:
             assert result_shape_i == dim_i
     return result
+
 
 def affine(X, Y, x_y_corners):
     #    a = [a0, a1, a2, a3, a4, a5, a6, a7]
