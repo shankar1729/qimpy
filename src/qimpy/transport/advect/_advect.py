@@ -2,12 +2,14 @@ import qimpy as qp
 import numpy as np
 import torch
 import functools
+from qimpy.transport import Geometry
+from qimpy.transport._geometry import affine, jacobian_inv, sqrt_det_g
 
 
-class Advect:
-
+class Advect(Geometry):
     def __init__(
         self,
+        x_y_corners,
         *,
         Lx: float = 1.0,
         Ly: float = 1.25,
@@ -23,10 +25,12 @@ class Advect:
         self.v_F = v_F
         self.Nx = Nx
         self.Ny = Ny
+        self.N1 = Nx
+        self.N2 = Ny
         self.N_theta = N_theta
         self.N_ghost = N_ghost
         self.contact_width = contact_width
-        
+
         self.dx = Lx / Nx
         self.dy = Ly / Ny
         self.dtheta = 2 * np.pi / self.N_theta
@@ -39,7 +43,53 @@ class Advect:
 
         self.v_x = v_F * self.theta.cos()
         self.v_y = v_F * self.theta.sin()
-        self.v = torch.stack((self.v_x, self.v_y)).T
+        # self.v = torch.stack((self.v_x, self.v_y)).T
+
+        X = np.arange(0, self.N1, 1)
+        Y = np.arange(0, self.N2, 1)
+        self.dX = X[1] - X[0]
+        self.dY = Y[1] - Y[0]
+        X, Y = np.meshgrid(X, Y, indexing="ij")
+        jac_inv = jacobian_inv(X, Y, affine, x_y_corners)
+        dX_dx = jac_inv[0][0]
+        dX_dy = jac_inv[0][1]
+        dY_dx = jac_inv[1][0]
+        dY_dy = jac_inv[1][1]
+
+        self.g = torch.tensor(
+            sqrt_det_g(X, Y, affine, x_y_corners), device=qp.rc.device
+        )
+        self.g = torch.nn.functional.pad(self.g, [self.N_ghost] * 4, value=1.0)
+
+        self.v_X = torch.tensor(
+            to_numpy(self.v_x)[:, None, None] * dX_dx[None, :, :]
+            + to_numpy(self.v_y)[:, None, None] * dX_dy[None, :, :],
+            device=qp.rc.device,
+        )
+        self.v_Y = torch.tensor(
+            to_numpy(self.v_x)[:, None, None] * dY_dx[None, :, :]
+            + to_numpy(self.v_y)[:, None, None] * dY_dy[None, :, :],
+            device=qp.rc.device,
+        )
+        self.v_X = self.v_X.reshape((Nx, Ny, N_theta))
+        self.v_Y = self.v_Y.reshape((Nx, Ny, N_theta))
+
+        self.v_X = self.v_X.reshape((self.N_theta, self.Nx, self.Ny))
+        self.v_X = torch.nn.functional.pad(self.v_X, [self.N_ghost] * 4)
+        self.v_X = self.v_X.reshape(
+            (self.Nx + 2 * self.N_ghost, self.Ny + 2 * self.N_ghost, self.N_theta)
+        )
+        self.v_Y = self.v_Y.reshape((self.N_theta, self.Nx, self.Ny))
+        self.v_Y = torch.nn.functional.pad(self.v_Y, [self.N_ghost] * 4)
+        self.v_Y = self.v_Y.reshape(
+            (self.Nx + 2 * self.N_ghost, self.Ny + 2 * self.N_ghost, self.N_theta)
+        )
+        # HACK
+        # self.v_X = self.v_X[:,:1,:1]
+        # self.v_Y = self.v_Y[:,:1,:1]
+        # self.g = self.g[:1, :1]
+
+        # self.v = torch.stack((self.v_X, self.v_Y)).T
 
         # Initialize distribution function:
         self.rho_shape = (len(self.x), len(self.y), N_theta)
@@ -50,10 +100,10 @@ class Advect:
         self.non_ghost = slice(N_ghost, -N_ghost)
         self.ghost_l = slice(0, N_ghost)  # ghost indices on left/bottom side
         self.ghost_r = slice(-N_ghost, None)  # ghost indices on right/top side
-        
+
         # Slices to access boundary region adjacent to ghost:
-        self.boundary_l = slice(N_ghost, 2*N_ghost)
-        self.boundary_r = slice(-2*N_ghost, -N_ghost)
+        self.boundary_l = slice(N_ghost, 2 * N_ghost)
+        self.boundary_r = slice(-2 * N_ghost, -N_ghost)
 
     def apply_dirichlet_boundary(self, rho: torch.Tensor) -> None:
         """Apply Dirichlet boundary conditions in-place."""
@@ -73,11 +123,19 @@ class Advect:
     @qp.utils.stopwatch(name="drho")
     def drho(self, dt: float, rho: torch.Tensor) -> torch.Tensor:
         """Compute drho for time step dt, given current rho."""
-        return (
-            (-dt / self.dx) * v_prime(rho, self.v_x, axis=0)
-            + (-dt / self.dy) * v_prime(rho, self.v_y, axis=1)
+        # return (
+        #    (-dt / self.dx) * v_prime(rho, self.v_x, axis=0)
+        #    + (-dt / self.dy) * v_prime(rho, self.v_y, axis=1)
+        # )
+        print(rho.shape)
+        print(self.v_X.shape)
+        print(self.g.shape)
+        return (-dt / (self.g * self.dX))[:, :, None] * v_prime(
+            rho, self.g[:, :, None] * self.v_X, axis=0
+        ) + (-dt / (self.g * self.dY))[:, :, None] * v_prime(
+            rho, self.g[:, :, None] * self.v_Y, axis=1
         )
-        
+
     def time_step(self):
         # Half step:
         self.apply_boundaries(self.rho)
@@ -106,8 +164,8 @@ def minmod(f: torch.Tensor, axis: int) -> torch.Tensor:
     """Return min|`f`| along `axis` when all same sign, and 0 otherwise."""
     fmin, fmax = torch.aminmax(f, dim=axis)
     return torch.where(
-        fmin < 0.,
-        torch.clamp(fmax, max=0.),  # fmin < 0, so fmax if also < 0, else 0.
+        fmin < 0.0,
+        torch.clamp(fmax, max=0.0),  # fmin < 0, so fmax if also < 0, else 0.
         fmin,  # fmin >= 0, so this is the min mod
     )
 
@@ -123,11 +181,16 @@ def get_slope_conv(slope_lim_theta: float = 2.0) -> torch.nn.Conv1d:
     On output, the singleton dimension will be replaced by length 3,
     containing backward, central and forward differences (in that order)."""
     conv = torch.nn.Conv1d(1, 3, 3, padding=1, bias=False)
-    conv.weight.data = torch.tensor([
-        [-slope_lim_theta, slope_lim_theta, 0.0],
-        [-0.5, 0.0, 0.5],
-        [0.0, -slope_lim_theta, slope_lim_theta],
-    ], device=qp.rc.device).view(3, 1, 3)  # add singleton in_channels dim
+    conv.weight.data = torch.tensor(
+        [
+            [-slope_lim_theta, slope_lim_theta, 0.0],
+            [-0.5, 0.0, 0.5],
+            [0.0, -slope_lim_theta, slope_lim_theta],
+        ],
+        device=qp.rc.device,
+    ).view(
+        3, 1, 3
+    )  # add singleton in_channels dim
     conv.weight.requires_grad = False
     return conv
 
@@ -146,8 +209,8 @@ def slope_minmod(f: torch.Tensor) -> torch.Tensor:
 @functools.cache
 def riemann_selection(v: torch.Tensor) -> tuple[torch.Tensor, int]:
     """Return velocity signs and selection of positive velocities."""
-    return v.sign().view(-1, 1, 1), torch.where(v > 0.0)[0]
-    
+    return v.sign().view(-1, 1, 1), torch.where(v > 0.0)
+
 
 def v_prime(rho: torch.Tensor, v: torch.Tensor, axis: int) -> torch.Tensor:
     """Compute v * d`rho`/dx, with velocity `v` along `axis`."""
@@ -160,13 +223,20 @@ def v_prime(rho: torch.Tensor, v: torch.Tensor, axis: int) -> torch.Tensor:
         permute_forward = (2, 0, 1)
         permute_inverse = (1, 2, 0)
     v_sign, v_plus = riemann_selection(v)
+    print(v_plus)
+    print(rho.shape)
+    exit()
+    v_sign = torch.reshape(v_sign, rho.shape)
+
     rho = rho.permute(permute_forward)
+    v_sign = v_sign.permute(permute_forward)
 
     # Riemann reconstruction based on velocity:
     half_slope = 0.5 * slope_minmod(rho)
+    # v_sign = torch.reshape(v_sign, .shape)
     rho_minus_half = torch.addcmul(rho, v_sign, half_slope)  # rho + sign*slope
     rho_minus_half[v_plus, :, 1:] = rho_minus_half[v_plus, :, :-1]  # ~ roll(+1)
-    
+
     # Final central difference derivative from plus and minus half points:
     delta_rho = rho_minus_half.diff(dim=-1, append=rho_minus_half[..., :1])
     return v * delta_rho.permute(permute_inverse)  # original axis order
