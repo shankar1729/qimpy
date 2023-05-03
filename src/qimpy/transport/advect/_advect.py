@@ -43,13 +43,15 @@ class Advect(Geometry):
 
         self.v_x = v_F * self.theta.cos()
         self.v_y = v_F * self.theta.sin()
-        # self.v = torch.stack((self.v_x, self.v_y)).T
+        #self.v = torch.stack((self.v_x, self.v_y)).T
 
         X = np.arange(0, self.N1, 1)
         Y = np.arange(0, self.N2, 1)
         self.dX = X[1] - X[0]
         self.dY = Y[1] - Y[0]
         X, Y = np.meshgrid(X, Y, indexing="ij")
+        self.X = X
+        self.Y = Y
         jac_inv = jacobian_inv(X, Y, affine, x_y_corners)
         dX_dx = jac_inv[0][0]
         dX_dy = jac_inv[0][1]
@@ -74,6 +76,8 @@ class Advect(Geometry):
         self.v_X = self.v_X.reshape((Nx, Ny, N_theta))
         self.v_Y = self.v_Y.reshape((Nx, Ny, N_theta))
 
+        self.v = torch.stack((self.v_X, self.v_Y))
+
         self.v_X = self.v_X.reshape((self.N_theta, self.Nx, self.Ny))
         self.v_X = torch.nn.functional.pad(self.v_X, [self.N_ghost] * 4)
         self.v_X = self.v_X.reshape(
@@ -84,12 +88,7 @@ class Advect(Geometry):
         self.v_Y = self.v_Y.reshape(
             (self.Nx + 2 * self.N_ghost, self.Ny + 2 * self.N_ghost, self.N_theta)
         )
-        # HACK
-        # self.v_X = self.v_X[:,:1,:1]
-        # self.v_Y = self.v_Y[:,:1,:1]
-        # self.g = self.g[:1, :1]
 
-        # self.v = torch.stack((self.v_X, self.v_Y)).T
 
         # Initialize distribution function:
         self.rho_shape = (len(self.x), len(self.y), N_theta)
@@ -127,9 +126,6 @@ class Advect(Geometry):
         #    (-dt / self.dx) * v_prime(rho, self.v_x, axis=0)
         #    + (-dt / self.dy) * v_prime(rho, self.v_y, axis=1)
         # )
-        print(rho.shape)
-        print(self.v_X.shape)
-        print(self.g.shape)
         return (-dt / (self.g * self.dX))[:, :, None] * v_prime(
             rho, self.g[:, :, None] * self.v_X, axis=0
         ) + (-dt / (self.g * self.dY))[:, :, None] * v_prime(
@@ -148,11 +144,6 @@ class Advect(Geometry):
     def density(self):
         """Density at each point (integrate over momenta)."""
         return self.rho[self.non_ghost, self.non_ghost].sum(dim=2) * self.dtheta
-
-    @property
-    def velocity(self):
-        """Average velocity at each point (integrate over momenta)."""
-        return (self.rho[self.non_ghost, self.non_ghost] @ self.v) * self.dtheta
 
 
 def to_numpy(f: torch.Tensor) -> np.ndarray:
@@ -206,12 +197,6 @@ def slope_minmod(f: torch.Tensor) -> torch.Tensor:
     return slope.unflatten(0, batch_shape)  # restore dimensions
 
 
-@functools.cache
-def riemann_selection(v: torch.Tensor) -> tuple[torch.Tensor, int]:
-    """Return velocity signs and selection of positive velocities."""
-    return v.sign().view(-1, 1, 1), torch.where(v > 0.0)
-
-
 def v_prime(rho: torch.Tensor, v: torch.Tensor, axis: int) -> torch.Tensor:
     """Compute v * d`rho`/dx, with velocity `v` along `axis`."""
     # Axis permutations to bring velocity to front and active axis to end
@@ -222,24 +207,21 @@ def v_prime(rho: torch.Tensor, v: torch.Tensor, axis: int) -> torch.Tensor:
         assert axis == 1
         permute_forward = (2, 0, 1)
         permute_inverse = (1, 2, 0)
-    v_sign, v_plus = riemann_selection(v)
-    print(v_plus)
-    print(rho.shape)
-    exit()
-    v_sign = torch.reshape(v_sign, rho.shape)
 
     rho = rho.permute(permute_forward)
-    v_sign = v_sign.permute(permute_forward)
+    v = v.permute(permute_forward)
 
-    # Riemann reconstruction based on velocity:
+    # Reconstruction
     half_slope = 0.5 * slope_minmod(rho)
-    # v_sign = torch.reshape(v_sign, .shape)
-    rho_minus_half = torch.addcmul(rho, v_sign, half_slope)  # rho + sign*slope
-    rho_minus_half[v_plus, :, 1:] = rho_minus_half[v_plus, :, :-1]  # ~ roll(+1)
+    
+    # Riemann selection based on velocity:
+    result_minus = rho - half_slope
+    result_plus = (rho + half_slope).roll(+1, dims=-1)
+    rho_minus_half = torch.where(v < 0.0, result_minus, result_plus)
 
     # Final central difference derivative from plus and minus half points:
     delta_rho = rho_minus_half.diff(dim=-1, append=rho_minus_half[..., :1])
-    return v * delta_rho.permute(permute_inverse)  # original axis order
+    return (v * delta_rho).permute(permute_inverse)  # original axis order
 
 
 def centered_grid(start: int, stop: int) -> torch.Tensor:

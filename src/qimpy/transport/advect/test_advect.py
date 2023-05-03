@@ -1,5 +1,7 @@
 import qimpy as qp
 from _advect import Advect, to_numpy
+import numpy as np
+import torch
 
 
 @qp.utils.stopwatch(name="plot_streamlines")
@@ -31,14 +33,15 @@ def main():
     x_y_top_left = [0.5, 1.0]
 
     x_y_corners = [x_y_bottom_left, x_y_bottom_right, x_y_top_right, x_y_top_left]
-    sim = Advect(x_y_corners)
+    sim = Advect(x_y_corners, contact_width=0.0)
+    sigma = 0.05
+    sim.rho = torch.tensor(np.exp(-((sim.X - sim.Lx / 2)**2 + (sim.Y - sim.Ly / 2)**2) / sigma**2))
     for time_step in range(256):
         qp.log.info(f"{time_step = }")
         sim.time_step()
 
     # Plot only at end (for easier performance benchmarking of time steps):
     qp.log.info("Plotting density and streamlines")
-    plot_streamlines(sim, plt, dict(levels=100), dict(linewidth=1.0))
     plt.gca().set_aspect("equal")
     plt.savefig("contour_final.png", bbox_inches="tight", dpi=200)
 
