@@ -50,29 +50,25 @@ class QimPy(Calculator):
         # Get symbols
         symbols = atoms.get_chemical_symbols()
 
-        input_dict = dict()
-
-        input_dict["lattice"] = {
-            "vector1": lattice[0],
-            "vector2": lattice[1],
-            "vector3": lattice[2],
+        lattice_dict = {
+            "vector1": lattice[0].tolist(),
+            "vector2": lattice[1].tolist(),
+            "vector3": lattice[2].tolist(),
             "movable": False,
         }
 
         # Horrible hardcode but default pseudopotentials need to be specified...
-        input_dict["ions"] = {
-            "coordinates": list(),
+        coordinates = [
+            [symbol] + position.tolist() for symbol, position in zip(symbols, positions)
+        ]
+        ions = {
+            "coordinates": coordinates,
             "fractional": True,
             "pseudopotentials": self.pseudopotentials,
         }
 
-        for i in range(len(symbols)):
-            input_dict["ions"]["coordinates"].append(
-                [symbols[i]] + positions[i].tolist()
-            )
-
         qp.rc.init()
-        system = qp.System(**input_dict)
+        system = qp.System(lattice=lattice_dict, ions=ions)
         system.run()
 
         self.results = {"energy": float(system.energy) * eV}
