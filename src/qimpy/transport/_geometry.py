@@ -54,8 +54,7 @@ class Geometry(TreeNode):
         # Construct equivalence classes of opposite edges in quads:
         # edge_class = np.arange(self.edges.shape[0])
         edge_pairs = self.quads.reshape(-1, 2, 2).transpose(-1, -2).flatten(0, 1)
-        for edge1, edge2 in edge_pairs.to(rc.cpu).numpy():
-            print(edge1, edge2)
+        print(equivalence_classes(edge_pairs.to(rc.cpu).numpy()))
 
 
 class QuadraticSpline:
@@ -113,9 +112,35 @@ def _make_check_tensor(
     return result
 
 
-def affine(X, Y, x_y_corners):
-    #    a = [a0, a1, a2, a3, a4, a5, a6, a7]
+def equivalence_classes(pairs: torch.Tensor) -> torch.Tensor:
+    """Given Npair x 2 array of index pairs that are equivalent,
+    compute equivalence class numbers for each original index."""
+    # Construct adjacency matrix:
+    N = pairs.max() + 1
+    i_pair, j_pair = pairs.T
+    adjacency_matrix = torch.eye(N, device=rc.device)
+    adjacency_matrix[i_pair, j_pair] = 1.0
+    adjacency_matrix[j_pair, i_pair] = 1.0
 
+    # Expand to indirect neighbors by repeated multiplication:
+    n_non_zero_prev = torch.count_nonzero(adjacency_matrix)
+    for i_mult in range(N):
+        adjacency_matrix = adjacency_matrix @ adjacency_matrix
+        n_non_zero = torch.count_nonzero(adjacency_matrix)
+        if n_non_zero == n_non_zero_prev:
+            break  # highest-degree connection reached
+        n_non_zero_prev = n_non_zero
+
+    # Find first non-zero entry of above (i.e. first equivalent index):
+    is_first = torch.logical_and(
+        adjacency_matrix.cumsum(dim=1) == adjacency_matrix, adjacency_matrix != 0.0
+    )
+    first_index = torch.nonzero(is_first)[:, 1]
+    assert len(first_index) == N
+    return torch.unique(first_index, return_inverse=True)[1]  # minimal class indices
+
+
+def affine(X, Y, x_y_corners):
     """
     Inputs :
         - Grid in X and Y. X, Y need to be outputs of np.meshgrid()

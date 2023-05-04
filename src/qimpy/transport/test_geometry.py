@@ -45,7 +45,7 @@ def test_geometry():
     ]
     geometry = Geometry(vertices=vertices, edges=edges, quads=quads)
 
-    plt.figure()
+    plt.figure(figsize=(10, 10))
     for i_edge, spline in enumerate(geometry.edge_splines):
         x, y = spline.points.T
         plt.plot(x, y, marker="+")
