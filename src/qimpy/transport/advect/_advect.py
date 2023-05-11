@@ -37,8 +37,8 @@ class Advect(Geometry):
         self.dt = 0.5 * self.dx / v_F
         self.drift_velocity_fraction = 1e-3  # as a fraction of v_F
 
-        self.x = centered_grid(-N_ghost, Nx + N_ghost) * self.dx
-        self.y = centered_grid(-N_ghost, Ny + N_ghost) * self.dy
+        #self.x = centered_grid(-N_ghost, Nx + N_ghost) * self.dx
+        #self.y = centered_grid(-N_ghost, Ny + N_ghost) * self.dy
         self.theta = centered_grid(0, N_theta) * self.dtheta - np.pi
 
         self.v_x = v_F * self.theta.cos()
@@ -49,12 +49,15 @@ class Advect(Geometry):
         Y = np.arange(0, self.N2, 1)
         Theta = np.arange(0, self.N_theta, 1)
 
+
         self.dX = X[1] - X[0]
         self.dY = Y[1] - Y[0]
         X, Y = np.meshgrid(X, Y, indexing="ij")
         self.X, self.Y = torch.nn.functional.pad(
             torch.tensor(X), [self.N_ghost] * 4
         ), torch.nn.functional.pad(torch.tensor(Y), [self.N_ghost] * 4)
+
+        self.x, self.y, jacobian = affine(self.X, self.Y, x_y_corners)
 
         jac_inv = jacobian_inv(X, Y, affine, x_y_corners)
         dX_dx = jac_inv[0][0]
@@ -94,7 +97,7 @@ class Advect(Geometry):
         )
 
         # Initialize distribution function:
-        self.rho_shape = (len(self.x), len(self.y), N_theta)
+        self.rho_shape = (self.x.shape[0], self.x.shape[1], N_theta)
         self.rho = torch.zeros(self.rho_shape, device=qp.rc.device)
 
         # Initialize slices for contact and ghost/non-ghost regions:
@@ -146,7 +149,7 @@ class Advect(Geometry):
     @property
     def density(self):
         """Density at each point (integrate over momenta)."""
-        return self.rho[self.non_ghost, self.non_ghost].sum(dim=2) * self.dtheta
+        return self.rho[self.non_ghost].sum(dim=2) * self.dtheta
 
     @qp.utils.stopwatch(name="plot_streamlines")
     def plot_streamlines(self, plt, contour_kwargs, stream_kwargs):
@@ -158,8 +161,10 @@ class Advect(Geometry):
         stream_kwargs.setdefault("arrowsize", 1.0)
         x = to_numpy(self.x[self.non_ghost])
         y = to_numpy(self.y[self.non_ghost])
+        #v = to_numpy(self.velocity)
         rho = to_numpy(self.density)
-        plt.contourf(x, y, rho.T, **contour_kwargs)
+        plt.contourf(x, y, rho, **contour_kwargs)
+        #plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
 
 
 def to_numpy(f: torch.Tensor) -> np.ndarray:
