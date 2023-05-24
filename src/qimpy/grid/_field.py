@@ -283,14 +283,22 @@ class Field(qp.utils.Gradable[FieldType]):
         op = -((iG.to(torch.double) @ self.grid.lattice.Gbasis) ** 2).sum(dim=-1)
         return self.__class__(self.grid, data=(op * self.data))
 
-    def convolve(self: FieldType, kernel_tilde: torch.Tensor) -> FieldType:
+    def convolve(
+        self: FieldType, kernel_tilde: torch.Tensor, reduction: str = ""
+    ) -> FieldType:
         """Convolve scalar field by reciprocal-space `kernel_tilde`.
         Amounts to an elementwise multiply for reciprocal space fields,
         but involve a forward and inverse fourier transform for real space fields.
+        If specified, reduction must be an `einsum` index expression to contract
+        certain indices of `self` and `kernel_tilde` (in that order).
         """
         if not self.is_tilde:  # apply in reciprocal space
-            return ~((~self).convolve(kernel_tilde))  # type: ignore
-        return self.__class__(self.grid, data=(kernel_tilde * self.data))
+            return ~((~self).convolve(kernel_tilde, reduction))  # type: ignore
+        if reduction:
+            data = torch.einsum(reduction, self.data, kernel_tilde)
+        else:
+            data = self.data * kernel_tilde
+        return self.__class__(self.grid, data=data)
 
     def zeros_like(self: FieldType) -> FieldType:
         """Create zero Field with same grid and batch dimensions."""
