@@ -15,8 +15,8 @@ class Advect(Geometry):
         Lx: float = 1.0,
         Ly: float = 1.25,
         v_F: float = 1.0,
-        Nx: int = 64,
-        Ny: int = 80,
+        Nx: int = 80,
+        Ny: int = 64,
         N_theta: int = 256,
         N_ghost: int = 2,
         contact_width: float = 0.25,
@@ -142,7 +142,7 @@ class Advect(Geometry):
         x = to_numpy(self.x[self.non_ghost, self.non_ghost])
         y = to_numpy(self.y[self.non_ghost, self.non_ghost])
         # v = to_numpy(self.velocity)
-        rho = to_numpy(self.density)
+        rho = to_numpy(torch.clamp(self.density, min=1e-4))
         plt.contourf(x, y, rho, **contour_kwargs)
         # plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
 
