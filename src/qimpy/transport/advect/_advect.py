@@ -55,7 +55,8 @@ class Advect(Geometry):
             torch.tensor(X), [self.N_ghost] * 4
         ), torch.nn.functional.pad(torch.tensor(Y), [self.N_ghost] * 4)
 
-        self.x, self.y, jacobian = affine(self.X, self.Y, x_y_corners)
+        #self.x, self.y, jacobian = affine(self.X, self.Y, x_y_corners)
+        self.x, self.y, jacobian = self.custom_transformation(self.X, self.Y)
 
         jac_inv = jacobian_inv(X, Y, affine, x_y_corners)
         dX_dx = jac_inv[0][0]
@@ -69,7 +70,7 @@ class Advect(Geometry):
         self.g = torch.nn.functional.pad(self.g, [self.N_ghost] * 4, value=1.0)
         
         
-        self.theta = centered_grid(0, N_theta) * self.dtheta - np.pi
+        self.theta = centered_grid(0, N_theta) * self.dtheta - np.pi/4
 
         #self.v_x = v_F * self.theta.cos()
         #self.v_y = v_F * self.theta.sin()
@@ -151,6 +152,21 @@ class Advect(Geometry):
         rho = to_numpy(self.density)
         plt.contourf(x, y, rho, **contour_kwargs)
         #plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
+
+    def custom_transformation(self, X, Y, kx=3, ky=4, amp=0.02):
+        x = X/self.N1 + amp*torch.sin(2*np.pi*ky*Y/self.N2)
+        y = Y/self.N2 + amp*torch.sin(2*np.pi*kx*X/self.N1)
+
+        dx_dX = 1/self.N1
+        dx_dY = 2*np.pi*amp*ky*torch.cos(2*np.pi*ky*Y/self.N2)/self.N1
+
+        dy_dX = 2*np.pi*amp*kx*torch.cos(2*np.pi*kx*X/self.N1)/self.N2
+        dy_dY = 1/self.N2
+
+        jacobian = [[dx_dX, dx_dY], [dy_dX, dy_dY]]
+
+        return (x, y, jacobian)
+
 
 def to_numpy(f: torch.Tensor) -> np.ndarray:
     """Move torch.Tensor to numpy array, regardless of input device etc."""
