@@ -3,11 +3,10 @@ import numpy as np
 import torch
 import functools
 from qimpy.transport import Geometry
-from qimpy.transport._geometry import affine, jacobian_inv, sqrt_det_g
+from qimpy.transport._geometry import affine, sqrt_det_g
 
 
 class Advect(Geometry):
-
     def __init__(
         self,
         x_y_corners,
@@ -27,26 +26,24 @@ class Advect(Geometry):
         self.v_F = v_F
         self.Nx = Nx
         self.Ny = Ny
-        self.N1 = Nx           
+        self.N1 = Nx
         self.N2 = Ny
         self.N_theta = N_theta
         self.N_ghost = N_ghost
         self.contact_width = contact_width
         self.reflect_boundaries = reflect_boundaries
-        
+
         self.dx = Lx / Nx
         self.dy = Ly / Ny
         self.dtheta = 2 * np.pi / self.N_theta
         self.dt = 0.5 * self.dx / v_F
         self.drift_velocity_fraction = 1e-3  # as a fraction of v_F
 
-        #self.x = centered_grid(-N_ghost, Nx + N_ghost) * self.dx
-        #self.y = centered_grid(-N_ghost, Ny + N_ghost) * self.dy
-        
+        # self.x = centered_grid(-N_ghost, Nx + N_ghost) * self.dx
+        # self.y = centered_grid(-N_ghost, Ny + N_ghost) * self.dy
+
         X = np.arange(0, self.N1, 1)
         Y = np.arange(0, self.N2, 1)
-        Theta = np.arange(0, self.N_theta, 1)
-
 
         self.dX = X[1] - X[0]
         self.dY = Y[1] - Y[0]
@@ -55,34 +52,27 @@ class Advect(Geometry):
             torch.tensor(X), [self.N_ghost] * 4
         ), torch.nn.functional.pad(torch.tensor(Y), [self.N_ghost] * 4)
 
-        #self.x, self.y, jacobian = affine(self.X, self.Y, x_y_corners)
+        # self.x, self.y, jacobian = affine(self.X, self.Y, x_y_corners)
         self.x, self.y, jacobian = self.custom_transformation(self.X, self.Y)
-
-        jac_inv = jacobian_inv(X, Y, affine, x_y_corners)
-        dX_dx = jac_inv[0][0]
-        dX_dy = jac_inv[0][1]
-        dY_dx = jac_inv[1][0]
-        dY_dy = jac_inv[1][1]
 
         self.g = torch.tensor(
             sqrt_det_g(X, Y, affine, x_y_corners), device=qp.rc.device
         )
         self.g = torch.nn.functional.pad(self.g, [self.N_ghost] * 4, value=1.0)
-        
-        
-        self.theta = centered_grid(0, N_theta) * self.dtheta - np.pi/4
 
-        #self.v_x = v_F * self.theta.cos()
-        #self.v_y = v_F * self.theta.sin()
-        #self.v = torch.stack((self.v_x, self.v_y)).T
+        self.theta = centered_grid(0, N_theta) * self.dtheta - np.pi / 4
+
+        # self.v_x = v_F * self.theta.cos()
+        # self.v_y = v_F * self.theta.sin()
+        # self.v = torch.stack((self.v_x, self.v_y)).T
 
         # Initialize distribution function:
         self.rho_shape = (self.x.shape[0], self.y.shape[1], N_theta)
         self.rho = torch.zeros(self.rho_shape, device=qp.rc.device)
-        
+
         self.v_x = torch.zeros(self.rho_shape, device=qp.rc.device)
         self.v_y = torch.zeros(self.rho_shape, device=qp.rc.device)
-        
+
         self.v_x[:, :, :] = v_F * self.theta.cos()
         self.v_y[:, :, :] = v_F * self.theta.sin()
 
@@ -91,11 +81,11 @@ class Advect(Geometry):
         self.non_ghost = slice(N_ghost, -N_ghost)
         self.ghost_l = slice(0, N_ghost)  # ghost indices on left/bottom side
         self.ghost_r = slice(-N_ghost, None)  # ghost indices on right/top side
-        
+
         # Slices to access boundary region adjacent to ghost:
-        self.boundary_l = slice(N_ghost, 2*N_ghost)
-        self.boundary_r = slice(-2*N_ghost, -N_ghost)
-    
+        self.boundary_l = slice(N_ghost, 2 * N_ghost)
+        self.boundary_r = slice(-2 * N_ghost, -N_ghost)
+
     def apply_dirichlet_boundary(self, rho: torch.Tensor) -> None:
         """Apply Dirichlet boundary conditions in-place."""
         rho_contact = self.drift_velocity_fraction * self.v_x
@@ -110,16 +100,15 @@ class Advect(Geometry):
             rho[self.ghost_r] = reflect_x(rho[self.boundary_r])
             rho[:, self.ghost_l] = reflect_y(rho[:, self.boundary_l])
             rho[:, self.ghost_r] = reflect_y(rho[:, self.boundary_r])
-        #self.apply_dirichlet_boundary(rho)
+        # self.apply_dirichlet_boundary(rho)
 
     @qp.utils.stopwatch(name="drho")
     def drho(self, dt: float, rho: torch.Tensor) -> torch.Tensor:
         """Compute drho for time step dt, given current rho."""
-        return (
-            (-dt / self.dx) * v_prime(rho, self.v_x, axis=0)
-            + (-dt / self.dy) * v_prime(rho, self.v_y, axis=1)
-        )
-        
+        return (-dt / self.dx) * v_prime(rho, self.v_x, axis=0) + (
+            -dt / self.dy
+        ) * v_prime(rho, self.v_y, axis=1)
+
     def time_step(self):
         # Half step:
         self.apply_boundaries(self.rho)
@@ -148,20 +137,20 @@ class Advect(Geometry):
         stream_kwargs.setdefault("arrowsize", 1.0)
         x = to_numpy(self.x[self.non_ghost, self.non_ghost])
         y = to_numpy(self.y[self.non_ghost, self.non_ghost])
-        #v = to_numpy(self.velocity)
+        # v = to_numpy(self.velocity)
         rho = to_numpy(self.density)
         plt.contourf(x, y, rho, **contour_kwargs)
-        #plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
+        # plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
 
     def custom_transformation(self, X, Y, kx=3, ky=4, amp=0.02):
-        x = X/self.N1 + amp*torch.sin(2*np.pi*ky*Y/self.N2)
-        y = Y/self.N2 + amp*torch.sin(2*np.pi*kx*X/self.N1)
+        x = X / self.N1 + amp * torch.sin(2 * np.pi * ky * Y / self.N2)
+        y = Y / self.N2 + amp * torch.sin(2 * np.pi * kx * X / self.N1)
 
-        dx_dX = 1/self.N1
-        dx_dY = 2*np.pi*amp*ky*torch.cos(2*np.pi*ky*Y/self.N2)/self.N1
+        dx_dX = 1 / self.N1
+        dx_dY = 2 * np.pi * amp * ky * torch.cos(2 * np.pi * ky * Y / self.N2) / self.N1
 
-        dy_dX = 2*np.pi*amp*kx*torch.cos(2*np.pi*kx*X/self.N1)/self.N2
-        dy_dY = 1/self.N2
+        dy_dX = 2 * np.pi * amp * kx * torch.cos(2 * np.pi * kx * X / self.N1) / self.N2
+        dy_dY = 1 / self.N2
 
         jacobian = [[dx_dX, dx_dY], [dy_dX, dy_dY]]
 

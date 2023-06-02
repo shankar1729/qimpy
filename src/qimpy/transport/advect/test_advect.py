@@ -1,5 +1,5 @@
 import qimpy as qp
-from _advect import Advect, to_numpy
+from _advect import Advect
 import numpy as np
 import torch
 
@@ -28,7 +28,11 @@ def main():
         plt.clf()
         sim.plot_streamlines(plt, dict(levels=100), dict(linewidth=1.0))
         plt.gca().set_aspect("equal")
-        plt.savefig(f"advect_animation/blob_advect_{time_step:03d}.png", bbox_inches="tight", dpi=200)
+        plt.savefig(
+            f"advect_animation/blob_advect_{time_step:03d}.png",
+            bbox_inches="tight",
+            dpi=200,
+        )
         sim.time_step()
 
     # Plot only at end (for easier performance benchmarking of time steps):
