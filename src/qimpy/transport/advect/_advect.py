@@ -143,14 +143,14 @@ class Advect(Geometry):
         # plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
 
     def custom_transformation(self, X, Y, kx=3, ky=4, amp=0.02):
-        x = X / self.N1 + amp * torch.sin(2 * np.pi * ky * Y / self.N2)
-        y = Y / self.N2 + amp * torch.sin(2 * np.pi * kx * X / self.N1)
+        x = self.Lx * X / self.N1 + amp * torch.sin(2 * np.pi * ky * Y / self.N2)
+        y = self.Ly * Y / self.N2 + amp * torch.sin(2 * np.pi * kx * X / self.N1)
 
-        dx_dX = 1 / self.N1
-        dx_dY = 2 * np.pi * amp * ky * torch.cos(2 * np.pi * ky * Y / self.N2) / self.N1
+        dx_dX = self.Lx / self.N1
+        dx_dY = 2 * np.pi * amp * ky * torch.cos(2 * np.pi * ky * Y / self.N2) / self.N2
 
-        dy_dX = 2 * np.pi * amp * kx * torch.cos(2 * np.pi * kx * X / self.N1) / self.N2
-        dy_dY = 1 / self.N2
+        dy_dX = 2 * np.pi * amp * kx * torch.cos(2 * np.pi * kx * X / self.N1) / self.N1
+        dy_dY = self.Ly / self.N2
 
         jacobian = [[dx_dX, dx_dY], [dy_dX, dy_dY]]
 

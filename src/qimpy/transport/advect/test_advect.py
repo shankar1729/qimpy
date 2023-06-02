@@ -17,7 +17,7 @@ def main():
     x_y_top_left = [0.5, 1.0]
 
     x_y_corners = [x_y_bottom_left, x_y_bottom_right, x_y_top_right, x_y_top_left]
-    sim = Advect(x_y_corners, reflect_boundaries=False)
+    sim = Advect(x_y_corners, reflect_boundaries=False, contact_width=0.0)
     sigma = 0.05
     print(sim.rho.shape)
     sim.rho[:, :, 0] = torch.tensor(
