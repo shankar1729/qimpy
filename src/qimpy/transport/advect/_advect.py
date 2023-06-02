@@ -146,10 +146,10 @@ class Advect(Geometry):
         plt.contourf(x, y, rho, **contour_kwargs)
         # plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
 
-    def sinewave_metric(self, X, Y, kx=3, ky=4, amp=0.02):
-        return self.Lx * X / self.N1 + amp * torch.sin(
-            2 * np.pi * ky * Y / self.N2
-        ), self.Ly * Y / self.N2 + amp * torch.sin(2 * np.pi * kx * X / self.N1)
+    def sinewave_metric(self, X, Y, kX=3, kY=4, amp=0.02):
+        return self.Lx  * (X / self.N1 + amp * torch.sin(
+            2 * np.pi * kY * Y / self.N2
+        )), self.Ly * (Y / self.N2 + amp * torch.sin(2 * np.pi * kX * X / self.N1))
 
     def custom_transformation(self, func, X, Y):
         x, y = func(X, Y)
