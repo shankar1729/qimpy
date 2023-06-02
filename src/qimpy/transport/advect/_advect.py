@@ -4,6 +4,7 @@ import torch
 import functools
 from qimpy.transport import Geometry
 from qimpy.transport._geometry import affine, sqrt_det_g
+from torch.autograd.functional import jacobian
 
 
 class Advect(Geometry):
@@ -48,12 +49,15 @@ class Advect(Geometry):
         self.dX = X[1] - X[0]
         self.dY = Y[1] - Y[0]
         X, Y = np.meshgrid(X, Y, indexing="ij")
-        self.X, self.Y = torch.nn.functional.pad(
-            torch.tensor(X), [self.N_ghost] * 4
-        ), torch.nn.functional.pad(torch.tensor(Y), [self.N_ghost] * 4)
+        self.X, self.Y = (
+            torch.nn.functional.pad(torch.tensor(X), [self.N_ghost] * 4).float(),
+            torch.nn.functional.pad(torch.tensor(Y), [self.N_ghost] * 4).float(),
+        )
 
         # self.x, self.y, jacobian = affine(self.X, self.Y, x_y_corners)
-        self.x, self.y, jacobian = self.custom_transformation(self.X, self.Y)
+        self.x, self.y, jacobian = self.custom_transformation(
+            self.sinewave_metric, self.X, self.Y
+        )
 
         self.g = torch.tensor(
             sqrt_det_g(X, Y, affine, x_y_corners), device=qp.rc.device
@@ -142,19 +146,16 @@ class Advect(Geometry):
         plt.contourf(x, y, rho, **contour_kwargs)
         # plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
 
-    def custom_transformation(self, X, Y, kx=3, ky=4, amp=0.02):
-        x = self.Lx * X / self.N1 + amp * torch.sin(2 * np.pi * ky * Y / self.N2)
-        y = self.Ly * Y / self.N2 + amp * torch.sin(2 * np.pi * kx * X / self.N1)
+    def sinewave_metric(self, X, Y, kx=3, ky=4, amp=0.02):
+        return self.Lx * X / self.N1 + amp * torch.sin(
+            2 * np.pi * ky * Y / self.N2
+        ), self.Ly * Y / self.N2 + amp * torch.sin(2 * np.pi * kx * X / self.N1)
 
-        dx_dX = self.Lx / self.N1
-        dx_dY = 2 * np.pi * amp * ky * torch.cos(2 * np.pi * ky * Y / self.N2) / self.N2
+    def custom_transformation(self, func, X, Y):
+        x, y = func(X, Y)
+        jac = jacobian(func, (X, Y))
 
-        dy_dX = 2 * np.pi * amp * kx * torch.cos(2 * np.pi * kx * X / self.N1) / self.N1
-        dy_dY = self.Ly / self.N2
-
-        jacobian = [[dx_dX, dx_dY], [dy_dX, dy_dY]]
-
-        return (x, y, jacobian)
+        return (x, y, jac)
 
 
 def to_numpy(f: torch.Tensor) -> np.ndarray:
