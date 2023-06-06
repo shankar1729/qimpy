@@ -6,6 +6,17 @@ from typing import Optional
 from qimpy.rc import MPI
 
 
+@qp.utils.stopwatch(name="Basis.apply_gradient")
+def _apply_gradient(
+    self: qp.electrons.Basis, C: qp.electrons.Wavefunction, i_dir: int,
+) -> qp.electrons.Wavefunction:
+    "Apply gradient operator to wavefunction `C`"
+    basis_slice = slice(None) if C.band_division else self.mine
+    coeff = torch.einsum("sknpb,kb->sknpb",
+                         C.coeff, self.get_gradient(basis_slice)[:, :, i_dir])
+    return qp.electrons.Wavefunction(self, coeff=coeff, band_division=C.band_division)
+
+
 @qp.utils.stopwatch(name="Basis.apply_ke")
 def _apply_ke(
     self: qp.electrons.Basis, C: qp.electrons.Wavefunction
@@ -299,7 +310,7 @@ class _CollectDensityKernel(_KernelCommon):
         qp.rc.compute_stream_wait_current()
         with torch.cuda.stream(qp.rc.compute_stream):
             prefac_mine = (
-                prefac[:, :, C.band_division.i_start : C.band_division.i_stop]
+                prefac[:, :, C.band_division.i_start: C.band_division.i_stop]
                 if C.band_division
                 else prefac
             )
