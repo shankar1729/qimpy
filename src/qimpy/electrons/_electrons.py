@@ -326,7 +326,8 @@ class Electrons(qp.TreeNode):
             C_grad = self.basis.apply_gradient(C, i_dir)
             self.tau_tilde.add_(
                 ~(self.basis.collect_density(C_grad, f, need_Mvec)).to(system.grid),
-                alpha=0.5)
+                alpha=0.5,
+            )
 
     def update_potential(self, system: qp.System, requires_grad: bool = True) -> None:
         """Update density-dependent energy terms and electron potential.

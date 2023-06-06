@@ -243,7 +243,7 @@ class Basis(qp.TreeNode):
             TODO, dimensions: `nk_mine` x len(`basis_slice`)
         """
         G = (self.iG[:, basis_slice] + self.k[:, None, :]) @ self.lattice.Gbasis.T
-        return 1.j * G
+        return 1.0j * G
 
     def get_ke(self, basis_slice: slice = slice(None)) -> torch.Tensor:
         """Kinetic energy (KE) of each plane wave in basis in :math:`E_h`
