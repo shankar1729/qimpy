@@ -3,7 +3,7 @@ import qimpy as qp
 import numpy as np
 import math
 import torch
-from ._basis_ops import _apply_ke, _apply_potential, _collect_density
+from ._basis_ops import _apply_gradient, _apply_ke, _apply_potential, _collect_density
 from ._basis_real import BasisReal
 from typing import Optional, Union
 from qimpy.rc import MPI
@@ -44,6 +44,7 @@ class Basis(qp.TreeNode):
     mine: slice  #: Slice of basis entries local to this process
     real: BasisReal  #: Extra indices for real wavefunctions
 
+    apply_gradient = _apply_gradient
     apply_ke = _apply_ke
     apply_potential = _apply_potential
     collect_density = _collect_density
@@ -227,6 +228,22 @@ class Basis(qp.TreeNode):
     def n_ideal(self) -> float:
         """Ideal `n_avg_weighted` based on `ke_cutoff` G-sphere volume."""
         return ((2.0 * self.ke_cutoff) ** 1.5) * self.lattice.volume / (6 * np.pi**2)
+
+    def get_gradient(self, basis_slice: slice = slice(None)) -> torch.Tensor:
+        """Kinetic energy (KE) of each plane wave in basis in :math:`E_h`
+
+        Parameters
+        ----------
+        basis_slice
+            Selection of basis functions to get KE for (default: full basis)
+
+        Returns
+        -------
+        torch.Tensor
+            TODO, dimensions: `nk_mine` x len(`basis_slice`)
+        """
+        G = (self.iG[:, basis_slice] + self.k[:, None, :]) @ self.lattice.Gbasis.T
+        return 1.j * G
 
     def get_ke(self, basis_slice: slice = slice(None)) -> torch.Tensor:
         """Kinetic energy (KE) of each plane wave in basis in :math:`E_h`
