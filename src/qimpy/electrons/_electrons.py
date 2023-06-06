@@ -322,6 +322,11 @@ class Electrons(qp.TreeNode):
         self.n_tilde.symmetrize()
         self.tau_tilde = qp.grid.FieldH(system.grid, shape_batch=(0,))
         # TODO: actually compute KE density if required
+        for i_dir in range(3):
+            C_grad = self.basis.apply_gradient(C, i_dir)  # not C.clone()?
+            self.tau_tilde.add_(
+                ~(self.basis.collect_density(C_grad, f, need_Mvec)).to(system.grid),
+                alpha=0.5)#.to(system.grid)  # need .to(system.grid)?
 
     def update_potential(self, system: qp.System, requires_grad: bool = True) -> None:
         """Update density-dependent energy terms and electron potential.
