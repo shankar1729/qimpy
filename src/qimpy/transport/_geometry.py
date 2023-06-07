@@ -223,7 +223,7 @@ def affine(X, Y, x_y_corners):
 
 def jacobian(X, Y, transform, x_y_corners):
 
-    x, y, jacobian_ = transform(X, Y, x_y_corners)
+    x, y, jacobian_ = transform(X, Y)
 
     return jacobian_
 
@@ -275,4 +275,4 @@ def sqrt_det_g(X, Y, transform, x_y_corners):
 
     det_g = g_11 * g_22 - g_12 * g_21
 
-    return np.sqrt(det_g)
+    return torch.sqrt(det_g)
