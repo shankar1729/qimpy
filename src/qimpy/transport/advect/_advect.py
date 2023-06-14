@@ -160,22 +160,29 @@ class Advect(Geometry):
         # plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
 
     def custom_transformation(self, Q, kx=1, ky=1, amp=-0.05):
-       L = torch.tensor([self.Lx, self.Ly], device=qp.rc.device)
-       k = torch.tensor([kx, ky], device=qp.rc.device)
-       N = torch.tensor([self.Nx, self.Ny], device=qp.rc.device)
-       Nx, Ny, _ = Q.shape
-       grad_q = torch.tile(torch.eye(2, device=qp.rc.device)[:, None, None], (1, Nx, Ny, 1))
-       Q.requires_grad = True
-       Q_by_N = Q/N
-       q = L * (Q_by_N + amp * torch.sin(2*np.pi*k*torch.roll(Q_by_N, 1)))
+        L = torch.tensor([self.Lx, self.Ly], device=qp.rc.device)
+        k = torch.tensor([kx, ky], device=qp.rc.device)
+        N = torch.tensor([self.Nx, self.Ny], device=qp.rc.device)
+        Nx, Ny, _ = Q.shape
+        grad_q = torch.tile(
+            torch.eye(2, device=qp.rc.device)[:, None, None], (1, Nx, Ny, 1)
+        )
+        Q.requires_grad = True
+        Q_by_N = Q / N
+        q = L * (Q_by_N + amp * torch.sin(2 * np.pi * k * torch.roll(Q_by_N, 1)))
 
-       jacobian = torch.autograd.grad(q, Q, grad_outputs=grad_q, is_grads_batched=True)[0]
-       jacobian = torch.permute(jacobian, (1, 2, 0, 3))
-    
-       Q.requires_grad = False
-       jacobian = [[jacobian[:, :, 0, 0], jacobian[:, :, 0, 1]], [jacobian[:, :, 1, 0], jacobian[:, :, 1, 1]]]
-    
-       return q, jacobian
+        jacobian = torch.autograd.grad(
+            q, Q, grad_outputs=grad_q, is_grads_batched=True
+        )[0]
+        jacobian = torch.permute(jacobian, (1, 2, 0, 3))
+
+        Q.requires_grad = False
+        jacobian = [
+            [jacobian[:, :, 0, 0], jacobian[:, :, 0, 1]],
+            [jacobian[:, :, 1, 0], jacobian[:, :, 1, 1]],
+        ]
+
+        return q, jacobian
 
 
 def to_numpy(f: torch.Tensor) -> np.ndarray:
