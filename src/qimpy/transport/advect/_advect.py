@@ -159,59 +159,23 @@ class Advect(Geometry):
         plt.gca().set_aspect("equal")
         # plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
 
-    # def custom_transformation(self, Q, kx=1, ky=1, amp=-0.05):
-    #    L = torch.tensor([self.Lx, self.Ly], device=qp.rc.device)
-    #    k = torch.tensor([kx, ky], device=qp.rc.device)
-    #    N = torch.tensor([self.Nx, self.Ny], device=qp.rc.device)
-    #    Q.requires_grad = True
-    #    #q[:,:,0] = self.Lx * (Q[:,:,0] / self.N1 + amp * torch.sin(2 * np.pi * ky * Q[:,:,1] / self.N2))
-    #    #q[:,:,1] = self.Ly * (Q[:,:,1] / self.N2 + amp * torch.sin(2 * np.pi * kx * Q[:,:,1] / self.N1))
-    #    print(Q.shape)
-    #    Q_by_N = Q/N
-    #    q = L * (Q_by_N + amp * torch.sin(2*np.pi*k*torch.roll(Q_by_N, 1)))
-
-    #    dx_dX, dx_dY = torch.autograd.grad(q[:,:,0].sum(), (Q[:,:,0], Q[:,:,1]))
-    #    dy_dX, dy_dY = torch.autograd.grad(q[:,:,1].sum(), (Q[:,:,0], Q[:,:,1]))
-    #
-    #    Q.requires_grad = False
-    #    jacobian = [[dx_dX, dx_dY], [dy_dX, dy_dY]]
-    #
-    #    """
-    #    dx_dX = self.Lx / self.N1
-    #    dx_dY = self.Lx * 2 * np.pi * amp * ky * torch.cos(2 * np.pi * ky * Y / self.N2) / self.N2
-
-    #    dy_dX = self.Ly * 2 * np.pi * amp * kx * torch.cos(2 * np.pi * kx * X / self.N1) / self.N1
-    #    dy_dY = self.Ly / self.N2
-    #    """
-
-    #    return q, jacobian
-
     def custom_transformation(self, Q, kx=1, ky=1, amp=-0.05):
-        X = Q[:, :, 0]
-        Y = Q[:, :, 1]
-        X.requires_grad = True
-        Y.requires_grad = True
-        x = self.Lx * (X / self.N1 + amp * torch.sin(2 * np.pi * ky * Y / self.N2))
-        y = self.Ly * (Y / self.N2 + amp * torch.sin(2 * np.pi * kx * X / self.N1))
+       L = torch.tensor([self.Lx, self.Ly], device=qp.rc.device)
+       k = torch.tensor([kx, ky], device=qp.rc.device)
+       N = torch.tensor([self.Nx, self.Ny], device=qp.rc.device)
+       Nx, Ny, _ = Q.shape
+       grad_q = torch.tile(torch.eye(2, device=qp.rc.device)[:, None, None], (1, Nx, Ny, 1))
+       Q.requires_grad = True
+       Q_by_N = Q/N
+       q = L * (Q_by_N + amp * torch.sin(2*np.pi*k*torch.roll(Q_by_N, 1)))
 
-        dx_dX, dx_dY = torch.autograd.grad(x.sum(), (X, Y))
-        dy_dX, dy_dY = torch.autograd.grad(y.sum(), (X, Y))
-
-        X.requires_grad = False
-        Y.requires_grad = False
-
-        """
-        dx_dX = self.Lx / self.N1
-        dx_dY = self.Lx * 2 * np.pi * amp * ky * torch.cos(2 * np.pi * ky * Y / self.N2) / self.N2
-
-        dy_dX = self.Ly * 2 * np.pi * amp * kx * torch.cos(2 * np.pi * kx * X / self.N1) / self.N1
-        dy_dY = self.Ly / self.N2
-        """
-
-        jacobian = [[dx_dX, dx_dY], [dy_dX, dy_dY]]
-        q = torch.stack([x, y], dim=-1)
-
-        return (q, jacobian)
+       jacobian = torch.autograd.grad(q, Q, grad_outputs=grad_q, is_grads_batched=True)[0]
+       jacobian = torch.permute(jacobian, (1, 2, 0, 3))
+    
+       Q.requires_grad = False
+       jacobian = [[jacobian[:, :, 0, 0], jacobian[:, :, 0, 1]], [jacobian[:, :, 1, 0], jacobian[:, :, 1, 1]]]
+    
+       return q, jacobian
 
 
 def to_numpy(f: torch.Tensor) -> np.ndarray:
