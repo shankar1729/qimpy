@@ -135,4 +135,4 @@ dmypy.json
 .pyre/
 
 # vim swap files
-*.swp
+*.sw*

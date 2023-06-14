@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import functools
 from qimpy.transport import Geometry
-from qimpy.transport._geometry import affine, sqrt_det_g, jacobian_inv
+from qimpy.transport._geometry import sqrt_det_g, jacobian_inv
 
 
 class Advect(Geometry):
@@ -57,15 +57,15 @@ class Advect(Geometry):
         self.q, jacobian = self.custom_transformation(self.Q)
         print(self.q.shape)
         print(self.Q.shape)
-        
+
         jac_inv = jacobian_inv(self.Q, self.custom_transformation)
         dX_dx = jac_inv[0][0]
         dX_dy = jac_inv[0][1]
         dY_dx = jac_inv[1][0]
         dY_dy = jac_inv[1][1]
 
-        self.g = sqrt_det_g(self.Q, self.custom_transformation).detach()[:,:,None]
-        #self.g = torch.nn.functional.pad(self.g, [self.N_ghost] * 4, value=1.0)
+        self.g = sqrt_det_g(self.Q, self.custom_transformation).detach()[:, :, None]
+        # self.g = torch.nn.functional.pad(self.g, [self.N_ghost] * 4, value=1.0)
 
         self.theta = centered_grid(0, N_theta) * self.dtheta - np.pi / 4
 
@@ -84,8 +84,8 @@ class Advect(Geometry):
         self.v_x[:, :, :] = v_F * self.theta.cos()
         self.v_y[:, :, :] = v_F * self.theta.sin()
 
-        self.v_X = self.v_x * dX_dx[:,:,None] + self.v_y * dX_dy[:,:,None]
-        self.v_Y = self.v_x * dY_dx[:,:,None] + self.v_y * dY_dy[:,:,None]
+        self.v_X = self.v_x * dX_dx[:, :, None] + self.v_y * dX_dy[:, :, None]
+        self.v_Y = self.v_x * dY_dx[:, :, None] + self.v_y * dY_dy[:, :, None]
 
         # Initialize slices for contact and ghost/non-ghost regions:
         self.non_ghost = slice(N_ghost, -N_ghost)
@@ -115,14 +115,12 @@ class Advect(Geometry):
     @qp.utils.stopwatch(name="drho")
     def drho(self, dt: float, rho: torch.Tensor) -> torch.Tensor:
         """Compute drho for time step dt, given current rho."""
-        #return (-dt / self.dx) * v_prime(rho, self.v_x, axis=0) + (
+        # return (-dt / self.dx) * v_prime(rho, self.v_x, axis=0) + (
         #    -dt / self.dy
-        #) * v_prime(rho, self.v_y, axis=1)
-        return (-dt / (self.g * self.dX)) * v_prime(
-            rho, self.g * self.v_X, axis=0
-        ) + (-dt / (self.g * self.dY)) * v_prime(
-            rho, self.g * self.v_Y, axis=1
-        )
+        # ) * v_prime(rho, self.v_y, axis=1)
+        return (-dt / (self.g * self.dX)) * v_prime(rho, self.g * self.v_X, axis=0) + (
+            -dt / (self.g * self.dY)
+        ) * v_prime(rho, self.g * self.v_Y, axis=1)
 
     def time_step(self):
         # Half step:
@@ -150,15 +148,15 @@ class Advect(Geometry):
         stream_kwargs.setdefault("linewidth", 1.0)
         stream_kwargs.setdefault("color", "k")
         stream_kwargs.setdefault("arrowsize", 1.0)
-        x = to_numpy(self.q[:,:,0][self.non_ghost, self.non_ghost])
-        y = to_numpy(self.q[:,:,1][self.non_ghost, self.non_ghost])
+        x = to_numpy(self.q[:, :, 0][self.non_ghost, self.non_ghost])
+        y = to_numpy(self.q[:, :, 1][self.non_ghost, self.non_ghost])
         # v = to_numpy(self.velocity)
         rho = to_numpy(self.density)
         plt.contourf(x, y, np.clip(rho, 1e-3, None), **contour_kwargs)
-        plt.gca().set_aspect('equal')
+        plt.gca().set_aspect("equal")
         # plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
 
-    #def custom_transformation(self, Q, kx=1, ky=1, amp=-0.05):
+    # def custom_transformation(self, Q, kx=1, ky=1, amp=-0.05):
     #    L = torch.tensor([self.Lx, self.Ly], device=qp.rc.device)
     #    k = torch.tensor([kx, ky], device=qp.rc.device)
     #    N = torch.tensor([self.Nx, self.Ny], device=qp.rc.device)
@@ -171,10 +169,10 @@ class Advect(Geometry):
 
     #    dx_dX, dx_dY = torch.autograd.grad(q[:,:,0].sum(), (Q[:,:,0], Q[:,:,1]))
     #    dy_dX, dy_dY = torch.autograd.grad(q[:,:,1].sum(), (Q[:,:,0], Q[:,:,1]))
-    #    
+    #
     #    Q.requires_grad = False
     #    jacobian = [[dx_dX, dx_dY], [dy_dX, dy_dY]]
-    #    
+    #
     #    """
     #    dx_dX = self.Lx / self.N1
     #    dx_dY = self.Lx * 2 * np.pi * amp * ky * torch.cos(2 * np.pi * ky * Y / self.N2) / self.N2
@@ -211,6 +209,7 @@ class Advect(Geometry):
         q = torch.stack([x, y], dim=-1)
 
         return (q, jacobian)
+
 
 def to_numpy(f: torch.Tensor) -> np.ndarray:
     """Move torch.Tensor to numpy array, regardless of input device etc."""
