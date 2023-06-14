@@ -55,8 +55,6 @@ class Advect(Geometry):
 
         # self.x, self.y, jacobian = affine(self.X, self.Y, x_y_corners)
         self.q, jacobian = self.custom_transformation(self.Q)
-        print(self.q.shape)
-        print(self.Q.shape)
 
         jac_inv = jacobian_inv(self.Q, self.custom_transformation)
         dX_dx = jac_inv[0][0]
@@ -75,7 +73,6 @@ class Advect(Geometry):
 
         # Initialize distribution function:
         self.rho_shape = (self.q.shape[0], self.q.shape[1], N_theta)
-        print(self.rho_shape)
         self.rho = torch.zeros(self.rho_shape, device=qp.rc.device)
 
         self.v_x = torch.zeros(self.rho_shape, device=qp.rc.device)
@@ -84,8 +81,12 @@ class Advect(Geometry):
         self.v_x[:, :, :] = v_F * self.theta.cos()
         self.v_y[:, :, :] = v_F * self.theta.sin()
 
+        self.v = torch.stack([self.v_x, self.v_y], dim=-1)
+
         self.v_X = self.v_x * dX_dx[:, :, None] + self.v_y * dX_dy[:, :, None]
         self.v_Y = self.v_x * dY_dx[:, :, None] + self.v_y * dY_dy[:, :, None]
+
+        self.V = torch.stack([self.v_X, self.v_Y], dim=-1)
 
         # Initialize slices for contact and ghost/non-ghost regions:
         self.non_ghost = slice(N_ghost, -N_ghost)
@@ -118,9 +119,11 @@ class Advect(Geometry):
         # return (-dt / self.dx) * v_prime(rho, self.v_x, axis=0) + (
         #    -dt / self.dy
         # ) * v_prime(rho, self.v_y, axis=1)
-        return (-dt / (self.g * self.dX)) * v_prime(rho, self.g * self.v_X, axis=0) + (
-            -dt / (self.g * self.dY)
-        ) * v_prime(rho, self.g * self.v_Y, axis=1)
+        return (-dt / (self.g * self.dX)) * v_prime(
+            rho, self.g * self.V[:, :, :, 0], axis=0
+        ) + (-dt / (self.g * self.dY)) * v_prime(
+            rho, self.g * self.V[:, :, :, 1], axis=1
+        )
 
     def time_step(self):
         # Half step:
