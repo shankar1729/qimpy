@@ -19,7 +19,7 @@ def main():
     x_y_corners = [x_y_bottom_left, x_y_bottom_right, x_y_top_right, x_y_top_left]
     sim = Advect(x_y_corners, reflect_boundaries=False, contact_width=0.0, v_F=200.0, Nx=128, Ny=160)
     sigma = 0.05
-    sim.rho[:, :, 0] = torch.exp(-((sim.x - sim.Lx / 2) ** 2 + (sim.y - sim.Ly / 2) ** 2) / sigma**2).detach()
+    sim.rho[:, :, 0] = torch.exp(-((sim.q[:,:,0] - sim.Lx / 2) ** 2 + (sim.q[:,:,1] - sim.Ly / 2) ** 2) / sigma**2).detach()
     for time_step in range(256):
         qp.log.info(f"{time_step = }")
         plt.clf()

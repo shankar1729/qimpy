@@ -221,14 +221,14 @@ def affine(X, Y, x_y_corners):
     return (x, y, jacobian)
 
 
-def jacobian(X, Y, transform, x_y_corners):
+def jacobian(Q, transform):
 
-    x, y, jacobian_ = transform(X, Y)
+    q, jacobian_ = transform(Q)
 
     return jacobian_
 
 
-def jacobian_inv(X, Y, transform, x_y_corners):
+def jacobian_inv(Q, transform):
 
     """Returns dX/dx in a 2x2 array
 
@@ -237,7 +237,7 @@ def jacobian_inv(X, Y, transform, x_y_corners):
 
     """
 
-    A = jacobian(X, Y, transform, x_y_corners)
+    A = jacobian(Q, transform)
 
     a = A[0][0]
     b = A[0][1]
@@ -256,9 +256,9 @@ def jacobian_inv(X, Y, transform, x_y_corners):
     return inv_A
 
 
-def sqrt_det_g(X, Y, transform, x_y_corners):
+def sqrt_det_g(Q, transform):
 
-    jac = jacobian(X, Y, transform, x_y_corners)
+    jac = jacobian(Q, transform)
 
     dx_dX = jac[0][0]
     dx_dY = jac[0][1]
