@@ -320,15 +320,18 @@ class Electrons(qp.TreeNode):
         self.n_tilde = (~(self.basis.collect_density(C, f, need_Mvec))).to(system.grid)
         # TODO: ultrasoft augmentation
         self.n_tilde.symmetrize()
-        self.tau_tilde = qp.grid.FieldH(system.grid, shape_batch=(0,))
         # TODO: actually compute KE density if required
         if self.xc.need_tau:
+            self.tau_tilde = self.n_tilde.zeros_like()
             for i_dir in range(3):
                 C_grad = self.basis.apply_gradient(C, i_dir)
                 self.tau_tilde.add_(
                     ~(self.basis.collect_density(C_grad, f, need_Mvec)).to(system.grid),
                     alpha=0.5,
                 )
+            self.tau_tilde.symmetrize()
+        else:
+            self.tau_tilde = qp.grid.FieldH(system.grid, shape_batch=(0,))
 
     def update_potential(self, system: qp.System, requires_grad: bool = True) -> None:
         """Update density-dependent energy terms and electron potential.
