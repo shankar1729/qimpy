@@ -9,7 +9,6 @@ from qimpy.transport._geometry import sqrt_det_g, jacobian_inv
 class Advect(Geometry):
     def __init__(
         self,
-        x_y_corners,
         *,
         Lx: float = 1.0,
         Ly: float = 1.25,
@@ -20,6 +19,7 @@ class Advect(Geometry):
         N_ghost: int = 2,
         contact_width: float = 0.25,
         reflect_boundaries: bool = True,
+        init_angle: float = 0.0,
     ) -> None:
         self.Lx = Lx
         self.Ly = Ly
@@ -65,7 +65,7 @@ class Advect(Geometry):
         self.g = sqrt_det_g(self.Q, self.custom_transformation).detach()[:, :, None]
         # self.g = torch.nn.functional.pad(self.g, [self.N_ghost] * 4, value=1.0)
 
-        self.theta = centered_grid(0, N_theta) * self.dtheta - np.pi / 4
+        self.theta = centered_grid(0, N_theta) * self.dtheta - init_angle
 
         # self.v_x = v_F * self.theta.cos()
         # self.v_y = v_F * self.theta.sin()
