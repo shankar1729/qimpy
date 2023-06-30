@@ -1,15 +1,15 @@
 import qimpy as qp
 import pytest
 from typing import Sequence, Type
-from qimpy.grid._field import FieldType
-from . import get_sequential_grid, get_parallel_grid, get_reference_field
+from ._field import FieldType
+from .test_common import get_sequential_grid, get_parallel_grid, get_reference_field
 
 
 def get_shape_batch_field_combinations(
     include_tilde: bool,
-) -> Sequence[tuple[Sequence[int], Sequence[int], Type[FieldType]]]:
+) -> Sequence[tuple[Sequence[int], Sequence[int], Type]]:
     shapes = ((48, 64, 96), (64, 72, 128))
-    n_batches = ((2, 3), tuple())
+    n_batches = ((2, 3), tuple[int, ...]())
     field_types = [qp.grid.FieldR, qp.grid.FieldC]
     if include_tilde:
         field_types += [qp.grid.FieldH, qp.grid.FieldG]

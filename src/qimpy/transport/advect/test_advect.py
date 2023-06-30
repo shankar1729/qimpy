@@ -1,12 +1,10 @@
 import qimpy as qp
-from _advect import Advect
+from ._advect import Advect
 import torch
 import numpy as np
 
 
 def convergence(Nxy, N_theta, diag=True):
-    import matplotlib.pyplot as plt
-
     qp.utils.log_config()
     qp.rc.init()
     assert qp.rc.n_procs == 1  # MPI not yet supported

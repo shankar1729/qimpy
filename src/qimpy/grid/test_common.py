@@ -2,7 +2,7 @@ import qimpy as qp
 import numpy as np
 import functools
 import torch
-from qimpy.grid._field import FieldType
+from ._field import FieldType
 from typing import Type, Sequence
 
 
@@ -22,7 +22,7 @@ def get_parallel_grid(shape: Sequence[int]) -> qp.grid.Grid:
 
 @functools.cache
 def get_reference_field(
-    cls: Type[FieldType], grid: qp.grid.Grid, shape_batch: Sequence[int] = (2, 3)
+    cls: Type[FieldType], grid: qp.grid.Grid, shape_batch: tuple[int, ...] = (2, 3)
 ) -> FieldType:
     """MPI-reproducible field of specified type on given `grid`."""
     result = cls(grid, shape_batch=shape_batch)  # all zeroes

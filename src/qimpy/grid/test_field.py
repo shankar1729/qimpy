@@ -1,8 +1,8 @@
 import pytest
 import torch
 from typing import Sequence, Type
-from qimpy.grid._field import FieldType
-from . import get_parallel_grid, get_reference_field
+from ._field import FieldType
+from .test_common import get_parallel_grid, get_reference_field
 from .test_fft import get_shape_batch_field_combinations
 
 

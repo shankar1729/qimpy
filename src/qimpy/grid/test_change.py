@@ -2,12 +2,12 @@ import pytest
 import torch
 import qimpy as qp
 import numpy as np
-from qimpy.grid._field import FieldType
-from typing import Type, Sequence
-from . import get_sequential_grid, get_parallel_grid, get_reference_field
+from ._field import Field, FieldType
+from .test_common import get_sequential_grid, get_parallel_grid, get_reference_field
+from typing import Type, Sequence, Any
 
 
-def get_test_field(cls: Type[FieldType], grid: qp.grid.Grid) -> FieldType:
+def get_test_field(cls: Type[FieldType], grid: qp.grid.Grid) -> Field[Any]:
     """A highly oscillatory and non-trivial function to test resampling."""
     if cls is qp.grid.FieldC:
         field = get_test_field(qp.grid.FieldR, grid)
@@ -23,7 +23,7 @@ def get_test_shapes() -> Sequence[Sequence[int]]:
     return (36, 40, 48), (40, 48, 64)
 
 
-def get_shape_field_combinations() -> Sequence[tuple[Sequence[int], Type[FieldType]]]:
+def get_shape_field_combinations() -> Sequence[tuple[Sequence[int], Type]]:
     shapes = get_test_shapes()
     field_types = (qp.grid.FieldR, qp.grid.FieldC, qp.grid.FieldH, qp.grid.FieldG)
     return [(shape, field_type) for shape in shapes for field_type in field_types]
@@ -78,7 +78,7 @@ def test_resample(cls: Type[FieldType]) -> None:
     assert (v1 - ~((~v2).to(grid1))).data.abs().max().item() < tol
 
 
-def get_plot_slice(v: qp.grid.FieldR) -> tuple[np.ndarray, np.ndarray]:
+def get_plot_slice(v: Field) -> tuple[np.ndarray, np.ndarray]:
     assert v.grid.comm is None
     Lz = v.grid.lattice.Rbasis[:, 2].norm().item()
     Nz = v.grid.shape[2]

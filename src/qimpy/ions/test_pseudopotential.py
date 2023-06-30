@@ -5,7 +5,7 @@ import os
 
 # Get list of filenames to test load:
 ps_path = os.getenv("QIMPY_PSEUDOPOTENTIAL_TEST_PATH", "")
-ps_names = os.getenv("QIMPY_PSEUDOPOTENTIAL_TEST_NAMES").split() if ps_path else []
+ps_names = os.getenv("QIMPY_PSEUDOPOTENTIAL_TEST_NAMES", "H").split() if ps_path else []
 ps_filenames = [os.path.join(ps_path, ps_name) for ps_name in ps_names]
 
 

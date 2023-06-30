@@ -51,6 +51,14 @@ class Field(qp.utils.Gradable[FieldType]):
         (Corresponding variable names are typically suffixed by '_tilde'.)
         """
 
+    @abstractmethod
+    def __invert__(self) -> Field[Any]:
+        """Fourier transform (enables the ~ operator)"""
+
+    @abstractmethod
+    def to(self: FieldType, grid: qp.grid.Grid) -> FieldType:
+        """Switch field to a grid that is different in shape or parallelization."""
+
     def __init__(
         self,
         grid: qp.grid.Grid,
