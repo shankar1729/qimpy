@@ -8,7 +8,7 @@ Command-line parameters (obtained using :code:`python -m qimpy.run -h`):
 
 .. code-block:: bash
 
-    python -m qimpy.run (-h | -v | -i FILE) [-o FILE] [-c C] [-p Pr Pk Pb]
+    python -m qimpy.dft (-h | -v | -i FILE) [-o FILE] [-c C] [-p Pr Pk Pb]
                            [-n] [-d] [-m FILE] [-V]
 
 Run a QimPy calculation from an input file
@@ -47,7 +47,8 @@ import sys
 import os
 from qimpy.rc import MPI
 
-if __name__ == "__main__":
+
+def main():
 
     # Parse the commandline arguments on main process:
     i_proc = MPI.COMM_WORLD.Get_rank()
@@ -202,3 +203,7 @@ if __name__ == "__main__":
     # Report timings:
     qp.rc.report_end()
     qp.utils.StopWatch.print_stats()
+
+
+if __name__ == "__main__":
+    main()
