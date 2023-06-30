@@ -12,16 +12,15 @@ uses SLURM_LOCALID or OMPI_COMM_WORLD_LOCAL_RANK to pick a specific GPU and alte
 CUDA_VISIBLE_DEVICES before any torch or MPI calls.
 """
 
-from . import _gpu_init  # before any gpu-related modules (torch, mpi)
 import os
 import time
 import datetime
 import torch
-import qimpy as qp
 import numpy as np
 from psutil import cpu_count
 from typing import Optional
 from mpi4py import MPI
+from . import log, set_gpu_visibility
 
 
 # List exported symbols for doc generation
@@ -100,7 +99,7 @@ def init(
     # Reset and report start time:
     global t_start
     t_start = time.time()
-    qp.log.info("Start time: " + time.ctime(t_start))
+    log.info("Start time: " + time.ctime(t_start))
 
     # Change MPI communicator if needed:
     if comm_override:
@@ -114,7 +113,7 @@ def init(
     comm_node = comm.Split_type(MPI.COMM_TYPE_SHARED)  # on-node communicator
     i_proc_node = comm_node.Get_rank()
     n_procs_node = comm_node.Get_size()
-    gpu_id = _gpu_init.set_visibility(i_proc_node)
+    gpu_id = set_gpu_visibility(i_proc_node)
 
     # Initialize torch:
     global device, use_cuda, compute_stream
@@ -125,9 +124,9 @@ def init(
         # Enable compute stream based on environment (default on):
         if os.environ.get("QIMPY_COMPUTE_STREAM", "1") in {"1", "yes"}:
             compute_stream = torch.cuda.Stream(device=device)
-            qp.log.info("Async compute stream enabled for GPU operations.")
+            log.info("Async compute stream enabled for GPU operations.")
         else:
-            qp.log.info("Async compute stream disabled for GPU operations.")
+            log.info("Async compute stream disabled for GPU operations.")
     else:
         gpu_id = -1
     # --- count unique GPUs on node using IDs (average over processes on same node)
@@ -158,7 +157,7 @@ def init(
     run_totals = np.array([n_threads, n_gpus])
     comm.Allreduce(MPI.IN_PLACE, run_totals, op=MPI.SUM)
     n_threads_tot, n_gpus_tot = run_totals.astype(int)
-    qp.log.info(
+    log.info(
         f"Run totals: {n_procs} processes, {n_threads_tot} threads, {n_gpus_tot} GPUs"
     )
 
@@ -190,4 +189,4 @@ def report_end():
     """Report end time and duration."""
     t_stop = time.time()
     duration = datetime.timedelta(seconds=(t_stop - t_start))
-    qp.log.info(f"\nEnd time: {time.ctime(t_stop)} (Duration: {duration})")
+    log.info(f"\nEnd time: {time.ctime(t_stop)} (Duration: {duration})")

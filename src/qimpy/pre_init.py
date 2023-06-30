@@ -1,8 +1,18 @@
-"""Set GPU visibility before importing MPI and torch when possible"""
+"""
+Initialization that must occur before all other imports:
+- Create log.
+- Set GPU visibility before importing MPI and torch when possible.
+"""
+
+import logging
 import os
 
 
-def set_visibility(local_rank: int) -> int:
+log: logging.Logger = logging.getLogger("qimpy")
+"Log for the qimpy module, configurable using :func:`qimpy.utils.log_config`"
+
+
+def set_gpu_visibility(local_rank: int) -> int:
     """Update CUDA_VISIBLE_DEVICES to select one GPU based on `local_rank` of process.
     Return the device number of the selected GPU, and -1 if no GPUs specified.
     (Note that CUDA_VISIBLE_DEVICES must be set explicitly to use GPUs.)"""
@@ -22,5 +32,5 @@ def set_visibility(local_rank: int) -> int:
 # Process GPU visibility in environment BEFORE torch and MPI imports
 for local_rank_key in ("OMPI_COMM_WORLD_LOCAL_RANK", "SLURM_LOCALID"):
     if local_rank_str := os.environ.get(local_rank_key):
-        set_visibility(int(local_rank_str))
+        set_gpu_visibility(int(local_rank_str))
         break

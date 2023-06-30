@@ -1,6 +1,8 @@
 """QimPy: Quantum-Integrated Multi-PhYsics"""
 # List exported symbols for doc generation
 __all__ = (
+    "log",
+    "set_gpu_visibility",
     "rc",
     "TreeNode",
     "Energy",
@@ -14,10 +16,10 @@ __all__ = (
     "export",
     "System",
     "transport",
-    "log",
 )
 
 # Module import definition
+from .pre_init import log, set_gpu_visibility
 from . import rc
 from ._tree import TreeNode
 from .energy import Energy
@@ -31,14 +33,9 @@ from . import geometry
 from . import export
 from ._system import System
 from . import transport
-import logging
 
 # Automatic versioning added by versioneer
 from ._version import get_versions
 
 __version__: str = get_versions()["version"]
 del get_versions
-
-# Module-level attributes
-log: logging.Logger = logging.getLogger("qimpy")
-"Log for the qimpy module, configurable using :func:`qimpy.utils.log_config`"
