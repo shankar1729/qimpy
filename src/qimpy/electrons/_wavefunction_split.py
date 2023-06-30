@@ -3,7 +3,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from dataclasses import dataclass
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 def _split_bands(

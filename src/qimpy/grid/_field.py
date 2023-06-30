@@ -4,7 +4,7 @@ import torch
 from abc import abstractmethod
 from ._change import _change_real, _change_recip
 from typing import TypeVar, Any, Union, Optional, Sequence
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 FieldType = TypeVar("FieldType", bound="Field")  #: Type for field ops.

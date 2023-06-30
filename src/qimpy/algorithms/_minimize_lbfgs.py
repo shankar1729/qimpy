@@ -16,12 +16,12 @@ class _HistoryEntry(Generic[Vector]):
     rho: float  #: Inverse state-gradient overlap, 1/(s.y)
 
 
-def _lbfgs(self: qp.utils.Minimize[Vector]) -> qp.Energy:
+def _lbfgs(self: qp.algorithms.Minimize[Vector]) -> qp.Energy:
     """L-BFGS implementation for `Minimize.minimize`"""
     assert self.method == "l-bfgs"
 
     # Initial energy and gradients:
-    state = qp.utils.MinimizeState[Vector]()
+    state = qp.algorithms.MinimizeState[Vector]()
     E = self._compute(state, energy_only=False)
     E_prev = 0.0
     line_minimize = LINE_MINIMIZE[self.line_minimize]

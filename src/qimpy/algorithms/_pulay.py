@@ -5,7 +5,7 @@ from ._optimizable import Optimizable, ConvergenceCheck
 from collections import deque
 from abc import ABC, abstractmethod
 from typing import TypeVar, Generic, Sequence, Deque
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 Variable = TypeVar("Variable", bound=Optimizable)

@@ -3,10 +3,10 @@ import numpy as np
 import torch
 import pytest
 from typing import Sequence
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
-class RandomFunction(qp.utils.Minimize[qp.grid.FieldR]):  # type: ignore
+class RandomFunction(qp.algorithms.Minimize[qp.grid.FieldR]):  # type: ignore
     """Random objective function to test minimization algorithms."""
 
     grid: qp.grid.Grid  #: Dummy grid for the fields below

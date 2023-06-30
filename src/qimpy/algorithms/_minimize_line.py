@@ -9,16 +9,21 @@ Vector = TypeVar("Vector", bound=Optimizable)
 
 
 LineMinimize = Callable[
-    ["qp.utils.Minimize[Vector]", Vector, float, "qp.utils.MinimizeState[Vector]"],
+    [
+        "qp.algorithms.Minimize[Vector]",
+        Vector,
+        float,
+        "qp.algorithms.MinimizeState[Vector]",
+    ],
     tuple[float, float, bool],
 ]
 
 
 def _constant(
-    self: qp.utils.Minimize[Vector],
+    self: qp.algorithms.Minimize[Vector],
     direction: Vector,
     step_size_test: float,
-    state: qp.utils.MinimizeState[Vector],
+    state: qp.algorithms.MinimizeState[Vector],
 ) -> tuple[float, float, bool]:
     """Take a pre-specified step size."""
     step_size = step_size_test  # Constant specified step size
@@ -33,10 +38,10 @@ def _constant(
 
 
 def _quadratic(
-    self: qp.utils.Minimize[Vector],
+    self: qp.algorithms.Minimize[Vector],
     direction: Vector,
     step_size_test: float,
-    state: qp.utils.MinimizeState[Vector],
+    state: qp.algorithms.MinimizeState[Vector],
 ) -> tuple[float, float, bool]:
     """Take a quadratic step calculated from an energy-only test step.
     Adjusts step size to back off if energy increases."""
@@ -146,10 +151,10 @@ def _quadratic(
 
 
 def _wolfe(
-    self: qp.utils.Minimize[Vector],
+    self: qp.algorithms.Minimize[Vector],
     direction: Vector,
     step_size_test: float,
-    state: qp.utils.MinimizeState[Vector],
+    state: qp.algorithms.MinimizeState[Vector],
 ) -> tuple[float, float, bool]:
     """Take cubic steps till the Wolfe energy and gradient criteria are
     satisfied. This uses a full energy and gradient test step, and does not

@@ -4,7 +4,7 @@ import logging
 import torch
 import sys
 from typing import Optional, Union
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 def log_config(

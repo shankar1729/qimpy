@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from dataclasses import dataclass
 from typing import Optional
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 class Davidson(qp.TreeNode):

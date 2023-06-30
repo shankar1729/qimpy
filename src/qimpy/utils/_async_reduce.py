@@ -2,7 +2,7 @@ import qimpy as qp
 import numpy as np
 import torch
 import functools
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 @functools.cache

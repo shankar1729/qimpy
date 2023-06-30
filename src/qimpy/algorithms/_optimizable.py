@@ -2,7 +2,7 @@ import qimpy as qp
 import torch
 from dataclasses import dataclass
 from typing import Protocol, TypeVar, Deque
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 T = TypeVar("T")
 

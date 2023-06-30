@@ -6,7 +6,7 @@ import torch
 from ._basis_ops import _apply_gradient, _apply_ke, _apply_potential, _collect_density
 from ._basis_real import BasisReal
 from typing import Optional, Union
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 class Basis(qp.TreeNode):

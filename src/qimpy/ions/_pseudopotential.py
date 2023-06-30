@@ -5,7 +5,7 @@ import torch
 import pathlib
 from ._read_upf import _read_upf
 from typing import Optional
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 class Pseudopotential:

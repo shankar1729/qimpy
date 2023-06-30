@@ -3,14 +3,14 @@ import qimpy as qp
 import torch
 import os
 from typing import Union, Optional
-from qimpy.rc import MPI
+from mpi4py import MPI
 from qimpy.utils import Checkpoint, CpPath, CpContext
 from ._gradient import Gradient
 from ._stepper import Stepper
 from ._history import History
 
 
-class Relax(qp.utils.Minimize[Gradient]):
+class Relax(qp.algorithms.Minimize[Gradient]):
     """Relax geometry of ions and/or lattice.
     Whether lattice changes is controlled by `lattice.movable`.
     """
@@ -142,7 +142,7 @@ class Relax(qp.utils.Minimize[Gradient]):
         self.stepper.step(direction, step_size)
 
     def compute(
-        self, state: qp.utils.MinimizeState[Gradient], energy_only: bool
+        self, state: qp.algorithms.MinimizeState[Gradient], energy_only: bool
     ) -> None:
         """Update energy and/or gradients in `state`."""
         state.energy, gradient = self.stepper.compute(not energy_only)

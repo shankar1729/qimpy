@@ -2,10 +2,10 @@ from __future__ import annotations
 import qimpy as qp
 import torch
 from typing import Optional, Sequence
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
-class SCF(qp.utils.Pulay[qp.grid.FieldH]):
+class SCF(qp.algorithms.Pulay[qp.grid.FieldH]):
     """Electronic self-consistent field iteration."""
 
     mix_fraction_mag: float  #: Mix-fraction for magnetization

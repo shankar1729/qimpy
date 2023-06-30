@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from ._hamiltonian import _hamiltonian
 from typing import Union, Optional
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 class Electrons(qp.TreeNode):

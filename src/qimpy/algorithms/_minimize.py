@@ -6,7 +6,7 @@ from ._minimize_cg import _cg
 from ._minimize_line import LINE_MINIMIZE, Vector
 from abc import ABC, abstractmethod
 from typing import Generic, Sequence, NamedTuple, Optional, Union
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 class MinimizeState(Generic[Vector]):
@@ -180,7 +180,7 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         if step_sizes is None:
             step_sizes = np.logspace(-9, 1, 11).tolist()
         # Initial state with gradient:
-        state = qp.utils.MinimizeState["Vector"]()
+        state = qp.algorithms.MinimizeState["Vector"]()
         E0 = self._compute(state, energy_only=False)
         dE_step = self._sync(
             state.gradient.vdot(direction)

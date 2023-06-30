@@ -3,7 +3,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from typing import Union, Optional, Callable
-from qimpy.rc import MPI
+from mpi4py import MPI
 from ._stepper import Stepper
 from ._history import History
 from ._gradient import Gradient

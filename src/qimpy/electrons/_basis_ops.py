@@ -3,7 +3,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from typing import Optional
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 @qp.utils.stopwatch(name="Basis.apply_gradient")

@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from ._fft import _init_grid_fft, _FFT, _IFFT, IndicesType
 from typing import Optional, Sequence
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 class Grid(qp.TreeNode):

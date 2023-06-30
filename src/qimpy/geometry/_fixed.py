@@ -1,6 +1,6 @@
 from __future__ import annotations
 import qimpy as qp
-from qimpy.rc import MPI
+from mpi4py import MPI
 from ._relax import Relax
 
 

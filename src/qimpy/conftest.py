@@ -1,5 +1,6 @@
 import pytest
-import qimpy as qp
+
+from . import rc
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -14,7 +15,7 @@ def pytest_report_teststatus(report, config):
 
 @pytest.fixture(scope="session", autouse=True)
 def init_run_config():
-    qp.rc.init()
+    rc.init()
 
 
 def pytest_collection_modifyitems(config, items):

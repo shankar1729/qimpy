@@ -2,7 +2,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from typing import Union, Optional, Any, Sequence
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 class System(qp.TreeNode):

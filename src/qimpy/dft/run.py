@@ -45,7 +45,7 @@ import qimpy as qp
 import argparse
 import sys
 import os
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 def main():

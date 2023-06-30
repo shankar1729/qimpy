@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from scipy import optimize
 from typing import Optional, Union, NamedTuple, Callable, Sequence
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 class SmearingResults(NamedTuple):

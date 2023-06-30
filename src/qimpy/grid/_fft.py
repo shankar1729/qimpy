@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from qimpy.utils import TaskDivision, BufferView
 from typing import Callable
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 IndicesType = tuple[torch.Tensor, torch.Tensor, torch.Tensor]

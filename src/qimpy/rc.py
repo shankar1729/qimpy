@@ -15,13 +15,14 @@ CUDA_VISIBLE_DEVICES before any torch or MPI calls.
 import os
 import time
 import datetime
+from typing import Optional
+
 import torch
 import numpy as np
 from psutil import cpu_count
-from typing import Optional
 from mpi4py import MPI
-from . import log, set_gpu_visibility
 
+from . import log, set_gpu_visibility
 
 # List exported symbols for doc generation
 __all__ = (

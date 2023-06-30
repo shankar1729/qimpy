@@ -2,7 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 def _norm(self: qp.electrons.Wavefunction) -> float:

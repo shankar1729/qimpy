@@ -2,7 +2,7 @@ import qimpy as qp
 import numpy as np
 import functools
 from typing import Optional, Sequence
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 IMBALANCE_THRESHOLD = 20.0  #: max cpu time% waste tolerated in process grid dimension

@@ -4,7 +4,7 @@ import torch
 from . import lda, gga
 from .functional import Functional, get_libxc_functional_names, FunctionalsLibxc
 from typing import Union
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 N_CUT = 1e-16  # Regularization threshold for densities

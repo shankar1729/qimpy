@@ -1,7 +1,7 @@
 from __future__ import annotations
 import qimpy as qp
 from typing import Protocol, Optional, Union
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 class Action(Protocol):

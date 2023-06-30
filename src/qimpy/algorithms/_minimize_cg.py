@@ -4,13 +4,13 @@ import numpy as np
 from ._minimize_line import LINE_MINIMIZE, Vector
 
 
-def _cg(self: qp.utils.Minimize[Vector]) -> qp.Energy:
+def _cg(self: qp.algorithms.Minimize[Vector]) -> qp.Energy:
     """Conjugate gradients implementation for `Minimize.minimize`.
     Also supports steepest descents (Gradient method) as a special case."""
     assert self.method in {"cg", "gradient"}
 
     # Initial energy and gradients:
-    state = qp.utils.MinimizeState[Vector]()
+    state = qp.algorithms.MinimizeState[Vector]()
     E = self._compute(state, energy_only=False)
     E_prev = 0.0
     along_gradient = True  # Whether current search direction is along gradient
@@ -105,26 +105,28 @@ def _cg(self: qp.utils.Minimize[Vector]) -> qp.Energy:
 
 
 def _initialize_convergence_checks(
-    self: qp.utils.Minimize[Vector], state: qp.utils.MinimizeState[Vector]
-) -> dict[str, qp.utils.ConvergenceCheck]:
+    self: qp.algorithms.Minimize[Vector], state: qp.algorithms.MinimizeState[Vector]
+) -> dict[str, qp.algorithms.ConvergenceCheck]:
     """Initialize convergence checkers for energy and `extra_thresholds`."""
     Ename = state.energy.name
     checks = {
         "d"
-        + Ename: qp.utils.ConvergenceCheck(self.energy_threshold, self.n_consecutive)
+        + Ename: qp.algorithms.ConvergenceCheck(
+            self.energy_threshold, self.n_consecutive
+        )
     }
     for extra_name, extra_threshold in self.extra_thresholds.items():
-        checks[extra_name] = qp.utils.ConvergenceCheck(
+        checks[extra_name] = qp.algorithms.ConvergenceCheck(
             extra_threshold, self.n_consecutive
         )
     return checks
 
 
 def _check_convergence(
-    self: qp.utils.Minimize[Vector],
-    state: qp.utils.MinimizeState[Vector],
+    self: qp.algorithms.Minimize[Vector],
+    state: qp.algorithms.MinimizeState[Vector],
     i_iter: int,
-    checks: dict[str, qp.utils.ConvergenceCheck],
+    checks: dict[str, qp.algorithms.ConvergenceCheck],
     E: float,
     E_prev: float,
 ) -> tuple[float, float, bool]:

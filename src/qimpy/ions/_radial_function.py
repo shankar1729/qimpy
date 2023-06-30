@@ -2,7 +2,7 @@ import qimpy as qp
 import numpy as np
 import torch
 from typing import Optional, Union
-from qimpy.rc import MPI
+from mpi4py import MPI
 
 
 class RadialFunction:

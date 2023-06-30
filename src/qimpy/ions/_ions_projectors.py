@@ -2,7 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from qimpy.rc import MPI
+from mpi4py import MPI
 from .quintic_spline import Interpolator
 from .spherical_harmonics import get_harmonics_tilde, get_harmonics_tilde_and_prime
 

@@ -4,9 +4,10 @@ __all__ = (
     "log",
     "set_gpu_visibility",
     "rc",
+    "utils",
     "TreeNode",
     "Energy",
-    "utils",
+    "algorithms",
     "ions",
     "lattice",
     "symmetries",
@@ -20,10 +21,10 @@ __all__ = (
 
 # Module import definition
 from .pre_init import log, set_gpu_visibility
-from . import rc
-from ._tree import TreeNode
+from . import rc, utils
+from .tree import TreeNode
 from .energy import Energy
-from . import utils
+from . import algorithms
 from . import ions
 from . import lattice
 from . import symmetries

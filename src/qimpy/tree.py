@@ -1,6 +1,7 @@
-from __future__ import annotations
-import qimpy as qp
 from typing import Union, TypeVar, Type, final
+
+from . import log, utils
+from .utils import CpPath, CpContext
 
 
 ClassType = TypeVar("ClassType")
@@ -20,9 +21,7 @@ class TreeNode:
         self.child_names = []
 
     @final
-    def save_checkpoint(
-        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
-    ) -> None:
+    def save_checkpoint(self, cp_path: CpPath, context: CpContext) -> None:
         """Save `self` and all children in hierarchy to `cp_path`.
         Here, `context` helps identify why/when this checkpoint is being called,
         e.g. at a geometry step, or at the end of the simulation.
@@ -36,16 +35,14 @@ class TreeNode:
             # Save quantities in self:
             saved = self._save_checkpoint(cp_path, context)
             if saved:
-                qp.log.info(f'  {cp_path.path} <- {", ".join(saved)}')
+                log.info(f'  {cp_path.path} <- {", ".join(saved)}')
             # Recur down the hierarchy:
             for child_name in self.child_names:
                 getattr(self, child_name).save_checkpoint(
                     cp_path.relative(child_name), context
                 )
 
-    def _save_checkpoint(
-        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
-    ) -> list[str]:
+    def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
         """Override to save required quantities to `cp_path`.
         Return names of objects saved (for logging)."""
         return []
@@ -55,7 +52,7 @@ class TreeNode:
         attr_name: str,
         cls: Type[TreeNodeType],
         params: Union[TreeNodeType, dict, str, None],
-        checkpoint_in: qp.utils.CpPath,
+        checkpoint_in: CpPath,
         attr_version_name: str = "",
         **kwargs,
     ) -> None:
@@ -93,7 +90,7 @@ class TreeNode:
         if isinstance(params, dict):
             result = cls(
                 **kwargs,
-                **qp.utils.dict.key_cleanup(params),
+                **utils.dict.key_cleanup(params),
                 checkpoint_in=checkpoint_in.relative(attr_name),
             )
         elif isinstance(params, cls):
@@ -115,10 +112,27 @@ class TreeNode:
         setattr(self, attr_name, result)
         self.child_names.append(attr_name)
 
+    class ChildOptions:
+        """Arguments to `qimpy.TreeNode.add_child`.
+        Used to specify multiple option lists in `qimpy.TreeNode.add_child_one_of`.
+        """
+
+        def __init__(
+            self,
+            attr_version_name: str,
+            cls: Type[TreeNodeType],
+            params: Union[TreeNodeType, dict, None],
+            **kwargs,
+        ) -> None:
+            self.attr_version_name = attr_version_name
+            self.cls = cls
+            self.params = params
+            self.kwargs = kwargs
+
     def add_child_one_of(
         self,
         attr_name: str,
-        checkpoint_in: qp.utils.CpPath,
+        checkpoint_in: CpPath,
         *args: ChildOptions,
         have_default: bool,
     ) -> None:
@@ -167,7 +181,7 @@ class TreeNode:
 
         # Prevent loading data from inconsistent checkpoint:
         if arg_sel.attr_version_name != attr_version_name_checkpoint:
-            checkpoint_in = qp.utils.CpPath()
+            checkpoint_in = CpPath()
 
         self.add_child(
             attr_name,
@@ -177,20 +191,3 @@ class TreeNode:
             arg_sel.attr_version_name,
             **arg_sel.kwargs,
         )
-
-    class ChildOptions:
-        """Arguments to `qimpy.TreeNode.add_child`.
-        Used to specify multiple option lists in `qimpy.TreeNode.add_child_one_of`.
-        """
-
-        def __init__(
-            self,
-            attr_version_name: str,
-            cls: Type[TreeNodeType],
-            params: Union[TreeNodeType, dict, None],
-            **kwargs,
-        ) -> None:
-            self.attr_version_name = attr_version_name
-            self.cls = cls
-            self.params = params
-            self.kwargs = kwargs
