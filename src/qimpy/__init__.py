@@ -25,9 +25,9 @@ from . import rc, utils
 from .tree import TreeNode
 from .energy import Energy
 from . import algorithms
-from . import ions
 from . import lattice
 from . import symmetries
+from . import ions
 from . import grid
 from . import electrons
 from . import geometry

@@ -104,7 +104,7 @@ class System(qp.TreeNode):
             symmetries,
             checkpoint_in,
             lattice=self.lattice,
-            ions=self.ions,
+            labeled_positions=self.ions.labeled_positions,
             axes=axes,
         )
         self.add_child(

@@ -11,6 +11,7 @@ from ._ions_atomic import (
     get_atomic_density,
 )
 from ._ions_update import update, accumulate_geometry_grad, _collect_ps_matrix
+from ..symmetries._positions import LabeledPositions
 from typing import Optional, Union
 
 
@@ -358,7 +359,8 @@ class Ions(qp.TreeNode):
     def _read_checkpoint(self, cp_path: qp.utils.CpPath) -> None:
         checkpoint, path = cp_path
         assert checkpoint is not None
-        self.symbols = cp_path.attrs["symbols"].split(",")
+        symbol_str = cp_path.attrs["symbols"]
+        self.symbols = symbol_str.split(",") if symbol_str else list[str]()
         self.types = cp_path.read("types")
         self.positions = cp_path.read("positions")
         self.velocities = cp_path.read_optional("velocities")
@@ -382,3 +384,23 @@ class Ions(qp.TreeNode):
             slice(slice_end - slice_len, slice_end)
             for slice_end, slice_len in zip(slice_ends, self.n_ions_type)
         ]
+
+    @property
+    def labeled_positions(self) -> Optional[LabeledPositions]:
+        """Labeled positions for symmetry detection."""
+        if not self.n_ions:
+            return None
+        scalars = [self.types.to(torch.double)]  # atom type always a label
+        pseudovectors: Optional[torch.Tensor] = None  # only if vector magnetization
+        if self.Q is not None:
+            scalars.append(self.Q)
+        if self.M is not None:
+            if len(self.M.shape) == 1:  # scalar magnetization
+                scalars.append(self.M)
+            else:  # vector magnetization
+                pseudovectors = self.M[None]
+        return LabeledPositions(
+            positions=self.positions,
+            scalars=torch.stack(scalars),
+            pseudovectors=pseudovectors,
+        )

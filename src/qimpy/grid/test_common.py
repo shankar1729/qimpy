@@ -58,6 +58,5 @@ def get_grid_inputs() -> tuple[qp.lattice.Lattice, qp.symmetries.Symmetries]:
     lattice = qp.lattice.Lattice(
         system="triclinic", a=2.1, b=2.2, c=2.3, alpha=75, beta=80, gamma=85
     )  # pick one with no symmetries
-    ions = qp.ions.Ions(lattice=lattice)
-    symmetries = qp.symmetries.Symmetries(lattice=lattice, ions=ions)
+    symmetries = qp.symmetries.Symmetries(lattice=lattice)
     return lattice, symmetries

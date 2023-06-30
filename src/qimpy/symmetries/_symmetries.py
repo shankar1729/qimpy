@@ -1,9 +1,14 @@
 import qimpy as qp
 import numpy as np
 import torch
-from typing import Union
+from typing import Union, Optional
 from ._lattice import _get_lattice_point_group, _symmetrize_lattice, _symmetrize_matrix
-from ._ions import _get_space_group, _symmetrize_positions, _symmetrize_forces
+from ._positions import (
+    LabeledPositions,
+    _get_space_group,
+    _symmetrize_positions,
+    _symmetrize_forces,
+)
 from ._grid import _check_grid_shape, _get_grid_shape
 
 
@@ -13,12 +18,12 @@ class Symmetries(qp.TreeNode):
     symmetrize properties such as positions, forces and densities."""
 
     lattice: qp.lattice.Lattice  #: Corresponding lattice vectors
-    ions: qp.ions.Ions  #: Corresponding ionic geometry
+    labeled_positions: Optional[LabeledPositions]  #: Positions determining space group
     tolerance: float  #: Relative error threshold in detecting symmetries
     n_sym: int  #: Number of space group operations
     rot: torch.Tensor  #: Rotations in fractional coordinates (n_sym x 3 x 3)
     trans: torch.Tensor  #: Translations in fractional coordinates (n_sym x 3)
-    ion_map: torch.Tensor  #: Ion index each ion maps to (n_sym x n_ions)
+    position_map: torch.Tensor  #: Index each position maps to (n_sym x n_positions)
     i_id: int  #: Index of identity operation within space group
     i_inv: list[int]  #: Indices of any inversion operations in space group
 
@@ -34,7 +39,7 @@ class Symmetries(qp.TreeNode):
         *,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         lattice: qp.lattice.Lattice,
-        ions: qp.ions.Ions,
+        labeled_positions: Optional[LabeledPositions] = None,
         axes: dict[str, np.ndarray] = {},
         tolerance: float = 1e-6,
         override: Union[None, str, list, np.ndarray] = None,
@@ -43,6 +48,12 @@ class Symmetries(qp.TreeNode):
 
         Parameters
         ----------
+        lattice
+            Lattice vectors for determining point group.
+        positions
+            List of covariant coordinates of eg. atoms to deduce space group.
+        scalar_labels
+
         tolerance
             :yaml:`Threshold for detecting symmetries.`
         override
@@ -57,10 +68,12 @@ class Symmetries(qp.TreeNode):
         """
         super().__init__()
         self.lattice = lattice
-        self.ions = ions
+        self.labeled_positions = labeled_positions
         self.tolerance = tolerance
         qp.log.info("\n--- Initializing Symmetries ---")
-        rot, trans, ion_map = Symmetries.detect(lattice, ions, axes, tolerance)
+        rot, trans, position_map = Symmetries.detect(
+            lattice, labeled_positions, axes, tolerance
+        )
 
         # Down-select to manual symmetries (if any):
         if override is not None:
@@ -77,23 +90,26 @@ class Symmetries(qp.TreeNode):
             qp.log.info(f"Override: {len(sel)} space-group symmetries")
             rot = rot[sel]
             trans = trans[sel]
-            ion_map = ion_map[sel]
+            position_map = position_map[sel]
             Symmetries.check_group(rot, trans, tolerance)
 
         # Set and enforce symmetries:
         self.rot = rot
         self.trans = trans
-        self.ion_map = ion_map
+        self.position_map = position_map
         self.n_sym = self.rot.shape[0]
         self.report()
-        self.enforce(lattice, ions)
+        self.enforce(
+            lattice,
+            None if (labeled_positions is None) else labeled_positions.positions,
+        )
         self.i_id = Symmetries.find_identity(rot, trans, tolerance)
         self.i_inv = Symmetries.find_inversion(rot, tolerance)
 
     @staticmethod
     def detect(
         lattice: qp.lattice.Lattice,
-        ions: qp.ions.Ions,
+        labeled_positions: Optional[LabeledPositions],
         axes: dict[str, np.ndarray],
         tolerance: float,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -104,9 +120,20 @@ class Symmetries(qp.TreeNode):
         qp.log.info(f"Found {n_point} point-group symmetries of the Bravais lattice")
         lattice_sym = Symmetries.reduce_axes(lattice_sym, lattice, axes, tolerance)
         # Space group:
-        rot, trans, ion_map = _get_space_group(lattice_sym, lattice, ions, tolerance)
-        qp.log.info(f"Found {rot.shape[0]} space-group symmetries with basis")
-        return rot, trans, ion_map
+        if labeled_positions is None:
+            # Special case of no ions: space group = point group:
+            rot = lattice_sym.clone().detach()
+            trans = torch.zeros((lattice_sym.shape[0], 3), device=rot.device)
+            position_map = torch.zeros(
+                (lattice_sym.shape[0], 0), dtype=torch.long, device=rot.device
+            )
+            return rot, trans, position_map
+        else:
+            rot, trans, position_map = _get_space_group(
+                lattice_sym, lattice, labeled_positions, tolerance
+            )
+            qp.log.info(f"Found {rot.shape[0]} space-group symmetries with basis")
+            return rot, trans, position_map
 
     @staticmethod
     def reduce_axes(
@@ -133,16 +160,18 @@ class Symmetries(qp.TreeNode):
         ):
             rot_str = ", ".join(qp.utils.fmt(row) for row in rot)
             qp.log.info(f"- [{rot_str}, {qp.utils.fmt(trans)}]")
-        qp.log.debug("Ion map:\n" + qp.utils.fmt(self.ion_map))
+        qp.log.debug("Ion map:\n" + qp.utils.fmt(self.position_map))
 
-    def enforce(self, lattice: qp.lattice.Lattice, ions: qp.ions.Ions) -> None:
+    def enforce(
+        self, lattice: qp.lattice.Lattice, positions: Optional[torch.Tensor]
+    ) -> None:
         """Enforce symmetries exactly on lattice and ions."""
         qp.log.info("Enforcing symmetries:")
         lattice.update(self.symmetrize_lattice(lattice.Rbasis))
-        if ions.n_ions:
-            positions_sym = self.symmetrize_positions(ions.positions)
-            rms = ((positions_sym - ions.positions) ** 2).mean().sqrt()
-            ions.positions = positions_sym
+        if positions is not None:
+            positions_sym = self.symmetrize_positions(positions)
+            rms = (positions_sym - positions).square().mean().sqrt()
+            positions[:] = positions_sym
             qp.log.info(f"RMS change in fractional positions of ions: {rms:e}")
 
     @staticmethod
