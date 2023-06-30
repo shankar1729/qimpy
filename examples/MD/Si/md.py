@@ -49,7 +49,7 @@ def main() -> None:
         ["Si", *tuple(pos), {"v": v}] for pos, v in zip(positions, velocities)
     ]
 
-    system = qp.System(
+    system = qp.dft.System(
         lattice=dict(system="cubic", a=float(Unit(5.43, "Å")), movable=True),
         ions=dict(
             pseudopotentials=os.path.join(ps_path, "$ID_ONCV_PBE.upf"),

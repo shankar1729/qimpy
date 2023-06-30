@@ -27,7 +27,7 @@ coordinates.extend(
     [["Cl", *tuple(coords)] for coords in coords_mesh if np.linalg.norm(coords)]
 )  # omit Cl at (0,0,0)
 
-system = qp.System(
+system = qp.dft.System(
     lattice=lattice,
     ions={
         "pseudopotentials": os.path.join(ps_path, "$ID_ONCV_PBE.upf"),

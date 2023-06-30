@@ -7,7 +7,7 @@ from mpi4py import MPI
 class Action(Protocol):
     """Class requirements to use as a geometry action."""
 
-    def run(self, system: qp.System) -> None:
+    def run(self, system: qp.dft.System) -> None:
         ...
 
 
@@ -49,6 +49,6 @@ class Geometry(qp.TreeNode):
             have_default=True,
         )
 
-    def run(self, system: qp.System):
+    def run(self, system: qp.dft.System):
         """Run selected geometry action."""
         self.action.run(system)

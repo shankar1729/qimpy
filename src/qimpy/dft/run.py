@@ -41,11 +41,13 @@ directory. For development, run `python setup.py develop --user` in the root
 directory of the source repository to make the above usage possible without
 instaling from pip/conda."""
 
-import qimpy as qp
 import argparse
 import sys
 import os
 from mpi4py import MPI
+
+from .. import log, rc, utils, __version__
+from . import System
 
 
 def main():
@@ -155,7 +157,7 @@ def main():
     if args.version:
         # Print version and exit:
         if i_proc == 0:
-            print("QimPy", qp.__version__)
+            print("QimPy", __version__)
         exit()
 
     if args.help:
@@ -165,7 +167,7 @@ def main():
         exit()
 
     # Setup logging:
-    qp.utils.log_config(
+    utils.log_config(
         output_file=args.output_file,
         mpi_log=args.mpi_log,
         mpi_comm=MPI.COMM_WORLD,
@@ -174,35 +176,35 @@ def main():
     )
 
     # Print version header
-    qp.log.info("*" * 15 + " QimPy " + qp.__version__ + " " + "*" * 15)
+    log.info("*" * 15 + " QimPy " + __version__ + " " + "*" * 15)
 
     # Configure hardware resources
-    qp.rc.init(cores_override=args.cores)
+    rc.init(cores_override=args.cores)
 
     # Load input parameters from YAML file:
-    input_dict = qp.utils.dict.key_cleanup(qp.utils.yaml.load(args.input_file))
+    input_dict = utils.dict.key_cleanup(utils.yaml.load(args.input_file))
     # --- Set default checkpoint file (if not specified in input):
     input_dict.setdefault("checkpoint", os.path.splitext(args.input_file)[0] + ".h5")
     # --- Include processed input in log:
-    qp.log.info(f"\n# Processed input:\n{qp.utils.yaml.dump(input_dict)}")
-    input_dict = qp.utils.dict.remove_units(input_dict)  # Remove units
+    log.info(f"\n# Processed input:\n{utils.yaml.dump(input_dict)}")
+    input_dict = utils.dict.remove_units(input_dict)  # Remove units
 
     # Initialize system with input parameters:
-    system = qp.System(process_grid_shape=args.process_grid, **input_dict)
+    system = System(process_grid_shape=args.process_grid, **input_dict)
 
     # Dry-run bypass:
     if args.dry_run:
-        qp.log.info("Dry run initialization successful: input is valid.")
-        qp.rc.report_end()
-        qp.utils.StopWatch.print_stats()
+        log.info("Dry run initialization successful: input is valid.")
+        rc.report_end()
+        utils.StopWatch.print_stats()
         exit()
 
     # Perform specified actions:
     system.run()
 
     # Report timings:
-    qp.rc.report_end()
-    qp.utils.StopWatch.print_stats()
+    rc.report_end()
+    utils.StopWatch.print_stats()
 
 
 if __name__ == "__main__":

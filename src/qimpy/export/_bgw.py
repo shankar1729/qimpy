@@ -10,7 +10,7 @@ class BGW(qp.TreeNode):
     def __init__(
         self,
         *,
-        system: qp.System,
+        system: qp.dft.System,
         filename: str,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
     ) -> None:
@@ -26,7 +26,7 @@ class BGW(qp.TreeNode):
         super().__init__()
         self.filename = filename
 
-    def export(self, system: qp.System) -> None:
+    def export(self, system: qp.dft.System) -> None:
         """Export BGW HDF5 file."""
         qp.log.info("Will do BGW export here.")
         raise NotImplementedError

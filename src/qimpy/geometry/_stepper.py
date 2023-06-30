@@ -8,7 +8,7 @@ from ._gradient import Gradient
 class Stepper:
     """Shared interface of dynamics and optimization with electronic system."""
 
-    system: qp.System  #: System being optimized currently
+    system: qp.dft.System  #: System being optimized currently
     invRbasis0: torch.Tensor  #: Initial lattice vectors inverse (used to define strain)
     drag_wavefunctions: bool  #: Whether to drag atomic components of wavefunctions
     isotropic: bool  #: Whether to force lattice changes to be isotropic (NPT mode)
@@ -16,7 +16,7 @@ class Stepper:
 
     def __init__(
         self,
-        system: qp.System,
+        system: qp.dft.System,
         *,
         drag_wavefunctions: bool = True,
         isotropic: bool = False,

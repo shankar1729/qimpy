@@ -5,7 +5,7 @@ import torch
 from .quintic_spline import Interpolator
 
 
-def update(self: qp.ions.Ions, system: qp.System) -> None:
+def update(self: qp.ions.Ions, system: qp.dft.System) -> None:
     """Update ionic potentials, projectors and energy components.
     The grids used for the potentials are derived from `system`,
     and the energy components are stored within `system.E`.
@@ -58,7 +58,7 @@ def update(self: qp.ions.Ions, system: qp.System) -> None:
     self.beta_version += 1  # will auto-invalidate cached projections
 
 
-def accumulate_geometry_grad(self: qp.ions.Ions, system: qp.System) -> None:
+def accumulate_geometry_grad(self: qp.ions.Ions, system: qp.dft.System) -> None:
     """Accumulate geometry gradient contributions of total energy.
     Each contribution is accumulated to a `grad` attribute,
     only if the corresponding `requires_grad` is enabled.
@@ -110,7 +110,7 @@ class _LocalTerms:
     """
 
     @qp.utils.stopwatch(name="Ions.LocalTerms.init")
-    def __init__(self, ions: qp.ions.Ions, system: qp.System):
+    def __init__(self, ions: qp.ions.Ions, system: qp.dft.System):
         self.ions = ions
         self.system = system
 

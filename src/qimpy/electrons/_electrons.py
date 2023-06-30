@@ -244,7 +244,7 @@ class Electrons(qp.TreeNode):
         # Initialize SCF:
         self.add_child("scf", qp.electrons.SCF, scf, checkpoint_in, comm=self.comm)
 
-    def initialize_wavefunctions(self, system: qp.System) -> None:
+    def initialize_wavefunctions(self, system: qp.dft.System) -> None:
         """Initialize wavefunctions to LCAO / random (if not from checkpoint).
         (This needs to happen after ions have been updated in order to get
         atomic orbitals, which in turn depends on electrons.__init__ being
@@ -290,7 +290,7 @@ class Electrons(qp.TreeNode):
             self.basis.division.n_procs > 1
         )
 
-    def initialize_fixed_hamiltonian(self, system: qp.System) -> None:
+    def initialize_fixed_hamiltonian(self, system: qp.dft.System) -> None:
         """Load density/potential from checkpoint for fixed-H calculation"""
         assert self.fixed_H
         cp_H = qp.utils.CpPath(
@@ -311,7 +311,7 @@ class Electrons(qp.TreeNode):
         self.fillings.mu_constrain = True  # make sure it's not updated
         qp.log.info(f"  Set mu: {self.fillings.mu}  constrained: True")
 
-    def update_density(self, system: qp.System) -> None:
+    def update_density(self, system: qp.dft.System) -> None:
         """Update electron density from wavefunctions and fillings.
         Result is in system grid in reciprocal space."""
         f = self.fillings.f
@@ -333,7 +333,9 @@ class Electrons(qp.TreeNode):
         else:
             self.tau_tilde = qp.grid.FieldH(system.grid, shape_batch=(0,))
 
-    def update_potential(self, system: qp.System, requires_grad: bool = True) -> None:
+    def update_potential(
+        self, system: qp.dft.System, requires_grad: bool = True
+    ) -> None:
         """Update density-dependent energy terms and electron potential.
         If `requires_grad` is False, only compute the energy (skip the potentials)."""
         self.n_tilde.requires_grad_(requires_grad, clear=True)
@@ -353,7 +355,7 @@ class Electrons(qp.TreeNode):
             self.n_tilde.grad[0] += system.ions.Vloc_tilde + VH_tilde
             self.n_tilde.grad.symmetrize()
 
-    def update(self, system: qp.System, requires_grad: bool = True) -> None:
+    def update(self, system: qp.dft.System, requires_grad: bool = True) -> None:
         """Update electronic system to current wavefunctions and eigenvalues.
         This updates occupations, density, potential and electronic energy.
         If `requires_grad` is False, only compute the energy (skip the potentials)."""
@@ -376,7 +378,7 @@ class Electrons(qp.TreeNode):
             self.kpoints.comm,
         )
 
-    def accumulate_geometry_grad(self, system: qp.System) -> None:
+    def accumulate_geometry_grad(self, system: qp.dft.System) -> None:
         """Accumulate geometry gradient contributions of electronic energy.
         Each contribution is accumulated to a `grad` attribute,
         only if the corresponding `requires_grad` is enabled.
@@ -439,7 +441,7 @@ class Electrons(qp.TreeNode):
                 )
             system.ions.beta.grad = C.non_spinor @ beta_C_grad.transpose(-2, -1).conj()
 
-    def run(self, system: qp.System) -> None:
+    def run(self, system: qp.dft.System) -> None:
         """Run any actions specified in the input."""
         if self.fixed_H:
             self.initialize_fixed_hamiltonian(system)

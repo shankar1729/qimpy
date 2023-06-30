@@ -9,7 +9,7 @@ from mpi4py import MPI
 class LCAO(Minimize[MatrixArray]):
     """Optimize electronic state in atomic-orbital subspace."""
 
-    system: qp.System
+    system: qp.dft.System
     _rot_prev: torch.Tensor  #: accumulated rotations of subspace
 
     def __init__(
@@ -45,7 +45,7 @@ class LCAO(Minimize[MatrixArray]):
             n_consecutive=2,
         )
 
-    def update(self, system: qp.System) -> None:
+    def update(self, system: qp.dft.System) -> None:
         """Set wavefunctions to optimum subspace of atomic orbitals."""
         el = system.electrons
         # Initialize based on reference atomic density (or fixed-H density):

@@ -68,7 +68,7 @@ class QimPy(Calculator):
         }
 
         qp.rc.init()
-        system = qp.System(lattice=lattice_dict, ions=ions)
+        system = qp.dft.System(lattice=lattice_dict, ions=ions)
         system.run()
 
         self.results = {"energy": float(system.energy) * eV}

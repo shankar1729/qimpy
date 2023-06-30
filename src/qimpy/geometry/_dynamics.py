@@ -17,7 +17,7 @@ class Dynamics(qp.TreeNode):
     Whether lattice changes is controlled by `lattice.movable`.
     """
 
-    system: qp.System  #: System being optimized currently
+    system: qp.dft.System  #: System being optimized currently
     masses: torch.Tensor  #: Mass of each ion in system (Dim: n_ions x 1 for bcast)
     stepper: Stepper
     comm: MPI.Comm  #: Communictaor over which forces consistent
@@ -133,7 +133,7 @@ class Dynamics(qp.TreeNode):
             "thermostat", Thermostat, thermostat, checkpoint_in, dynamics=self
         )
 
-    def run(self, system: qp.System) -> None:
+    def run(self, system: qp.dft.System) -> None:
         self.system = system
         self.masses = Dynamics.get_masses(system.ions)
         stepper = Stepper(

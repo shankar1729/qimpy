@@ -6,7 +6,7 @@ from typing import Protocol, Optional, Union
 class Exporter(Protocol):
     """Class requirements to use as a geometry action."""
 
-    def export(self, system: qp.System) -> None:
+    def export(self, system: qp.dft.System) -> None:
         ...
 
 
@@ -19,7 +19,7 @@ class Export(qp.TreeNode):
     def __init__(
         self,
         *,
-        system: qp.System,
+        system: qp.dft.System,
         checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
         bgw: Optional[Union[dict, qp.export.BGW]] = None,
     ) -> None:
@@ -37,7 +37,7 @@ class Export(qp.TreeNode):
             self.add_child("bgw", qp.export.BGW, bgw, checkpoint_in, system=system)
             self.exporters.append(self.bgw)
 
-    def __call__(self, system: qp.System):
+    def __call__(self, system: qp.dft.System):
         """Run selected geometry action."""
         for exporter in self.exporters:
             exporter.export(system)

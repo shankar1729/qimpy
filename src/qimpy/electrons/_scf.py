@@ -15,7 +15,7 @@ class SCF(qp.algorithms.Pulay[qp.grid.FieldH]):
     n_eig_steps: int  #: Number of eigenvalue steps per cycle
     eig_threshold: float  #: Eigenvalue convergence threshold
     mix_density: bool  #: Mix density if True, else mix potential
-    system: qp.System  #: Current system being optimized
+    system: qp.dft.System  #: Current system being optimized
     K_kerker: torch.Tensor  #: Kernel for Kerker mixing (preconditioner)
     K_metric: torch.Tensor  #: Kernel for metric used in Pulay overlaps
 
@@ -107,7 +107,7 @@ class SCF(qp.algorithms.Pulay[qp.grid.FieldH]):
             mix_fraction=mix_fraction,
         )
 
-    def update(self, system: qp.System) -> None:
+    def update(self, system: qp.dft.System) -> None:
         self.system = system
         # Initialize preconditioner and metric:
         grid = system.grid

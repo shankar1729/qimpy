@@ -15,7 +15,7 @@ __all__ = (
     "electrons",
     "geometry",
     "export",
-    "System",
+    "dft",
     "transport",
 )
 
@@ -32,7 +32,7 @@ from . import grid
 from . import electrons
 from . import geometry
 from . import export
-from ._system import System
+from . import dft
 from . import transport
 
 # Automatic versioning added by versioneer

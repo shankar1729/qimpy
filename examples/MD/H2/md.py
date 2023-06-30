@@ -22,7 +22,7 @@ def main() -> None:
 
     bond_distances = []  # to be populated by analyze()
     ps_path = "../../../../../JDFTx/build_testing/pseudopotentials/SG15"
-    system = qp.System(
+    system = qp.dft.System(
         lattice=dict(system="cubic", modification="face-centered", a=14.0),
         ions=dict(
             pseudopotentials=os.path.join(ps_path, "$ID_ONCV_PBE.upf"),

@@ -117,7 +117,7 @@ class Relax(qp.algorithms.Minimize[Gradient]):
         else:
             self.history = None
 
-    def run(self, system: qp.System) -> None:
+    def run(self, system: qp.dft.System) -> None:
         qp.log.info(
             "\n--- Geometry relaxation ---\n"
             if self.n_iterations

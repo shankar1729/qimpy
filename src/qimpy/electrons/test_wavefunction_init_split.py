@@ -6,7 +6,7 @@ from typing import Optional
 
 
 @functools.cache
-def make_system(real: bool, spinorial: bool, polarized: bool) -> qp.System:
+def make_system(real: bool, spinorial: bool, polarized: bool) -> qp.dft.System:
     """Make a system to test with."""
     if real:
         # Gamma-point only, non-spinorial (make a bit larger since no k)
@@ -22,7 +22,7 @@ def make_system(real: bool, spinorial: bool, polarized: bool) -> qp.System:
     else:
         lattice = {"system": "hexagonal", "a": 9.0, "c": 12.0}
         kmesh = {"size": [4, 4, 3]}
-    return qp.System(
+    return qp.dft.System(
         lattice=lattice,
         electrons={"k-mesh": kmesh, "basis": {"real-wavefunctions": real}},
         process_grid_shape=(1, 1, -1),  # ensure basis-split
@@ -31,7 +31,7 @@ def make_system(real: bool, spinorial: bool, polarized: bool) -> qp.System:
 
 @functools.cache
 def get_Cg(
-    system: qp.System, n_bands: int, b_start: int = 0, b_stop: Optional[int] = None
+    system: qp.dft.System, n_bands: int, b_start: int = 0, b_stop: Optional[int] = None
 ) -> qp.electrons.Wavefunction:
     """Create basis-split wavefunction, selectively randomized."""
     Cg = qp.electrons.Wavefunction(system.electrons.basis, n_bands=n_bands)
@@ -41,7 +41,7 @@ def get_Cg(
 
 @functools.cache
 def get_Cb(
-    system: qp.System, n_bands: int, b_start: int = 0, b_stop: Optional[int] = None
+    system: qp.dft.System, n_bands: int, b_start: int = 0, b_stop: Optional[int] = None
 ) -> qp.electrons.Wavefunction:
     """Create band-split wavefunction, selectively randomized."""
     div = system.electrons.basis.division
@@ -67,7 +67,7 @@ system_band_combinations = [combination[:2] for combination in parameter_combina
 @pytest.mark.mpi
 @pytest.mark.parametrize("system, n_bands, b_start, b_stop", parameter_combinations)
 def test_split_bands_inverse(
-    system: qp.System, n_bands: int, b_start: int, b_stop: int
+    system: qp.dft.System, n_bands: int, b_start: int, b_stop: int
 ) -> None:
     """Check that inv(split_bands) = split_basis."""
     Cg = get_Cg(system, n_bands, b_start, b_stop)
@@ -79,7 +79,7 @@ def test_split_bands_inverse(
 @pytest.mark.mpi
 @pytest.mark.parametrize("system, n_bands, b_start, b_stop", parameter_combinations)
 def test_split_basis_inverse(
-    system: qp.System, n_bands: int, b_start: int, b_stop: int
+    system: qp.dft.System, n_bands: int, b_start: int, b_stop: int
 ) -> None:
     """Check that inv(split_basis) = split_bands."""
     Cb = get_Cb(system, n_bands, b_start, b_stop)
@@ -91,7 +91,7 @@ def test_split_basis_inverse(
 @pytest.mark.mpi
 @pytest.mark.parametrize("system, n_bands, b_start, b_stop", parameter_combinations)
 def test_random_equiv(
-    system: qp.System, n_bands: int, b_start: int, b_stop: int
+    system: qp.dft.System, n_bands: int, b_start: int, b_stop: int
 ) -> None:
     """Check that randomization is consistent between different splits."""
     Cg = get_Cg(system, n_bands, b_start, b_stop)
@@ -101,7 +101,7 @@ def test_random_equiv(
 
 
 @pytest.mark.parametrize("system, n_bands", system_band_combinations)
-def test_orthonormalize(system: qp.System, n_bands: int) -> None:
+def test_orthonormalize(system: qp.dft.System, n_bands: int) -> None:
     C = get_Cg(system, n_bands).orthonormalize()
     C_OC = C.dot_O(C).wait()
     expected = torch.eye(n_bands, device=qp.rc.device)[None, None]
