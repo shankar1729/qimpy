@@ -1,6 +1,6 @@
 """QimPy: Quantum-Integrated Multi-PhYsics"""
 # List exported symbols for doc generation
-__all__ = [
+__all__ = (
     "rc",
     "TreeNode",
     "Energy",
@@ -15,12 +15,12 @@ __all__ = [
     "System",
     "transport",
     "log",
-]
+)
 
 # Module import definition
 from . import rc
 from ._tree import TreeNode
-from ._energy import Energy
+from .energy import Energy
 from . import utils
 from . import ions
 from . import lattice
