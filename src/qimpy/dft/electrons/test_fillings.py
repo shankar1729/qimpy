@@ -2,7 +2,7 @@ import qimpy as qp
 import torch
 import pytest
 import functools
-from qimpy.electrons._fillings import _smearing_funcs, SmearingFunc
+from qimpy.dft.electrons._fillings import _smearing_funcs, SmearingFunc
 
 
 @functools.cache

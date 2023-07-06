@@ -1,8 +1,11 @@
-import qimpy as qp
 import numpy as np
 import torch
 from typing import Optional, Union
 from mpi4py import MPI
+
+from qimpy import log
+from qimpy.utils import BufferView, TaskDivision
+from . import spherical_bessel, quintic_spline
 
 
 class RadialFunction:
@@ -70,7 +73,7 @@ class RadialFunction:
         # Collect all radial functions together, dividing r over comm:
         if not radial_functions:
             return  # Nothing to do
-        r_div = qp.utils.TaskDivision(
+        r_div = TaskDivision(
             n_tot=radial_functions[0].r.shape[0],
             n_procs=comm.Get_size(),
             i_proc=comm.Get_rank(),
@@ -94,18 +97,16 @@ class RadialFunction:
 
         # Perform transform for each l:
         f_tilde = torch.empty((f.shape[0], nG), device=f.device)
-        jl_by_Grl = qp.ions.spherical_bessel.jl_by_xl(l_max, r.outer(G))
+        jl_by_Grl = spherical_bessel.jl_by_xl(l_max, r.outer(G))
         for l_i in range(0, l_max + 1):
             sel = torch.where(l == l_i)[0]
             f_tilde[sel] = (f[sel] * (r ** (2 * l_i)) * wr) @ jl_by_Grl[l_i]
         if f_tilde.is_cuda:
             torch.cuda.current_stream().synchronize()
-        comm.Allreduce(
-            MPI.IN_PLACE, qp.utils.BufferView(f_tilde), op=MPI.SUM
-        )  # collect over r that was split above
+        comm.Allreduce(MPI.IN_PLACE, BufferView(f_tilde), op=MPI.SUM)  # collect over r
 
         # Compute spline coefficients:
-        f_tilde_coeff = qp.ions.quintic_spline.get_coeff(f_tilde)
+        f_tilde_coeff = quintic_spline.get_coeff(f_tilde)
 
         # Split results back over input radial functions:
         nf = [rf.f.shape[0] for rf in radial_functions]
@@ -116,7 +117,7 @@ class RadialFunction:
             rf.f_tilde = f_tilde_split[i_rf]
             rf.f_tilde_coeff = f_tilde_coeff_split[i_rf]
         if name:
-            qp.log.info(
+            log.info(
                 f"Transformed {f.shape[0]} radial functions for {name}"
                 f" from n_r={r_div.n_tot} to nG={nG} points."
             )

@@ -1,7 +1,7 @@
 import qimpy as qp
 import numpy as np
-from qimpy.ions import spherical_harmonics as sh
-from qimpy.ions.spherical_harmonics_generate import get_harmonics_ref
+from qimpy.dft.ions import spherical_harmonics as sh
+from qimpy.dft.ions.spherical_harmonics_generate import get_harmonics_ref
 import torch
 import pytest
 

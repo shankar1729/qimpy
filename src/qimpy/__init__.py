@@ -8,13 +8,9 @@ __all__ = (
     "TreeNode",
     "Energy",
     "algorithms",
-    "ions",
     "lattice",
     "symmetries",
     "grid",
-    "electrons",
-    "geometry",
-    "export",
     "dft",
     "transport",
 )
@@ -24,16 +20,7 @@ from .pre_init import log, set_gpu_visibility
 from . import rc, utils
 from .tree import TreeNode
 from .energy import Energy
-from . import algorithms
-from . import lattice
-from . import symmetries
-from . import ions
-from . import grid
-from . import electrons
-from . import geometry
-from . import export
-from . import dft
-from . import transport
+from . import algorithms, lattice, symmetries, grid, dft, transport
 
 # Automatic versioning added by versioneer
 from ._version import get_versions

@@ -4,6 +4,9 @@ import qimpy as qp
 import numpy as np
 import torch
 
+from qimpy import log, rc
+from . import symbols
+
 
 def _read_upf(self: qp.ions.Pseudopotential, filename: str) -> None:
     """Read a UPF pseudopotential.
@@ -14,7 +17,7 @@ def _read_upf(self: qp.ions.Pseudopotential, filename: str) -> None:
     filename : str
         Full path to the UPF file to read.
     """
-    qp.log.info(f"\nReading '{filename}':")
+    log.info(f"\nReading '{filename}':")
     upf = ET.fromstring(open(filename, "r").read().replace("&", "&amp;"))
     assert upf.tag == "UPF"
 
@@ -25,16 +28,16 @@ def _read_upf(self: qp.ions.Pseudopotential, filename: str) -> None:
     # --- Get element:
     try:
         self.element = section.attrib["element"].strip()
-        self.atomic_number = qp.ions.symbols.ATOMIC_NUMBERS[self.element]
+        self.atomic_number = symbols.ATOMIC_NUMBERS[self.element]
     except KeyError:
-        qp.log.error(
+        log.error(
             "  Could not determine atomic number for element '"
             + self.element
             + "'.\n  Please edit pseudopotential to"
             "use the standard chemical symbol."
         )
         raise ValueError("Invalid chemical symbol in " + filename)
-    qp.log.info(
+    log.info(
         f"  '{self.element}' pseudopotential,"
         f" '{section.attrib['functional']}' functional"
     )
@@ -51,12 +54,12 @@ def _read_upf(self: qp.ions.Pseudopotential, filename: str) -> None:
         + optional_attrib("date", "  Date: ", "")
     )
     if optionals:
-        qp.log.info(optionals.rstrip("\n"))
+        log.info(optionals.rstrip("\n"))
 
     # --- Check for unsupported types:
     self.is_paw = str(section.attrib.get("is_paw")).lower() in ["t", "true"]
     if self.is_paw:
-        qp.log.error("  PAW datasets are not yet supported.")
+        log.error("  PAW datasets are not yet supported.")
         raise ValueError("PAW dataset in " + filename + " unsupported")
 
     # --- Valence properties:
@@ -65,7 +68,7 @@ def _read_upf(self: qp.ions.Pseudopotential, filename: str) -> None:
     n_grid = int(section.attrib["mesh_size"])
     n_beta = int(section.attrib["number_of_proj"])
     n_psi = int(section.attrib["number_of_wfc"])
-    qp.log.info(
+    log.info(
         f"  {self.Z:g} valence electrons, {n_psi}"
         f" orbitals, {n_beta} projectors, {n_grid}"
         f" radial grid points, with l_max = {self.l_max}"
@@ -86,14 +89,12 @@ def _read_upf(self: qp.ions.Pseudopotential, filename: str) -> None:
             r = np.fromstring(entry.text, sep=" ")
             if not r[0]:  # avoid divide by 0 below
                 r[0] = 1e-3 * r[1]
-            self.r = torch.tensor(r, device=qp.rc.device)
+            self.r = torch.tensor(r, device=rc.device)
         elif entry.tag == "PP_RAB":
             assert entry.text is not None
-            self.dr = torch.tensor(
-                np.fromstring(entry.text, sep=" "), device=qp.rc.device
-            )
+            self.dr = torch.tensor(np.fromstring(entry.text, sep=" "), device=rc.device)
         else:
-            qp.log.info(f"  NOTE: ignored section '{entry.tag}'")
+            log.info(f"  NOTE: ignored section '{entry.tag}'")
     assert r is not None
 
     # Read all remaining sections (order not relevant):
@@ -138,14 +139,14 @@ def _read_upf(self: qp.ions.Pseudopotential, filename: str) -> None:
                         assert entry.text is not None
                         self.D = torch.tensor(
                             np.fromstring(entry.text, sep=" ") * 0.5,
-                            device=qp.rc.device,
+                            device=rc.device,
                         ).reshape(n_beta, n_beta)
                         # Note: 0.5 above converts from Ry to Eh
                     else:
                         # np.fromstring misbehaves for an empty string
-                        self.D = torch.zeros((0, 0), device=qp.rc.device)
+                        self.D = torch.zeros((0, 0), device=rc.device)
                 else:
-                    qp.log.info(f"  NOTE: ignored section '{entry.tag}'")
+                    log.info(f"  NOTE: ignored section '{entry.tag}'")
             # Create projector radial function:
             self.beta = qp.ions.RadialFunction(
                 self.r, self.dr, beta * (r[None, :] ** -(l_beta + 1)[:, None]), l_beta
@@ -171,7 +172,7 @@ def _read_upf(self: qp.ions.Pseudopotential, filename: str) -> None:
                     self.eig_psi[i_psi] = (
                         float(entry.attrib.get("pseudo_energy", "NaN")) * 0.5
                     )  # convert from Ry to Eh
-                    qp.log.info(
+                    log.info(
                         f"    {label}   l: {l_psi[i_psi]}"
                         f"  occupation: {occ:4.1f}"
                         f"  eigenvalue: {self.eig_psi[i_psi]}"
@@ -179,7 +180,7 @@ def _read_upf(self: qp.ions.Pseudopotential, filename: str) -> None:
                     # Read orbital (contains factor of r removed below):
                     psi[i_psi] = np.fromstring(entry.text, sep=" ")
                 else:
-                    qp.log.info(f"  NOTE: ignored section '{entry.tag}'")
+                    log.info(f"  NOTE: ignored section '{entry.tag}'")
             # Create orbitals radial function:
             self.psi = qp.ions.RadialFunction(
                 self.r, self.dr, psi * (r[None, :] ** -(l_psi + 1)[:, None]), l_psi
@@ -212,11 +213,11 @@ def _read_upf(self: qp.ions.Pseudopotential, filename: str) -> None:
                     # Get orbital's total angular momentum:
                     j_psi[i_psi] = entry.attrib["jchi"]
                 else:
-                    qp.log.info(f"  NOTE: ignored section '{entry.tag}'")
-            self.j_beta = torch.tensor(j_beta, device=qp.rc.device)
-            self.j_psi = torch.tensor(j_psi, device=qp.rc.device)
+                    log.info(f"  NOTE: ignored section '{entry.tag}'")
+            self.j_beta = torch.tensor(j_beta, device=rc.device)
+            self.j_psi = torch.tensor(j_psi, device=rc.device)
         else:
-            qp.log.info(f"  NOTE: ignored section '{section.tag}'")
+            log.info(f"  NOTE: ignored section '{section.tag}'")
 
     # Make sure some common entries are set:
     assert hasattr(self, "Vloc")

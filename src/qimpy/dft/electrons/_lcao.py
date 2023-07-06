@@ -2,7 +2,7 @@ from __future__ import annotations
 import qimpy as qp
 import numpy as np
 import torch
-from ..algorithms import Minimize, MinimizeState, MatrixArray
+from qimpy.algorithms import Minimize, MinimizeState, MatrixArray
 from mpi4py import MPI
 
 

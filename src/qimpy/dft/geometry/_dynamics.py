@@ -8,7 +8,7 @@ from ._stepper import Stepper
 from ._history import History
 from ._gradient import Gradient
 from .thermostat import Thermostat
-from qimpy.ions.symbols import ATOMIC_WEIGHTS, ATOMIC_NUMBERS
+from qimpy.dft.ions.symbols import ATOMIC_WEIGHTS, ATOMIC_NUMBERS
 from qimpy.utils import Unit, UnitOrFloat, Checkpoint, CpPath, CpContext
 
 

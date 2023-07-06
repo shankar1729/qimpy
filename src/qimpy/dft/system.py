@@ -1,36 +1,45 @@
-import qimpy as qp
+from typing import Union, Optional, Any, Sequence
 import numpy as np
 import torch
-from typing import Union, Optional, Any, Sequence
 from mpi4py import MPI
 
+from .. import rc, log, TreeNode, Energy
+from ..utils import Checkpoint, CpPath, ProcessGrid
+from ..lattice import Lattice
+from ..symmetries import Symmetries
+from ..grid import Grid, Coulomb
+from .ions import Ions
+from .electrons import Electrons
+from .geometry import Geometry
+from .export import Export
 
-class System(qp.TreeNode):
+
+class System(TreeNode):
     """Overall system to calculate within QimPy"""
 
-    lattice: qp.lattice.Lattice  #: Lattice vectors / unit cell definition
-    ions: qp.ions.Ions  #: Ionic positions and pseudopotentials
-    symmetries: qp.symmetries.Symmetries  #: Point and space group symmetries
-    electrons: qp.electrons.Electrons  #: Electronic sub-system
-    grid: qp.grid.Grid  #: Charge-density grid
-    coulomb: qp.grid.Coulomb  #: Coulomb interactions on charge-density grid
-    geometry: qp.geometry.Geometry  #: Geometry actions, e.g., relaxation / dynamics
-    export: qp.export.Export  #: Exporters to interface with other codes
-    energy: qp.Energy  #: Energy components
-    checkpoint_in: qp.utils.CpPath  #: Input checkpoint
+    lattice: Lattice  #: Lattice vectors / unit cell definition
+    ions: Ions  #: Ionic positions and pseudopotentials
+    symmetries: Symmetries  #: Point and space group symmetries
+    electrons: Electrons  #: Electronic sub-system
+    grid: Grid  #: Charge-density grid
+    coulomb: Coulomb  #: Coulomb interactions on charge-density grid
+    geometry: Geometry  #: Geometry actions, e.g., relaxation / dynamics
+    export: Export  #: Exporters to interface with other codes
+    energy: Energy  #: Energy components
+    checkpoint_in: CpPath  #: Input checkpoint
     checkpoint_out: Optional[str]  #: Filename for output checkpoint
-    process_grid: qp.utils.ProcessGrid  #: Process grid for parallelization
+    process_grid: ProcessGrid  #: Process grid for parallelization
 
     def __init__(
         self,
         *,
-        lattice: Union[qp.lattice.Lattice, dict],
-        ions: Union[qp.ions.Ions, dict, None] = None,
-        symmetries: Union[qp.symmetries.Symmetries, dict, None] = None,
-        electrons: Union[qp.electrons.Electrons, dict, None] = None,
-        grid: Union[qp.grid.Grid, dict, None] = None,
-        geometry: Union[qp.geometry.Geometry, dict, str, None] = None,
-        export: Union[qp.export.Export, dict, None] = None,
+        lattice: Union[Lattice, dict],
+        ions: Union[Ions, dict, None] = None,
+        symmetries: Union[Symmetries, dict, None] = None,
+        electrons: Union[Electrons, dict, None] = None,
+        grid: Union[Grid, dict, None] = None,
+        geometry: Union[Geometry, dict, str, None] = None,
+        export: Union[Export, dict, None] = None,
         checkpoint: Optional[str] = None,
         checkpoint_out: Optional[str] = None,
         comm: Optional[MPI.Comm] = None,
@@ -71,16 +80,16 @@ class System(qp.TreeNode):
             auto-determined based on number of tasks available to split along them.
             Default: all process grid dimensions are auto-determined."""
         super().__init__()
-        self.process_grid = qp.utils.ProcessGrid(
-            comm if comm else qp.rc.comm, "rkb", process_grid_shape
+        self.process_grid = ProcessGrid(
+            comm if comm else rc.comm, "rkb", process_grid_shape
         )
         # Set in and out checkpoints:
-        checkpoint_in = qp.utils.CpPath()
+        checkpoint_in = CpPath()
         if checkpoint is not None:
             try:
-                checkpoint_in = qp.utils.CpPath(qp.utils.Checkpoint(checkpoint))
+                checkpoint_in = CpPath(Checkpoint(checkpoint))
             except OSError:  # Raised by h5py when file not readable
-                qp.log.info(f"Cannot load checkpoint file '{checkpoint}'")
+                log.info(f"Cannot load checkpoint file '{checkpoint}'")
         self.checkpoint_out = checkpoint if checkpoint_out is None else checkpoint_out
 
         # Determine any global axes that break symmetries:
@@ -89,18 +98,12 @@ class System(qp.TreeNode):
         _add_axis(axes, "magnetic field", electrons, ["fillings", "B"])
         # TODO: similarly account for applied electric fields
 
-        self.add_child("lattice", qp.lattice.Lattice, lattice, checkpoint_in)
-        self.add_child(
-            "ions",
-            qp.ions.Ions,
-            ions,
-            checkpoint_in,
-            lattice=self.lattice,
-        )
+        self.add_child("lattice", Lattice, lattice, checkpoint_in)
+        self.add_child("ions", Ions, ions, checkpoint_in, lattice=self.lattice)
         self.process_grid.provide_n_tasks("r", self.ions.n_replicas)
         self.add_child(
             "symmetries",
-            qp.symmetries.Symmetries,
+            Symmetries,
             symmetries,
             checkpoint_in,
             lattice=self.lattice,
@@ -109,7 +112,7 @@ class System(qp.TreeNode):
         )
         self.add_child(
             "electrons",
-            qp.electrons.Electrons,
+            Electrons,
             electrons,
             checkpoint_in,
             process_grid=self.process_grid,
@@ -118,10 +121,10 @@ class System(qp.TreeNode):
             symmetries=self.symmetries,
         )
 
-        qp.log.info("\n--- Initializing Charge-Density Grid ---")
+        log.info("\n--- Initializing Charge-Density Grid ---")
         self.add_child(
             "grid",
-            qp.grid.Grid,
+            Grid,
             grid,
             checkpoint_in,
             lattice=self.lattice,
@@ -129,24 +132,24 @@ class System(qp.TreeNode):
             comm=self.electrons.comm,  # Parallel
             ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff,
         )
-        self.coulomb = qp.grid.Coulomb(self.grid, self.ions.n_ions)
+        self.coulomb = Coulomb(self.grid, self.ions.n_ions)
 
         self.add_child(
             "geometry",
-            qp.geometry.Geometry,
+            Geometry,
             geometry,
             checkpoint_in,
             comm=self.electrons.comm,
             lattice=self.lattice,
         )
 
-        self.add_child("export", qp.export.Export, export, checkpoint_in, system=self)
+        self.add_child("export", Export, export, checkpoint_in, system=self)
 
         # Initialize ionic potentials and energies at initial configuration:
-        self.energy = qp.Energy()
+        self.energy = Energy()
         self.ions.update(self)
 
-        qp.log.info(f"\nInitialization completed at t[s]: {qp.rc.clock():.2f}\n")
+        log.info(f"\nInitialization completed at t[s]: {rc.clock():.2f}\n")
 
     def geometry_grad(self) -> None:
         """Update geometric gradients i.e. forces and optionally, stresses."""

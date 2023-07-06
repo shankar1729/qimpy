@@ -11,7 +11,7 @@ from ._ions_atomic import (
     get_atomic_density,
 )
 from ._ions_update import update, accumulate_geometry_grad, _collect_ps_matrix
-from ..symmetries._positions import LabeledPositions
+from qimpy.symmetries._positions import LabeledPositions
 from typing import Optional, Union
 
 
