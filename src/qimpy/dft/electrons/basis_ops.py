@@ -1,39 +1,52 @@
 from __future__ import annotations
-import qimpy as qp
+from typing import Optional
+
 import numpy as np
 import torch
-from typing import Optional
 from mpi4py import MPI
 
+from qimpy import rc
+from qimpy.grid import FieldR, FieldH
+from qimpy.utils import (
+    stopwatch,
+    ceildiv,
+    get_block_slices,
+    Waitable,
+    Iallreduce_in_place,
+    accum_norm_,
+    accum_prod_,
+)
+from qimpy.dft import electrons
 
-@qp.utils.stopwatch(name="Basis.apply_gradient")
+
+@stopwatch(name="Basis.apply_gradient")
 def _apply_gradient(
-    self: qp.electrons.Basis,
-    C: qp.electrons.Wavefunction,
+    self: electrons.Basis,
+    C: electrons.Wavefunction,
     i_dir: int,
-) -> qp.electrons.Wavefunction:
+) -> electrons.Wavefunction:
     "Apply gradient operator to wavefunction `C`"
     basis_slice = slice(None) if C.band_division else self.mine
     coeff = torch.einsum(
         "sknpb,kb->sknpb", C.coeff, self.get_gradient(basis_slice)[:, :, i_dir]
     )
-    return qp.electrons.Wavefunction(self, coeff=coeff, band_division=C.band_division)
+    return electrons.Wavefunction(self, coeff=coeff, band_division=C.band_division)
 
 
-@qp.utils.stopwatch(name="Basis.apply_ke")
+@stopwatch(name="Basis.apply_ke")
 def _apply_ke(
-    self: qp.electrons.Basis, C: qp.electrons.Wavefunction
-) -> qp.electrons.Wavefunction:
+    self: electrons.Basis, C: electrons.Wavefunction
+) -> electrons.Wavefunction:
     "Apply kinetic energy (KE) operator to wavefunction `C`"
     basis_slice = slice(None) if C.band_division else self.mine
     coeff = C.coeff * self.get_ke(basis_slice)[None, :, None, None, :]
-    return qp.electrons.Wavefunction(self, coeff=coeff, band_division=C.band_division)
+    return electrons.Wavefunction(self, coeff=coeff, band_division=C.band_division)
 
 
-@qp.utils.stopwatch(name="Basis.apply_potential")
+@stopwatch(name="Basis.apply_potential")
 def _apply_potential(
-    self: qp.electrons.Basis, V: qp.grid.FieldH, C: qp.electrons.Wavefunction
-) -> qp.electrons.Wavefunction:
+    self: electrons.Basis, V: FieldH, C: electrons.Wavefunction
+) -> electrons.Wavefunction:
     "Apply potential `V` to wavefunction `C`"
     Vdata_in = (~(V.to(self.grid))).data  # change to real space on basis grid
     n_densities = Vdata_in.shape[0]
@@ -41,7 +54,7 @@ def _apply_potential(
     if spin_dm_mode:
         assert C.coeff.shape[-2] == 2  # must be spinorial
         Vdata = torch.empty(
-            (2, 2) + Vdata_in.shape[1:], dtype=C.coeff.dtype, device=qp.rc.device
+            (2, 2) + Vdata_in.shape[1:], dtype=C.coeff.dtype, device=rc.device
         )
         Vdata[0, 0] = Vdata_in[0] + Vdata_in[3]
         Vdata[1, 1] = Vdata_in[0] - Vdata_in[3]
@@ -51,7 +64,7 @@ def _apply_potential(
         Vdata = torch.empty(
             (2, 1, 1, 1) + Vdata_in.shape[1:],
             dtype=Vdata_in.dtype,
-            device=qp.rc.device,
+            device=rc.device,
         )
         Vdata[0, 0, 0, 0] = Vdata_in[0] + Vdata_in[1]
         Vdata[1, 0, 0, 0] = Vdata_in[0] - Vdata_in[1]
@@ -67,7 +80,7 @@ def _apply_potential(
 
         # Prepare first input block ('g' indicates G-vectors of basis together):
         Cg = C[:, :, mpi_block_slices[0]].split_bands().wait()
-        VCg: qp.electrons.Wavefunction  # created at end of first iteration below
+        VCg: electrons.Wavefunction  # created at end of first iteration below
 
         for mpi_block_slice_prev, mpi_block_slice_next in zip(
             (None, *mpi_block_slices[:-1]), (*mpi_block_slices[1:], None)
@@ -110,7 +123,7 @@ def _apply_potential(
 class _KernelCommon:
     """Common functionality between _ApplyPotentialKernel and _CollectDensityKernel."""
 
-    def __init__(self, C_tot: qp.electrons.Wavefunction) -> None:
+    def __init__(self, C_tot: electrons.Wavefunction) -> None:
         # Determine FFT type and dimensions:
         basis = C_tot.basis
         coeff = C_tot.coeff
@@ -124,7 +137,7 @@ class _KernelCommon:
         n_bands_mine_tot = (
             C_tot.n_bands()
             if C_tot.band_division
-            else qp.utils.ceildiv(C_tot.n_bands(), basis.division.n_procs)
+            else ceildiv(C_tot.n_bands(), basis.division.n_procs)
         )
         self.fft_block_size = basis.get_fft_block_size(n_spins * nk, n_bands_mine_tot)
         self.fft_shape = (n_spins, nk, self.fft_block_size, n_spinor) + shapeG
@@ -141,7 +154,7 @@ class _KernelCommon:
             mpi_block_size = basis.get_mpi_block_size(
                 int(np.prod(coeff.shape[:2])), n_bands, self.fft_block_size
             )
-            self.mpi_block_slices = qp.utils.get_block_slices(n_bands, mpi_block_size)
+            self.mpi_block_slices = get_block_slices(n_bands, mpi_block_size)
 
     def expand_ifft(self, coeff: torch.Tensor, block_slice: slice) -> torch.Tensor:
         """Expand and ifft `block_slice` of wavefunction coefficients `coeff`."""
@@ -162,7 +175,7 @@ class _ApplyPotentialKernel(_KernelCommon):
 
     def __init__(
         self,
-        C_tot: qp.electrons.Wavefunction,
+        C_tot: electrons.Wavefunction,
         spin_dm_mode: bool,
         Vdata: torch.Tensor,
     ) -> None:
@@ -174,14 +187,12 @@ class _ApplyPotentialKernel(_KernelCommon):
         self.spin_dm_mode = spin_dm_mode
         self.Vdata = Vdata
 
-    def __call__(
-        self, C: qp.electrons.Wavefunction
-    ) -> qp.utils.Waitable[qp.electrons.Wavefunction]:
+    def __call__(self, C: electrons.Wavefunction) -> Waitable[electrons.Wavefunction]:
         """Apply potential to C in-place. C must be in bands-divided mode.
         Note that C could have a subset of bands of C_tot passed to __init__."""
-        fft_block_slices = qp.utils.get_block_slices(C.n_bands(), self.fft_block_size)
-        qp.rc.compute_stream_wait_current()
-        with torch.cuda.stream(qp.rc.compute_stream):
+        fft_block_slices = get_block_slices(C.n_bands(), self.fft_block_size)
+        rc.compute_stream_wait_current()
+        with torch.cuda.stream(rc.compute_stream):
             for fft_block_slice in fft_block_slices:
                 # Expand -> ifft -> multiply V -> fft -> reduce back (on block)
                 VCb = self.expand_ifft(C.coeff, fft_block_slice)
@@ -194,19 +205,19 @@ class _ApplyPotentialKernel(_KernelCommon):
         self.result = C  # return in wait() when above is asynchronous
         return self  # so that the output is Waitable
 
-    def wait(self) -> qp.electrons.Wavefunction:
+    def wait(self) -> electrons.Wavefunction:
         """Wait for completion (if running in separate stream)."""
-        qp.rc.current_stream_wait_compute()
+        rc.current_stream_wait_compute()
         return self.result
 
 
-@qp.utils.stopwatch(name="Basis.collect_density")
+@stopwatch(name="Basis.collect_density")
 def _collect_density(
-    self: qp.electrons.Basis,
-    C: qp.electrons.Wavefunction,
+    self: electrons.Basis,
+    C: electrons.Wavefunction,
     f: torch.Tensor,
     need_Mvec: bool,
-) -> qp.grid.FieldR:
+) -> FieldR:
     r"""Collect density contributions given wavefunction `C` and occupations
     `f`. The result is in real-space on `basis.grid`.
     If the wavefunction has two spin channels, the two components of
@@ -271,7 +282,7 @@ def _collect_density(
 
     # Convert density matrix components to density, magnetization:
     n_densities = 4 if need_Mvec else n_spins
-    density = qp.grid.FieldR(self.grid, shape_batch=(n_densities,))
+    density = FieldR(self.grid, shape_batch=(n_densities,))
     density.data[0] = rho_diag.sum(dim=0)  # n_tot
     if n_densities >= 2:
         density.data[-1] = rho_diag[0] - rho_diag[1]  # Mz
@@ -281,8 +292,8 @@ def _collect_density(
 
     # Collect over MPI:
     if self.comm_kb.size > 1:
-        qp.rc.current_stream_synchronize()
-        qp.utils.Iallreduce_in_place(self.comm_kb, density.data, MPI.SUM).wait()
+        rc.current_stream_synchronize()
+        Iallreduce_in_place(self.comm_kb, density.data, MPI.SUM).wait()
     return density
 
 
@@ -291,7 +302,7 @@ class _CollectDensityKernel(_KernelCommon):
 
     def __init__(
         self,
-        C_tot: qp.electrons.Wavefunction,
+        C_tot: electrons.Wavefunction,
         rho_diag: torch.Tensor,
         rho_dn_up: Optional[torch.Tensor],
     ) -> None:
@@ -304,14 +315,14 @@ class _CollectDensityKernel(_KernelCommon):
         self.rho_dn_up = rho_dn_up
 
     def __call__(
-        self, C: qp.electrons.Wavefunction, prefac: torch.Tensor
-    ) -> qp.utils.Waitable[None]:
+        self, C: electrons.Wavefunction, prefac: torch.Tensor
+    ) -> Waitable[None]:
         """Collect density from wave-function `C` with prefactors `prefac`
         (related to fillings). C must be in bands-divided mode.
         Note that C could have a subset of bands of C_tot passed to __init__."""
-        fft_block_slices = qp.utils.get_block_slices(C.n_bands(), self.fft_block_size)
-        qp.rc.compute_stream_wait_current()
-        with torch.cuda.stream(qp.rc.compute_stream):
+        fft_block_slices = get_block_slices(C.n_bands(), self.fft_block_size)
+        rc.compute_stream_wait_current()
+        with torch.cuda.stream(rc.compute_stream):
             prefac_mine = (
                 prefac[:, :, C.band_division.i_start : C.band_division.i_stop]
                 if C.band_division
@@ -322,8 +333,8 @@ class _CollectDensityKernel(_KernelCommon):
                 ICb = self.expand_ifft(C.coeff, fft_block_slice)
                 prefac_cur = prefac_mine[:, :, fft_block_slice]
                 if self.rho_dn_up is not None:  # vector-magnetization mode
-                    qp.utils.accum_norm_(prefac_cur, ICb, self.rho_diag, start_dim=0)
-                    qp.utils.accum_prod_(
+                    accum_norm_(prefac_cur, ICb, self.rho_diag, start_dim=0)
+                    accum_prod_(
                         prefac_cur,
                         ICb[:, :, :, 1],
                         ICb[:, :, :, 0].conj(),
@@ -331,9 +342,9 @@ class _CollectDensityKernel(_KernelCommon):
                         start_dim=0,
                     )
                 else:
-                    qp.utils.accum_norm_(prefac_cur, ICb, self.rho_diag, start_dim=1)
+                    accum_norm_(prefac_cur, ICb, self.rho_diag, start_dim=1)
         return self  # so that the output is Waitable
 
     def wait(self) -> None:
         """Wait for completion (if running in separate stream)."""
-        qp.rc.current_stream_wait_compute()
+        rc.current_stream_wait_compute()

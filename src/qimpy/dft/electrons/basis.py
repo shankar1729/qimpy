@@ -1,23 +1,38 @@
 from __future__ import annotations
-import qimpy as qp
-import numpy as np
-import math
-import torch
-from ._basis_ops import _apply_gradient, _apply_ke, _apply_potential, _collect_density
-from ._basis_real import BasisReal
 from typing import Optional, Union
+import math
+
+import numpy as np
+import torch
 from mpi4py import MPI
 
+from qimpy import rc, log, TreeNode
+from qimpy.utils import (
+    TaskDivision,
+    ProcessGrid,
+    BufferView,
+    ceildiv,
+    CpPath,
+    globalreduce,
+)
+from qimpy.lattice import Lattice
+from qimpy.symmetries import Symmetries
+from qimpy.grid import Grid
+from qimpy.dft.ions import Ions
+from . import Kpoints
+from .basis_ops import _apply_gradient, _apply_ke, _apply_potential, _collect_density
+from .basis_real import BasisReal
 
-class Basis(qp.TreeNode):
+
+class Basis(TreeNode):
     """Plane-wave basis for electronic wavefunctions. The underlying
     :class:`qimpy.utils.TaskDivision` splits plane waves over `rc.comm_b`"""
 
     comm: MPI.Comm  #: Basis/bands communicator
     comm_kb: MPI.Comm  #: Overall k-points and basis/bands communicator
-    lattice: qp.lattice.Lattice  #: Lattice vectors of unit cell
-    ions: qp.ions.Ions  #: Ionic system: implicit in basis for ultrasoft / PAW
-    kpoints: qp.electrons.Kpoints  #: Corresponding k-point set
+    lattice: Lattice  #: Lattice vectors of unit cell
+    ions: Ions  #: Ionic system: implicit in basis for ultrasoft / PAW
+    kpoints: Kpoints  #: Corresponding k-point set
     n_spins: int  #: Default number of spin channels
     n_spinor: int  #: Default number of spinorial components
     k: torch.Tensor  #: Subset of k handled by this basis (due to MPI division)
@@ -25,7 +40,7 @@ class Basis(qp.TreeNode):
     w_sk: torch.Tensor  #: Combined spin and k-point weights
     real_wavefunctions: bool  #: Whether wavefunctions are real
     ke_cutoff: float  #: Kinetic energy cutoff
-    grid: qp.grid.Grid  #: Wavefunction grid (always process-local)
+    grid: Grid  #: Wavefunction grid (always process-local)
     iG: torch.Tensor  #: Plane waves in reciprocal lattice coordinates
     n: torch.Tensor  #: Number of plane waves for each `k`
     n_min: int  #: Minimum of `n` across all `k` (including on other processes)
@@ -40,7 +55,7 @@ class Basis(qp.TreeNode):
     ]  #: Indexing datatype for `pad_index` and `pad_index_mine`
     pad_index: PadIndex  #: Which basis entries are padding (beyond `n`)
     pad_index_mine: PadIndex  #: Subset of `pad_index` on this process
-    division: qp.utils.TaskDivision  #: Division of basis across `rc.comm_b`
+    division: TaskDivision  #: Division of basis across `rc.comm_b`
     mine: slice  #: Slice of basis entries local to this process
     real: BasisReal  #: Extra indices for real wavefunctions
 
@@ -52,17 +67,17 @@ class Basis(qp.TreeNode):
     def __init__(
         self,
         *,
-        process_grid: qp.utils.ProcessGrid,
-        lattice: qp.lattice.Lattice,
-        ions: qp.ions.Ions,
-        symmetries: qp.symmetries.Symmetries,
-        kpoints: qp.electrons.Kpoints,
+        process_grid: ProcessGrid,
+        lattice: Lattice,
+        ions: Ions,
+        symmetries: Symmetries,
+        kpoints: Kpoints,
         n_spins: int,
         n_spinor: int,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        checkpoint_in: CpPath = CpPath(),
         ke_cutoff: float = 20.0,
         real_wavefunctions: bool = False,
-        grid: Optional[Union[qp.grid.Grid, dict]] = None,
+        grid: Optional[Union[Grid, dict]] = None,
         fft_block_size: int = 0,
         mpi_block_size: int = 0,
     ) -> None:
@@ -144,10 +159,10 @@ class Basis(qp.TreeNode):
 
         # Initialize grid to match cutoff:
         self.ke_cutoff = float(ke_cutoff)
-        qp.log.info("\nInitializing wavefunction grid:")
+        log.info("\nInitializing wavefunction grid:")
         self.add_child(
             "grid",
-            qp.grid.Grid,
+            Grid,
             grid,
             checkpoint_in,
             lattice=lattice,
@@ -163,19 +178,19 @@ class Basis(qp.TreeNode):
         within_cutoff = self.get_ke() < ke_cutoff  # mask of which iG to keep
         # --- determine statistics of basis count across all k:
         self.n = within_cutoff.count_nonzero(dim=1)
-        self.n_min = qp.utils.globalreduce.min(self.n, kpoints.comm)
-        self.n_max = qp.utils.globalreduce.max(self.n, kpoints.comm)
+        self.n_min = globalreduce.min(self.n, kpoints.comm)
+        self.n_max = globalreduce.max(self.n, kpoints.comm)
         n_procs_b = self.comm.size
-        self.n_tot = qp.utils.ceildiv(self.n_max, n_procs_b) * n_procs_b
-        self.n_avg = qp.utils.globalreduce.sum(self.n * self.wk, kpoints.comm)
-        qp.log.info(
+        self.n_tot = ceildiv(self.n_max, n_procs_b) * n_procs_b
+        self.n_avg = globalreduce.sum(self.n * self.wk, kpoints.comm)
+        log.info(
             f"n_basis:  min: {self.n_min}  max: {self.n_max}"
             f"  avg: {self.n_avg:.3f}  ideal: {self.n_ideal:.3f}"
         )
         # --- create indices from basis set to FFT grid:
         n_fft = self.iG.shape[0]  # number of points on FFT grid
         assert self.n_tot <= n_fft  # make sure padding doesn't exceed grid
-        fft_range = torch.arange(n_fft, device=qp.rc.device)
+        fft_range = torch.arange(n_fft, device=rc.device)
         self.fft_index = (
             torch.where(within_cutoff, 0, n_fft) + fft_range[None, :]
         ).argsort(  # ke<cutoff to front
@@ -196,7 +211,7 @@ class Basis(qp.TreeNode):
         )  # add spin, band and spinor dims
 
         # Divide basis on comm_b:
-        div = qp.utils.TaskDivision(
+        div = TaskDivision(
             n_tot=self.n_tot,
             n_procs=n_procs_b,
             i_proc=self.comm.rank,
@@ -287,13 +302,13 @@ class Basis(qp.TreeNode):
             if not (n_batch and n_bands):
                 return 1  # Irrelevant since no FFTs to perform anyway
             # TODO: better heuristics on how much data to FFT at once
-            min_data = 16_000_000 if qp.rc.use_cuda else 100_000
-            min_block = qp.utils.ceildiv(min_data, n_batch * math.prod(self.grid.shape))
-            max_block = qp.utils.ceildiv(n_bands, 16)  # based on memory limit
+            min_data = 16_000_000 if rc.use_cuda else 100_000
+            min_block = ceildiv(min_data, n_batch * math.prod(self.grid.shape))
+            max_block = ceildiv(n_bands, 16)  # based on memory limit
             block_size = min(min_block, max_block)
         # Report selected block-size once:
         if not Basis._fft_block_size_reported:
-            qp.log.info(f"Selected block-size for band FFT: {block_size}")
+            log.info(f"Selected block-size for band FFT: {block_size}")
             Basis._fft_block_size_reported = True
         return block_size
 
@@ -312,16 +327,16 @@ class Basis(qp.TreeNode):
                 return 1  # Irrelevant since nothing to transfer anyway
             # TODO: better heuristics on how much data to MPI-transfer at once
             min_data = 2_000_000  # TODO: incorporate MPI latency info somehow
-            mpi_block_size = qp.utils.ceildiv(min_data, n_batch * self.n_tot)
+            mpi_block_size = ceildiv(min_data, n_batch * self.n_tot)
         # Enforce multiple of fft_block_size * comm.size:
         divisor = fft_block_size * self.division.n_procs
-        mpi_block_size = qp.utils.ceildiv(mpi_block_size, divisor) * divisor
+        mpi_block_size = ceildiv(mpi_block_size, divisor) * divisor
         # Round up to n_bands if not enough blocks:
         if mpi_block_size * 2 > n_bands:
             mpi_block_size = n_bands  # no gain in working with <= 2 blocks
         # Report selected block-size once for each mode:
         if not Basis._mpi_block_size_reported:
-            qp.log.info(f"Selected block-size for band MPI: {mpi_block_size}")
+            log.info(f"Selected block-size for band MPI: {mpi_block_size}")
             Basis._mpi_block_size_reported = True
         return mpi_block_size
 
@@ -332,5 +347,5 @@ class Basis(qp.TreeNode):
         """Allreduce `x` in place using `op` over `self.comm`.
         Convenient wrapper used in many basis operations."""
         if self.division.n_procs > 1:
-            qp.rc.current_stream_synchronize()
-            self.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(x), op)
+            rc.current_stream_synchronize()
+            self.comm.Allreduce(MPI.IN_PLACE, BufferView(x), op)

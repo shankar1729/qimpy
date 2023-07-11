@@ -1,13 +1,16 @@
 from __future__ import annotations
-import qimpy as qp
 import numpy as np
 import torch
+
+from qimpy import rc, log
+from qimpy.utils import BufferView
+from qimpy.dft import electrons
 
 
 class BasisReal:
     """Extra book-keeping for real basis"""
 
-    basis: qp.electrons.Basis
+    basis: electrons.Basis
     iz0: torch.Tensor  #: Index of Gz = 0 points
     iz0_conj: torch.Tensor  #: Hermitian conjugate points of `iz0`
     iz0_conj_self: torch.Tensor  #: Conjugate indices within Gz = 0 set
@@ -18,7 +21,7 @@ class BasisReal:
     Gweight_mine: torch.Tensor  #: Weight of local plane waves
     Gweight_tot: float  #: Total weight of all plane waves
 
-    def __init__(self, basis: qp.electrons.Basis):
+    def __init__(self, basis: electrons.Basis):
         """Initialize extra indexing required for real wavefunctions,
         if needed."""
         assert basis.real_wavefunctions and basis.kpoints.division.n_mine
@@ -32,17 +35,17 @@ class BasisReal:
         shapeH = basis.grid.shapeH_mine
         plane_index = basis.fft_index[0, self.iz0].div(shapeH[2], rounding_mode="floor")
         iG_conj = (-basis.iG[0, self.iz0, :2]) % torch.tensor(
-            shapeH[:2], device=qp.rc.device
+            shapeH[:2], device=rc.device
         )[None, :]
         plane_index_conj = iG_conj[:, 0] * shapeH[1] + iG_conj[:, 1]
         # --- map plane_index_conj to basis using full plane for look-up:
         plane = torch.zeros(
-            shapeH[0] * shapeH[1], dtype=self.iz0.dtype, device=qp.rc.device
+            shapeH[0] * shapeH[1], dtype=self.iz0.dtype, device=rc.device
         )
         plane[plane_index] = self.iz0
         self.iz0_conj = plane[plane_index_conj].clone().detach()
         # --- similar mapping within the Gz = 0 set:
-        plane[plane_index] = torch.arange(len(plane_index), device=qp.rc.device)
+        plane[plane_index] = torch.arange(len(plane_index), device=rc.device)
         self.iz0_conj_self = plane[plane_index_conj].clone().detach()
 
         # Extract local portions of above:
@@ -58,7 +61,7 @@ class BasisReal:
         self.Gweight[basis.n_max :] = 0.0  # padded elements
         self.Gweight_mine = self.Gweight[div.i_start : div.i_stop]
         self.Gweight_tot = self.Gweight.sum().item()
-        qp.log.info(f"real basis weight sum: {self.Gweight_tot:g}")
+        log.info(f"real basis weight sum: {self.Gweight_tot:g}")
 
     def symmetrize(self, coeff: torch.Tensor) -> None:
         """Impose Hermitian symmetry constraint on Gz = 0 coefficients."""
@@ -77,15 +80,15 @@ class BasisReal:
                 .permute(4, 0, 1, 2, 3)  # basis at front
                 .contiguous()
             )
-            mpi_type = qp.rc.mpi_type[coeff.dtype]
+            mpi_type = rc.mpi_type[coeff.dtype]
             sendcount = coeff_z0_mine.numel()
             prod_rest = np.prod(coeff.shape[:-1])  # number in all other dims
             recvcounts = np.diff(self.nz0_prev) * prod_rest
             offsets = self.nz0_prev[:-1] * prod_rest
-            qp.rc.current_stream_synchronize()
+            rc.current_stream_synchronize()
             basis.comm.Allgatherv(
-                (qp.utils.BufferView(coeff_z0_mine), sendcount, 0, mpi_type),
-                (qp.utils.BufferView(coeff_z0), recvcounts, offsets, mpi_type),
+                (BufferView(coeff_z0_mine), sendcount, 0, mpi_type),
+                (BufferView(coeff_z0), recvcounts, offsets, mpi_type),
             )
             coeff_z0 = coeff_z0.permute(1, 2, 3, 4, 0)  # put basis back at end
         else:  # All coefficients local already:

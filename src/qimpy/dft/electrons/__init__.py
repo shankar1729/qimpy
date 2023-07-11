@@ -17,7 +17,7 @@ __all__ = [
 
 from .kpoints import Kpoints, Kmesh, Kpath
 from .fillings import Fillings
-from ._basis import Basis
+from .basis import Basis
 from ._wavefunction import Wavefunction
 from ._davidson import Davidson
 from ._chefsi import CheFSI
