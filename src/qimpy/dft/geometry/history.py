@@ -1,29 +1,28 @@
 from __future__ import annotations
-import torch
-import qimpy as qp
-import numpy as np
-from mpi4py import MPI
 from typing import Union
 
+import torch
+import numpy as np
+from mpi4py import MPI
 
-class History(qp.TreeNode):
+from qimpy import rc, TreeNode
+from qimpy.utils import CpPath, CpContext, TaskDivision
+
+
+class History(TreeNode):
     """Helper to save history along trajectory."""
 
     comm: MPI.Comm
-    iter_division: qp.utils.TaskDivision  # Division of iterations over MPI
+    iter_division: TaskDivision  # Division of iterations over MPI
     i_iter: int  # Current iteration / last iteration for which history available
     save_map: dict[str, np.ndarray]  # Names and data for quantities to save
 
     def __init__(
-        self,
-        *,
-        comm: MPI.Comm,
-        n_max: int,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        self, *, comm: MPI.Comm, n_max: int, checkpoint_in: CpPath = CpPath()
     ) -> None:
         super().__init__()
         self.comm = comm
-        self.iter_division = qp.utils.TaskDivision(
+        self.iter_division = TaskDivision(
             n_tot=n_max, n_procs=comm.size, i_proc=comm.rank
         )
         self.i_iter = 0
@@ -48,9 +47,7 @@ class History(qp.TreeNode):
 
     def add(self, name: str, value: Union[float, torch.Tensor]) -> None:
         """Add current `value` for variable `name` to history."""
-        data = (
-            np.array(value) if isinstance(value, float) else value.to(qp.rc.cpu).numpy()
-        )
+        data = np.array(value) if isinstance(value, float) else value.to(rc.cpu).numpy()
         if name not in self.save_map:
             assert self.i_iter == 0  # if not, previous history must have been read in
             self.save_map[name] = np.empty(
@@ -60,9 +57,7 @@ class History(qp.TreeNode):
             i_out = self.i_iter - self.iter_division.i_start  # local index
             self.save_map[name][i_out] = data
 
-    def _save_checkpoint(
-        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
-    ) -> list[str]:
+    def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
         cp_path.attrs["i_iter"] = self.i_iter
         saved_list = []
         for name, data in self.save_map.items():
@@ -70,7 +65,7 @@ class History(qp.TreeNode):
             saved_list.append(name)
         return saved_list
 
-    def _save(self, cp_path: qp.utils.CpPath, data: np.ndarray) -> None:
+    def _save(self, cp_path: CpPath, data: np.ndarray) -> None:
         """Save history `data` up to `i_iter`'th iteration to `cp_path`."""
         checkpoint, path = cp_path
         assert checkpoint is not None

@@ -1,9 +1,9 @@
 """Geometry actions: relaxation and dynamics."""
 # List exported symbols for doc generation
-__all__ = ["Geometry", "Fixed", "Relax", "thermostat", "Dynamics"]
+__all__ = ["Relax", "Fixed", "thermostat", "Dynamics", "Geometry"]
 
-from ._geometry import Geometry
-from ._fixed import Fixed
-from ._relax import Relax
+from .relax import Relax
+from .fixed import Fixed
 from . import thermostat
-from ._dynamics import Dynamics
+from .dynamics import Dynamics
+from .geometry import Geometry

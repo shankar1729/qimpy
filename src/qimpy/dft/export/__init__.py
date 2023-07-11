@@ -1,6 +1,6 @@
 """Export data to interface with other codes."""
 # List exported symbols for doc generation
-__all__ = ["Export", "BGW"]
+__all__ = ("BGW", "Export")
 
-from ._export import Export
-from ._bgw import BGW
+from .bgw import BGW
+from .export import Export

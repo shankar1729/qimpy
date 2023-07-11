@@ -1,23 +1,26 @@
 from __future__ import annotations
-import qimpy as qp
+from typing import Union, Optional, Callable
+
 import numpy as np
 import torch
-from typing import Union, Optional, Callable
 from mpi4py import MPI
-from ._stepper import Stepper
-from ._history import History
-from ._gradient import Gradient
-from .thermostat import Thermostat
+
+from qimpy import rc, log, TreeNode, dft
+from qimpy.utils import Unit, UnitOrFloat, Checkpoint, CpPath, CpContext, BufferView
+from qimpy.dft.ions import Ions
 from qimpy.dft.ions.symbols import ATOMIC_WEIGHTS, ATOMIC_NUMBERS
-from qimpy.utils import Unit, UnitOrFloat, Checkpoint, CpPath, CpContext
+from .stepper import Stepper
+from .history import History
+from .gradient import Gradient
+from .thermostat import Thermostat
 
 
-class Dynamics(qp.TreeNode):
+class Dynamics(TreeNode):
     """Molecular dynamics of ions and/or lattice.
     Whether lattice changes is controlled by `lattice.movable`.
     """
 
-    system: qp.dft.System  #: System being optimized currently
+    system: dft.System  #: System being optimized currently
     masses: torch.Tensor  #: Mass of each ion in system (Dim: n_ions x 1 for bcast)
     stepper: Stepper
     comm: MPI.Comm  #: Communictaor over which forces consistent
@@ -109,13 +112,13 @@ class Dynamics(qp.TreeNode):
         self.T0 = float(T0)
         if stress0 is None:
             self.isotropic = True
-            self.stress0 = -float(P0) * torch.eye(3, device=qp.rc.device)
+            self.stress0 = -float(P0) * torch.eye(3, device=rc.device)
         else:
             self.isotropic = False
             self.stress0 = (
                 stress0
                 if isinstance(stress0, torch.Tensor)
-                else torch.tensor(stress0, device=qp.rc.device)
+                else torch.tensor(stress0, device=rc.device)
             )
             assert self.stress0.shape == (3, 3)
         self.t_damp_T = float(t_damp_T)
@@ -133,7 +136,7 @@ class Dynamics(qp.TreeNode):
             "thermostat", Thermostat, thermostat, checkpoint_in, dynamics=self
         )
 
-    def run(self, system: qp.dft.System) -> None:
+    def run(self, system: dft.System) -> None:
         self.system = system
         self.masses = Dynamics.get_masses(system.ions)
         stepper = Stepper(
@@ -178,17 +181,17 @@ class Dynamics(qp.TreeNode):
 
     def thermal_velocities(self, T: float, seed: int) -> torch.Tensor:
         """Thermal velocity distribution at `T`, randomized with `seed`."""
-        generator = torch.Generator(device=qp.rc.device)
+        generator = torch.Generator(device=rc.device)
         generator.manual_seed(seed)
         velocities = (
             torch.randn(
                 *self.system.ions.positions.shape,
                 generator=generator,
-                device=qp.rc.device,
+                device=rc.device,
             )
             / self.masses.sqrt()
         )
-        self.comm.Bcast(qp.utils.BufferView(velocities))
+        self.comm.Bcast(BufferView(velocities))
         velocities = self.stepper.constrain(self.create_gradient(velocities)).ions
         # Normalize to set temperature:
         T_current = self.get_T(self.get_KE(velocities))
@@ -224,22 +227,22 @@ class Dynamics(qp.TreeNode):
         if self.report_callback is not None:
             self.report_callback(self, i_iter)
         E = system.energy
-        qp.log.info(
+        log.info(
             f"Dynamics: {i_iter}  {E.name}: {float(E):+.11f}"
             f"  KE: {self.KE:.6f}  T: {Unit.convert(self.T, 'K')}"
             f"  P: {'null' if (self.P is None) else Unit.convert(self.P, 'bar')}"
-            f"  t[s]: {qp.rc.clock():.2f}"
+            f"  t[s]: {rc.clock():.2f}"
         )
 
     @staticmethod
-    def get_masses(ions: qp.ions.Ions) -> torch.Tensor:
+    def get_masses(ions: Ions) -> torch.Tensor:
         """Collect the masses of all ions as an n_ions x 1 tensor."""
         atomic_weights = np.empty(ions.n_ions)
         for ion_slice, symbol in zip(ions.slices, ions.symbols):
             atomic_weights[ion_slice] = ATOMIC_WEIGHTS[ATOMIC_NUMBERS[symbol]]
         # Convert to atomic units (in terms of m_e):
         amu = float(Unit(1.0, "amu"))
-        return torch.tensor(atomic_weights, device=qp.rc.device).unsqueeze(1) * amu
+        return torch.tensor(atomic_weights, device=rc.device).unsqueeze(1) * amu
 
     def get_stress(self, velocity: torch.Tensor) -> Optional[torch.Tensor]:
         """Compute total stress tensor including ion `velocity` contributions."""
@@ -274,7 +277,7 @@ class Dynamics(qp.TreeNode):
         """Create gradient from ionic part, initializing optional parts correctly."""
         gradient = Gradient(ions=ions)
         if self.system.lattice.movable:
-            gradient.lattice = torch.zeros((3, 3), device=qp.rc.device)
+            gradient.lattice = torch.zeros((3, 3), device=rc.device)
         self.thermostat.method.initialize_gradient(gradient)
         return gradient
 

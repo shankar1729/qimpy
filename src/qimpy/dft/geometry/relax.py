@@ -1,16 +1,20 @@
 from __future__ import annotations
-import qimpy as qp
-import torch
-import os
 from typing import Union, Optional
+import os
+
+import torch
 from mpi4py import MPI
-from qimpy.utils import Checkpoint, CpPath, CpContext
-from ._gradient import Gradient
-from ._stepper import Stepper
-from ._history import History
+
+from qimpy import log, dft
+from qimpy.lattice import Lattice
+from qimpy.utils import Checkpoint, CpPath, CpContext, BufferView
+from qimpy.algorithms import Minimize, MinimizeState
+from .gradient import Gradient
+from .stepper import Stepper
+from .history import History
 
 
-class Relax(qp.algorithms.Minimize[Gradient]):
+class Relax(Minimize[Gradient]):
     """Relax geometry of ions and/or lattice.
     Whether lattice changes is controlled by `lattice.movable`.
     """
@@ -24,7 +28,7 @@ class Relax(qp.algorithms.Minimize[Gradient]):
         self,
         *,
         comm: MPI.Comm,
-        lattice: qp.lattice.Lattice,
+        lattice: Lattice,
         n_iterations: int = 20,
         energy_threshold: float = 5e-5,
         fmax_threshold: float = 5e-4,
@@ -117,8 +121,8 @@ class Relax(qp.algorithms.Minimize[Gradient]):
         else:
             self.history = None
 
-    def run(self, system: qp.dft.System) -> None:
-        qp.log.info(
+    def run(self, system: dft.System) -> None:
+        log.info(
             "\n--- Geometry relaxation ---\n"
             if self.n_iterations
             else "\n--- Fixed geometry ---\n"
@@ -141,9 +145,7 @@ class Relax(qp.algorithms.Minimize[Gradient]):
         """Update the geometry along `direction` by amount `step_size`"""
         self.stepper.step(direction, step_size)
 
-    def compute(
-        self, state: qp.algorithms.MinimizeState[Gradient], energy_only: bool
-    ) -> None:
+    def compute(self, state: MinimizeState[Gradient], energy_only: bool) -> None:
         """Update energy and/or gradients in `state`."""
         state.energy, gradient = self.stepper.compute(not energy_only)
         if gradient is not None:
@@ -176,7 +178,7 @@ class Relax(qp.algorithms.Minimize[Gradient]):
             """Return an MPI-consistent random tensor with same shape as `t`."""
             result = torch.randn_like(t)
             if self.comm.size > 1:
-                self.comm.Bcast(qp.utils.BufferView(result))
+                self.comm.Bcast(BufferView(result))
             return result
 
         # Prepare a random direction to test along:

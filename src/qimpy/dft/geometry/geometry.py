@@ -1,17 +1,22 @@
 from __future__ import annotations
-import qimpy as qp
 from typing import Protocol, Optional, Union
+
 from mpi4py import MPI
+
+from qimpy import TreeNode, dft
+from qimpy.utils import CpPath
+from qimpy.lattice import Lattice
+from . import Fixed, Relax, Dynamics
 
 
 class Action(Protocol):
     """Class requirements to use as a geometry action."""
 
-    def run(self, system: qp.dft.System) -> None:
+    def run(self, system: dft.System) -> None:
         ...
 
 
-class Geometry(qp.TreeNode):
+class Geometry(TreeNode):
     """Select between possible geometry actions."""
 
     action: Action
@@ -20,11 +25,11 @@ class Geometry(qp.TreeNode):
         self,
         *,
         comm: MPI.Comm,
-        lattice: qp.lattice.Lattice,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
-        fixed: Optional[Union[dict, qp.geometry.Fixed]] = None,
-        relax: Optional[Union[dict, qp.geometry.Relax]] = None,
-        dynamics: Optional[Union[dict, qp.geometry.Dynamics]] = None,
+        lattice: Lattice,
+        checkpoint_in: CpPath = CpPath(),
+        fixed: Optional[Union[dict, Fixed]] = None,
+        relax: Optional[Union[dict, Relax]] = None,
+        dynamics: Optional[Union[dict, Dynamics]] = None,
     ) -> None:
         """Specify one of the supported geometry actions.
         Defaults to `Fixed` if none specified.
@@ -39,16 +44,16 @@ class Geometry(qp.TreeNode):
             :yaml:`Molecular dynamics of ions, and optionally, also the lattice.`
         """
         super().__init__()
-        ChildOptions = qp.TreeNode.ChildOptions
+        ChildOptions = TreeNode.ChildOptions
         self.add_child_one_of(
             "action",
             checkpoint_in,
-            ChildOptions("fixed", qp.geometry.Fixed, fixed, comm=comm, lattice=lattice),
-            ChildOptions("relax", qp.geometry.Relax, relax, comm=comm, lattice=lattice),
-            ChildOptions("dynamics", qp.geometry.Dynamics, dynamics, comm=comm),
+            ChildOptions("fixed", Fixed, fixed, comm=comm, lattice=lattice),
+            ChildOptions("relax", Relax, relax, comm=comm, lattice=lattice),
+            ChildOptions("dynamics", Dynamics, dynamics, comm=comm),
             have_default=True,
         )
 
-    def run(self, system: qp.dft.System):
+    def run(self, system: dft.System):
         """Run selected geometry action."""
         self.action.run(system)

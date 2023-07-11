@@ -1,22 +1,26 @@
 from __future__ import annotations
-import qimpy as qp
-import torch
 from typing import Optional
-from ._gradient import Gradient
+
+import torch
+
+from qimpy import log, rc, dft, Energy
+from qimpy.utils import fmt
+from qimpy.dft.ions import Lowdin
+from .gradient import Gradient
 
 
 class Stepper:
     """Shared interface of dynamics and optimization with electronic system."""
 
-    system: qp.dft.System  #: System being optimized currently
+    system: dft.System  #: System being optimized currently
     invRbasis0: torch.Tensor  #: Initial lattice vectors inverse (used to define strain)
     drag_wavefunctions: bool  #: Whether to drag atomic components of wavefunctions
     isotropic: bool  #: Whether to force lattice changes to be isotropic (NPT mode)
-    _lowdin: Optional[qp.ions.Lowdin]  #: Lowdin and wavefunction drag shared data
+    _lowdin: Optional[Lowdin]  #: Lowdin and wavefunction drag shared data
 
     def __init__(
         self,
-        system: qp.dft.System,
+        system: dft.System,
         *,
         drag_wavefunctions: bool = True,
         isotropic: bool = False,
@@ -33,7 +37,7 @@ class Stepper:
 
         if self.drag_wavefunctions:
             if self._lowdin is None:
-                self._lowdin = qp.ions.Lowdin(self.system.electrons.C)
+                self._lowdin = Lowdin(self.system.electrons.C)
             self._lowdin.remove_atomic_projections()
 
         delta_positions = step_size * (direction.ions @ lattice.invRbasis.T)
@@ -50,15 +54,15 @@ class Stepper:
             self._lowdin.restore_atomic_projections(delta_positions)
             self._lowdin = None
 
-    def compute(self, require_grad: bool) -> tuple[qp.Energy, Optional[Gradient]]:
+    def compute(self, require_grad: bool) -> tuple[Energy, Optional[Gradient]]:
         """Compute energy and optionally ionic/lattice gradient."""
         system = self.system
         lattice = system.lattice
         # Update ionic potentials and energies:
-        system.energy = qp.Energy()
+        system.energy = Energy()
         system.ions.update(system)
         # Optimize electrons:
-        qp.log.info("\n--- Electronic optimization ---\n")
+        log.info("\n--- Electronic optimization ---\n")
         system.electrons.run(system)
         # Update forces / stresses if needed:
         if require_grad:
@@ -77,9 +81,9 @@ class Stepper:
         system = self.system
         ions = system.ions
         electrons = system.electrons
-        qp.log.info(f"\nEnergy components:\n{repr(system.energy)}")
-        qp.log.info("")
-        self._lowdin = qp.ions.Lowdin(electrons.C)
+        log.info(f"\nEnergy components:\n{repr(system.energy)}")
+        log.info("")
+        self._lowdin = Lowdin(electrons.C)
         ions.Q, ions.M = self._lowdin.analyze(
             electrons.fillings.f, electrons.spin_polarized
         )
@@ -87,13 +91,13 @@ class Stepper:
         if system.lattice.compute_stress:
             system.lattice.report(report_grad=True)  # lattice, stress
             if total_stress is not None:  # total stress including kinetic contributions
-                qp.log.info(f"Stress+kinetic [Eh/a0^3]:\n{qp.utils.fmt(total_stress)}")
-            qp.log.info(f"Strain:\n{qp.utils.fmt(self.strain)}")
-            qp.log.info("")
+                log.info(f"Stress+kinetic [Eh/a0^3]:\n{fmt(total_stress)}")
+            log.info(f"Strain:\n{fmt(self.strain)}")
+            log.info("")
 
     @property
     def strain(self) -> torch.Tensor:
-        eye = torch.eye(3, device=qp.rc.device)
+        eye = torch.eye(3, device=rc.device)
         return self.system.lattice.Rbasis @ self.invRbasis0 - eye
 
     def constrain(self, v: Gradient) -> Gradient:
@@ -102,7 +106,7 @@ class Stepper:
         v.ions -= v.ions.mean(dim=0)
         if self.isotropic and (v.lattice is not None):
             isotropic_strain = torch.trace(v.lattice) / 3.0
-            v.lattice = isotropic_strain * torch.eye(3, device=qp.rc.device)
+            v.lattice = isotropic_strain * torch.eye(3, device=rc.device)
         self.symmetrize_(v)
         return v
 

@@ -1,27 +1,30 @@
 from __future__ import annotations
-import qimpy as qp
 from typing import Protocol, Optional, Union
+
+from qimpy import TreeNode, dft
+from qimpy.utils import CpPath
+from . import BGW
 
 
 class Exporter(Protocol):
     """Class requirements to use as a geometry action."""
 
-    def export(self, system: qp.dft.System) -> None:
+    def export(self, system: dft.System) -> None:
         ...
 
 
-class Export(qp.TreeNode):
+class Export(TreeNode):
     """Export data for other codes."""
 
-    bgw: qp.export.BGW
+    bgw: BGW
     exporters: list[Exporter]
 
     def __init__(
         self,
         *,
-        system: qp.dft.System,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
-        bgw: Optional[Union[dict, qp.export.BGW]] = None,
+        system: dft.System,
+        checkpoint_in: CpPath = CpPath(),
+        bgw: Optional[Union[dict, BGW]] = None,
     ) -> None:
         """Specify one or more export formats.
 
@@ -34,10 +37,10 @@ class Export(qp.TreeNode):
         self.exporters = []
 
         if bgw is not None:
-            self.add_child("bgw", qp.export.BGW, bgw, checkpoint_in, system=system)
+            self.add_child("bgw", BGW, bgw, checkpoint_in, system=system)
             self.exporters.append(self.bgw)
 
-    def __call__(self, system: qp.dft.System):
+    def __call__(self, system: dft.System):
         """Run selected geometry action."""
         for exporter in self.exporters:
             exporter.export(system)

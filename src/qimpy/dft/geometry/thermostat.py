@@ -1,23 +1,26 @@
 """Geometry actions: relaxation and dynamics."""
 from __future__ import annotations
 from typing import Union, Protocol, Callable, Optional
+
 import torch
-import qimpy as qp
-from qimpy.utils import Unit, UnitOrFloat
-from ._gradient import Gradient
+
+from qimpy import rc, TreeNode
+from qimpy.utils import CpPath, CpContext, BufferView, Unit, UnitOrFloat
+from qimpy.dft import geometry
+from .gradient import Gradient
 
 # List exported symbols for doc generation
-__all__ = [
+__all__ = (
     "Thermostat",
     "ThermostatMethod",
     "NVE",
     "NoseHoover",
     "Berendsen",
     "Langevin",
-]
+)
 
 
-class Thermostat(qp.TreeNode):
+class Thermostat(TreeNode):
     """Select between possible geometry actions."""
 
     method: ThermostatMethod
@@ -25,8 +28,8 @@ class Thermostat(qp.TreeNode):
     def __init__(
         self,
         *,
-        dynamics: qp.geometry.Dynamics,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        dynamics: geometry.Dynamics,
+        checkpoint_in: CpPath = CpPath(),
         nve: Union[dict, NVE, None] = None,
         nose_hoover: Union[dict, NoseHoover, None] = None,
         berendsen: Union[dict, Berendsen, None] = None,
@@ -47,7 +50,7 @@ class Thermostat(qp.TreeNode):
             :yaml:`Langevin stochastic thermostat and/or barostat.`
         """
         super().__init__()
-        ChildOptions = qp.TreeNode.ChildOptions
+        ChildOptions = TreeNode.ChildOptions
         self.add_child_one_of(
             "method",
             checkpoint_in,
@@ -75,16 +78,16 @@ class ThermostatMethod(Protocol):
         """Set optional velocity components used by this thermostat from `velocity`."""
 
 
-class NVE(qp.TreeNode):
+class NVE(TreeNode):
     """No thermostat (or barostat), i.e. NVE ensemble."""
 
-    dynamics: qp.geometry.Dynamics
+    dynamics: geometry.Dynamics
 
     def __init__(
         self,
         *,
-        dynamics: qp.geometry.Dynamics,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        dynamics: geometry.Dynamics,
+        checkpoint_in: CpPath = CpPath(),
     ) -> None:
         super().__init__()
         self.dynamics = dynamics
@@ -103,10 +106,10 @@ class NVE(qp.TreeNode):
         """No optional velocity components for this thermostat method."""
 
 
-class NoseHoover(qp.TreeNode):
+class NoseHoover(TreeNode):
     """Nose-Hoover thermostat and/or barostat."""
 
-    dynamics: qp.geometry.Dynamics
+    dynamics: geometry.Dynamics
     chain_length_T: int  #: Nose-Hoover chain length for thermostat
     chain_length_P: int  #: Nose-Hoover chain length for barostat
     thermostat_velocity: torch.Tensor  #: Velocity of extra thermostat DOFs
@@ -115,10 +118,10 @@ class NoseHoover(qp.TreeNode):
     def __init__(
         self,
         *,
-        dynamics: qp.geometry.Dynamics,
+        dynamics: geometry.Dynamics,
         chain_length_T: int = 3,
         chain_length_P: int = 3,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        checkpoint_in: CpPath = CpPath(),
     ) -> None:
         """
         Specify thermostat parameters.
@@ -144,12 +147,10 @@ class NoseHoover(qp.TreeNode):
         else:
             self.chain_length_T = chain_length_T
             self.chain_length_P = chain_length_P
-            self.thermostat_velocity = torch.zeros(chain_length_T, device=qp.rc.device)
+            self.thermostat_velocity = torch.zeros(chain_length_T, device=rc.device)
             self.barostat_velocity = None
 
-    def _save_checkpoint(
-        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
-    ) -> list[str]:
+    def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
         attrs = cp_path.attrs
         attrs["chain_length_T"] = self.chain_length_T
         attrs["chain_length_P"] = self.chain_length_P
@@ -199,7 +200,7 @@ class NoseHoover(qp.TreeNode):
             dstress = dynamics.stress0 - dynamics.get_stress(velocity.ions)
             assert velocity.barostat is not None
             acceleration.lattice = (omega_sq_L / ((nDOF + n_free_L) * dynamics.T0)) * (
-                lattice.volume * dstress + T * torch.eye(3, device=qp.rc.device)
+                lattice.volume * dstress + T * torch.eye(3, device=rc.device)
             ) - velocity.barostat[0] * velocity.lattice
 
             # Coupling to previous barostat DOF / system:
@@ -221,9 +222,9 @@ class NoseHoover(qp.TreeNode):
 
     def initialize_gradient(self, gradient: Gradient) -> None:
         """Initialize `thermostat` and, if needed, `barostat` terms in `gradient`."""
-        gradient.thermostat = torch.zeros(self.chain_length_T, device=qp.rc.device)
+        gradient.thermostat = torch.zeros(self.chain_length_T, device=rc.device)
         if self.dynamics.system.lattice.movable:
-            gradient.barostat = torch.zeros(self.chain_length_P, device=qp.rc.device)
+            gradient.barostat = torch.zeros(self.chain_length_P, device=rc.device)
 
     def get_velocity(self, velocity: Gradient) -> None:
         """Get `thermostat` and optional `barostat` components within `velocity`."""
@@ -239,17 +240,17 @@ class NoseHoover(qp.TreeNode):
             self.barostat_velocity = velocity.barostat
 
 
-class Berendsen(qp.TreeNode):
+class Berendsen(TreeNode):
     """Berendsen velocity-rescaling thermostat and/or barostat."""
 
-    dynamics: qp.geometry.Dynamics
+    dynamics: geometry.Dynamics
 
     def __init__(
         self,
         *,
-        dynamics: qp.geometry.Dynamics,
+        dynamics: geometry.Dynamics,
         B0: UnitOrFloat = Unit(2.2, "GPa"),
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        checkpoint_in: CpPath = CpPath(),
     ) -> None:
         """
         Specify thermostat parameters.
@@ -268,9 +269,7 @@ class Berendsen(qp.TreeNode):
         self.dynamics = dynamics
         self.B0 = checkpoint_in.attrs["B0"] if checkpoint_in else float(B0)
 
-    def _save_checkpoint(
-        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
-    ) -> list[str]:
+    def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
         cp_path.attrs["B0"] = self.B0
         return ["B0"]
 
@@ -303,16 +302,16 @@ class Berendsen(qp.TreeNode):
         """No optional velocity components for this thermostat method."""
 
 
-class Langevin(qp.TreeNode):
+class Langevin(TreeNode):
     """Langevin stochastic thermostat and/or barostat."""
 
-    dynamics: qp.geometry.Dynamics
+    dynamics: geometry.Dynamics
 
     def __init__(
         self,
         *,
-        dynamics: qp.geometry.Dynamics,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        dynamics: geometry.Dynamics,
+        checkpoint_in: CpPath = CpPath(),
     ) -> None:
         super().__init__()
         self.dynamics = dynamics
@@ -326,7 +325,7 @@ class Langevin(qp.TreeNode):
         dynamics = self.dynamics
         # Generate MPI-consistent stochastic acceleration (not velocity dependent):
         rand = torch.randn_like(velocity.ions)
-        self.dynamics.comm.Bcast(qp.utils.BufferView(rand))
+        self.dynamics.comm.Bcast(BufferView(rand))
         variances = 2 * dynamics.T0 / (dynamics.masses * (dynamics.t_damp_T * dt))
         acceleration_noise = Gradient(ions=(rand * variances.sqrt()))
         # Take step including velocity-dependent damping:
