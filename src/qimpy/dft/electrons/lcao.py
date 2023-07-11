@@ -1,22 +1,26 @@
 from __future__ import annotations
-import qimpy as qp
+
 import numpy as np
 import torch
-from qimpy.algorithms import Minimize, MinimizeState, MatrixArray
 from mpi4py import MPI
+
+from qimpy import rc, dft
+from qimpy.utils import BufferView, CpPath, eighg, dagger
+from qimpy.algorithms import Minimize, MinimizeState, MatrixArray
+from qimpy.grid import FieldH
 
 
 class LCAO(Minimize[MatrixArray]):
     """Optimize electronic state in atomic-orbital subspace."""
 
-    system: qp.dft.System
+    system: dft.System
     _rot_prev: torch.Tensor  #: accumulated rotations of subspace
 
     def __init__(
         self,
         *,
         comm: MPI.Comm,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        checkpoint_in: CpPath = CpPath(),
         n_iterations: int = 30,
         energy_threshold: float = 1e-6,
         gradient_threshold: float = 1e-8,
@@ -45,7 +49,7 @@ class LCAO(Minimize[MatrixArray]):
             n_consecutive=2,
         )
 
-    def update(self, system: qp.dft.System) -> None:
+    def update(self, system: dft.System) -> None:
         """Set wavefunctions to optimum subspace of atomic orbitals."""
         el = system.electrons
         # Initialize based on reference atomic density (or fixed-H density):
@@ -53,11 +57,11 @@ class LCAO(Minimize[MatrixArray]):
             el.n_tilde = system.ions.get_atomic_density(
                 system.grid, el.fillings.n_electrons, el.fillings.M
             )
-            el.tau_tilde = qp.grid.FieldH(system.grid, shape_batch=(0,))  # TODO
+            el.tau_tilde = FieldH(system.grid, shape_batch=(0,))  # TODO
             el.update_potential(system)
         C_OC = el.C.dot_O(el.C).wait()
         C_HC = el.C ^ el.hamiltonian(el.C)
-        el.eig, V = qp.utils.eighg(C_HC, C_OC)
+        el.eig, V = eighg(C_HC, C_OC)
         el.C = el.C @ V  # Set to eigenvectors
         if (el.fillings.smearing is None) or el.fixed_H:
             return
@@ -74,7 +78,7 @@ class LCAO(Minimize[MatrixArray]):
         el = self.system.electrons
         # Move auxiliary Hamiltonian accounting for accumulated rotations:
         H_aux = el.eig.diag_embed() + step_size * (  # current Hamiltonian
-            qp.utils.dagger(self._rot_prev) @ (direction.M @ self._rot_prev)
+            dagger(self._rot_prev) @ (direction.M @ self._rot_prev)
         )
         # Update rotations to re-diagonalize auxiliary Hamiltonian
         el.eig, V = torch.linalg.eigh(H_aux)
@@ -96,9 +100,9 @@ class LCAO(Minimize[MatrixArray]):
         wf_eig = el.basis.w_sk * el.fillings.f_eig
         E_mu_num = (wf_eig * dH_sub_diag).sum(dim=(1, 2))
         E_mu_den = wf_eig.sum(dim=(1, 2))  # TODO: make this more general:
-        qp.rc.current_stream_synchronize()
-        el.kpoints.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(E_mu_num), MPI.SUM)
-        el.kpoints.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(E_mu_den), MPI.SUM)
+        rc.current_stream_synchronize()
+        el.kpoints.comm.Allreduce(MPI.IN_PLACE, BufferView(E_mu_num), MPI.SUM)
+        el.kpoints.comm.Allreduce(MPI.IN_PLACE, BufferView(E_mu_den), MPI.SUM)
         E_mu_den.clamp_(max=-1e-20)  # avoid 0/0 in large-gap corner cases
         if (el.n_spins == 1) or el.fillings.M_constrain:
             E_mu = E_mu_num / E_mu_den  # N of each spin channel constrained
@@ -106,7 +110,7 @@ class LCAO(Minimize[MatrixArray]):
             E_mu = E_mu_num.sum() / E_mu_den.sum()  # only total N constrained
         E_mu = E_mu.view(-1, 1, 1, 1)
         E_f = dH_sub - (
-            torch.eye(el.fillings.n_bands, device=qp.rc.device)[None, None] * E_mu
+            torch.eye(el.fillings.n_bands, device=rc.device)[None, None] * E_mu
         )
         # Compute auxiliary hamiltonian gradient:
         delta_f = el.fillings.f[..., None] - el.fillings.f[:, :, None, :]
@@ -117,7 +121,7 @@ class LCAO(Minimize[MatrixArray]):
         E_H_aux = el.basis.w_sk[..., None] * (E_f * f_eig_mat)
         K_E_H_aux = -E_f  # drop f' and weights in preconditioned gradient
         # Transform back to original rotation (which CG remains in):
-        dagger_rot_prev = qp.utils.dagger(self._rot_prev)
+        dagger_rot_prev = dagger(self._rot_prev)
         E_H_aux = self._rot_prev @ E_H_aux @ dagger_rot_prev
         K_E_H_aux = self._rot_prev @ K_E_H_aux @ dagger_rot_prev
         # Store gradients:

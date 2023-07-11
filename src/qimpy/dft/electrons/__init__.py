@@ -21,7 +21,7 @@ from .basis import Basis
 from .wavefunction import Wavefunction
 from .davidson import Davidson
 from .chefsi import CheFSI
-from ._scf import SCF
-from ._lcao import LCAO
+from .scf import SCF
+from .lcao import LCAO
 from . import xc
 from ._electrons import Electrons

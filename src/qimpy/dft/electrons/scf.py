@@ -1,11 +1,16 @@
 from __future__ import annotations
-import qimpy as qp
-import torch
 from typing import Optional, Sequence
+
+import torch
 from mpi4py import MPI
 
+from qimpy import dft, Energy
+from qimpy.utils import CpPath, globalreduce
+from qimpy.algorithms import Pulay
+from qimpy.grid import FieldH
 
-class SCF(qp.algorithms.Pulay[qp.grid.FieldH]):
+
+class SCF(Pulay[FieldH]):
     """Electronic self-consistent field iteration."""
 
     mix_fraction_mag: float  #: Mix-fraction for magnetization
@@ -15,7 +20,7 @@ class SCF(qp.algorithms.Pulay[qp.grid.FieldH]):
     n_eig_steps: int  #: Number of eigenvalue steps per cycle
     eig_threshold: float  #: Eigenvalue convergence threshold
     mix_density: bool  #: Mix density if True, else mix potential
-    system: qp.dft.System  #: Current system being optimized
+    system: dft.System  #: Current system being optimized
     K_kerker: torch.Tensor  #: Kernel for Kerker mixing (preconditioner)
     K_metric: torch.Tensor  #: Kernel for metric used in Pulay overlaps
 
@@ -23,7 +28,7 @@ class SCF(qp.algorithms.Pulay[qp.grid.FieldH]):
         self,
         *,
         comm: MPI.Comm,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        checkpoint_in: CpPath = CpPath(),
         n_iterations: int = 50,
         energy_threshold: float = 1e-8,
         residual_threshold: float = 1e-7,
@@ -107,14 +112,14 @@ class SCF(qp.algorithms.Pulay[qp.grid.FieldH]):
             mix_fraction=mix_fraction,
         )
 
-    def update(self, system: qp.dft.System) -> None:
+    def update(self, system: dft.System) -> None:
         self.system = system
         # Initialize preconditioner and metric:
         grid = system.grid
         iG = grid.get_mesh("H").to(torch.double)  # half-space
         Gsq = ((iG @ grid.lattice.Gbasis.T) ** 2).sum(dim=-1)
         # --- regularize Gsq by q_kappa or min(G!=0) as appropriate
-        Gsq_min = qp.utils.globalreduce.min(Gsq[Gsq > 0.0], self.comm)
+        Gsq_min = globalreduce.min(Gsq[Gsq > 0.0], self.comm)
         q_kappa_sq = 0.0 if (self.q_kappa is None) else (self.q_kappa**2)
         Gsq_reg = (Gsq + q_kappa_sq) if q_kappa_sq else torch.clamp(Gsq, min=Gsq_min)
         # --- compute kernels
@@ -141,21 +146,21 @@ class SCF(qp.algorithms.Pulay[qp.grid.FieldH]):
         # Compute eigenvalue difference for extra convergence threshold:
         eig_cur = electrons.eig[..., : electrons.fillings.n_bands]
         deig = (eig_cur - eig_prev).abs()
-        deig_max = qp.utils.globalreduce.max(deig, electrons.comm)
+        deig_max = globalreduce.max(deig, electrons.comm)
         return [deig_max]
 
     @property
-    def energy(self) -> qp.Energy:
+    def energy(self) -> Energy:
         return self.system.energy
 
     @property
-    def variable(self) -> qp.grid.FieldH:
+    def variable(self) -> FieldH:
         """Get density or potential, depending on `mix_density`."""
         electrons = self.system.electrons
         return electrons.n_tilde if self.mix_density else electrons.n_tilde.grad
 
     @variable.setter
-    def variable(self, v: qp.grid.FieldH) -> None:
+    def variable(self, v: FieldH) -> None:
         """Set density or potential, depending on `mix_density`."""
         electrons = self.system.electrons
         if self.mix_density:
@@ -164,11 +169,11 @@ class SCF(qp.algorithms.Pulay[qp.grid.FieldH]):
         else:
             electrons.n_tilde.grad = v
 
-    def precondition(self, v: qp.grid.FieldH) -> qp.grid.FieldH:
+    def precondition(self, v: FieldH) -> FieldH:
         result = v.convolve(self.K_kerker)
         if result.data.shape[0] > 1:  # Different fraction for magnetization
             result.data[1:] *= self.mix_fraction_mag / self.mix_fraction
         return result
 
-    def metric(self, v: qp.grid.FieldH) -> qp.grid.FieldH:
+    def metric(self, v: FieldH) -> FieldH:
         return v.convolve(self.K_metric)
