@@ -1,28 +1,40 @@
 from __future__ import annotations
-import qimpy as qp
-import numpy as np
-import torch
 from dataclasses import dataclass
 from typing import Optional
+
+import numpy as np
+import torch
 from mpi4py import MPI
 
+from qimpy import rc, log, TreeNode, dft
+from qimpy.utils import (
+    CpPath,
+    stopwatch,
+    BufferView,
+    globalreduce,
+    eighg,
+    Waitable,
+    dagger,
+)
+from . import Wavefunction
 
-class Davidson(qp.TreeNode):
+
+class Davidson(TreeNode):
     """Davidson diagonalization of Hamiltonian in `electrons`."""
 
-    electrons: qp.electrons.Electrons  #: Electronic system to diagonalize
+    electrons: dft.electrons.Electrons  #: Electronic system to diagonalize
     n_iterations: int  #: Number of diagonalization iterations
     eig_threshold: float  #: Eigenvalue convergence threshold (in :math:`E_h`)
     _line_prefix: str
     _norm_cut: float
     _i_iter: int
-    _HC: qp.electrons.Wavefunction  #: Used for coordination with sub-classes
+    _HC: Wavefunction  #: Used for coordination with sub-classes
 
     def __init__(
         self,
         *,
-        electrons: qp.electrons.Electrons,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        electrons: dft.electrons.Electrons,
+        checkpoint_in: CpPath = CpPath(),
         n_iterations: int = 100,
         eig_threshold: float = 1e-8,
     ) -> None:
@@ -76,17 +88,15 @@ class Davidson(qp.TreeNode):
             line += f"  deig_max: {self.electrons.deig_max:.2e}"
         if n_eigs_done:
             line += f"  n_eigs_done: {n_eigs_done}"
-        line += f"  t[s]: {qp.rc.clock():.2f}"
-        qp.log.info(line)
+        line += f"  t[s]: {rc.clock():.2f}"
+        log.info(line)
         if converged and (not inner_loop):
-            qp.log.info(f"{line_prefix}: Converged")
+            log.info(f"{line_prefix}: Converged")
         if converge_failed and (not inner_loop):
-            qp.log.info(f"{line_prefix}: Failed to converge")
+            log.info(f"{line_prefix}: Failed to converge")
 
-    @qp.utils.stopwatch
-    def precondition(
-        self, Cerr: qp.electrons.Wavefunction, KEref: torch.Tensor
-    ) -> qp.electrons.Wavefunction:
+    @stopwatch
+    def precondition(self, Cerr: Wavefunction, KEref: torch.Tensor) -> Wavefunction:
         """Inverse-kinetic preconditioner on the Cerr in eigenpairs,
         using the per-band kinetic energy KEref"""
         basis = self.electrons.basis
@@ -94,16 +104,14 @@ class Davidson(qp.TreeNode):
         x += torch.exp(-x)  # don't modify x ~ 0
         return Cerr / x
 
-    def _regularize(
-        self, C: qp.electrons.Wavefunction, norm: torch.Tensor, i_iter: int
-    ) -> None:
+    def _regularize(self, C: Wavefunction, norm: torch.Tensor, i_iter: int) -> None:
         """Regularize low-norm bands of C by randomizing them,
         using seed based on current iteration number i_iter"""
         # Find low-norm bands:
         if C.basis.division.n_procs > 1:
             # guard against machine-precision differences between procs
-            qp.rc.current_stream_synchronize()
-            C.basis.comm.Bcast(qp.utils.BufferView(norm))
+            rc.current_stream_synchronize()
+            C.basis.comm.Bcast(BufferView(norm))
         low_norm = norm < self._norm_cut
         i_spin, i_k, i_band = torch.where(low_norm)
         if not len(i_spin):
@@ -116,7 +124,7 @@ class Davidson(qp.TreeNode):
         """Compute the sum over band eigenvalues, averaged over k"""
         electrons = self.electrons
         n_bands = electrons.fillings.n_bands
-        return qp.utils.globalreduce.sum(
+        return globalreduce.sum(
             electrons.basis.w_sk * electrons.eig[..., :n_bands],
             electrons.kpoints.comm,
         )
@@ -127,7 +135,7 @@ class Davidson(qp.TreeNode):
         """Return maximum change in eigenvalues and how many
         eigenvalues are converged at all spin and k"""
         n_bands = self.electrons.fillings.n_bands
-        deig_max = qp.utils.globalreduce.max(deig[..., :n_bands], self.electrons.comm)
+        deig_max = globalreduce.max(deig[..., :n_bands], self.electrons.comm)
         pending = torch.where(
             (deig[..., :n_bands] > eig_threshold).flatten(0, 1).any(dim=0)
         )[0]
@@ -201,7 +209,7 @@ class Davidson(qp.TreeNode):
             C_HC_new = TileExpansion(C_HC, Cnew ^ HCexp)
 
             # Solve expanded subspace generalized eigenvalue problem:
-            eig_new, V_new = qp.utils.eighg(C_HC_new, C_OC_new.wait())
+            eig_new, V_new = eighg(C_HC_new, C_OC_new.wait())
             n_bands_next = min(n_bands_new, n_bands_max)  # number to retain
             V_new = V_new[..., :n_bands_next]  # drop extra bands
             Vcur, Vexp = V_new.split((n_bands_cur, n_bands_exp), dim=2)
@@ -241,7 +249,7 @@ class TileExpansion:
     Implements Waitable protocol to support delayed evaluation."""
 
     C_XC: torch.Tensor  #: C^X(C) for operator X (typically O or H)
-    Cnew_XCexp: qp.utils.Waitable[
+    Cnew_XCexp: Waitable[
         torch.Tensor
     ]  #: future result of Cnew^X(Cexp), where Cnew = cat(C, Cexp)
 
@@ -257,6 +265,6 @@ class TileExpansion:
         )
         result[:, :, :n_bands_cur, :n_bands_cur] += self.C_XC  # add to broadcast
         result[:, :, :n_bands_cur, n_bands_cur:] = C_XCexp
-        result[:, :, n_bands_cur:, :n_bands_cur] = qp.utils.dagger(C_XCexp)
+        result[:, :, n_bands_cur:, :n_bands_cur] = dagger(C_XCexp)
         result[:, :, n_bands_cur:, n_bands_cur:] = Cexp_XCexp
         return result

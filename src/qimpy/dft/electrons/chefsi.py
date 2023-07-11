@@ -1,9 +1,12 @@
 from __future__ import annotations
-import qimpy as qp
+from typing import Optional
+
 import numpy as np
 import torch
-from ._davidson import Davidson
-from typing import Optional
+
+from qimpy import dft
+from qimpy.utils import CpPath, eighg, globalreduce
+from .davidson import Davidson
 
 
 class CheFSI(Davidson):
@@ -15,8 +18,8 @@ class CheFSI(Davidson):
     def __init__(
         self,
         *,
-        electrons: qp.electrons.Electrons,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        electrons: dft.electrons.Electrons,
+        checkpoint_in: CpPath = CpPath(),
         n_iterations: int = 100,
         eig_threshold: float = 1e-8,
         filter_order: int = 10,
@@ -96,7 +99,7 @@ class CheFSI(Davidson):
             self._report(inner_loop=inner_loop)
 
         KEmax = el.basis.ke_cutoff  # upper bound on KE
-        PEmax = qp.utils.globalreduce.max((~el.n_tilde.grad).data, el.comm)
+        PEmax = globalreduce.max((~el.n_tilde.grad).data, el.comm)
         n_eigs_done = 0
 
         # Subspace iteration loop:
@@ -148,7 +151,7 @@ class CheFSI(Davidson):
 
             # Subspace orthonormalization and diagonalization:
             eig_prev = el.eig
-            el.eig, V = qp.utils.eighg(el.C ^ HC, el.C.dot_O(el.C).wait())
+            el.eig, V = eighg(el.C ^ HC, el.C.dot_O(el.C).wait())
             el.C = el.C @ V
             HC = HC @ V
 
