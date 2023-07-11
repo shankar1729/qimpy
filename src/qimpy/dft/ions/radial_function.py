@@ -1,6 +1,7 @@
+from typing import Optional, Union
+
 import numpy as np
 import torch
-from typing import Optional, Union
 from mpi4py import MPI
 
 from qimpy import log

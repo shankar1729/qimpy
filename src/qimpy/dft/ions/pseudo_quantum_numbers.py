@@ -1,7 +1,8 @@
-import torch
-import numpy as np
 import functools
 from typing import Optional
+
+import torch
+import numpy as np
 
 
 class PseudoQuantumNumbers:

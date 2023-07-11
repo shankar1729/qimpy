@@ -1,11 +1,14 @@
 from __future__ import annotations
-import qimpy as qp
+from typing import Optional
+import pathlib
+
 import numpy as np
 import torch
-import pathlib
-from ._read_upf import _read_upf
-from typing import Optional
 from mpi4py import MPI
+
+from qimpy import log
+from qimpy.dft.ions import RadialFunction, PseudoQuantumNumbers
+from qimpy.dft.ions.read_upf import read_upf
 
 
 class Pseudopotential:
@@ -20,12 +23,12 @@ class Pseudopotential:
     l_max: int  #: Maximum angular momentum quantum number
     r: torch.Tensor  #: Radial grid
     dr: torch.Tensor  #: Radial grid spacings / integration weights
-    rho_atom: qp.ions.RadialFunction  #: Atomic reference electron density
-    n_core: qp.ions.RadialFunction  #: Partial core density
-    Vloc: qp.ions.RadialFunction  #: Local potential (short-ranged part)
+    rho_atom: RadialFunction  #: Atomic reference electron density
+    n_core: RadialFunction  #: Partial core density
+    Vloc: RadialFunction  #: Local potential (short-ranged part)
     ion_width: float  #: Gaussian width to extract long-ranged part of Vloc
-    beta: qp.ions.RadialFunction  #: Nonlocal projectors
-    psi: qp.ions.RadialFunction  #: Atomic orbitals
+    beta: RadialFunction  #: Nonlocal projectors
+    psi: RadialFunction  #: Atomic orbitals
     is_relativistic: bool  #: Whether this is a relativistic pseudopotential
     j_beta: Optional[torch.Tensor]  #: l+s of projectors (if relativistic)
     j_psi: Optional[torch.Tensor]  #: l+s of atomic orbitals (if relativistic)
@@ -33,12 +36,9 @@ class Pseudopotential:
     D: torch.Tensor  #: Descreened nonlocal pseudopotential matrix
 
     Gmax: float  #: Current reciprocal space extent of radial functions
-    pqn_beta: qp.ions.PseudoQuantumNumbers  #: quantum numbers for projectors
-    pqn_psi: qp.ions.PseudoQuantumNumbers  #: quantum numbers for orbitals
+    pqn_beta: PseudoQuantumNumbers  #: quantum numbers for projectors
+    pqn_psi: PseudoQuantumNumbers  #: quantum numbers for orbitals
     pulay_data: Optional[np.ndarray]  #: Pulay correction data for finite ke cutoff
-
-    # Methods defined out of class:
-    read_upf = _read_upf
 
     def __init__(self, filename: str) -> None:
         """Read pseudopotential from file.
@@ -50,10 +50,10 @@ class Pseudopotential:
             Currently, only norm-conserving UPF files are supported.
         """
         assert filename[-4:].lower() == ".upf"
-        self.read_upf(filename)
+        read_upf(self, filename)
         self.Gmax = 0.0  # reciprocal space versions not yet initialized
-        self.pqn_beta = qp.ions.PseudoQuantumNumbers(self.beta.l, self.j_beta)
-        self.pqn_psi = qp.ions.PseudoQuantumNumbers(self.psi.l, self.j_psi)
+        self.pqn_beta = PseudoQuantumNumbers(self.beta.l, self.j_beta)
+        self.pqn_psi = PseudoQuantumNumbers(self.psi.l, self.j_psi)
         self._read_pulay(filename)
 
     def update(self, Gmax: float, ion_width: float, comm: MPI.Comm) -> None:
@@ -73,7 +73,7 @@ class Pseudopotential:
             )
             if Gmax <= self.Gmax:
                 # Not a global Gmax update, transform Vloc separately:
-                qp.ions.RadialFunction.transform([self.Vloc], Gmax, comm, self.element)
+                RadialFunction.transform([self.Vloc], Gmax, comm, self.element)
             self.ion_width = ion_width
 
         # Update radial transforms if necessary:
@@ -81,7 +81,7 @@ class Pseudopotential:
             transform_list = [self.rho_atom, self.Vloc, self.beta, self.psi]
             if hasattr(self, "n_core"):
                 transform_list.append(self.n_core)
-            qp.ions.RadialFunction.transform(transform_list, Gmax, comm, self.element)
+            RadialFunction.transform(transform_list, Gmax, comm, self.element)
             self.Gmax = Gmax
 
     @property
@@ -129,7 +129,7 @@ class Pseudopotential:
                         raise IOError("Incorrect pulay correction file format.")
             assert n_cutoffs == i_cutoff
             self.pulay_data = data[data[:, 0].argsort()]  # sort by cutoffs
-            qp.log.info(f"  Loaded Pulay corrections from {pulay_filename}")
+            log.info(f"  Loaded Pulay corrections from {pulay_filename}")
         else:
             self.pulay_data = None
 
@@ -151,13 +151,11 @@ class Pseudopotential:
                 )
             ke_cutoff_max = ke_cutoffs[-1]
             if ke_cutoff > ke_cutoff_max:
-                qp.log.warning(
+                log.warning(
                     f"ke_cutoff higher than {ke_cutoff_max = } Eh in {self.element}"
                     " Pulay correction."
                 )
                 return 0.0
             result = float(np.interp(ke_cutoff, ke_cutoffs, corrections))
-            qp.log.info(
-                f"Pulay dE/drho_basis = {result:.6f} Eh a0^3 for {self.element}"
-            )
+            log.info(f"Pulay dE/drho_basis = {result:.6f} Eh a0^3 for {self.element}")
             return result

@@ -2,10 +2,11 @@
 # List exported symbols for doc generation
 __all__ = ["get_coeff", "Interpolator"]
 
+from typing import Optional
+
 import numpy as np
 import torch
 from scipy.linalg import solve_banded
-from typing import Optional
 
 
 def get_coeff(samples: torch.Tensor) -> torch.Tensor:

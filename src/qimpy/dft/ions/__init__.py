@@ -13,8 +13,8 @@ __all__ = [
 ]
 
 from . import symbols, spherical_harmonics, spherical_bessel, quintic_spline
-from ._radial_function import RadialFunction
-from ._pseudo_quantum_numbers import PseudoQuantumNumbers
-from ._pseudopotential import Pseudopotential
-from ._ions import Ions
-from ._lowdin import Lowdin
+from .radial_function import RadialFunction
+from .pseudo_quantum_numbers import PseudoQuantumNumbers
+from .pseudopotential import Pseudopotential
+from .ions import Ions
+from .lowdin import Lowdin

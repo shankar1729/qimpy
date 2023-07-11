@@ -1,15 +1,17 @@
-import qimpy as qp
 import numpy as np
-from qimpy.dft.ions import spherical_harmonics as sh
-from qimpy.dft.ions.spherical_harmonics_generate import get_harmonics_ref
 import torch
 import pytest
+
+from qimpy import rc, log
+from qimpy.utils import log_config
+from . import spherical_harmonics as sh
+from .spherical_harmonics_generate import get_harmonics_ref
 
 
 def get_r_ylm() -> tuple[torch.Tensor, torch.Tensor]:
     """Get test data for all the harmonics tests."""
     torch.manual_seed(0)
-    r = torch.randn(10, 10000, 3, device=qp.rc.device)
+    r = torch.randn(10, 10000, 3, device=rc.device)
     ylm = sh.get_harmonics(sh.L_MAX, r)
     return r, ylm
 
@@ -21,30 +23,30 @@ def r_ylm() -> tuple[torch.Tensor, torch.Tensor]:
 
 @pytest.mark.mpi_skip
 def test_ylm(r_ylm: tuple[torch.Tensor, torch.Tensor]) -> None:
-    qp.log.info("Testing spherical harmonics:")
+    log.info("Testing spherical harmonics:")
     r, ylm = r_ylm
     rel_err_all = []
-    ylm_ref = torch.from_numpy(get_harmonics_ref(sh.L_MAX, r.to(qp.rc.cpu).numpy())).to(
-        qp.rc.device
+    ylm_ref = torch.from_numpy(get_harmonics_ref(sh.L_MAX, r.to(rc.cpu).numpy())).to(
+        rc.device
     )
     for l in range(sh.L_MAX + 1):
         l_slice = slice(l**2, (l + 1) ** 2)
         err = (ylm[l_slice] - ylm_ref[l_slice]).norm().item()
         rel_err = err / (ylm_ref[l_slice]).norm().item()
         rel_err_all.append(rel_err)
-        qp.log.info(f"  l: {l} Err: {rel_err:9.3e}")
+        log.info(f"  l: {l} Err: {rel_err:9.3e}")
     rel_err_overall = np.sqrt((np.array(rel_err_all) ** 2).mean())
-    qp.log.info(f"  Overall Err: {rel_err_overall:9.3e}\n")
+    log.info(f"  Overall Err: {rel_err_overall:9.3e}\n")
     assert rel_err_overall < 1e-14
 
 
 @pytest.mark.mpi_skip
 def test_ylm_prod(r_ylm: tuple[torch.Tensor, torch.Tensor]) -> None:
-    qp.log.info("Testing product coefficients:")
+    log.info("Testing product coefficients:")
     r, ylm = r_ylm
     r_sq = (r**2).sum(dim=-1)
     if not sh._YLM_PROD:
-        sh._initialize_device(qp.rc.device)
+        sh._initialize_device(rc.device)
     rel_err_all = []
     dl_shape = (-1,) + (1,) * len(r_sq.shape)  # bcast with r_sq[None]
     for l1 in range(sh.L_MAX_HLF + 1):
@@ -69,15 +71,15 @@ def test_ylm_prod(r_ylm: tuple[torch.Tensor, torch.Tensor]) -> None:
             err = (product - product_ref).norm().item()
             rel_err = err / product_ref.norm().item()
             rel_err_all.append(rel_err)
-            qp.log.info(f"  l: {l1} {l2} Err: {rel_err:9.3e}")
+            log.info(f"  l: {l1} {l2} Err: {rel_err:9.3e}")
     rel_err_overall = np.sqrt((np.array(rel_err_all) ** 2).mean())
-    qp.log.info(f"  Overall Err: {rel_err_overall:9.3e}\n")
+    log.info(f"  Overall Err: {rel_err_overall:9.3e}\n")
     assert rel_err_overall < 1e-14
 
 
 @pytest.mark.mpi_skip
 def test_ylm_prime(r_ylm: tuple[torch.Tensor, torch.Tensor]) -> None:
-    qp.log.info("Testing derivatives:")
+    log.info("Testing derivatives:")
     # Analytical calculation:
     r, ylm = r_ylm
     _, ylm_prime = sh.get_harmonics_and_prime(sh.L_MAX, r)
@@ -96,23 +98,23 @@ def test_ylm_prime(r_ylm: tuple[torch.Tensor, torch.Tensor]) -> None:
         err_den_sq += ylm_prime_num.flatten(1).norm(dim=1).square()
     err[1:] *= 1.0 / err_den_sq.sqrt()[1:, None]  # to relative error
     # Report:
-    err_np = err.to(qp.rc.cpu).numpy()
+    err_np = err.to(rc.cpu).numpy()
     for l in range(sh.L_MAX + 1):
         for m in range(-l, l + 1):
             err_x, err_y, err_z = err_np[l * (l + 1) + m]
-            qp.log.info(f"  l: {l} m: {m:+d}  Err: {err_x:.3e} {err_y:.3e} {err_z:.3e}")
+            log.info(f"  l: {l} m: {m:+d}  Err: {err_x:.3e} {err_y:.3e} {err_z:.3e}")
     # Overall error:
     err_avg = err_np.mean(axis=0)
     err_x, err_y, err_z = err_avg
-    qp.log.info(f"      Overall Err: {err_x:.3e} {err_y:.3e} {err_z:.3e}")
+    log.info(f"      Overall Err: {err_x:.3e} {err_y:.3e} {err_z:.3e}")
     assert np.all(err_avg < 1e-8)
 
 
 def main():
     """Run test with verbose log."""
-    qp.utils.log_config()
-    qp.rc.init()
-    assert qp.rc.n_procs == 1
+    log_config()
+    rc.init()
+    assert rc.n_procs == 1
     r, ylm = get_r_ylm()
     test_ylm((r, ylm))
     test_ylm_prod((r, ylm))

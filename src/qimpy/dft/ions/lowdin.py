@@ -1,9 +1,12 @@
 from __future__ import annotations
-import qimpy as qp
+from typing import NamedTuple, Optional
+
 import numpy as np
 import torch
-from typing import NamedTuple, Optional
 from mpi4py import MPI
+
+from qimpy import rc, dft
+from qimpy.utils import BufferView, stopwatch, ortho_matrix, cis, abs_squared
 
 
 class LowdinResults(NamedTuple):
@@ -14,13 +17,13 @@ class LowdinResults(NamedTuple):
 class Lowdin:
     """Lowdin analysis and atomic manipulation of wavefunctions."""
 
-    C: qp.electrons.Wavefunction  #: Wavefunction being analyzed / manipulated
-    psi: qp.electrons.Wavefunction  #: Atomic orbitals
+    C: dft.electrons.Wavefunction  #: Wavefunction being analyzed / manipulated
+    psi: dft.electrons.Wavefunction  #: Atomic orbitals
     psi_Opsi: torch.Tensor  #: Self-overlap of atomic orbitals
     psi_OC: torch.Tensor  #: Overlap of atomic orbitals with current wavefunction `C`
     coeff: Optional[torch.Tensor]  #: Best-fit coefficents of C on psi used for dragging
 
-    def __init__(self, C: qp.electrons.Wavefunction) -> None:
+    def __init__(self, C: dft.electrons.Wavefunction) -> None:
         """Prepare to analyze / manipulate wavefunction `C`."""
         ions = C.basis.ions
         psi = ions.get_atomic_orbitals(C.basis)
@@ -31,7 +34,7 @@ class Lowdin:
         self.psi_Opsi = psi_Opsi.wait()
         self.psi_OC = psi_OC.wait()
 
-    @qp.utils.stopwatch(name="Lowdin.analyze")
+    @stopwatch(name="Lowdin.analyze")
     def analyze(self, f: torch.Tensor, spin_polarized: bool) -> LowdinResults:
         """Calculate Lowdin charges and magnetizations (if `spin_polarized`).
         Here, `f` are the occupation factors corresponding to wavefunctions `C`."""
@@ -40,14 +43,14 @@ class Lowdin:
         index = ions.get_atomic_orbital_index(basis)
         i_ion = index[:, 0]  # atom index by atomic orbital
         Z = ions.Z[ions.types]  # neutral electron count per atom
-        lowdin = qp.utils.ortho_matrix(self.psi_Opsi, use_cholesky=False) @ self.psi_OC
+        lowdin = ortho_matrix(self.psi_Opsi, use_cholesky=False) @ self.psi_OC
         lowdin = lowdin[..., : f.shape[-1]]  # drop extra empty bands
         wf = f * basis.w_sk
         if spin_polarized and self.C.spinorial:
             # Need off-diagonal density matrix components for spinorial magnetization:
             Rho = torch.einsum("skab, skb, skAb -> aA", lowdin, wf, lowdin.conj())
-            basis.kpoints.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(Rho))
-            result = torch.empty((4, ions.n_ions), device=qp.rc.device)
+            basis.kpoints.comm.Allreduce(MPI.IN_PLACE, BufferView(Rho))
+            result = torch.empty((4, ions.n_ions), device=rc.device)
             i_psi_start = 0
             for slice_i, ps in zip(ions.slices, ions.pseudopotentials):
                 pauli = ps.pqn_psi.pauli_expectation()
@@ -67,10 +70,10 @@ class Lowdin:
             return LowdinResults(Q, Mvec)
         else:
             # Diagonal components of density matrix suffice:
-            Rho = torch.einsum("skb, skab -> sa", wf, qp.utils.abs_squared(lowdin))
-            basis.kpoints.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(Rho))
+            Rho = torch.einsum("skb, skab -> sa", wf, abs_squared(lowdin))
+            basis.kpoints.comm.Allreduce(MPI.IN_PLACE, BufferView(Rho))
             # Reduce to (spin)-number on each atom:
-            Ns = torch.zeros((Rho.shape[0], ions.n_ions), device=qp.rc.device)
+            Ns = torch.zeros((Rho.shape[0], ions.n_ions), device=rc.device)
             Ns.index_add_(1, i_ion, Rho)
             Q = Z - Ns.sum(dim=0)
             M = (Ns[0] - Ns[1]) if spin_polarized else None  # scalar or no M per atom
@@ -92,7 +95,7 @@ class Lowdin:
         else:
             # Drag orbitals with appropriate translation phase:
             iGk = basis.iG[:, basis.mine] + basis.k[:, None]  # fractional G + k
-            phase = qp.utils.cis((-2 * np.pi) * (iGk @ delta_positions.T))
+            phase = cis((-2 * np.pi) * (iGk @ delta_positions.T))
             i_ion = basis.ions.get_atomic_orbital_index(basis)[:, 0]
             self.psi *= phase[..., i_ion].transpose(1, 2)[None, :, :, None, :]
         # Restore atomic projections:

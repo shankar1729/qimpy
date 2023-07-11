@@ -1,11 +1,16 @@
 from __future__ import annotations
-import qimpy as qp
+
 import torch
+
+from qimpy import rc, dft
+from qimpy.grid import Grid, FieldH
+from qimpy.dft import ions
+from . import RadialFunction
 from .quintic_spline import Interpolator
 
 
 def get_atomic_orbital_index(
-    self: qp.ions.Ions, basis: qp.electrons.Basis
+    self: ions.Ions, basis: dft.electrons.Basis
 ) -> torch.Tensor:
     """Get ion index and quantum numbers of atomic orbitals.
     The result is an n_orbitals x 5 integer tensor, with ion index as the first column.
@@ -14,7 +19,7 @@ def get_atomic_orbital_index(
     For spinorial pseudopotentials, the remaining columns are (n, l, 2j, 2m_j)."""
     n_spinor = basis.n_spinor
     n_psi_tot = self.n_atomic_orbitals(n_spinor)
-    result = torch.empty((n_psi_tot, 5), dtype=torch.long, device=qp.rc.device)
+    result = torch.empty((n_psi_tot, 5), dtype=torch.long, device=rc.device)
     i_psi_start = 0
     i_ion_start = 0
     for n_ions_i, ps in zip(self.n_ions_type, self.pseudopotentials):
@@ -28,7 +33,7 @@ def get_atomic_orbital_index(
         # Add ion indices:
         i_ion_stop = i_ion_start + n_ions_i
         result_i[..., 0] = torch.arange(
-            i_ion_start, i_ion_stop, dtype=torch.long, device=qp.rc.device
+            i_ion_start, i_ion_stop, dtype=torch.long, device=rc.device
         )[:, None]
         # Update for next species:
         i_psi_start = i_psi_stop
@@ -37,8 +42,8 @@ def get_atomic_orbital_index(
 
 
 def get_atomic_orbitals(
-    self: qp.ions.Ions, basis: qp.electrons.Basis
-) -> qp.electrons.Wavefunction:
+    self: ions.Ions, basis: dft.electrons.Basis
+) -> dft.electrons.Wavefunction:
     """Get atomic orbitals (across all species) for specified `basis`."""
     psi = self._get_projectors(basis, get_psi=True)
     n_spinor = basis.n_spinor
@@ -50,7 +55,7 @@ def get_atomic_orbitals(
         psi_s = torch.empty(
             (n_spins, nk_mine, n_psi_tot, n_spinor, n_basis_each),
             dtype=torch.complex128,
-            device=qp.rc.device,
+            device=rc.device,
         )
         i_proj_start = 0
         i_psi_start = 0
@@ -77,18 +82,18 @@ def get_atomic_orbitals(
             # Move to next species:
             i_proj_start = i_proj_stop
             i_psi_start = i_psi_stop
-        return qp.electrons.Wavefunction(basis, coeff=psi_s)
+        return dft.electrons.Wavefunction(basis, coeff=psi_s)
     else:
         if basis.n_spins == 1:
             return psi  # no modifications needed compared to projectors
         else:  # basis.n_spins == 2:
             coeff_spin = psi.coeff.tile(2, 1, 1, 1, 1)  # repeat for spin
-            return qp.electrons.Wavefunction(basis, coeff=coeff_spin)
+            return dft.electrons.Wavefunction(basis, coeff=coeff_spin)
 
 
 def get_atomic_density(
-    self: qp.ions.Ions, grid: qp.grid.Grid, n_electrons: float, M_tot: torch.Tensor
-) -> qp.grid.FieldH:
+    self: ions.Ions, grid: Grid, n_electrons: float, M_tot: torch.Tensor
+) -> FieldH:
     """Get atomic reference density (for LCAO) on `grid`.
     The overall norm / charge of the generated density is set by `n_electrons`.
     The magnetization mode and overall magnitude is set by `M_tot`."""
@@ -96,7 +101,7 @@ def get_atomic_density(
     # Compute fractional electron number on each atom:
     Z = self.Z[self.types].to(torch.complex128)  # number of electrons on each atom
     N_frac = (
-        torch.ones(self.n_ions, dtype=torch.complex128, device=qp.rc.device)
+        torch.ones(self.n_ions, dtype=torch.complex128, device=rc.device)
         if (self.Q is None)
         else (1.0 - self.Q / Z)
     )
@@ -130,10 +135,10 @@ def get_atomic_density(
 
     # Collect density from each atom:
     n_densities = 1 + n_mag
-    n = qp.grid.FieldH(grid, shape_batch=(n_densities,))
+    n = FieldH(grid, shape_batch=(n_densities,))
     iG = grid.get_mesh("H").to(torch.double)  # half-space
     G = ((iG @ grid.lattice.Gbasis.T) ** 2).sum(dim=-1).sqrt()
-    Ginterp = Interpolator(G, qp.ions.RadialFunction.DG)
+    Ginterp = Interpolator(G, RadialFunction.DG)
     for slice_i, ps in zip(self.slices, self.pseudopotentials):
         rho_i = Ginterp(ps.rho_atom.f_tilde_coeff / grid.lattice.volume)
         SF = self.translation_phase(iG, slice_i)

@@ -1,7 +1,10 @@
-import qimpy as qp
+from typing import Sequence, Any
+
 import numpy as np
 from scipy.special import sph_harm
-from typing import Sequence, Any
+
+from qimpy import log, rc
+from qimpy.utils import log_config
 
 
 def get_harmonics_ref(l_max: int, r: np.ndarray) -> np.ndarray:
@@ -39,9 +42,9 @@ def generate_harmonic_coefficients(l_max_hlf: int) -> None:
     solid harmonics up to l_max = 2 * l_max_hlf, as well as tables of
     product coefficients (Clebsch-Gordon coefficients) for real solid
     harmonics up to order l_max_hlf. Print results formatted as Python
-    code that can be pasted into _spherical_harmonics_data.py."""
+    code that can be pasted into spherical_harmonics_data.py."""
     l_max = 2 * l_max_hlf
-    qp.log.info(
+    log.info(
         f"L_MAX: int = {l_max}  # Maximum l for harmonics\n"
         f"L_MAX_HLF: int = {l_max_hlf}  # Maximum l for products"
     )
@@ -53,7 +56,7 @@ def generate_harmonic_coefficients(l_max_hlf: int) -> None:
     # Calculate recursion coefficients:
     ERR_TOL = 1e-14
     COEFF_TOL = 1e-8
-    qp.log.info(
+    log.info(
         "CooIndices = tuple[list[int], list[int], list[float]]\n\n"
         "# Recursion coefficients for computing real harmonics at l>1\n"
         "# from products of those at l = 1 and l-1. The integers index\n"
@@ -62,7 +65,7 @@ def generate_harmonic_coefficients(l_max_hlf: int) -> None:
     )
     Y_00 = np.sqrt(0.25 / np.pi)
     Y_1m_prefac = np.sqrt(0.75 / np.pi)
-    qp.log.info(f"    ([], [], [{Y_00:.16f}]), ([], [], [{Y_1m_prefac:.16f}]),")
+    log.info(f"    ([], [], [{Y_00:.16f}]), ([], [], [{Y_1m_prefac:.16f}]),")
     for l in range(2, l_max + 1):
         l_minus_1_slice = slice((l - 1) ** 2, l**2)
         y_product = ylm[l_minus_1_slice, None, :] * ylm[None, 1:4, :]
@@ -103,16 +106,16 @@ def generate_harmonic_coefficients(l_max_hlf: int) -> None:
             index_col += list(indices[sort_index])
             values += list(coeff[sort_index])
         # Format as python code:
-        qp.log.info(
+        log.info(
             f"    ("
             f"{format_array(index_row, '{:d}')}, "
             f"{format_array(index_col, '{:d}')}, "
             f"{format_array(values, '{:.16f}')}),"
         )
-    qp.log.info("]\n")
+    log.info("]\n")
     # Calculate Clebsch-Gordon coefficients:
     lm_hlf = get_lm(l_max_hlf)
-    qp.log.info(
+    log.info(
         "# Clebsch-Gordon coefficients for products of real harmonics.\n"
         "# The integer indices correspond to l*(l+1)+m for each (l,m).\n"
         "YLM_PROD: dict[tuple[int, int],"
@@ -145,18 +148,18 @@ def generate_harmonic_coefficients(l_max_hlf: int) -> None:
             ilm = ilm[sort_index]
             coeff = coeff[sort_index]
             # Format as python code:
-            qp.log.info(
+            log.info(
                 f"    ({ilm1}, {ilm2}): ("
                 f"{format_array(ilm, '{:d}')}, "
                 f"{format_array(coeff, '{:.16f}')}),"
             )
-    qp.log.info("}")
+    log.info("}")
 
 
 def main():
-    qp.rc.init()
-    assert qp.rc.n_procs == 1  # no MPI
-    qp.utils.log_config()  # after rc to suppress header messages
+    rc.init()
+    assert rc.n_procs == 1  # no MPI
+    log_config()  # after rc to suppress header messages
     generate_harmonic_coefficients(l_max_hlf=3)
 
 

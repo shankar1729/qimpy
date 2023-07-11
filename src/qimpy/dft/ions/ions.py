@@ -1,31 +1,30 @@
 from __future__ import annotations
-import qimpy as qp
-import numpy as np
-import torch
+from typing import Optional, Union
 import pathlib
 import re
-from ._ions_projectors import _get_projectors, _projectors_grad
-from ._ions_atomic import (
-    get_atomic_orbital_index,
-    get_atomic_orbitals,
-    get_atomic_density,
-)
-from ._ions_update import update, accumulate_geometry_grad, _collect_ps_matrix
+
+import numpy as np
+import torch
+
+from qimpy import TreeNode, log, rc, dft
+from qimpy.utils import fmt, cis, CpPath, CpContext
+from qimpy.lattice import Lattice
 from qimpy.symmetries._positions import LabeledPositions
-from typing import Optional, Union
+from qimpy.grid import FieldH
+from . import Pseudopotential, ions_projectors, ions_atomic, ions_update
 
 
-class Ions(qp.TreeNode):
+class Ions(TreeNode):
     """Ionic system: ionic geometry and pseudopotentials."""
 
-    lattice: qp.lattice.Lattice  #: Lattice vectors of corresponding unit cell
+    lattice: Lattice  #: Lattice vectors of corresponding unit cell
     fractional: bool  #: use fractional coordinates in input/output
     n_ions: int  #: number of ions
     n_types: int  #: number of distinct ion types
     n_ions_type: list[int]  #: number of ions of each type
     symbols: list[str]  #: symbol for each ion type
     slices: list[slice]  #: slice to get each ion type
-    pseudopotentials: list[qp.ions.Pseudopotential]  #: pseudopotential for each type
+    pseudopotentials: list[Pseudopotential]  #: pseudopotential for each type
     positions: torch.Tensor  #: fractional positions of each ion (n_ions x 3)
     velocities: Optional[torch.Tensor]  #: Cartesian velocities of each ion (n_ions x 3)
     types: torch.Tensor  #: type of each ion (n_ions, int)
@@ -33,29 +32,29 @@ class Ions(qp.TreeNode):
     M: Optional[torch.Tensor]  #: initial / Lowdin magnetic moment for each ion
     Z: torch.Tensor  #: charge of each ion type (n_types, float)
     Z_tot: float  #: total ionic charge
-    rho_tilde: qp.grid.FieldH  #: ionic charge density (uses coulomb.ion_width)
-    Vloc_tilde: qp.grid.FieldH  #: local potential due to ions (including from rho)
-    n_core_tilde: qp.grid.FieldH  #: partial core electronic density (for XC)
-    beta: qp.electrons.Wavefunction  #: pseudopotential projectors (split-basis only)
-    beta_full: Optional[qp.electrons.Wavefunction]  #: full-basis version of `beta`
+    rho_tilde: FieldH  #: ionic charge density (uses coulomb.ion_width)
+    Vloc_tilde: FieldH  #: local potential due to ions (including from rho)
+    n_core_tilde: FieldH  #: partial core electronic density (for XC)
+    beta: dft.electrons.Wavefunction  #: pseudopotential projectors (split-basis only)
+    beta_full: Optional[dft.electrons.Wavefunction]  #: full-basis version of `beta`
     beta_version: int  #: version of `beta` to invalidate cached projections
     D_all: torch.Tensor  #: nonlocal pseudopotential matrix (all atoms)
     dEtot_drho_basis: float  #: dE/d(basis function density) for Pulay correction
 
-    _get_projectors = _get_projectors
-    _projectors_grad = _projectors_grad
-    get_atomic_orbital_index = get_atomic_orbital_index
-    get_atomic_orbitals = get_atomic_orbitals
-    get_atomic_density = get_atomic_density
-    update = update
-    accumulate_geometry_grad = accumulate_geometry_grad
-    _collect_ps_matrix = _collect_ps_matrix
+    _get_projectors = ions_projectors._get_projectors
+    _projectors_grad = ions_projectors._projectors_grad
+    get_atomic_orbital_index = ions_atomic.get_atomic_orbital_index
+    get_atomic_orbitals = ions_atomic.get_atomic_orbitals
+    get_atomic_density = ions_atomic.get_atomic_density
+    update = ions_update.update
+    accumulate_geometry_grad = ions_update.accumulate_geometry_grad
+    _collect_ps_matrix = ions_update._collect_ps_matrix
 
     def __init__(
         self,
         *,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
-        lattice: qp.lattice.Lattice,
+        checkpoint_in: CpPath = CpPath(),
+        lattice: Lattice,
         fractional: bool = True,
         coordinates: Optional[list] = None,
         pseudopotentials: Optional[Union[str, list[str]]] = None,
@@ -96,7 +95,7 @@ class Ions(qp.TreeNode):
             each element takes precedence.
         """
         super().__init__()
-        qp.log.info("\n--- Initializing Ions ---")
+        log.info("\n--- Initializing Ions ---")
         self.lattice = lattice
         self.fractional = fractional
         if checkpoint_in:
@@ -115,16 +114,14 @@ class Ions(qp.TreeNode):
             for symbol in self.symbols
         ]
         self.pseudopotentials = [
-            qp.ions.Pseudopotential(filename) for filename in pseudopotential_filenames
+            Pseudopotential(filename) for filename in pseudopotential_filenames
         ]
         self.beta_version = 0
 
         # Calculate total ionic charge (needed for number of electrons):
-        self.Z = torch.tensor(
-            [ps.Z for ps in self.pseudopotentials], device=qp.rc.device
-        )
+        self.Z = torch.tensor([ps.Z for ps in self.pseudopotentials], device=rc.device)
         self.Z_tot = self.Z[self.types].sum().item()
-        qp.log.info(f"\nTotal ion charge, Z_tot: {self.Z_tot:g}")
+        log.info(f"\nTotal ion charge, Z_tot: {self.Z_tot:g}")
 
     @property
     def n_replicas(self) -> int:
@@ -166,15 +163,15 @@ class Ions(qp.TreeNode):
 
         # Convert to tensors before storing in class object:
         self.positions = (
-            torch.tensor(positions, device=qp.rc.device)
+            torch.tensor(positions, device=rc.device)
             if positions
-            else torch.empty((0, 3), device=qp.rc.device)
+            else torch.empty((0, 3), device=rc.device)
         )
         if not self.fractional:
             # Convert Cartesian input to fractional coordinates:
             self.positions = self.positions @ self.lattice.invRbasisT
         self.positions.grad = None
-        self.types = torch.tensor(types, device=qp.rc.device, dtype=torch.long)
+        self.types = torch.tensor(types, device=rc.device, dtype=torch.long)
         self.symbols = symbols
         self._set_counts_slices()  # uses types and symbols, sets n_ions, slices etc.
         self.velocities = self._process_velocities(velocities)
@@ -188,7 +185,7 @@ class Ions(qp.TreeNode):
         v_default = [0.0, 0.0, 0.0]
         return torch.tensor(
             [(v_default if (v is None) else v) for v in velocities],
-            device=qp.rc.device,
+            device=rc.device,
             dtype=torch.double,
         )
 
@@ -198,7 +195,7 @@ class Ions(qp.TreeNode):
             return None  # no charge specified
         return torch.tensor(
             [(0.0 if (Q is None) else Q) for Q in Q_initial],
-            device=qp.rc.device,
+            device=rc.device,
             dtype=torch.double,
         )
 
@@ -216,7 +213,7 @@ class Ions(qp.TreeNode):
         M_default = [0.0, 0.0, 0.0] if (M_length == 3) else 0.0
         return torch.tensor(
             [(M_default if (M is None) else M) for M in M_initial],
-            device=qp.rc.device,
+            device=rc.device,
             dtype=torch.double,
         )
 
@@ -244,7 +241,7 @@ class Ions(qp.TreeNode):
 
     def report(self, report_grad: bool) -> None:
         """Report ionic positions / attributes, and optionally forces if `report_grad`."""
-        qp.log.info(
+        log.info(
             f"{self.n_ions} total ions of {self.n_types} types; positions:"
             f"  # in {'fractional' if self.fractional else 'Cartesian [a0]'} coordinates"
         )
@@ -255,13 +252,13 @@ class Ions(qp.TreeNode):
                 if self.fractional
                 else self.positions @ self.lattice.Rbasis.T
             )
-            .to(qp.rc.cpu)
+            .to(rc.cpu)
             .numpy()
         )
-        types = self.types.to(qp.rc.cpu).numpy()
-        v = None if (self.velocities is None) else self.velocities.to(qp.rc.cpu).numpy()
-        Q = None if (self.Q is None) else self.Q.to(qp.rc.cpu).numpy()
-        M = None if (self.M is None) else self.M.to(qp.rc.cpu).numpy()
+        types = self.types.to(rc.cpu).numpy()
+        v = None if (self.velocities is None) else self.velocities.to(rc.cpu).numpy()
+        Q = None if (self.Q is None) else self.Q.to(rc.cpu).numpy()
+        M = None if (self.M is None) else self.M.to(rc.cpu).numpy()
         any_attribs = not ((v is None) and (Q is None) and (M is None))
         for i_ion, (pos_x, pos_y, pos_z) in enumerate(positions):
             if any_attribs:
@@ -273,28 +270,26 @@ class Ions(qp.TreeNode):
                 if Q is not None:
                     attribs["Q"] = f"{Q[i_ion]:+.5f}"
                 if M is not None:
-                    attribs["M"] = qp.utils.fmt(
-                        M[i_ion], floatmode="fixed", precision=5
-                    )
+                    attribs["M"] = fmt(M[i_ion], floatmode="fixed", precision=5)
                 attrib_str = str(attribs).replace("'", "")
                 attrib_str = f", {attrib_str}"
             else:
                 attrib_str = ""
             # Report:
-            qp.log.info(
+            log.info(
                 f"- [{self.symbols[types[i_ion]]},"
                 f" {pos_x:11.8f}, {pos_y:11.8f}, {pos_z:11.8f}{attrib_str}]"
             )
 
         # Report forces / stresses if requested:
         if report_grad:
-            forces = self.forces.detach().to(qp.rc.cpu).numpy()
-            qp.log.info("\nforces:  # in Cartesian [Eh/a0] coordinates")
+            forces = self.forces.detach().to(rc.cpu).numpy()
+            log.info("\nforces:  # in Cartesian [Eh/a0] coordinates")
             for type_i, (fx, fy, fz) in zip(types, forces):
-                qp.log.info(
+                log.info(
                     f"- [{self.symbols[type_i]}, {fx:11.8f}, {fy:11.8f}, {fz:11.8f}]"
                 )
-        qp.log.info("")
+        log.info("")
 
     def translation_phase(
         self, iG: torch.Tensor, atom_slice: slice = slice(None)
@@ -303,7 +298,7 @@ class Ions(qp.TreeNode):
         The result has atoms as the final dimension; summing over that
         dimension yields the structure factor corresponding to these atoms.
         """
-        return qp.utils.cis((-2 * np.pi) * (iG @ self.positions[atom_slice].T))
+        return cis((-2 * np.pi) * (iG @ self.positions[atom_slice].T))
 
     @property
     def n_projectors(self) -> int:
@@ -338,9 +333,7 @@ class Ions(qp.TreeNode):
         assert self.positions.grad is not None
         return -self.positions.grad.detach() @ self.lattice.invRbasis
 
-    def _save_checkpoint(
-        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
-    ) -> list[str]:
+    def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
         # TODO: decide how / whether pseudopotentials are checkpoint'd
         cp_path.attrs["symbols"] = ",".join(self.symbols)
         saved_list = ["symbols"]
@@ -356,7 +349,7 @@ class Ions(qp.TreeNode):
             saved_list.append(cp_path.write("M", self.M))
         return saved_list
 
-    def _read_checkpoint(self, cp_path: qp.utils.CpPath) -> None:
+    def _read_checkpoint(self, cp_path: CpPath) -> None:
         checkpoint, path = cp_path
         assert checkpoint is not None
         symbol_str = cp_path.attrs["symbols"]

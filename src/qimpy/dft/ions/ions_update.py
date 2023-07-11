@@ -1,42 +1,48 @@
 from __future__ import annotations
-import qimpy as qp
+
 import numpy as np
 import torch
+
+from qimpy import rc, dft
+from qimpy.utils import stopwatch
+from qimpy.grid import FieldH
+from qimpy.dft import ions
+from . import RadialFunction
 from .quintic_spline import Interpolator
 
 
-def update(self: qp.ions.Ions, system: qp.dft.System) -> None:
+def update(self: ions.Ions, system: dft.System) -> None:
     """Update ionic potentials, projectors and energy components.
     The grids used for the potentials are derived from `system`,
     and the energy components are stored within `system.E`.
     """
     grid = system.grid
     n_densities = system.electrons.n_densities
-    self.rho_tilde = qp.grid.FieldH(grid)  # initialize zero ionic charge
-    self.Vloc_tilde = qp.grid.FieldH(grid)  # initialize zero local potential
-    self.n_core_tilde = qp.grid.FieldH(
+    self.rho_tilde = FieldH(grid)  # initialize zero ionic charge
+    self.Vloc_tilde = FieldH(grid)  # initialize zero local potential
+    self.n_core_tilde = FieldH(
         grid, shape_batch=(n_densities,)  # initialize zero core density
     )
     if not self.n_ions:
         nk_mine = system.electrons.kpoints.division.n_mine
         n_basis_mine = system.electrons.basis.division.n_mine
-        self.beta = qp.electrons.Wavefunction(
+        self.beta = dft.electrons.Wavefunction(
             system.electrons.basis,
             coeff=torch.empty(
                 (1, nk_mine, 0, 1, n_basis_mine),
                 dtype=torch.complex128,
-                device=qp.rc.device,
+                device=rc.device,
             ),
         )
-        self.D_all = torch.empty((0, 0), dtype=torch.complex128, device=qp.rc.device)
+        self.D_all = torch.empty((0, 0), dtype=torch.complex128, device=rc.device)
         if system.electrons.need_full_projectors:
             n_basis_tot = system.electrons.basis.n_tot
-            self.beta_full = qp.electrons.Wavefunction(
+            self.beta_full = dft.electrons.Wavefunction(
                 system.electrons.basis,
                 coeff=torch.empty(
                     (1, nk_mine, 0, 1, n_basis_tot),
                     dtype=torch.complex128,
-                    device=qp.rc.device,
+                    device=rc.device,
                 ),
             )
         return  # no contributions below if no ions!
@@ -58,7 +64,7 @@ def update(self: qp.ions.Ions, system: qp.dft.System) -> None:
     self.beta_version += 1  # will auto-invalidate cached projections
 
 
-def accumulate_geometry_grad(self: qp.ions.Ions, system: qp.dft.System) -> None:
+def accumulate_geometry_grad(self: ions.Ions, system: dft.System) -> None:
     """Accumulate geometry gradient contributions of total energy.
     Each contribution is accumulated to a `grad` attribute,
     only if the corresponding `requires_grad` is enabled.
@@ -82,7 +88,7 @@ def accumulate_geometry_grad(self: qp.ions.Ions, system: qp.dft.System) -> None:
         system.coulomb.ewald(self.positions, self.Z[self.types])
         if system.lattice.requires_grad and self.dEtot_drho_basis:
             # Pulay stress:
-            eye3 = torch.eye(3, device=qp.rc.device)
+            eye3 = torch.eye(3, device=rc.device)
             system.lattice.grad += (
                 self.dEtot_drho_basis
                 * system.electrons.basis.n_avg_weighted
@@ -109,8 +115,8 @@ class _LocalTerms:
     Handle generation and gradient propagation of ionic scalar fields (local terms).
     """
 
-    @qp.utils.stopwatch(name="Ions.LocalTerms.init")
-    def __init__(self, ions: qp.ions.Ions, system: qp.dft.System):
+    @stopwatch(name="Ions.LocalTerms.init")
+    def __init__(self, ions: ions.Ions, system: dft.System):
         self.ions = ions
         self.system = system
 
@@ -120,7 +126,7 @@ class _LocalTerms:
         G = self.iG @ grid.lattice.Gbasis.T
         Gsq = G.square().sum(dim=-1)
         Gmag = Gsq.sqrt()
-        self.Ginterp = Interpolator(Gmag, qp.ions.RadialFunction.DG)
+        self.Ginterp = Interpolator(Gmag, RadialFunction.DG)
 
         # Collect structure factor and radial coefficients:
         Vloc_coeff = []
@@ -139,17 +145,17 @@ class _LocalTerms:
 
         # Extra requirements for lattice gradient:
         if ions.lattice.requires_grad:
-            self.Ginterp_prime = Interpolator(Gmag, qp.ions.RadialFunction.DG, deriv=1)
+            self.Ginterp_prime = Interpolator(Gmag, RadialFunction.DG, deriv=1)
             self.rho_kernel_prime = self.rho_kernel * (-(ion_width**2)) * Gmag
             G = G.permute(3, 0, 1, 2)  # bring gradient direction to front
-            self.stress_kernel = qp.grid.FieldH(
+            self.stress_kernel = FieldH(
                 grid,
                 data=(
                     torch.where(Gmag == 0.0, 0.0, -1.0 / Gmag) * G[None] * G[:, None]
                 ).to(dtype=torch.cdouble),
             )
 
-    @qp.utils.stopwatch(name="Ions.LocalTerms.update")
+    @stopwatch(name="Ions.LocalTerms.update")
     def update(self) -> None:
         """Update ionic densities and potentials."""
         ions = self.ions
@@ -160,7 +166,7 @@ class _LocalTerms:
         # Add long-range part of local potential from ionic charge:
         ions.Vloc_tilde += self.system.coulomb(ions.rho_tilde, correct_G0_width=True)
 
-    @qp.utils.stopwatch(name="Ions.LocalTerms.update_grad")
+    @stopwatch(name="Ions.LocalTerms.update_grad")
     def update_grad(self) -> None:
         """Accumulate local-pseudopotential force / stress contributions."""
         # Propagate long-range local-potential gradient to ionic charge gradient:
@@ -190,7 +196,7 @@ class _LocalTerms:
                 + self.Ginterp_prime(self.n_core_coeff) * ions.n_core_tilde.grad.data[0]
                 + self.rho_kernel_prime * ions.rho_tilde.grad.data
             )
-            radial_grad = qp.grid.FieldH(
+            radial_grad = FieldH(
                 self.system.grid, data=(radial_part * SF.conj()).sum(dim=0)
             )
             # Propagate to lattice gradient:
@@ -216,17 +222,15 @@ class _LocalTerms:
         for slice_i, SF_grad_i in zip(self.ions.slices, SF_grad):
             phase = self.ions.translation_phase(self.iG, slice_i)
             phase = phase.permute(3, 0, 1, 2)[:, None]  # bring atom dim to front
-            dphase_by_dpos = qp.grid.FieldH(grid, data=d_by_dpos * phase)
-            pos_grad[slice_i] += qp.grid.FieldH(grid, data=SF_grad_i) ^ dphase_by_dpos
+            dphase_by_dpos = FieldH(grid, data=d_by_dpos * phase)
+            pos_grad[slice_i] += FieldH(grid, data=SF_grad_i) ^ dphase_by_dpos
 
 
-def _collect_ps_matrix(self: qp.ions.Ions, n_spinor: int) -> None:
+def _collect_ps_matrix(self: ions.Ions, n_spinor: int) -> None:
     """Collect pseudopotential matrices across species and atoms.
     Initializes `D_all`."""
     n_proj = self.n_projectors * n_spinor
-    self.D_all = torch.zeros(
-        (n_proj, n_proj), device=qp.rc.device, dtype=torch.complex128
-    )
+    self.D_all = torch.zeros((n_proj, n_proj), device=rc.device, dtype=torch.complex128)
     i_proj_start = 0
     for i_ps, ps in enumerate(self.pseudopotentials):
         D_nlms = ps.pqn_beta.expand_matrix(ps.D, n_spinor)
@@ -239,7 +243,7 @@ def _collect_ps_matrix(self: qp.ions.Ions, n_spinor: int) -> None:
             i_proj_start = i_proj_stop
 
 
-def _update_pulay(ions: qp.ions.Ions, basis: qp.electrons.Basis) -> float:
+def _update_pulay(ions: ions.Ions, basis: dft.electrons.Basis) -> float:
     "Update `ions.dEtot_drho_basis` and return Pulay correction."
     ions.dEtot_drho_basis = sum(
         n_ions_i * ps.dE_drho_basis(basis.ke_cutoff)

@@ -1,6 +1,7 @@
 """Calculate spherical harmonics and their product expansions."""
-import qimpy.dft.ions._spherical_harmonics_data as shdata
 import torch
+
+from . import spherical_harmonics_data as shdata
 
 # List exported symbols for doc generation
 __all__ = [

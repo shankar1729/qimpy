@@ -1,19 +1,24 @@
 from __future__ import annotations
-import qimpy as qp
+
+from mpi4py import MPI
 import numpy as np
 import torch
-from mpi4py import MPI
+
+from qimpy import rc, dft
+from qimpy.utils import stopwatch, BufferView
+from qimpy.dft import ions
+from . import RadialFunction
 from .quintic_spline import Interpolator
 from .spherical_harmonics import get_harmonics_tilde, get_harmonics_tilde_and_prime
 
 
-@qp.utils.stopwatch(name="Ions.get_projectors")
+@stopwatch(name="Ions.get_projectors")
 def _get_projectors(
-    self: qp.ions.Ions,
-    basis: qp.electrons.Basis,
+    self: ions.Ions,
+    basis: dft.electrons.Basis,
     get_psi: bool = False,
     full_basis: bool = False,
-) -> qp.electrons.Wavefunction:
+) -> dft.electrons.Wavefunction:
     """Get projectors corresponding to specified `basis`.
     If get_psi is True, get atomic orbitals instead. This mode is only for
     internal use by :meth:`get_atomic_orbitals`, which does additional
@@ -26,17 +31,17 @@ def _get_projectors(
     Gk = iGk @ self.lattice.Gbasis.T  # Cartesian G + k (of this process)
     # Prepare interpolator for radial functions:
     Gk_mag = (Gk**2).sum(dim=-1).sqrt()
-    Ginterp = Interpolator(Gk_mag, qp.ions.RadialFunction.DG)
+    Ginterp = Interpolator(Gk_mag, RadialFunction.DG)
     # Prepare output:
     nk_mine, n_basis = Gk_mag.shape
     n_proj_tot = self.n_orbital_projectors if get_psi else self.n_projectors
     proj = torch.empty(
         (1, nk_mine, n_proj_tot, 1, n_basis),
         dtype=torch.complex128,
-        device=qp.rc.device,
+        device=rc.device,
     )
     if not n_proj_tot:  # no ions or all local pseudopotentials
-        return qp.electrons.Wavefunction(basis, coeff=proj)
+        return dft.electrons.Wavefunction(basis, coeff=proj)
     # Get harmonics (per l,m):
     l_max = max(ps.l_max for ps in self.pseudopotentials)
     Ylm_tilde = get_harmonics_tilde(l_max, Gk)
@@ -65,12 +70,12 @@ def _get_projectors(
     # Project out padded entries:
     pad_index = basis.pad_index if full_basis else basis.pad_index_mine
     proj[pad_index] = 0.0
-    return qp.electrons.Wavefunction(basis, coeff=proj)
+    return dft.electrons.Wavefunction(basis, coeff=proj)
 
 
-@qp.utils.stopwatch(name="Ions.projectors_grad")
+@stopwatch(name="Ions.projectors_grad")
 def _projectors_grad(
-    self: qp.ions.Ions, proj: qp.electrons.Wavefunction, is_psi: bool = False
+    self: ions.Ions, proj: dft.electrons.Wavefunction, is_psi: bool = False
 ) -> None:
     """Propagate `proj.grad` to forces and stresses.
     Each contribution is accumulated to a `grad` attribute,
@@ -90,7 +95,7 @@ def _projectors_grad(
         # Combine all terms except for the iG from d/dpos of translation phase:
         # (sum over spin and spinors here, as projectors don't depend on them)
         pp_grad = proj.coeff.conj() * proj.grad.coeff
-        d_by_dpos = qp.electrons.Wavefunction(
+        d_by_dpos = dft.electrons.Wavefunction(
             basis, coeff=(iGk * (-2j * np.pi)).transpose(1, 2)[None, :, :, None]
         )  # shape like a 3-band wavefunction
 
@@ -105,7 +110,7 @@ def _projectors_grad(
             n_proj_cur = pqn.n_tot * n_ions_i
             i_proj_stop = i_proj_start + n_proj_cur
             # Reduce pp_grad over projectors on each atom:
-            pp_grad_cur = qp.electrons.Wavefunction(
+            pp_grad_cur = dft.electrons.Wavefunction(
                 basis,
                 coeff=pp_grad[:, :, i_proj_start:i_proj_stop]
                 .view(pp_grad.shape[:2] + (n_ions_i, pqn.n_tot) + pp_grad.shape[3:])
@@ -118,7 +123,7 @@ def _projectors_grad(
             # Prepare for next species:
             i_proj_start = i_proj_stop
 
-        basis.kpoints.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(pos_grad))
+        basis.kpoints.comm.Allreduce(MPI.IN_PLACE, BufferView(pos_grad))
         self.positions.grad += pos_grad
 
     # Projector stress:
@@ -128,9 +133,9 @@ def _projectors_grad(
         Gk_mag = Gk.norm(dim=-1)
         Gk_hat = Gk * torch.where(Gk_mag == 0.0, 0.0, 1.0 / Gk_mag).unsqueeze(2)
         Gk_hat = Gk_hat.permute(2, 0, 1)[:, None]  # 3,1,k,G
-        Ginterp = Interpolator(Gk_mag, qp.ions.RadialFunction.DG)
-        Ginterp_prime = Interpolator(Gk_mag, qp.ions.RadialFunction.DG, deriv=1)
-        minus_Gk = qp.electrons.Wavefunction(
+        Ginterp = Interpolator(Gk_mag, RadialFunction.DG)
+        Ginterp_prime = Interpolator(Gk_mag, RadialFunction.DG, deriv=1)
+        minus_Gk = dft.electrons.Wavefunction(
             basis, coeff=(-Gk).transpose(1, 2)[None, :, :, None].to(torch.cdouble)
         )  # shape like a 3-band wavefunction
 
@@ -161,7 +166,7 @@ def _projectors_grad(
                 Gk_hat * (Ginterp_prime(f_t_coeff)[pqn.i_rf] * Ylm_tilde[pqn.i_lm])
                 + Ginterp(f_t_coeff)[pqn.i_rf] * Ylm_tilde_prime[:, pqn.i_lm]
             )  # 3,i_proj,k,G
-            Gk_grad = qp.electrons.Wavefunction(
+            Gk_grad = dft.electrons.Wavefunction(
                 basis,
                 coeff=(
                     p_grad_atom.conj() * proj_atom_prime.transpose(1, 2).unsqueeze(3)
@@ -172,5 +177,5 @@ def _projectors_grad(
             # Prepare for next species:
             i_proj_start = i_proj_stop
 
-        basis.kpoints.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(lattice_grad))
+        basis.kpoints.comm.Allreduce(MPI.IN_PLACE, BufferView(lattice_grad))
         self.lattice.grad += lattice_grad
