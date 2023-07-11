@@ -1,8 +1,11 @@
 from __future__ import annotations
-import qimpy as qp
+from typing import Optional
+
 import numpy as np
 import torch
-from typing import Optional
+
+from qimpy.utils import stopwatch
+from qimpy.dft import electrons
 
 
 def _randn(x: torch.Tensor) -> torch.Tensor:
@@ -21,9 +24,9 @@ def _randn(x: torch.Tensor) -> torch.Tensor:
     )  # Phase
 
 
-@qp.utils.stopwatch(name="Wavefunction.randomize")
+@stopwatch(name="Wavefunction.randomize")
 def _randomize(
-    self: qp.electrons.Wavefunction,
+    self: electrons.Wavefunction,
     seed: int = 0,
     b_start: int = 0,
     b_stop: Optional[int] = None,
@@ -122,9 +125,9 @@ def _randomize(
     coeff_cur *= 1.0 / (1.0 + ((4.0 / 3) * ke) ** 6)  # damp-out high-KE coefficients
 
 
-@qp.utils.stopwatch(name="Wavefunction.randomize_sel")
+@stopwatch(name="Wavefunction.randomize_sel")
 def _randomize_selected(
-    self: qp.electrons.Wavefunction,
+    self: electrons.Wavefunction,
     i_spin: torch.Tensor,
     i_k: torch.Tensor,
     i_band: torch.Tensor,

@@ -1,19 +1,21 @@
 from __future__ import annotations
-import qimpy as qp
-import torch
 from typing import Union
+
+import torch
+
+from qimpy.dft import electrons
 
 
 def _mul(
-    self: qp.electrons.Wavefunction, scale: Union[float, torch.Tensor]
-) -> qp.electrons.Wavefunction:
+    self: electrons.Wavefunction, scale: Union[float, torch.Tensor]
+) -> electrons.Wavefunction:
     is_suitable = is_band_scale = isinstance(scale, float)
     if isinstance(scale, torch.Tensor) and (len(scale.shape) == 5):
         is_suitable = True
         is_band_scale = scale.shape[-2:] == (1, 1)
     if not is_suitable:
         return NotImplemented
-    result = qp.electrons.Wavefunction(
+    result = electrons.Wavefunction(
         self.basis, coeff=self.coeff * scale, band_division=self.band_division
     )
     if is_band_scale and self._proj_is_valid():
@@ -24,8 +26,8 @@ def _mul(
 
 
 def _imul(
-    self: qp.electrons.Wavefunction, scale: Union[float, torch.Tensor]
-) -> qp.electrons.Wavefunction:
+    self: electrons.Wavefunction, scale: Union[float, torch.Tensor]
+) -> electrons.Wavefunction:
     is_suitable = is_band_scale = isinstance(scale, float)
     if isinstance(scale, torch.Tensor) and (len(scale.shape) == 5):
         is_suitable = True
@@ -42,12 +44,12 @@ def _imul(
 
 
 def _add(
-    self: qp.electrons.Wavefunction, other: qp.electrons.Wavefunction
-) -> qp.electrons.Wavefunction:
-    if not isinstance(other, qp.electrons.Wavefunction):
+    self: electrons.Wavefunction, other: electrons.Wavefunction
+) -> electrons.Wavefunction:
+    if not isinstance(other, electrons.Wavefunction):
         return NotImplemented
     assert self.basis is other.basis
-    result = qp.electrons.Wavefunction(
+    result = electrons.Wavefunction(
         self.basis, coeff=(self.coeff + other.coeff), band_division=self.band_division
     )
     if self._proj_is_valid() and other._proj_is_valid():
@@ -59,9 +61,9 @@ def _add(
 
 
 def _iadd(
-    self: qp.electrons.Wavefunction, other: qp.electrons.Wavefunction
-) -> qp.electrons.Wavefunction:
-    if not isinstance(other, qp.electrons.Wavefunction):
+    self: electrons.Wavefunction, other: electrons.Wavefunction
+) -> electrons.Wavefunction:
+    if not isinstance(other, electrons.Wavefunction):
         return NotImplemented
     assert self.basis is other.basis
     self.coeff += other.coeff
@@ -75,12 +77,12 @@ def _iadd(
 
 
 def _sub(
-    self: qp.electrons.Wavefunction, other: qp.electrons.Wavefunction
-) -> qp.electrons.Wavefunction:
-    if not isinstance(other, qp.electrons.Wavefunction):
+    self: electrons.Wavefunction, other: electrons.Wavefunction
+) -> electrons.Wavefunction:
+    if not isinstance(other, electrons.Wavefunction):
         return NotImplemented
     assert self.basis is other.basis
-    result = qp.electrons.Wavefunction(
+    result = electrons.Wavefunction(
         self.basis, coeff=(self.coeff - other.coeff), band_division=self.band_division
     )
     if self._proj_is_valid() and other._proj_is_valid():
@@ -92,9 +94,9 @@ def _sub(
 
 
 def _isub(
-    self: qp.electrons.Wavefunction, other: qp.electrons.Wavefunction
-) -> qp.electrons.Wavefunction:
-    if not isinstance(other, qp.electrons.Wavefunction):
+    self: electrons.Wavefunction, other: electrons.Wavefunction
+) -> electrons.Wavefunction:
+    if not isinstance(other, electrons.Wavefunction):
         return NotImplemented
     assert self.basis is other.basis
     self.coeff -= other.coeff

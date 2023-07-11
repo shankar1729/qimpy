@@ -1,21 +1,30 @@
 from __future__ import annotations
-import qimpy as qp
+
 import numpy as np
 import torch
 from mpi4py import MPI
 
+from qimpy.utils import (
+    stopwatch,
+    Waitable,
+    Waitless,
+    globalreduce,
+    abs_squared,
+    Iallreduce_in_place,
+    ortho_matrix,
+)
+from qimpy.dft import electrons
 
-def _norm(self: qp.electrons.Wavefunction) -> float:
+
+def _norm(self: electrons.Wavefunction) -> float:
     """Return overall norm of wavefunctions"""
-    return np.sqrt(
-        qp.utils.globalreduce.sum(qp.utils.abs_squared(self.coeff), self.basis.comm)
-    )
+    return np.sqrt(globalreduce.sum(abs_squared(self.coeff), self.basis.comm))
 
 
-@qp.utils.stopwatch(name="Wavefunction.dot")
+@stopwatch(name="Wavefunction.dot")
 def _dot(
-    self: qp.electrons.Wavefunction, other: qp.electrons.Wavefunction
-) -> qp.utils.Waitable[torch.Tensor]:
+    self: electrons.Wavefunction, other: electrons.Wavefunction
+) -> Waitable[torch.Tensor]:
     """Inner (dot) product of `self` with `other`.
     For convenience, this can also be invoked as `self` ^ `other`.
     Note that this means xor(`self`, `other`) also computes wavefunction dot
@@ -44,7 +53,7 @@ def _dot(
         of the non-spinorial one is effectively doubled,
         including spinor components in adjacent entries.
     """
-    if not isinstance(other, qp.electrons.Wavefunction):
+    if not isinstance(other, electrons.Wavefunction):
         return NotImplemented
     basis = self.basis
     assert basis is other.basis
@@ -99,14 +108,14 @@ def _dot(
     # Reduce asynchronously if needed:
     need_reduce = (basis.division.n_procs > 1) and (not full_basis)
     if need_reduce:
-        return qp.utils.Iallreduce_in_place(basis.comm, result, op=MPI.SUM)
+        return Iallreduce_in_place(basis.comm, result, op=MPI.SUM)
     else:
-        return qp.utils.Waitless(result)  # Result available now
+        return Waitless(result)  # Result available now
 
 
 def _dot_O(
-    self: qp.electrons.Wavefunction, other: qp.electrons.Wavefunction
-) -> qp.utils.Waitable[torch.Tensor]:
+    self: electrons.Wavefunction, other: electrons.Wavefunction
+) -> Waitable[torch.Tensor]:
     """Dot product of `self` with O(`other`).
     Here, the overlap operator O is identity for norm-conserving
     pseudopotentials, but includes augmentation for ultrasoft
@@ -123,7 +132,7 @@ def _dot_O(
     return result
 
 
-def _overlap(self: qp.electrons.Wavefunction) -> qp.electrons.Wavefunction:
+def _overlap(self: electrons.Wavefunction) -> electrons.Wavefunction:
     """Return wavefunction with overlap operator applied.
     This is identity and returns a view of the original wavefunction
     for norm-conserving pseudopotentials, but includes augmentation terms
@@ -131,10 +140,8 @@ def _overlap(self: qp.electrons.Wavefunction) -> qp.electrons.Wavefunction:
     return self  # TODO: augment overlap here when adding ultrasoft / PAW
 
 
-@qp.utils.stopwatch(name="Wavefunction.matmul")
-def _matmul(
-    self: qp.electrons.Wavefunction, mat: torch.Tensor
-) -> qp.electrons.Wavefunction:
+@stopwatch(name="Wavefunction.matmul")
+def _matmul(self: electrons.Wavefunction, mat: torch.Tensor) -> electrons.Wavefunction:
     """Compute a matrix transformation (such as rotation) along the band
     dimension of wavefunction (self). For convenience, this can also be
     invoked as self @ other, using the standard matrix multiply operator.
@@ -181,7 +188,7 @@ def _matmul(
         C_out.shape[:-2]  # unmerge spinor from bands / basis
         + (n_bands_out, n_spinor_out, n_basis)
     )
-    result = qp.electrons.Wavefunction(
+    result = electrons.Wavefunction(
         self.basis, coeff=C_out, band_division=self.band_division
     )
     if self._proj_is_valid() and (n_spinor_in == n_spinor_out):
@@ -190,9 +197,9 @@ def _matmul(
     return result
 
 
-def _orthonormalize(self: qp.electrons.Wavefunction) -> qp.electrons.Wavefunction:
+def _orthonormalize(self: electrons.Wavefunction) -> electrons.Wavefunction:
     """Return orthonormalized version of wavefunctions.
     This internally uses Gram-Schmidt scheme using a Cholesky decomposition,
     which is not differentiable. Use a symmetric orthonormalization scheme
     using :meth:`qimpy.utils.ortho_matrix` for a differentiable scheme."""
-    return self @ qp.utils.ortho_matrix(self.dot_O(self).wait(), use_cholesky=True)
+    return self @ ortho_matrix(self.dot_O(self).wait(), use_cholesky=True)

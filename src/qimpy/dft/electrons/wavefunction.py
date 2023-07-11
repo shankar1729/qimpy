@@ -1,18 +1,22 @@
 from __future__ import annotations
-import qimpy as qp
-import torch
-from ._wavefunction_init import _randomize, _randomize_selected
-from ._wavefunction_split import _split_bands, _split_basis
-from ._wavefunction_arithmetic import _mul, _imul, _add, _iadd, _sub, _isub
-from ._wavefunction_slice import _getitem, _setitem, _cat
-from ._wavefunction_dot import _norm, _dot, _dot_O, _overlap, _matmul, _orthonormalize
 from typing import Optional
 
+import torch
 
-class Wavefunction(qp.utils.Gradable["Wavefunction"]):
+from qimpy import rc
+from qimpy.utils import Gradable, TaskDivision, CpPath, abs_squared
+from . import Basis
+from .wavefunction_init import _randomize, _randomize_selected
+from .wavefunction_split import _split_bands, _split_basis
+from .wavefunction_arithmetic import _mul, _imul, _add, _iadd, _sub, _isub
+from .wavefunction_slice import _getitem, _setitem, _cat
+from .wavefunction_dot import _norm, _dot, _dot_O, _overlap, _matmul, _orthonormalize
+
+
+class Wavefunction(Gradable["Wavefunction"]):
     """Electronic wavefunctions including coefficients and projections"""
 
-    basis: qp.electrons.Basis  #: Corresponding basis
+    basis: Basis  #: Corresponding basis
 
     #: Wavefunction coefficients (n_spins x nk x n_bands x n_spinor x n_basis)
     coeff: torch.Tensor
@@ -26,14 +30,14 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
 
     #: If present, wavefunctions are split along bands instead of
     #: along the 'home position' of split along basis.
-    band_division: Optional[qp.utils.TaskDivision]
+    band_division: Optional[TaskDivision]
 
     def __init__(
         self,
-        basis: qp.electrons.Basis,
+        basis: Basis,
         *,
         coeff: Optional[torch.Tensor] = None,
-        band_division: Optional[qp.utils.TaskDivision] = None,
+        band_division: Optional[TaskDivision] = None,
         n_bands: int = 0,
         n_spins: int = 0,
         n_spinor: int = 0,
@@ -83,13 +87,13 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
             self.coeff = torch.zeros(
                 (n_spins, nk_mine, n_bands, n_spinor, n_basis),
                 dtype=torch.cdouble,
-                device=qp.rc.device,
+                device=rc.device,
             )
             # Projections of zero wavefunctions are always zero:
             self._proj = torch.zeros(
                 (n_spins, nk_mine, basis.ions.n_projectors, n_bands),
                 dtype=torch.cdouble,
-                device=qp.rc.device,
+                device=rc.device,
             )
             self._proj_version = basis.ions.beta_version
         else:
@@ -124,7 +128,7 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
         """Check whether cached projections are still valid."""
         return self._proj_version == self.basis.ions.beta_version
 
-    def zeros_like(self, n_bands: int = 0) -> qp.electrons.Wavefunction:
+    def zeros_like(self, n_bands: int = 0) -> Wavefunction:
         """Create a zero Wavefunction similar to the present one.
         Optionally override the number of bands with `n_bands`."""
         n_bands = n_bands if n_bands else self.coeff.shape[2]
@@ -136,7 +140,7 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
             n_spinor=self.coeff.shape[3],
         )
 
-    def clone(self) -> qp.electrons.Wavefunction:
+    def clone(self) -> Wavefunction:
         """Create an independent copy (not a view / reference)."""
         result = Wavefunction(
             self.basis,
@@ -153,7 +157,7 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
         """Get number of bands in wavefunction"""
         return self.coeff.shape[2]
 
-    def read(self, cp_path: qp.utils.CpPath) -> int:
+    def read(self, cp_path: CpPath) -> int:
         """Read wavefunctions from `cp_path`. Return number of bands read."""
         checkpoint, path = cp_path
         assert checkpoint is not None
@@ -177,7 +181,7 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
         self._proj_invalidate()
         return n_bands_in
 
-    def write(self, cp_path: qp.utils.CpPath) -> None:
+    def write(self, cp_path: CpPath) -> None:
         """Write wavefunctions to `cp_path`."""
         checkpoint, path = cp_path
         assert checkpoint is not None
@@ -216,11 +220,11 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
         else:
             return self
 
-    def band_norm(self: qp.electrons.Wavefunction) -> torch.Tensor:
+    def band_norm(self: Wavefunction) -> torch.Tensor:
         """Return per-band norm of wavefunctions."""
         assert not self.band_division
         basis = self.basis
-        coeff_sq = qp.utils.abs_squared(self.coeff)
+        coeff_sq = abs_squared(self.coeff)
         if basis.real_wavefunctions:
             result = (coeff_sq @ basis.real.Gweight_mine).sum(dim=-1)
         else:
@@ -228,18 +232,18 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
         basis.allreduce_in_place(result)
         return result.sqrt()
 
-    def band_ke(self: qp.electrons.Wavefunction) -> torch.Tensor:
+    def band_ke(self: Wavefunction) -> torch.Tensor:
         """Return per-band kinetic energy of wavefunctions."""
         assert not self.band_division
         basis = self.basis
         ke = basis.get_ke(basis.mine)
         if basis.real_wavefunctions:
             ke *= basis.real.Gweight_mine
-        result = torch.einsum("skbxg, kg -> skb", qp.utils.abs_squared(self.coeff), ke)
+        result = torch.einsum("skbxg, kg -> skb", abs_squared(self.coeff), ke)
         basis.allreduce_in_place(result)
         return result
 
-    def band_spin(self: qp.electrons.Wavefunction) -> torch.Tensor:
+    def band_spin(self: Wavefunction) -> torch.Tensor:
         """Return per-band spin of wavefunctions (must be spinorial).
         Result dimensions are 3 x 1 x nk x n_bands."""
         assert not self.band_division
@@ -254,7 +258,7 @@ class Wavefunction(qp.utils.Gradable["Wavefunction"]):
             )
         )  # Convert spin density matrix per band (rho_s) to spin vector per band
 
-    def constrain(self: qp.electrons.Wavefunction) -> None:
+    def constrain(self: Wavefunction) -> None:
         """Enforce basis constraints on wavefunction coefficients.
         This includes setting padded coefficients to zero, and imposing
         Hermitian symmetry in Gz = 0 coefficients for real wavefunctions.

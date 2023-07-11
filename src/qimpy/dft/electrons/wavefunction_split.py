@@ -1,20 +1,24 @@
 from __future__ import annotations
-import qimpy as qp
+from dataclasses import dataclass
+
 import numpy as np
 import torch
-from dataclasses import dataclass
 from mpi4py import MPI
+
+from qimpy import rc
+from qimpy.utils import Waitable, Waitless, TaskDivision, BufferView
+from qimpy.dft import electrons
 
 
 def _split_bands(
-    self: qp.electrons.Wavefunction,
-) -> qp.utils.Waitable[qp.electrons.Wavefunction]:
+    self: electrons.Wavefunction,
+) -> Waitable[electrons.Wavefunction]:
     """Return wavefunction split by bands, bringing all basis coefficients of
     each band together on some process. Note that the result may be a view if
     there is only one process, or if the wavefunction is already split by bands
     """
     if (self.basis.division.n_procs == 1) or self.band_division:
-        return qp.utils.Waitless(self)  # already in required configuration
+        return Waitless(self)  # already in required configuration
     basis = self.basis
 
     # Bring band-dimension to outermost (so that send chunks are contiguous):
@@ -23,7 +27,7 @@ def _split_bands(
     n_per_band = np.prod(send_coeff.shape[1:])
 
     # All-to-all MPI rearrangement:
-    band_division = qp.utils.TaskDivision(
+    band_division = TaskDivision(
         n_tot=self.coeff.shape[2],
         n_procs=basis.division.n_procs,
         i_proc=basis.division.i_proc,
@@ -32,16 +36,16 @@ def _split_bands(
     send_offset = band_division.n_prev[:-1] * n_per_band
     recv_counts = band_division.n_mine * n_per_band
     recv_offset = np.arange(band_division.n_procs) * recv_counts
-    mpi_type = qp.rc.mpi_type[send_coeff.dtype]
+    mpi_type = rc.mpi_type[send_coeff.dtype]
     recv_coeff = torch.zeros(
         (band_division.n_procs, band_division.n_mine) + send_coeff.shape[1:],
         dtype=send_coeff.dtype,
         device=send_coeff.device,
     )
-    qp.rc.current_stream_synchronize()
+    rc.current_stream_synchronize()
     request = basis.comm.Ialltoallv(
-        (qp.utils.BufferView(send_coeff), send_counts, send_offset, mpi_type),
-        (qp.utils.BufferView(recv_coeff), recv_counts, recv_offset, mpi_type),
+        (BufferView(send_coeff), send_counts, send_offset, mpi_type),
+        (BufferView(recv_coeff), recv_counts, recv_offset, mpi_type),
     )
     return SplitBandsWait(request, send_coeff, recv_coeff, basis, band_division)
 
@@ -53,17 +57,17 @@ class SplitBandsWait:
     request: MPI.Request
     send_coeff: torch.Tensor
     recv_coeff: torch.Tensor
-    basis: qp.electrons.Basis
-    band_division: qp.utils.TaskDivision
+    basis: electrons.Basis
+    band_division: TaskDivision
 
-    def wait(self) -> qp.electrons.Wavefunction:
+    def wait(self) -> electrons.Wavefunction:
         """Complete `Wavefunction.split_bands` after waiting on MPI transfers."""
         # Wait for MPI completion:
         self.request.Wait()
         del self.send_coeff
         # Unscramble data to bring all basis for each band together:
         # --- before this data order is (proc, band, spin, k, spinor, basis)
-        result = qp.electrons.Wavefunction(
+        result = electrons.Wavefunction(
             self.basis,
             coeff=self.recv_coeff.permute(2, 3, 1, 4, 0, 5).flatten(4, 5),
             band_division=self.band_division,
@@ -73,14 +77,14 @@ class SplitBandsWait:
 
 
 def _split_basis(
-    self: qp.electrons.Wavefunction,
-) -> qp.utils.Waitable[qp.electrons.Wavefunction]:
+    self: electrons.Wavefunction,
+) -> Waitable[electrons.Wavefunction]:
     """Return wavefunction split by basis, bringing all bands of each basis
     coefficient together on some process. Note that the result may be a view if
     there is only one process, or if the wavefunction is already split by basis
     """
     if (self.basis.division.n_procs == 1) or (self.band_division is None):
-        return qp.utils.Waitless(self)  # already in required configuration
+        return Waitless(self)  # already in required configuration
     basis = self.basis
 
     # Split basis dimension to proc and basis-each, bring proc dimension
@@ -101,16 +105,16 @@ def _split_basis(
     send_offset = np.arange(band_division.n_procs) * send_counts
     recv_counts = np.diff(band_division.n_prev) * n_per_band
     recv_offset = band_division.n_prev[:-1] * n_per_band
-    mpi_type = qp.rc.mpi_type[send_coeff.dtype]
+    mpi_type = rc.mpi_type[send_coeff.dtype]
     recv_coeff = torch.zeros(
         (band_division.n_tot,) + send_coeff.shape[2:],
         dtype=send_coeff.dtype,
         device=send_coeff.device,
     )
-    qp.rc.current_stream_synchronize()
+    rc.current_stream_synchronize()
     request = basis.comm.Ialltoallv(
-        (qp.utils.BufferView(send_coeff), send_counts, send_offset, mpi_type),
-        (qp.utils.BufferView(recv_coeff), recv_counts, recv_offset, mpi_type),
+        (BufferView(send_coeff), send_counts, send_offset, mpi_type),
+        (BufferView(recv_coeff), recv_counts, recv_offset, mpi_type),
     )
     return SplitBasisWait(request, send_coeff, recv_coeff, basis)
 
@@ -122,16 +126,16 @@ class SplitBasisWait:
     request: MPI.Request
     send_coeff: torch.Tensor
     recv_coeff: torch.Tensor
-    basis: qp.electrons.Basis
+    basis: electrons.Basis
 
-    def wait(self) -> qp.electrons.Wavefunction:
+    def wait(self) -> electrons.Wavefunction:
         """Complete `Wavefunction.split_basis` after waiting on MPI transfers."""
         # Wait for MPI completion:
         self.request.Wait()
         del self.send_coeff
         # Move band index into correct position (already together):
         # --- before this data order is (band, spin, k, spinor, basis)
-        result = qp.electrons.Wavefunction(
+        result = electrons.Wavefunction(
             self.basis, coeff=self.recv_coeff.permute(1, 2, 0, 3, 4)
         )
         del self.recv_coeff
