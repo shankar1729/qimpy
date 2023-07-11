@@ -1,10 +1,10 @@
 from __future__ import annotations
-import qimpy as qp
+
+from qimpy import dft
+from . import Wavefunction
 
 
-def _hamiltonian(
-    self: qp.electrons.Electrons, C: qp.electrons.Wavefunction
-) -> qp.electrons.Wavefunction:
+def _hamiltonian(self: dft.electrons.Electrons, C: Wavefunction) -> Wavefunction:
     """Apply electronic Hamiltonian on wavefunction `C`"""
     basis = C.basis
     ions = basis.ions

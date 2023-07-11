@@ -2,10 +2,11 @@
 # List exported symbols for doc generation
 __all__ = ["x_pbe", "c_pbe"]
 
-from .functional import Functional
-from .lda import get_rs, _C_PW, SpinInterpolate1, SpinInterpolate3
 import numpy as np
 import torch
+
+from .functional import Functional
+from .lda import get_rs, _C_PW, SpinInterpolate1, SpinInterpolate3
 
 
 def x_pbe(sol: bool, scale_factor: float = 1.0) -> Functional:

@@ -1,16 +1,20 @@
-import qimpy as qp
+from typing import Union
+
 import numpy as np
 import torch
-from . import lda, gga
-from .functional import Functional, get_libxc_functional_names, FunctionalsLibxc
-from typing import Union
 from mpi4py import MPI
+
+from qimpy import log, TreeNode
+from qimpy.utils import CpPath, StopWatch
+from qimpy.grid import FieldH, FieldR
+from .functional import Functional, get_libxc_functional_names, FunctionalsLibxc
+from . import lda, gga
 
 
 N_CUT = 1e-16  # Regularization threshold for densities
 
 
-class XC(qp.TreeNode):
+class XC(TreeNode):
     """Exchange-correlation functional."""
 
     _functionals: list[Functional]  #: list of functionals that add up to XC
@@ -22,7 +26,7 @@ class XC(qp.TreeNode):
         self,
         *,
         spin_polarized: bool,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        checkpoint_in: CpPath = CpPath(),
         functional: Union[str, list[str]] = "gga-pbe",
     ):
         """Initialize exchange-correlation functional.
@@ -53,7 +57,7 @@ class XC(qp.TreeNode):
             correlation to add up to 1.
         """
         super().__init__()
-        qp.log.info("\nInitializing XC:")
+        log.info("\nInitializing XC:")
         if isinstance(functional, str):
             functional = functional.split(" ")
 
@@ -81,7 +85,7 @@ class XC(qp.TreeNode):
         self.need_lap = any(func.needs_lap for func in self._functionals)
         self.need_tau = any(func.needs_tau for func in self._functionals)
 
-    def __call__(self, n_tilde: qp.grid.FieldH, tau_tilde: qp.grid.FieldH) -> float:
+    def __call__(self, n_tilde: FieldH, tau_tilde: FieldH) -> float:
         """Compute exchange-correlation energy and potential.
         Here, `n_tilde` and `tau_tilde` are the electron density and KE density
         (used if `need_tau` is True) in reciprocal space.
@@ -89,7 +93,7 @@ class XC(qp.TreeNode):
         within the corresponding `grad` attributes if `required_grad` is True.
         Presently, either both gradients or no gradients should be requested."""
         grid = n_tilde.grid
-        watch = qp.utils.StopWatch("xc.prepare")
+        watch = StopWatch("xc.prepare")
         n_in = ~n_tilde
         n_densities = n_in.data.shape[0]
 
@@ -100,7 +104,7 @@ class XC(qp.TreeNode):
             Mhat = Mvec * MmagInv  # regularized unit vector
 
         # Get required quantities in local-spin basis:
-        def from_magnetization(X_in: qp.grid.FieldR) -> torch.Tensor:
+        def from_magnetization(X_in: FieldR) -> torch.Tensor:
             """Transform a density-like quantity `x` from magnetization to up/dn basis.
             First dimension of `X_in` must be the spin dimension."""
             x_in = X_in.data
@@ -153,7 +157,7 @@ class XC(qp.TreeNode):
         watch.stop()
 
         # Evaluate functionals:
-        watch = qp.utils.StopWatch("xc.functional")
+        watch = StopWatch("xc.functional")
         requires_grad = n_tilde.requires_grad
         assert requires_grad == tau_tilde.requires_grad  # compute all or no gradients
         if grid.lattice.requires_grad:
@@ -169,16 +173,16 @@ class XC(qp.TreeNode):
         watch.stop()
 
         # Gradient propagation for potential:
-        def from_magnetization_grad(x: torch.Tensor, X_in: qp.grid.FieldR) -> None:
+        def from_magnetization_grad(x: torch.Tensor, X_in: FieldR) -> None:
             """Gradient propagation corresponding to `from_magnetization`.
             Sets the gradient contribution to `X_in.grad` from `x.grad`.
             In vector-spin mode, this also contributes to `n_in.grad`, even
             when `x` is not `n` because `n` determines `Mhat`."""
             assert x.grad is not None
             if n_densities == 1:
-                X_in.grad = qp.grid.FieldR(grid, data=x.grad)
+                X_in.grad = FieldR(grid, data=x.grad)
                 return
-            X_in.grad = qp.grid.FieldR(
+            X_in.grad = FieldR(
                 grid,
                 data=torch.empty(
                     (n_densities,) + x.shape[1:], dtype=x.dtype, device=x.device
@@ -207,7 +211,7 @@ class XC(qp.TreeNode):
                 X_in.grad.data[1] = x_diff_grad
 
         if requires_grad:
-            watch = qp.utils.StopWatch("xc.propagate_grad")
+            watch = StopWatch("xc.propagate_grad")
             assert n.grad is not None
             n.grad[clamp_sel] = 0.0  # account for any clamping
             from_magnetization_grad(n, n_in)
@@ -314,17 +318,17 @@ def _get_functionals(name: str, scale_factor: float) -> list[Union[Functional, s
         libxc_names = get_libxc_functional_names()
         # --- List available functionals if requested:
         if key == "list":
-            qp.log.info(
+            log.info(
                 "\nAvailable internal XC functionals:\n"
                 f"\n{sorted(INTERNAL_FUNCTIONAL_NAMES)}\n"
             )
             if libxc_names:
-                qp.log.info(
+                log.info(
                     "\nAvailable Libxc functionals:\n"
                     f"\n{np.array(sorted(libxc_names))}\n"
                 )
             else:
-                qp.log.info("\nLibxc not available.")
+                log.info("\nLibxc not available.")
             exit()
         # --- Try the specified name directly first:
         if key in libxc_names:

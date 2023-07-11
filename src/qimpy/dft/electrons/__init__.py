@@ -24,4 +24,4 @@ from .chefsi import CheFSI
 from .scf import SCF
 from .lcao import LCAO
 from . import xc
-from ._electrons import Electrons
+from .electrons import Electrons

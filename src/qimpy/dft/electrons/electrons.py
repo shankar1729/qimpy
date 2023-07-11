@@ -32,7 +32,7 @@ from . import (
     Wavefunction,
 )
 from .xc import XC
-from ._hamiltonian import _hamiltonian
+from .hamiltonian import _hamiltonian
 
 
 class Electrons(TreeNode):

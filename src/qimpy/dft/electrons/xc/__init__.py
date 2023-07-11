@@ -1,8 +1,6 @@
 """Exchange-correlation functional."""
 # List exported symbols for doc generation
-__all__ = ["XC", "functional", "lda", "gga"]
+__all__ = ("functional", "lda", "gga", "XC")
 
-from ._xc import XC
-from . import functional
-from . import lda
-from . import gga
+from . import functional, lda, gga
+from .xc import XC

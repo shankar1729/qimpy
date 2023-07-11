@@ -1,19 +1,21 @@
 """Internal interface for XC functionals."""
 from __future__ import annotations
-import qimpy as qp
+from typing import Set, Callable, Optional
+from dataclasses import dataclass
+import functools
+
 import numpy as np
 import torch
-import functools
-from dataclasses import dataclass
-from typing import Set, Callable, Optional
+
+from qimpy import rc, log
 
 # List exported symbols for doc generation
-__all__ = [
+__all__ = (
     "Functional",
     "LIBXC_AVAILABLE",
     "get_libxc_functional_names",
     "FunctionalsLibxc",
-]
+)
 
 try:
     import pylibxc
@@ -53,7 +55,7 @@ class Functional:
                 if (self.scale_factor == 1.0)
                 else f" (scaled by {self.scale_factor})"
             )
-            qp.log.info(f"  {self.name} functional{scale_str}.")
+            log.info(f"  {self.name} functional{scale_str}.")
 
     def __call__(
         self,
@@ -184,7 +186,7 @@ class _FunctionalLibxc:
         self.functional = func
         name_str = f"{func.get_name()} {family_str} {kind_str}"
         scale_str = "" if (scale_factor == 1.0) else f" (scaled by {scale_factor})"
-        qp.log.info(f"  {name_str} functional from Libxc{scale_str}.")
+        log.info(f"  {name_str} functional from Libxc{scale_str}.")
 
         # List of outputs that will be generated:
         self.output_labels = ["vrho"]  # potential always generated
@@ -242,14 +244,14 @@ class FunctionalsLibxc(Functional):
 
     def to_xc(self, v: torch.Tensor) -> np.ndarray:
         """Convert data array from internal to XC form."""
-        return v.to(qp.rc.cpu).flatten(1).T.contiguous().numpy()
+        return v.to(rc.cpu).flatten(1).T.contiguous().numpy()
 
     def from_xc(self, v: np.ndarray, v_ref: torch.Tensor) -> torch.Tensor:
         """Convert data array from XC to internal form.
         `v_ref` provides the reference shape for the output."""
         in_shape = v_ref.shape[1:] + v_ref.shape[:1]  # spin dim last in XC
         out = torch.from_numpy(v).contiguous().view(in_shape)
-        return out.permute(3, 0, 1, 2).to(qp.rc.device)  # spin first now
+        return out.permute(3, 0, 1, 2).to(rc.device)  # spin first now
 
     def __call__(
         self,

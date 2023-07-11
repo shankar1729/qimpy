@@ -2,9 +2,10 @@
 # List exported symbols for doc generation
 __all__ = ["ke_tf", "x_slater", "c_pz", "c_pw", "c_vwn", "xc_teter"]
 
-from .functional import Functional
 import numpy as np
 import torch
+
+from .functional import Functional
 
 
 def ke_tf(scale_factor: float = 1.0) -> Functional:
