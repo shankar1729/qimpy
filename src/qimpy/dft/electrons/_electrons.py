@@ -1,60 +1,88 @@
 from __future__ import annotations
-import qimpy as qp
+from typing import Union, Optional
+
 import numpy as np
 import torch
-from ._hamiltonian import _hamiltonian
-from typing import Union, Optional
 from mpi4py import MPI
 
+from qimpy import log, rc, TreeNode, dft
+from qimpy.utils import (
+    ProcessGrid,
+    CpPath,
+    CpContext,
+    Checkpoint,
+    globalreduce,
+    BufferView,
+    abs_squared,
+)
+from qimpy.lattice import Lattice
+from qimpy.symmetries import Symmetries
+from qimpy.grid import FieldH, FieldR
+from qimpy.dft.ions import Ions
+from . import (
+    Kpoints,
+    Kmesh,
+    Kpath,
+    Fillings,
+    Basis,
+    Davidson,
+    CheFSI,
+    SCF,
+    LCAO,
+    Wavefunction,
+)
+from .xc import XC
+from ._hamiltonian import _hamiltonian
 
-class Electrons(qp.TreeNode):
+
+class Electrons(TreeNode):
     """Electronic subsystem"""
 
     comm: MPI.Comm  #: Overall electronic communicator (k-points and bands/basis)
-    kpoints: qp.electrons.Kpoints  #: Set of kpoints (mesh or path)
+    kpoints: Kpoints  #: Set of kpoints (mesh or path)
     spin_polarized: bool  #: Whether calculation is spin-polarized
     spinorial: bool  #: Whether calculation is relativistic / spinorial
     n_spins: int  #: Number of spin channels
     n_spinor: int  #: Number of spinor components
     w_spin: float  #: Spin weight (degeneracy factor)
-    fillings: qp.electrons.Fillings  #: Occupation factor / smearing scheme
-    basis: qp.electrons.Basis  #: Plane-wave basis for wavefunctions
-    xc: qp.electrons.xc.XC  #: Exchange-correlation functional
-    diagonalize: qp.electrons.Davidson  #: Hamiltonian diagonalization method
-    scf: qp.electrons.SCF  #: Self-consistent field method
-    C: qp.electrons.Wavefunction  #: Electronic wavefunctions
+    fillings: Fillings  #: Occupation factor / smearing scheme
+    basis: Basis  #: Plane-wave basis for wavefunctions
+    xc: XC  #: Exchange-correlation functional
+    diagonalize: Davidson  #: Hamiltonian diagonalization method
+    scf: SCF  #: Self-consistent field method
+    C: Wavefunction  #: Electronic wavefunctions
     _n_bands_done: int  #: Number of bands in C that have been initialized
     fixed_H: str  #: If given, fix Hamiltonian to checkpoint file of this name
     save_wavefunction: bool  #: Whether to save wavefunction in checkpoint
-    lcao: Optional[qp.electrons.LCAO]  #: If present, use LCAO initialization
+    lcao: Optional[LCAO]  #: If present, use LCAO initialization
     eig: torch.Tensor  #: Electronic orbital eigenvalues
     deig_max: float  #: Estimate of accuracy of current `eig`
-    n_tilde: qp.grid.FieldH  #: Electron density (and magnetization, if `spin_polarized`)
-    tau_tilde: qp.grid.FieldH  #: KE density (only for meta-GGAs)
+    n_tilde: FieldH  #: Electron density (and magnetization, if `spin_polarized`)
+    tau_tilde: FieldH  #: KE density (only for meta-GGAs)
 
     hamiltonian = _hamiltonian
 
     def __init__(
         self,
         *,
-        process_grid: qp.utils.ProcessGrid,
-        lattice: qp.lattice.Lattice,
-        ions: qp.ions.Ions,
-        symmetries: qp.symmetries.Symmetries,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
-        k_mesh: Optional[Union[dict, qp.electrons.Kmesh]] = None,
-        k_path: Optional[Union[dict, qp.electrons.Kpath]] = None,
+        process_grid: ProcessGrid,
+        lattice: Lattice,
+        ions: Ions,
+        symmetries: Symmetries,
+        checkpoint_in: CpPath = CpPath(),
+        k_mesh: Optional[Union[dict, Kmesh]] = None,
+        k_path: Optional[Union[dict, Kpath]] = None,
         spin_polarized: bool = False,
         spinorial: bool = False,
-        fillings: Optional[Union[dict, qp.electrons.Fillings]] = None,
-        basis: Optional[Union[dict, qp.electrons.Basis]] = None,
-        xc: Optional[Union[dict, qp.electrons.xc.XC]] = None,
+        fillings: Optional[Union[dict, Fillings]] = None,
+        basis: Optional[Union[dict, Basis]] = None,
+        xc: Optional[Union[dict, XC]] = None,
         fixed_H: str = "",
         save_wavefunction: bool = True,
-        lcao: Optional[Union[dict, bool, qp.electrons.LCAO]] = None,
-        davidson: Optional[Union[dict, qp.electrons.Davidson]] = None,
-        chefsi: Optional[Union[dict, qp.electrons.CheFSI]] = None,
-        scf: Optional[Union[dict, qp.electrons.SCF]] = None,
+        lcao: Optional[Union[dict, bool, LCAO]] = None,
+        davidson: Optional[Union[dict, Davidson]] = None,
+        chefsi: Optional[Union[dict, CheFSI]] = None,
+        scf: Optional[Union[dict, SCF]] = None,
     ) -> None:
         """Initialize from components and/or dictionary of options.
 
@@ -119,23 +147,23 @@ class Electrons(qp.TreeNode):
             :yaml:`Self-consistent field (SCF) iteration parameters.`
         """
         super().__init__()
-        qp.log.info("\n--- Initializing Electrons ---")
+        log.info("\n--- Initializing Electrons ---")
 
         # Initialize k-points:
         self.add_child_one_of(
             "kpoints",
             checkpoint_in,
-            qp.TreeNode.ChildOptions(
+            TreeNode.ChildOptions(
                 "k-mesh",
-                qp.electrons.Kmesh,
+                Kmesh,
                 k_mesh,
                 process_grid=process_grid,
                 symmetries=symmetries,
                 lattice=lattice,
             ),
-            qp.TreeNode.ChildOptions(
+            TreeNode.ChildOptions(
                 "k-path",
-                qp.electrons.Kpath,
+                Kpath,
                 k_path,
                 process_grid=process_grid,
                 lattice=lattice,
@@ -151,7 +179,7 @@ class Electrons(qp.TreeNode):
         self.n_spinor = 2 if spinorial else 1
         self.n_spins = 2 if (spin_polarized and not spinorial) else 1
         self.w_spin = 2 // (self.n_spins * self.n_spinor)  # spin weight
-        qp.log.info(
+        log.info(
             f"n_spins: {self.n_spins}  n_spinor: {self.n_spinor}"
             f"  w_spin: {self.w_spin}"
         )
@@ -159,7 +187,7 @@ class Electrons(qp.TreeNode):
         # Initialize fillings:
         self.add_child(
             "fillings",
-            qp.electrons.Fillings,
+            Fillings,
             fillings,
             checkpoint_in,
             ions=ions,
@@ -169,7 +197,7 @@ class Electrons(qp.TreeNode):
         # Initialize wave-function basis:
         self.add_child(
             "basis",
-            qp.electrons.Basis,
+            Basis,
             basis,
             checkpoint_in,
             process_grid=process_grid,
@@ -184,7 +212,7 @@ class Electrons(qp.TreeNode):
         # Initialize exchange-correlation functional:
         self.add_child(
             "xc",
-            qp.electrons.xc.XC,
+            XC,
             xc,
             checkpoint_in,
             spin_polarized=spin_polarized,
@@ -192,23 +220,23 @@ class Electrons(qp.TreeNode):
 
         # Initial wavefunctions and eigenvalues:
         self._n_bands_done = 0
-        self.C = qp.electrons.Wavefunction(self.basis, n_bands=self.fillings.n_bands)
+        self.C = Wavefunction(self.basis, n_bands=self.fillings.n_bands)
         if cp_C := checkpoint_in.member("C"):
-            qp.log.info("Loading wavefunctions C")
+            log.info("Loading wavefunctions C")
             self._n_bands_done = self.C.read(cp_C)
         self.eig = torch.zeros(
-            self.C.coeff.shape[:3], dtype=torch.double, device=qp.rc.device
+            self.C.coeff.shape[:3], dtype=torch.double, device=rc.device
         )
         self.deig_max = np.nan  # eigenvalues completely wrong
         if cp_eig := checkpoint_in.member("eig"):
-            qp.log.info("Loading band eigenvalues eig")
+            log.info("Loading band eigenvalues eig")
             if (
                 self.fillings.read_band_scalars(cp_eig, self.eig)
                 == self.fillings.n_bands
             ):
                 self.deig_max = np.inf  # not fully wrong, but accuracy unknown
         self.fixed_H = str(fixed_H)
-        assert self.fixed_H or (not isinstance(self.kpoints, qp.electrons.Kpath))
+        assert self.fixed_H or (not isinstance(self.kpoints, Kpath))
         self.save_wavefunction = bool(save_wavefunction)
 
         # Initialize LCAO subspace initializer:
@@ -217,34 +245,32 @@ class Electrons(qp.TreeNode):
                 raise ValueError("lcao must be False or LCAO parameters")
             self.lcao = None
         else:
-            self.add_child(
-                "lcao", qp.electrons.LCAO, lcao, checkpoint_in, comm=self.comm
-            )
+            self.add_child("lcao", LCAO, lcao, checkpoint_in, comm=self.comm)
 
         # Initialize diagonalizer:
         self.add_child_one_of(
             "diagonalize",
             checkpoint_in,
-            qp.TreeNode.ChildOptions(
+            TreeNode.ChildOptions(
                 "davidson",
-                qp.electrons.Davidson,
+                Davidson,
                 davidson,
                 electrons=self,
             ),
-            qp.TreeNode.ChildOptions(
+            TreeNode.ChildOptions(
                 "chefsi",
-                qp.electrons.CheFSI,
+                CheFSI,
                 chefsi,
                 electrons=self,
             ),
             have_default=True,
         )
-        qp.log.info("\nDiagonalization: " + repr(self.diagonalize))
+        log.info("\nDiagonalization: " + repr(self.diagonalize))
 
         # Initialize SCF:
-        self.add_child("scf", qp.electrons.SCF, scf, checkpoint_in, comm=self.comm)
+        self.add_child("scf", SCF, scf, checkpoint_in, comm=self.comm)
 
-    def initialize_wavefunctions(self, system: qp.dft.System) -> None:
+    def initialize_wavefunctions(self, system: dft.System) -> None:
         """Initialize wavefunctions to LCAO / random (if not from checkpoint).
         (This needs to happen after ions have been updated in order to get
         atomic orbitals, which in turn depends on electrons.__init__ being
@@ -252,7 +278,7 @@ class Electrons(qp.TreeNode):
         n_atomic = 0
         if (self.lcao is not None) and not self._n_bands_done:
             n_atomic = system.ions.n_atomic_orbitals(self.n_spinor)
-            qp.log.info(
+            log.info(
                 f"Setting {n_atomic} bands of wavefunctions C" " to atomic orbitals"
             )
             if n_atomic < self.C.n_bands():
@@ -261,7 +287,7 @@ class Electrons(qp.TreeNode):
                 self.C = system.ions.get_atomic_orbitals(self.basis)
             self._n_bands_done = n_atomic
         if self._n_bands_done < self.fillings.n_bands:
-            qp.log.info(
+            log.info(
                 "Randomizing {} bands of wavefunctions C ".format(
                     f"{self.fillings.n_bands - self._n_bands_done}"
                     if self._n_bands_done
@@ -272,7 +298,7 @@ class Electrons(qp.TreeNode):
             self._n_bands_done = self.C.n_bands()
         # Diagonalize LCAO subspace hamiltonian:
         if n_atomic:
-            qp.log.info("Setting wavefunctions to LCAO eigenvectors")
+            log.info("Setting wavefunctions to LCAO eigenvectors")
             assert self.lcao is not None
             self.lcao.update(system)
         else:
@@ -286,32 +312,30 @@ class Electrons(qp.TreeNode):
     @property
     def need_full_projectors(self) -> bool:
         """Whether full-basis projectors are necessary."""
-        return isinstance(self.diagonalize, qp.electrons.CheFSI) and (
+        return isinstance(self.diagonalize, CheFSI) and (
             self.basis.division.n_procs > 1
         )
 
-    def initialize_fixed_hamiltonian(self, system: qp.dft.System) -> None:
+    def initialize_fixed_hamiltonian(self, system: dft.System) -> None:
         """Load density/potential from checkpoint for fixed-H calculation"""
         assert self.fixed_H
-        cp_H = qp.utils.CpPath(
-            checkpoint=qp.utils.Checkpoint(self.fixed_H), path="/electrons"
-        )
+        cp_H = CpPath(checkpoint=Checkpoint(self.fixed_H), path="/electrons")
         # Read n and V_ks (n.grad) in real space from checkpoint:
         n_densities = self.n_densities
-        n = qp.grid.FieldR(system.grid, shape_batch=(n_densities,))
-        V_ks = qp.grid.FieldR(system.grid, shape_batch=(n_densities,))
+        n = FieldR(system.grid, shape_batch=(n_densities,))
+        V_ks = FieldR(system.grid, shape_batch=(n_densities,))
         n.read(cp_H.relative("n"))
         V_ks.read(cp_H.relative("V_ks"))
         # Store in reciprocal space:
         self.n_tilde = ~n
         self.n_tilde.grad = ~V_ks
-        qp.log.info("  Read n and V_ks.")
+        log.info("  Read n and V_ks.")
         # Use mu from checkpoint for fillings:
         self.fillings.mu = cp_H.relative("fillings").attrs["mu"]
         self.fillings.mu_constrain = True  # make sure it's not updated
-        qp.log.info(f"  Set mu: {self.fillings.mu}  constrained: True")
+        log.info(f"  Set mu: {self.fillings.mu}  constrained: True")
 
-    def update_density(self, system: qp.dft.System) -> None:
+    def update_density(self, system: dft.System) -> None:
         """Update electron density from wavefunctions and fillings.
         Result is in system grid in reciprocal space."""
         f = self.fillings.f
@@ -331,11 +355,9 @@ class Electrons(qp.TreeNode):
                 )
             self.tau_tilde.symmetrize()
         else:
-            self.tau_tilde = qp.grid.FieldH(system.grid, shape_batch=(0,))
+            self.tau_tilde = FieldH(system.grid, shape_batch=(0,))
 
-    def update_potential(
-        self, system: qp.dft.System, requires_grad: bool = True
-    ) -> None:
+    def update_potential(self, system: dft.System, requires_grad: bool = True) -> None:
         """Update density-dependent energy terms and electron potential.
         If `requires_grad` is False, only compute the energy (skip the potentials)."""
         self.n_tilde.requires_grad_(requires_grad, clear=True)
@@ -355,7 +377,7 @@ class Electrons(qp.TreeNode):
             self.n_tilde.grad[0] += system.ions.Vloc_tilde + VH_tilde
             self.n_tilde.grad.symmetrize()
 
-    def update(self, system: qp.dft.System, requires_grad: bool = True) -> None:
+    def update(self, system: dft.System, requires_grad: bool = True) -> None:
         """Update electronic system to current wavefunctions and eigenvalues.
         This updates occupations, density, potential and electronic energy.
         If `requires_grad` is False, only compute the energy (skip the potentials)."""
@@ -363,13 +385,13 @@ class Electrons(qp.TreeNode):
         self.update_density(system)
         self.update_potential(system, requires_grad)
         f = self.fillings.f
-        system.energy["KE"] = qp.utils.globalreduce.sum(
+        system.energy["KE"] = globalreduce.sum(
             self.C.band_ke()[:, :, : f.shape[2]] * self.basis.w_sk * f,
             self.kpoints.comm,
         )
         # Nonlocal projector:
         beta_C = self.C.proj[..., : self.fillings.n_bands]
-        system.energy["Enl"] = qp.utils.globalreduce.sum(
+        system.energy["Enl"] = globalreduce.sum(
             (
                 (beta_C.conj() * (system.ions.D_all @ beta_C)).sum(dim=-2)
                 * self.basis.w_sk
@@ -378,7 +400,7 @@ class Electrons(qp.TreeNode):
             self.kpoints.comm,
         )
 
-    def accumulate_geometry_grad(self, system: qp.dft.System) -> None:
+    def accumulate_geometry_grad(self, system: dft.System) -> None:
         """Accumulate geometry gradient contributions of electronic energy.
         Each contribution is accumulated to a `grad` attribute,
         only if the corresponding `requires_grad` is enabled.
@@ -406,7 +428,7 @@ class Electrons(qp.TreeNode):
         wf = self.fillings.f * self.basis.w_sk
         if system.lattice.requires_grad:
             # Wavefunction squared, with fillings and weights:
-            wf_coeff_sq = qp.utils.abs_squared(C.coeff).sum(dim=3)  # sum over spinors
+            wf_coeff_sq = abs_squared(C.coeff).sum(dim=3)  # sum over spinors
             wf_coeff_sq *= wf.unsqueeze(3)
             if C.basis.real_wavefunctions:
                 wf_coeff_sq *= C.basis.real.Gweight_mine.view(1, 1, 1, -1)
@@ -419,11 +441,11 @@ class Electrons(qp.TreeNode):
 
             # Orthonormality constraint:
             eig = self.eig[..., : self.fillings.n_bands]
-            eye3 = torch.eye(3, device=qp.rc.device)
+            eye3 = torch.eye(3, device=rc.device)
             lattice_grad_mine -= (wf_coeff_sq.sum(dim=-1) * eig).sum() * eye3
 
             # Collect above local contributions over MPI:
-            self.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(lattice_grad_mine))
+            self.comm.Allreduce(MPI.IN_PLACE, BufferView(lattice_grad_mine))
             system.lattice.grad += lattice_grad_mine
 
             # Volume contributions:
@@ -441,7 +463,7 @@ class Electrons(qp.TreeNode):
                 )
             system.ions.beta.grad = C.non_spinor @ beta_C_grad.transpose(-2, -1).conj()
 
-    def run(self, system: qp.dft.System) -> None:
+    def run(self, system: dft.System) -> None:
         """Run any actions specified in the input."""
         if self.fixed_H:
             self.initialize_fixed_hamiltonian(system)
@@ -459,12 +481,10 @@ class Electrons(qp.TreeNode):
 
     def output(self) -> None:
         """Save any configured outputs (TODO: systematize this)"""
-        if isinstance(self.kpoints, qp.electrons.Kpath):
+        if isinstance(self.kpoints, Kpath):
             self.kpoints.plot(self, "bandstruct.pdf")
 
-    def _save_checkpoint(
-        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
-    ) -> list[str]:
+    def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
         (~self.n_tilde).write(cp_path.relative("n"))
         (~self.n_tilde.grad).write(cp_path.relative("V_ks"))
         self.fillings.write_band_scalars(cp_path.relative("eig"), self.eig)

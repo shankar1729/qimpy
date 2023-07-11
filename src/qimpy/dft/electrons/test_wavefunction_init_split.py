@@ -1,12 +1,16 @@
-import qimpy as qp
-import torch
-import functools
-import pytest
 from typing import Optional
+import functools
+
+import torch
+import pytest
+
+from qimpy import rc, dft
+from qimpy.utils import TaskDivision
+from . import Wavefunction
 
 
 @functools.cache
-def make_system(real: bool, spinorial: bool, polarized: bool) -> qp.dft.System:
+def make_system(real: bool, spinorial: bool, polarized: bool) -> dft.System:
     """Make a system to test with."""
     if real:
         # Gamma-point only, non-spinorial (make a bit larger since no k)
@@ -22,7 +26,7 @@ def make_system(real: bool, spinorial: bool, polarized: bool) -> qp.dft.System:
     else:
         lattice = {"system": "hexagonal", "a": 9.0, "c": 12.0}
         kmesh = {"size": [4, 4, 3]}
-    return qp.dft.System(
+    return dft.System(
         lattice=lattice,
         electrons={"k-mesh": kmesh, "basis": {"real-wavefunctions": real}},
         process_grid_shape=(1, 1, -1),  # ensure basis-split
@@ -31,24 +35,22 @@ def make_system(real: bool, spinorial: bool, polarized: bool) -> qp.dft.System:
 
 @functools.cache
 def get_Cg(
-    system: qp.dft.System, n_bands: int, b_start: int = 0, b_stop: Optional[int] = None
-) -> qp.electrons.Wavefunction:
+    system: dft.System, n_bands: int, b_start: int = 0, b_stop: Optional[int] = None
+) -> Wavefunction:
     """Create basis-split wavefunction, selectively randomized."""
-    Cg = qp.electrons.Wavefunction(system.electrons.basis, n_bands=n_bands)
+    Cg = Wavefunction(system.electrons.basis, n_bands=n_bands)
     Cg.randomize(b_start=b_start, b_stop=b_stop)
     return Cg
 
 
 @functools.cache
 def get_Cb(
-    system: qp.dft.System, n_bands: int, b_start: int = 0, b_stop: Optional[int] = None
-) -> qp.electrons.Wavefunction:
+    system: dft.System, n_bands: int, b_start: int = 0, b_stop: Optional[int] = None
+) -> Wavefunction:
     """Create band-split wavefunction, selectively randomized."""
     div = system.electrons.basis.division
-    band_division = qp.utils.TaskDivision(
-        n_tot=n_bands, n_procs=div.n_procs, i_proc=div.i_proc
-    )
-    Cb = qp.electrons.Wavefunction(system.electrons.basis, band_division=band_division)
+    band_division = TaskDivision(n_tot=n_bands, n_procs=div.n_procs, i_proc=div.i_proc)
+    Cb = Wavefunction(system.electrons.basis, band_division=band_division)
     Cb.randomize(b_start=b_start, b_stop=b_stop)
     return Cb
 
@@ -67,7 +69,7 @@ system_band_combinations = [combination[:2] for combination in parameter_combina
 @pytest.mark.mpi
 @pytest.mark.parametrize("system, n_bands, b_start, b_stop", parameter_combinations)
 def test_split_bands_inverse(
-    system: qp.dft.System, n_bands: int, b_start: int, b_stop: int
+    system: dft.System, n_bands: int, b_start: int, b_stop: int
 ) -> None:
     """Check that inv(split_bands) = split_basis."""
     Cg = get_Cg(system, n_bands, b_start, b_stop)
@@ -79,7 +81,7 @@ def test_split_bands_inverse(
 @pytest.mark.mpi
 @pytest.mark.parametrize("system, n_bands, b_start, b_stop", parameter_combinations)
 def test_split_basis_inverse(
-    system: qp.dft.System, n_bands: int, b_start: int, b_stop: int
+    system: dft.System, n_bands: int, b_start: int, b_stop: int
 ) -> None:
     """Check that inv(split_basis) = split_bands."""
     Cb = get_Cb(system, n_bands, b_start, b_stop)
@@ -91,7 +93,7 @@ def test_split_basis_inverse(
 @pytest.mark.mpi
 @pytest.mark.parametrize("system, n_bands, b_start, b_stop", parameter_combinations)
 def test_random_equiv(
-    system: qp.dft.System, n_bands: int, b_start: int, b_stop: int
+    system: dft.System, n_bands: int, b_start: int, b_stop: int
 ) -> None:
     """Check that randomization is consistent between different splits."""
     Cg = get_Cg(system, n_bands, b_start, b_stop)
@@ -101,8 +103,8 @@ def test_random_equiv(
 
 
 @pytest.mark.parametrize("system, n_bands", system_band_combinations)
-def test_orthonormalize(system: qp.dft.System, n_bands: int) -> None:
+def test_orthonormalize(system: dft.System, n_bands: int) -> None:
     C = get_Cg(system, n_bands).orthonormalize()
     C_OC = C.dot_O(C).wait()
-    expected = torch.eye(n_bands, device=qp.rc.device)[None, None]
+    expected = torch.eye(n_bands, device=rc.device)[None, None]
     assert (C_OC - expected).abs().max().item() < 1e-8

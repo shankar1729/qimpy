@@ -1,26 +1,31 @@
 from __future__ import annotations
-import qimpy as qp
+from typing import Union, Sequence
+
 import numpy as np
 import torch
-from typing import Union, Sequence
 from mpi4py import MPI
 
+from qimpy import log, rc, TreeNode, dft
+from qimpy.lattice import Lattice
+from qimpy.symmetries import Symmetries
+from qimpy.utils import ProcessGrid, TaskDivision, CpPath
 
-class Kpoints(qp.TreeNode):
+
+class Kpoints(TreeNode):
     """Set of k-points in Brillouin zone."""
 
     comm: MPI.Comm  #: Communicator for k-point division
     k: torch.Tensor  #: Array of k-points (N x 3)
     wk: torch.Tensor  #: Integration weights for each k (adds to 1)
-    division: qp.utils.TaskDivision  #: Division of k-points across `comm`
+    division: TaskDivision  #: Division of k-points across `comm`
 
     def __init__(
         self,
         *,
-        process_grid: qp.utils.ProcessGrid,
+        process_grid: ProcessGrid,
         k: torch.Tensor,
         wk: torch.Tensor,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        checkpoint_in: CpPath = CpPath(),
     ) -> None:
         """Initialize from list of k-points and weights. Typically, this should
         be used only by derived classes :class:`Kmesh` or :class:`Kpath`.
@@ -33,7 +38,7 @@ class Kpoints(qp.TreeNode):
         # Initialize process grid dimension (if -1) and split k-points:
         process_grid.provide_n_tasks("k", k.shape[0])
         self.comm = process_grid.get_comm("k")
-        self.division = qp.utils.TaskDivision(
+        self.division = TaskDivision(
             n_tot=k.shape[0],
             n_procs=self.comm.size,
             i_proc=self.comm.rank,
@@ -52,10 +57,10 @@ class Kmesh(Kpoints):
     def __init__(
         self,
         *,
-        process_grid: qp.utils.ProcessGrid,
-        symmetries: qp.symmetries.Symmetries,
-        lattice: qp.lattice.Lattice,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        process_grid: ProcessGrid,
+        symmetries: Symmetries,
+        lattice: Lattice,
+        checkpoint_in: CpPath = CpPath(),
         offset: Union[Sequence[float], np.ndarray] = (0.0, 0.0, 0.0),
         size: Union[float, Sequence[int], np.ndarray] = (1, 1, 1),
         use_inversion: bool = True,
@@ -94,7 +99,7 @@ class Kmesh(Kpoints):
             sup_length = float(size)
             L_i = torch.linalg.norm(lattice.Rbasis, dim=0)  # lattice lengths
             size = torch.ceil(sup_length / L_i).to(torch.int).tolist()
-            qp.log.info(
+            log.info(
                 f"Selecting {size[0]} x {size[1]} x {size[2]} k-mesh"
                 f" for supercell size >= {sup_length:g} bohrs"
             )
@@ -109,7 +114,7 @@ class Kmesh(Kpoints):
             if (np.linalg.norm(offset) == 0.0)
             else ("offset by " + np.array2string(offset, separator=", "))
         )
-        qp.log.info(
+        log.info(
             f"Creating {size[0]} x {size[1]} x {size[2]} uniform"
             f" k-mesh {kmesh_method_str}"
         )
@@ -121,7 +126,7 @@ class Kmesh(Kpoints):
 
         # Create full mesh:
         grids1d = [
-            (offset[i] + torch.arange(size[i], device=qp.rc.device)) / size[i]
+            (offset[i] + torch.arange(size[i], device=rc.device)) / size[i]
             for i in range(3)
         ]
         mesh = torch.stack(torch.meshgrid(*tuple(grids1d), indexing="ij")).view(3, -1).T
@@ -131,11 +136,11 @@ class Kmesh(Kpoints):
         def mesh_map(k: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             # Sizes and dimensions on torch:
             assert isinstance(size, np.ndarray)
-            size_i = torch.tensor(size, dtype=torch.int, device=qp.rc.device)
+            size_i = torch.tensor(size, dtype=torch.int, device=rc.device)
             size_f = size_i.to(torch.double)  # need as both int and float
-            offset_f = torch.tensor(offset, device=qp.rc.device)
+            offset_f = torch.tensor(offset, device=rc.device)
             stride_i = torch.tensor(
-                [size[1] * size[2], size[2], 1], dtype=torch.int, device=qp.rc.device
+                [size[1] * size[2], size[2], 1], dtype=torch.int, device=rc.device
             )
             not_found_index = size.prod()
             # Compute mesh coordinates:
@@ -155,7 +160,7 @@ class Kmesh(Kpoints):
         # --- k-points transform by rot.T, so no transpose on right-multiply
         on_mesh, mesh_index = mesh_map(mesh @ rot)
         if not on_mesh.all():
-            qp.log.info(
+            log.info(
                 "WARNING: k-mesh symmetries are a subgroup of size "
                 + str(on_mesh.all(dim=-1).count_nonzero().item())
             )
@@ -165,7 +170,7 @@ class Kmesh(Kpoints):
         )
         k = mesh[reduced_index]  # k in irreducible wedge
         wk = reduced_counts / size.prod()  # corresponding weights
-        qp.log.info(
+        log.info(
             f"Reduced {size.prod()} points on k-mesh to" f" {len(k)} under symmetries"
         )
         # --- store mapping from full k-mesh to reduced set:
@@ -176,7 +181,7 @@ class Kmesh(Kpoints):
         self.invert = torch.where(self.i_sym > symmetries.n_sym, -1, +1)
         self.i_sym = self.i_sym % symmetries.n_sym
         if self.invert.min() < 0:
-            qp.log.info("Note: used k-inversion (conjugation) symmetry")
+            log.info("Note: used k-inversion (conjugation) symmetry")
 
         # Initialize base class:
         super().__init__(
@@ -191,11 +196,11 @@ class Kpath(Kpoints):
     def __init__(
         self,
         *,
-        process_grid: qp.utils.ProcessGrid,
-        lattice: qp.lattice.Lattice,
+        process_grid: ProcessGrid,
+        lattice: Lattice,
         dk: float,
         points: list,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        checkpoint_in: CpPath = CpPath(),
     ) -> None:
         """Initialize k-path with spacing `dk` connecting `points`.
 
@@ -219,9 +224,9 @@ class Kpath(Kpoints):
         dk = float(dk)
         labels = [(point[3] if (len(point) > 3) else "") for point in points]
         kverts = torch.tensor(
-            [point[:3] for point in points], dtype=torch.double, device=qp.rc.device
+            [point[:3] for point in points], dtype=torch.double, device=rc.device
         )
-        qp.log.info(
+        log.info(
             f"Creating k-path with dk = {dk:g} connecting"
             f" {kverts.shape[0]} special points"
         )
@@ -236,33 +241,32 @@ class Kpath(Kpoints):
         distances = torch.sqrt(((dkverts @ lattice.Gbasis.T) ** 2).sum(dim=1))
         for i, distance in enumerate(distances):
             nk = int(torch.ceil(distance / dk).item())  # for this segment
-            t = torch.arange(1, nk + 1, device=qp.rc.device) / nk
+            t = torch.arange(1, nk + 1, device=rc.device) / nk
             k_list.append(kverts[i] + t[:, None] * dkverts[i])
             nk_tot += nk
             self.labels[nk_tot - 1] = labels[i + 1]  # label at end of segment
-            k_length.append((distance_tot + distance * t).to(qp.rc.cpu).numpy())
+            k_length.append((distance_tot + distance * t).to(rc.cpu).numpy())
             distance_tot += distance
         k = torch.cat(k_list)
-        wk = torch.full((nk_tot,), 1.0 / nk_tot, device=qp.rc.device)
+        wk = torch.full((nk_tot,), 1.0 / nk_tot, device=rc.device)
         self.k_length = np.concatenate(k_length)  # cumulative length on path
-        qp.log.info(
-            f"Created {nk_tot} k-points on k-path of" f" length {distance_tot:g}"
-        )
+        log.info(f"Created {nk_tot} k-points on k-path of" f" length {distance_tot:g}")
 
         # Initialize base class:
         super().__init__(
             process_grid=process_grid, k=k, wk=wk, checkpoint_in=checkpoint_in
         )
 
-    def plot(self, electrons: qp.electrons.Electrons, filename: str) -> None:
-        """Save band structure plot for `electrons` to `filename`."""
+    def plot(self, electrons: dft.electrons.Electrons, filename: str) -> None:
+        """Save band structure plot for `electrons` to `filename`.
+        TODO: MOVE. This is a postprocessing utility that does not belong here!"""
         if electrons.basis.division.i_proc:
             return  # only head of each basis group needed below
 
         # Get the energies to head process:
         n_spins = electrons.n_spins
         n_bands = electrons.fillings.n_bands
-        eig = np.array(electrons.eig[..., :n_bands].to(qp.rc.cpu))
+        eig = np.array(electrons.eig[..., :n_bands].to(rc.cpu))
         if self.division.i_proc:
             self.comm.Send(eig, 0)
             return  # only overall head needs to plot

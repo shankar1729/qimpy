@@ -1,8 +1,9 @@
-import qimpy as qp
+import functools
 import torch
 import pytest
-import functools
-from qimpy.dft.electrons._fillings import _smearing_funcs, SmearingFunc
+
+from qimpy import rc
+from .fillings import _smearing_funcs, SmearingFunc
 
 
 @functools.cache
@@ -12,7 +13,7 @@ def get_smear_test_inputs() -> tuple[torch.Tensor, float, float, float]:
     mu = -0.157
     deig = 0.01 * sigma
     delta_eig = 100 * sigma
-    eig = torch.arange(mu - delta_eig, mu + delta_eig, deig, device=qp.rc.device)
+    eig = torch.arange(mu - delta_eig, mu + delta_eig, deig, device=rc.device)
     return eig, mu, sigma, deig
 
 

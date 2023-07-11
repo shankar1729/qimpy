@@ -1,10 +1,14 @@
 from __future__ import annotations
-import qimpy as qp
+from typing import Optional, Union, NamedTuple, Callable, Sequence
+
 import numpy as np
 import torch
 from scipy import optimize
-from typing import Optional, Union, NamedTuple, Callable, Sequence
 from mpi4py import MPI
+
+from qimpy import rc, log, TreeNode, Energy, dft
+from qimpy.dft.ions import Ions
+from qimpy.utils import BufferView, CpPath, CpContext, stopwatch, globalreduce, fmt
 
 
 class SmearingResults(NamedTuple):
@@ -18,10 +22,10 @@ SmearingFunc = Callable[
 ]
 
 
-class Fillings(qp.TreeNode):
+class Fillings(TreeNode):
     """Electron occupation factors (smearing)"""
 
-    electrons: qp.electrons.Electrons
+    electrons: dft.electrons.Electrons
     n_electrons: float  #: Number of electrons
     n_bands_min: int  #: Minimum number of bands to accomodate `n_electrons`
     n_bands: int  #: Number of bands to calculate
@@ -40,9 +44,9 @@ class Fillings(qp.TreeNode):
     def __init__(
         self,
         *,
-        ions: qp.ions.Ions,
-        electrons: qp.electrons.Electrons,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        ions: Ions,
+        electrons: dft.electrons.Electrons,
+        checkpoint_in: CpPath = CpPath(),
         charge: float = 0.0,
         smearing: str = "gauss",
         sigma: float = 0.002,
@@ -130,9 +134,7 @@ class Fillings(qp.TreeNode):
                     raise ValueError(
                         f"{x_name} only allowed for" f" spin-polarized calculations"
                     )
-                x_arr = torch.tensor(
-                    x, device=qp.rc.device, dtype=torch.double
-                ).flatten()
+                x_arr = torch.tensor(x, device=rc.device, dtype=torch.double).flatten()
                 if x_len != len(x_arr):
                     prefix = "" if electrons.spinorial else "non-"
                     raise ValueError(
@@ -141,7 +143,7 @@ class Fillings(qp.TreeNode):
                     )
                 return x_arr
             else:
-                return torch.zeros(x_len, device=qp.rc.device)
+                return torch.zeros(x_len, device=rc.device)
 
         self.B = check_magnetic(B, "B")
         self.M = check_magnetic(M, "M")
@@ -174,20 +176,20 @@ class Fillings(qp.TreeNode):
             if self.sigma
             else str(None)
         )
-        qp.log.info(
+        log.info(
             f"n_electrons: {self.n_electrons:g}" f"  n_bands_min: {self.n_bands_min}"
         )
-        qp.log.info(f"smearing: {self.smearing}  sigma: {sigma_str}")
+        log.info(f"smearing: {self.smearing}  sigma: {sigma_str}")
         self.mu = float(mu)
         self.mu_constrain = bool(mu_constrain)
         if self.mu_constrain and np.isnan(self.mu):
             raise ValueError("mu must be specified for mu_constrain = True")
-        qp.log.info(f"mu: initial: {self.mu}" f"  constrained: {self.mu_constrain}")
+        log.info(f"mu: initial: {self.mu}" f"  constrained: {self.mu_constrain}")
         if electrons.spin_polarized:
-            qp.log.info(
-                f"M: initial: {qp.utils.fmt(self.M)}"
+            log.info(
+                f"M: initial: {fmt(self.M)}"
                 f"  constrained: {self.M_constrain}"
-                f"  B: {qp.utils.fmt(self.B)}"
+                f"  B: {fmt(self.B)}"
             )
 
         self._initialize_n_bands(ions, n_bands, n_bands_extra)
@@ -195,7 +197,7 @@ class Fillings(qp.TreeNode):
 
     def _initialize_n_bands(
         self,
-        ions: qp.ions.Ions,
+        ions: Ions,
         n_bands: Optional[Union[int, str]] = None,
         n_bands_extra: Optional[Union[int, str]] = None,
     ) -> None:
@@ -212,7 +214,7 @@ class Fillings(qp.TreeNode):
                 n_bands_method = "atomic"
                 self.n_bands = ions.n_atomic_orbitals(self.electrons.n_spinor)
                 if self.n_bands < self.n_bands_min:
-                    qp.log.warning(
+                    log.warning(
                         f"Note: {self.n_bands} atomic orbitals"
                         f" < n_bands_min = {self.n_bands_min}"
                     )
@@ -241,24 +243,24 @@ class Fillings(qp.TreeNode):
                 1, int(np.ceil(self.n_bands * n_bands_extra_scale))
             )
             n_bands_extra_method = n_bands_extra[1:] + "*n_bands"
-        qp.log.info(
+        log.info(
             f"n_bands: {self.n_bands} ({n_bands_method})"
             f"  n_bands_extra: {self.n_bands_extra} ({n_bands_extra_method})"
         )
 
-    def _initialize_f(self, checkpoint_in: qp.utils.CpPath) -> None:
+    def _initialize_f(self, checkpoint_in: CpPath) -> None:
         """Create or load initial fillings."""
         el = self.electrons
         k_division = el.kpoints.division
         self.f = torch.zeros(
-            (el.n_spins, k_division.n_mine, self.n_bands), device=qp.rc.device
+            (el.n_spins, k_division.n_mine, self.n_bands), device=rc.device
         )
         if cp_f := checkpoint_in.member("f"):
-            qp.log.info("Loading fillings f")
+            log.info("Loading fillings f")
             self.read_band_scalars(cp_f, self.f)
         else:
             # Compute fillings
-            qp.log.info("Constructing fillings f to occupy lowest bands")
+            log.info("Constructing fillings f to occupy lowest bands")
             # --- Fillings sum for each spin channel:
             f_sums = np.ones(el.n_spins) * self.n_electrons / (el.w_spin * el.n_spins)
             if el.spin_polarized and (not el.spinorial):
@@ -283,8 +285,8 @@ class Fillings(qp.TreeNode):
                     self.f[i_spin, :, n_full] = f_sum - n_full  # left overs
         self.f_eig = torch.zeros_like(self.f)
 
-    @qp.utils.stopwatch
-    def update(self, energy: qp.Energy) -> None:
+    @stopwatch
+    def update(self, energy: Energy) -> None:
         """Update fillings `f` and chemical potential `mu`, if needed.
         Set corresponding energy components in `energy`.
         """
@@ -302,7 +304,7 @@ class Fillings(qp.TreeNode):
         # Guess chemical potential from eigenvalues if needed:
         if np.isnan(self.mu):
             n_full = int(np.floor(self.n_electrons / (el.w_spin * el.n_spins)))
-            self.mu = qp.utils.globalreduce.min(eig[:, :, n_full], el.comm)
+            self.mu = globalreduce.min(eig[:, :, n_full], el.comm)
 
         # Weights that generate number / magnetization and their targets:
         if el.spin_polarized:
@@ -316,17 +318,17 @@ class Fillings(qp.TreeNode):
                 )
                 M_len = 3
             else:
-                w_NM = torch.tensor([[1, 1], [1, -1]], device=qp.rc.device).view(
+                w_NM = torch.tensor([[1, 1], [1, -1]], device=rc.device).view(
                     2, 2, 1, 1
                 )
                 M_len = 1
             NM_target = np.concatenate(
-                (np.full(1, self.n_electrons), self.M.to(qp.rc.cpu).numpy())
+                (np.full(1, self.n_electrons), self.M.to(rc.cpu).numpy())
             )
-            mu_B = np.concatenate((np.full(1, self.mu), self.B.to(qp.rc.cpu).numpy()))
+            mu_B = np.concatenate((np.full(1, self.mu), self.B.to(rc.cpu).numpy()))
             i_free = np.where([not self.mu_constrain] + [self.M_constrain] * M_len)[0]
         else:
-            w_NM = torch.ones((1, 1, 1, 1), device=qp.rc.device)
+            w_NM = torch.ones((1, 1, 1, 1), device=rc.device)
             NM_target = np.array([self.n_electrons])
             mu_B = np.array([self.mu])
             i_free = np.where([not self.mu_constrain])[0]
@@ -341,7 +343,7 @@ class Fillings(qp.TreeNode):
             """
             assert self._smearing_func is not None
             mu_B[i_free] = params
-            mu_B_t = torch.tensor(mu_B).to(qp.rc.device)
+            mu_B_t = torch.tensor(mu_B).to(rc.device)
             mu_eff = (mu_B_t.view(-1, 1, 1, 1) * w_NM).sum(dim=0)
             f, f_eig, S = self._smearing_func(eig, mu_eff, sigma_cur)
             NM = (w_NM * (w_sk * f)).sum(dim=(1, 2, 3))
@@ -349,19 +351,17 @@ class Fillings(qp.TreeNode):
                 dim=(2, 3, 4)
             )
             # Collect across MPI and make consistent to machine precision:
-            qp.rc.current_stream_synchronize()
+            rc.current_stream_synchronize()
             for tensor in (NM, NM_mu_B):
-                el.kpoints.comm.Allreduce(
-                    MPI.IN_PLACE, qp.utils.BufferView(tensor), MPI.SUM
-                )
-                el.comm.Bcast(qp.utils.BufferView(tensor))
+                el.kpoints.comm.Allreduce(MPI.IN_PLACE, BufferView(tensor), MPI.SUM)
+                el.comm.Bcast(BufferView(tensor))
             self.f = f
             self.f_eig = f_eig
             results["NM"] = NM
             results["S"] = S
             # Compute errors:
-            NM_err = NM.to(qp.rc.cpu).numpy() - NM_target
-            NM_err_mu_B = NM_mu_B.to(qp.rc.cpu).numpy()
+            NM_err = NM.to(rc.cpu).numpy() - NM_target
+            NM_err_mu_B = NM_mu_B.to(rc.cpu).numpy()
             return NM_err[i_free], NM_err_mu_B[i_free][:, i_free]
 
         if len(i_free) == 0:
@@ -388,7 +388,7 @@ class Fillings(qp.TreeNode):
         else:  # B is free: use a quasi-Newton method
             # Find mu and/or B to match N and/or M as appropriate:
             # --- start with a larger sigma and reduce down for stability:
-            eig_diff_max = qp.utils.globalreduce.max(eig.diff(dim=-1), el.kpoints.comm)
+            eig_diff_max = globalreduce.max(eig.diff(dim=-1), el.kpoints.comm)
             sigma_cur = max(self.sigma, min(0.1, eig_diff_max))
             final_step = False
             while not final_step:
@@ -410,7 +410,7 @@ class Fillings(qp.TreeNode):
                 )
 
         # Update fillings and entropy accordingly:
-        energy["-TS"] = (-0.5 * self.sigma) * qp.utils.globalreduce.sum(
+        energy["-TS"] = (-0.5 * self.sigma) * globalreduce.sum(
             w_sk * results["S"], el.kpoints.comm
         )
         # --- update n_electrons or mu, depending on which is free
@@ -423,25 +423,23 @@ class Fillings(qp.TreeNode):
         if el.spin_polarized:
             M = results["NM"][1:]
             if self.M_constrain:
-                self.B = torch.from_numpy(mu_B[1:]).to(qp.rc.device)
+                self.B = torch.from_numpy(mu_B[1:]).to(rc.device)
             else:
                 self.M = M
-            M_str = f'  M: {qp.utils.fmt(M, floatmode="fixed", precision=5)}'
+            M_str = f'  M: {fmt(M, floatmode="fixed", precision=5)}'
         else:
             M_str = ""
-        qp.log.info(
+        log.info(
             f"  FillingsUpdate:  mu: {self.mu:.9f}"
             f"  n_electrons: {n_electrons:.6f}{M_str}"
         )
 
-    def _save_checkpoint(
-        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
-    ) -> list[str]:
+    def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
         self.write_band_scalars(cp_path.relative("f"), self.f)
         cp_path.attrs["mu"] = self.mu
         return ["f", "mu"]
 
-    def write_band_scalars(self, cp_path: qp.utils.CpPath, v: torch.Tensor) -> None:
+    def write_band_scalars(self, cp_path: CpPath, v: torch.Tensor) -> None:
         """Write `v` containing one scalar per band to `cp_path`.
         This is useful for writing fillings, eigenvalues etc."""
         checkpoint, path = cp_path
@@ -454,7 +452,7 @@ class Fillings(qp.TreeNode):
         if el.basis.division.i_proc == 0:
             checkpoint.write_slice(dset, offset, v[:, :, : self.n_bands])
 
-    def read_band_scalars(self, cp_path: qp.utils.CpPath, v: torch.Tensor) -> int:
+    def read_band_scalars(self, cp_path: CpPath, v: torch.Tensor) -> int:
         """Read one scalar per band from `cp_path` into `v`.
         Returns number of bands read, which may be <= `self.n_bands`.
         This is useful for reading fillings, eigenvalues etc."""
