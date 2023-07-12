@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from qimpy import rc, log, TreeNode
-from qimpy.utils import CheckpointPath, fmt
+from qimpy.io import CheckpointPath, fmt
 from qimpy.lattice import Lattice
 from . import LabeledPositions
 from .lattice import get_lattice_point_group, symmetrize_lattice, symmetrize_matrix

@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Protocol, Optional, Union
 
 from qimpy import TreeNode, dft
-from qimpy.utils import CheckpointPath
+from qimpy.io import CheckpointPath
 from . import BGW
 
 

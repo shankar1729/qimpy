@@ -6,8 +6,8 @@ import numpy as np
 from mpi4py import MPI
 
 from qimpy import log, Energy, TreeNode
-from qimpy.utils import CheckpointPath
-from qimpy.utils.dict import key_cleanup
+from qimpy.io import CheckpointPath
+from qimpy.io.dict import key_cleanup
 from .minimize_lbfgs import lbfgs
 from .minimize_cg import cg
 from .minimize_line import LINE_MINIMIZE, Vector

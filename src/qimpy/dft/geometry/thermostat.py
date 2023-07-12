@@ -5,7 +5,8 @@ from typing import Union, Protocol, Callable, Optional
 import torch
 
 from qimpy import rc, TreeNode
-from qimpy.utils import CheckpointPath, CheckpointContext, BufferView, Unit, UnitOrFloat
+from qimpy.io import CheckpointPath, CheckpointContext, Unit, UnitOrFloat
+from qimpy.mpi import BufferView
 from qimpy.dft import geometry
 from .gradient import Gradient
 

@@ -1,9 +1,10 @@
 """YAML wrappers handling includes and environment substitution."""
-__all__ = ["load", "dump"]
+__all__ = ("load", "dump")
 
-import qimpy as qp
 import yaml
 import os
+
+from .dict import merge as dict_merge
 
 
 def load(filename: str, already_included: tuple = tuple()) -> dict:
@@ -42,5 +43,5 @@ def _process_includes(d: dict, already_included: tuple) -> dict:
                 )
             d_list.append(load(include_name, already_included))
         d_list.append(d)  # current dict is last (highest priority)
-        d = qp.utils.dict.merge(d_list)
+        d = dict_merge(d_list)
     return d

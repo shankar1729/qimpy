@@ -1,10 +1,12 @@
 from __future__ import annotations
+from typing import Any, Optional, NamedTuple
 import os
+
 import h5py
-import qimpy as qp
 import numpy as np
 import torch
-from typing import Any, Optional, NamedTuple
+
+from qimpy import log, rc
 
 
 class Checkpoint(h5py.File):
@@ -36,19 +38,19 @@ class Checkpoint(h5py.File):
             filename_open = filename  # Directly open the target filename,
             self.filename_move = ""  # and don't move at the end
         mode = "w" if writable else "r"  # don't allow r+, a etc. for safety
-        super().__init__(filename_open, mode, driver="mpio", comm=qp.rc.comm)
+        super().__init__(filename_open, mode, driver="mpio", comm=rc.comm)
         mode_name = "writing:" if writable else "reading"
-        qp.log.info(f"\nOpened checkpoint file '{filename_open}' for {mode_name}")
+        log.info(f"\nOpened checkpoint file '{filename_open}' for {mode_name}")
 
     def close(self):
         """Close the file, and perform rotations if applicable."""
         filename = self.filename  # remember where the file was before closing
         super().close()  # actually close the file
-        if self.filename_move and qp.rc.is_head:
+        if self.filename_move and rc.is_head:
             if os.path.isfile(self.filename_move):
-                qp.log.info(f"Moving {self.filename_move} -> {self.filename_move}.bak")
+                log.info(f"Moving {self.filename_move} -> {self.filename_move}.bak")
                 os.replace(self.filename_move, self.filename_move + ".bak")
-            qp.log.info(f"Moving {filename} -> {self.filename_move}")
+            log.info(f"Moving {filename} -> {self.filename_move}")
             os.rename(filename, self.filename_move)
 
     def write_slice(
@@ -67,7 +69,7 @@ class Checkpoint(h5py.File):
         index = tuple(
             slice(offset[i], offset[i] + s_i) for i, s_i in enumerate(data.shape)
         )
-        dset[index] = data.to(qp.rc.cpu).numpy()
+        dset[index] = data.to(rc.cpu).numpy()
 
     def read_slice(
         self, dset: Any, offset: tuple[int, ...], size: tuple[int, ...]
@@ -81,7 +83,7 @@ class Checkpoint(h5py.File):
         index = tuple(
             slice(offset[i], offset[i] + size[i]) for i, s_i in enumerate(dset.shape)
         )
-        return torch.from_numpy(dset[index]).to(qp.rc.device)
+        return torch.from_numpy(dset[index]).to(rc.device)
 
     def create_dataset_real(
         self, path: str, shape: tuple[int, ...], dtype: torch.dtype = torch.float64
@@ -89,7 +91,7 @@ class Checkpoint(h5py.File):
         """Create a dataset at `path` suitable for a real array of size `shape`.
         Additionally, `dtype` is translated
         from torch to numpy for convenience."""
-        return self.create_dataset(path, shape=shape, dtype=qp.rc.np_type[dtype])
+        return self.create_dataset(path, shape=shape, dtype=rc.np_type[dtype])
 
     def create_dataset_complex(
         self, path: str, shape: tuple[int, ...], dtype: torch.dtype = torch.complex128
@@ -167,8 +169,8 @@ class CheckpointPath(NamedTuple):
         checkpoint, path = self.relative(name)
         assert checkpoint is not None
         dset = checkpoint.create_dataset_real(path, data.shape, data.dtype)
-        if qp.rc.is_head:
-            dset[...] = data.to(qp.rc.cpu).numpy()
+        if rc.is_head:
+            dset[...] = data.to(rc.cpu).numpy()
         return name
 
     def read(self, name: str, report: bool = True) -> torch.Tensor:
@@ -177,9 +179,9 @@ class CheckpointPath(NamedTuple):
         assert checkpoint is not None
         assert path in checkpoint
         if report:
-            qp.log.info(f"Loading {name}")
+            log.info(f"Loading {name}")
         dset = checkpoint[path]
-        return torch.from_numpy(dset[...]).to(qp.rc.device)
+        return torch.from_numpy(dset[...]).to(rc.device)
 
     def read_optional(self, name: str, report: bool = True) -> Optional[torch.Tensor]:
         """Handle optional dataset with `read`, returning None if not found."""

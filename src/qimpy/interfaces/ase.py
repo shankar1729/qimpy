@@ -1,7 +1,7 @@
 from ase.calculators.calculator import Calculator
 
 from qimpy import rc, dft
-from qimpy.utils import Unit
+from qimpy.io import Unit
 
 
 class QimPy(Calculator):

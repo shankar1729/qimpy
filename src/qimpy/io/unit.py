@@ -1,6 +1,6 @@
 from __future__ import annotations
-from dataclasses import dataclass
 from typing import Union, ClassVar
+from dataclasses import dataclass
 import math
 import yaml
 import re

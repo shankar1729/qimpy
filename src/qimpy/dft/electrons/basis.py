@@ -7,14 +7,9 @@ import torch
 from mpi4py import MPI
 
 from qimpy import rc, log, TreeNode
-from qimpy.utils import (
-    TaskDivision,
-    ProcessGrid,
-    BufferView,
-    ceildiv,
-    CheckpointPath,
-    globalreduce,
-)
+from qimpy.io import CheckpointPath
+from qimpy.mpi import TaskDivision, ProcessGrid, BufferView, globalreduce
+from qimpy.utils import ceildiv
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
 from qimpy.grid import Grid

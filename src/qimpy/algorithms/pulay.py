@@ -7,7 +7,7 @@ import numpy as np
 from mpi4py import MPI
 
 from qimpy import log, rc, TreeNode, Energy
-from qimpy.utils import CheckpointPath
+from qimpy.io import CheckpointPath
 from .optimizable import Optimizable, ConvergenceCheck
 
 

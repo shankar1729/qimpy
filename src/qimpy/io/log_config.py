@@ -1,10 +1,12 @@
-import qimpy as qp
-import numpy as np
-import logging
-import torch
-import sys
 from typing import Optional, Union
+import logging
+import sys
+
+import numpy as np
+import torch
 from mpi4py import MPI
+
+from qimpy import rc, log
 
 
 def log_config(
@@ -59,14 +61,14 @@ def log_config(
     )
 
     # Set handler:
-    qp.log.handlers.clear()
-    qp.log.addHandler(handler)
+    log.handlers.clear()
+    log.addHandler(handler)
 
     # Select log level:
     if is_head or ((not is_head) and mpi_log):
-        qp.log.setLevel(logging.DEBUG if verbose else logging.INFO)
+        log.setLevel(logging.DEBUG if verbose else logging.INFO)
     else:
-        qp.log.setLevel(logging.WARNING)
+        log.setLevel(logging.WARNING)
 
 
 def fmt(tensor: Union[torch.Tensor, np.ndarray], **kwargs) -> str:
@@ -77,7 +79,7 @@ def fmt(tensor: Union[torch.Tensor, np.ndarray], **kwargs) -> str:
     kwargs.setdefault("suppress_small", True)
     kwargs.setdefault("separator", ", ")
     return np.array2string(
-        tensor.detach().to(qp.rc.cpu).numpy()
+        tensor.detach().to(rc.cpu).numpy()
         if isinstance(tensor, torch.Tensor)
         else tensor,
         **kwargs

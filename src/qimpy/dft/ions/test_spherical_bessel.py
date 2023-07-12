@@ -4,7 +4,7 @@ import pytest
 from scipy.special import spherical_jn
 
 from qimpy import rc, log
-from qimpy.utils import log_config
+from qimpy.io import log_config
 from .spherical_bessel import jl_by_xl
 
 

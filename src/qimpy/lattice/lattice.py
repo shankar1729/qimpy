@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from qimpy import log, rc, TreeNode
-from qimpy.utils import CheckpointPath, CheckpointContext, fmt
+from qimpy.io import CheckpointPath, CheckpointContext, fmt
 from .lattice_systems import get_Rbasis
 
 

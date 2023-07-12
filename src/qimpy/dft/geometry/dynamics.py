@@ -6,14 +6,8 @@ import torch
 from mpi4py import MPI
 
 from qimpy import rc, log, TreeNode, dft
-from qimpy.utils import (
-    Unit,
-    UnitOrFloat,
-    Checkpoint,
-    CheckpointPath,
-    CheckpointContext,
-    BufferView,
-)
+from qimpy.io import Unit, UnitOrFloat, Checkpoint, CheckpointPath, CheckpointContext
+from qimpy.mpi import BufferView
 from qimpy.dft.ions import Ions
 from qimpy.dft.ions.symbols import ATOMIC_WEIGHTS, ATOMIC_NUMBERS
 from .stepper import Stepper

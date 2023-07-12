@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from qimpy import log, TreeNode, dft
-from qimpy.utils import CheckpointPath
+from qimpy.io import CheckpointPath
 
 
 class BGW(TreeNode):

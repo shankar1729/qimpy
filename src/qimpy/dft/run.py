@@ -47,7 +47,8 @@ import os
 
 from mpi4py import MPI
 
-from qimpy import log, rc, utils, __version__
+from qimpy import log, rc, io, __version__
+from qimpy.utils import StopWatch
 from . import System
 
 
@@ -168,7 +169,7 @@ def main():
         exit()
 
     # Setup logging:
-    utils.log_config(
+    io.log_config(
         output_file=args.output_file,
         mpi_log=args.mpi_log,
         mpi_comm=MPI.COMM_WORLD,
@@ -183,12 +184,12 @@ def main():
     rc.init(cores_override=args.cores)
 
     # Load input parameters from YAML file:
-    input_dict = utils.dict.key_cleanup(utils.yaml.load(args.input_file))
+    input_dict = io.dict.key_cleanup(io.yaml.load(args.input_file))
     # --- Set default checkpoint file (if not specified in input):
     input_dict.setdefault("checkpoint", os.path.splitext(args.input_file)[0] + ".h5")
     # --- Include processed input in log:
-    log.info(f"\n# Processed input:\n{utils.yaml.dump(input_dict)}")
-    input_dict = utils.dict.remove_units(input_dict)  # Remove units
+    log.info(f"\n# Processed input:\n{io.yaml.dump(input_dict)}")
+    input_dict = io.dict.remove_units(input_dict)  # Remove units
 
     # Initialize system with input parameters:
     system = System(process_grid_shape=args.process_grid, **input_dict)
@@ -197,7 +198,7 @@ def main():
     if args.dry_run:
         log.info("Dry run initialization successful: input is valid.")
         rc.report_end()
-        utils.StopWatch.print_stats()
+        StopWatch.print_stats()
         exit()
 
     # Perform specified actions:
@@ -205,7 +206,7 @@ def main():
 
     # Report timings:
     rc.report_end()
-    utils.StopWatch.print_stats()
+    StopWatch.print_stats()
 
 
 if __name__ == "__main__":

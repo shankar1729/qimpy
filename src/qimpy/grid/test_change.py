@@ -5,7 +5,7 @@ import torch
 import numpy as np
 
 from qimpy import rc
-from qimpy.utils import log_config
+from qimpy.io import log_config
 from . import Grid, FieldType, Field, FieldR, FieldH, FieldC, FieldG
 from .test_common import get_sequential_grid, get_parallel_grid, get_reference_field
 

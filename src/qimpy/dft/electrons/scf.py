@@ -5,7 +5,8 @@ import torch
 from mpi4py import MPI
 
 from qimpy import dft, Energy
-from qimpy.utils import CheckpointPath, globalreduce
+from qimpy.io import CheckpointPath
+from qimpy.mpi import globalreduce
 from qimpy.algorithms import Pulay
 from qimpy.grid import FieldH
 

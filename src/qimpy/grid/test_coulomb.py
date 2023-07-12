@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from qimpy import rc
-from qimpy.utils import log_config
+from qimpy.io import log_config
 
 
 def plot_nyquist():

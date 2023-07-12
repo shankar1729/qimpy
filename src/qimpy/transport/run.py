@@ -44,7 +44,8 @@ import qimpy as qp
 import argparse
 import sys
 import os
-from ..rc import MPI
+
+from qimpy.rc import MPI
 from . import Transport
 
 

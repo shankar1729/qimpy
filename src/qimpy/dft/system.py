@@ -5,7 +5,8 @@ import torch
 from mpi4py import MPI
 
 from qimpy import rc, log, TreeNode, Energy
-from qimpy.utils import Checkpoint, CheckpointPath, ProcessGrid
+from qimpy.io import Checkpoint, CheckpointPath
+from qimpy.mpi import ProcessGrid
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
 from qimpy.grid import Grid, Coulomb

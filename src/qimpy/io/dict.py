@@ -2,7 +2,8 @@
 __all__ = ["key_cleanup", "flatten", "unflatten", "merge", "remove_units"]
 
 from typing import Callable, Union
-from ._unit import Unit
+
+from . import Unit
 
 
 def key_cleanup(params: dict) -> dict:

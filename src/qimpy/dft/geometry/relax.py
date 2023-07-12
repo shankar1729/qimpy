@@ -7,7 +7,8 @@ from mpi4py import MPI
 
 from qimpy import log, dft
 from qimpy.lattice import Lattice
-from qimpy.utils import Checkpoint, CheckpointPath, CheckpointContext, BufferView
+from qimpy.io import Checkpoint, CheckpointPath, CheckpointContext
+from qimpy.mpi import BufferView
 from qimpy.algorithms import Minimize, MinimizeState
 from .gradient import Gradient
 from .stepper import Stepper

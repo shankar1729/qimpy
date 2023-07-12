@@ -2,7 +2,7 @@ import torch
 import pytest
 
 from qimpy import rc
-from qimpy.utils import log_config
+from qimpy.io import log_config
 from .quintic_spline import get_coeff, Interpolator
 
 

@@ -6,11 +6,12 @@ import pytest
 from mpi4py import MPI
 
 from qimpy import rc
-from qimpy.utils import CheckpointPath, BufferView, log_config
-from qimpy.algorithms import Minimize
+from qimpy.io import CheckpointPath, log_config
+from qimpy.mpi import BufferView
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
 from qimpy.grid import Grid, FieldR
+from . import Minimize
 
 
 class RandomFunction(Minimize[FieldR]):  # type: ignore

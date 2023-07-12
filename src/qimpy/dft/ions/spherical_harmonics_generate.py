@@ -4,7 +4,7 @@ import numpy as np
 from scipy.special import sph_harm
 
 from qimpy import log, rc
-from qimpy.utils import log_config
+from qimpy.io import log_config
 
 
 def get_harmonics_ref(l_max: int, r: np.ndarray) -> np.ndarray:

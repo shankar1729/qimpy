@@ -4,7 +4,7 @@ from typing import Protocol, Optional, Union
 from mpi4py import MPI
 
 from qimpy import TreeNode, dft
-from qimpy.utils import CheckpointPath
+from qimpy.io import CheckpointPath
 from qimpy.lattice import Lattice
 from . import Fixed, Relax, Dynamics
 

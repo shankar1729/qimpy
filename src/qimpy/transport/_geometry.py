@@ -1,9 +1,11 @@
 from __future__ import annotations
-from .. import TreeNode, rc
-from ..utils import CheckpointPath
 from typing import Sequence, Union, Any, Optional
+
 import numpy as np
 import torch
+
+from qimpy import TreeNode, rc
+from qimpy.io import CheckpointPath
 
 
 class Geometry(TreeNode):

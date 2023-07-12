@@ -3,7 +3,7 @@ import torch
 import pytest
 
 from qimpy import rc, log
-from qimpy.utils import log_config
+from qimpy.io import log_config
 from . import spherical_harmonics as sh
 from .spherical_harmonics_generate import get_harmonics_ref
 

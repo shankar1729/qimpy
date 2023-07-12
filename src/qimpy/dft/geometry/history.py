@@ -6,7 +6,8 @@ import numpy as np
 from mpi4py import MPI
 
 from qimpy import rc, TreeNode
-from qimpy.utils import CheckpointPath, CheckpointContext, TaskDivision
+from qimpy.io import CheckpointPath, CheckpointContext
+from qimpy.mpi import TaskDivision
 
 
 class History(TreeNode):

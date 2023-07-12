@@ -6,9 +6,10 @@ import torch
 from mpi4py import MPI
 
 from qimpy import log, rc, TreeNode, dft
+from qimpy.io import CheckpointPath
+from qimpy.mpi import ProcessGrid, TaskDivision
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
-from qimpy.utils import ProcessGrid, TaskDivision, CheckpointPath
 
 
 class Kpoints(TreeNode):

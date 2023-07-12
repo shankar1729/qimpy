@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import pytest
 
 from qimpy import rc
-from qimpy.utils import log_config
+from qimpy.io import log_config
 from . import Pseudopotential
 
 

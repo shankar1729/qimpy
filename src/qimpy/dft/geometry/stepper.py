@@ -4,7 +4,7 @@ from typing import Optional
 import torch
 
 from qimpy import log, rc, dft, Energy
-from qimpy.utils import fmt
+from qimpy.io import fmt
 from qimpy.dft.ions import Lowdin
 from .gradient import Gradient
 

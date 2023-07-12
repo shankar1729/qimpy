@@ -1,7 +1,7 @@
 from typing import Union, TypeVar, Type, final
 
-from qimpy.utils import CheckpointPath, CheckpointContext
-from qimpy.utils.dict import key_cleanup
+from qimpy.io import CheckpointPath, CheckpointContext
+from qimpy.io.dict import key_cleanup
 from . import log
 
 

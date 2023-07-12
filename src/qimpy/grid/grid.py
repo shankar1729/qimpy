@@ -6,7 +6,8 @@ import torch
 from mpi4py import MPI
 
 from qimpy import rc, log, TreeNode, grid
-from qimpy.utils import TaskDivision, CheckpointPath
+from qimpy.mpi import TaskDivision
+from qimpy.io import CheckpointPath
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
 from .fft import init_grid_fft, FFT, IFFT, IndicesType

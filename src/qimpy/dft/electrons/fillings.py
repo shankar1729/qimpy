@@ -8,14 +8,9 @@ from mpi4py import MPI
 
 from qimpy import rc, log, TreeNode, Energy, dft
 from qimpy.dft.ions import Ions
-from qimpy.utils import (
-    BufferView,
-    CheckpointPath,
-    CheckpointContext,
-    stopwatch,
-    globalreduce,
-    fmt,
-)
+from qimpy.io import CheckpointPath, CheckpointContext, fmt
+from qimpy.mpi import BufferView, globalreduce
+from qimpy.utils import stopwatch
 
 
 class SmearingResults(NamedTuple):

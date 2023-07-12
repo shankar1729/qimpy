@@ -5,7 +5,9 @@ import numpy as np
 import torch
 
 from qimpy import dft
-from qimpy.utils import CheckpointPath, eighg, globalreduce
+from qimpy.io import CheckpointPath
+from qimpy.mpi import globalreduce
+from qimpy.utils import eighg
 from .davidson import Davidson
 
 

@@ -1,6 +1,7 @@
-from .. import TreeNode
-from ..utils import CheckpointPath
 from typing import Sequence
+
+from qimpy import TreeNode
+from qimpy.io import CheckpointPath
 
 
 class Material(TreeNode):
