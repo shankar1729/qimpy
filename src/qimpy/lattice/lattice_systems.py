@@ -1,7 +1,8 @@
-import torch
-import numbers
-import numpy as np
 from typing import Optional
+from numbers import Number
+
+import torch
+import numpy as np
 
 
 def get_Rbasis(
@@ -21,7 +22,7 @@ def get_Rbasis(
         for key, value in kwargs.items():
             if value is None:
                 raise KeyError(system + " lattice system requires parameter " + key)
-            if not isinstance(value, numbers.Number):
+            if not isinstance(value, Number):
                 raise TypeError("Lattice paramater " + key + " must be numeric")
             if value <= 0.0:
                 raise ValueError("Lattice paramater " + key + " must be > 0")
@@ -79,12 +80,12 @@ def get_Rbasis(
         raise KeyError("Unknown lattice system: " + system)
 
     # Confirm that all geometry parameters are now available:
-    assert isinstance(a, numbers.Number)
-    assert isinstance(b, numbers.Number)
-    assert isinstance(c, numbers.Number)
-    assert isinstance(alpha, numbers.Number)
-    assert isinstance(beta, numbers.Number)
-    assert isinstance(gamma, numbers.Number)
+    assert isinstance(a, Number)
+    assert isinstance(b, Number)
+    assert isinstance(c, Number)
+    assert isinstance(alpha, Number)
+    assert isinstance(beta, Number)
+    assert isinstance(gamma, Number)
 
     # Compute base lattice vectors:
     cos_alpha = np.cos(np.deg2rad(alpha))

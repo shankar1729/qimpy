@@ -1,11 +1,14 @@
-import qimpy as qp
-import numpy as np
-import torch
-from ._lattice_systems import get_Rbasis
 from typing import Optional, Union, Sequence
 
+import numpy as np
+import torch
 
-class Lattice(qp.TreeNode):
+from qimpy import log, rc, TreeNode
+from qimpy.utils import CheckpointPath, CheckpointContext, fmt
+from .lattice_systems import get_Rbasis
+
+
+class Lattice(TreeNode):
     """Real and reciprocal space lattice vectors"""
 
     Rbasis: torch.Tensor  #: Real-space lattice vectors (in columns)
@@ -24,7 +27,7 @@ class Lattice(qp.TreeNode):
     def __init__(
         self,
         *,
-        checkpoint_in: qp.utils.CheckpointPath = qp.utils.CheckpointPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
         system: Optional[str] = None,
         modification: Optional[str] = None,
         a: Optional[float] = None,
@@ -108,7 +111,7 @@ class Lattice(qp.TreeNode):
             Defaults to (1, 1, 1) if unspecified.
         """
         super().__init__()
-        qp.log.info("\n--- Initializing Lattice ---")
+        log.info("\n--- Initializing Lattice ---")
 
         if checkpoint_in:
             attrs = checkpoint_in.attrs
@@ -121,7 +124,7 @@ class Lattice(qp.TreeNode):
         else:
             self.compute_stress = False
             self.movable = False
-            self.move_scale = torch.ones(3, device=qp.rc.device)
+            self.move_scale = torch.ones(3, device=rc.device)
             self.strain_rate = None
             stress = None
 
@@ -151,7 +154,7 @@ class Lattice(qp.TreeNode):
                 self.Rbasis = scale_vector[None, :] * self.Rbasis
 
         # Compute dependent quantities:
-        self.update(self.Rbasis.to(qp.rc.device), report_change=False)
+        self.update(self.Rbasis.to(rc.device), report_change=False)
         self.report(report_grad=False)
         self.requires_grad_(False, clear=True)  # initialize gradient
         if stress is not None:
@@ -164,11 +167,11 @@ class Lattice(qp.TreeNode):
         if compute_stress is not None:
             self.compute_stress = compute_stress or self.movable
         if move_scale is not None:
-            self.move_scale = torch.tensor(move_scale, device=qp.rc.device)
+            self.move_scale = torch.tensor(move_scale, device=rc.device)
             assert self.move_scale.shape == (3,)
 
     def _save_checkpoint(
-        self, cp_path: qp.utils.CheckpointPath, context: qp.utils.CheckpointContext
+        self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
         attrs = cp_path.attrs
         attrs["compute_stress"] = self.compute_stress
@@ -193,7 +196,7 @@ class Lattice(qp.TreeNode):
                 self.Rbasis
             )
             change_volume = (volume - self.volume) / self.volume
-            qp.log.info(
+            log.info(
                 f"Relative change in Rbasis: {change_Rbasis:e}"
                 f" and volume: {change_volume:e}"
             )
@@ -203,14 +206,14 @@ class Lattice(qp.TreeNode):
 
     def report(self, report_grad: bool) -> None:
         """Report lattice vectors, and optionally stress if `report_grad`."""
-        qp.log.info(
-            f"Rbasis (real-space basis [a0] in columns):\n{qp.utils.fmt(self.Rbasis)}\n"
+        log.info(
+            f"Rbasis (real-space basis [a0] in columns):\n{fmt(self.Rbasis)}\n"
             "Gbasis (reciprocal-space basis [1/a0] in columns):\n"
-            f"{qp.utils.fmt(self.Gbasis)}"
+            f"{fmt(self.Gbasis)}"
             f"\nUnit cell volume: {self.volume}"
         )
         if report_grad and self.compute_stress:
-            qp.log.info(f"Stress [Eh/a0^3]:\n{qp.utils.fmt(self.stress)}")
+            log.info(f"Stress [Eh/a0^3]:\n{fmt(self.stress)}")
 
     @property
     def invRbasis(self) -> torch.Tensor:
