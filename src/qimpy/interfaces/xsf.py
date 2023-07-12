@@ -1,7 +1,9 @@
-import argparse
 from typing import Optional, TextIO
+import argparse
+
 import h5py
 import numpy as np
+
 from qimpy.utils import Unit
 
 
