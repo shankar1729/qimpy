@@ -1,14 +1,16 @@
 from __future__ import annotations
-import qimpy as qp
+
 import torch
 
+from qimpy import symmetries
 
-def _get_lattice_point_group(Rbasis: torch.Tensor, tolerance: float) -> torch.Tensor:
+
+def get_lattice_point_group(Rbasis: torch.Tensor, tolerance: float) -> torch.Tensor:
     """Return point group (n_sym x 3 x 3 tensor in lattice coordinates),
     given lattice vectors Rbasis (3 x 3 tensor)."""
 
     # Reduce lattice vectors:
-    T = _reduce_matrix33(Rbasis, tolerance)
+    T = reduce_matrix33(Rbasis, tolerance)
     Rreduced = Rbasis @ T
 
     # Construct all possible matrices with entries from (-1, 0, 1):
@@ -27,7 +29,7 @@ def _get_lattice_point_group(Rbasis: torch.Tensor, tolerance: float) -> torch.Te
     return (T @ sym) @ torch.linalg.inv(T)
 
 
-def _reduce_matrix33(M: torch.Tensor, tolerance: float) -> torch.Tensor:
+def reduce_matrix33(M: torch.Tensor, tolerance: float) -> torch.Tensor:
     """Find integer T that minimizes norm(M @ T).
     All tensors are 3 x 3, and accuracy of minimum is set by tolerance."""
     assert M.shape == (3, 3)
@@ -70,8 +72,8 @@ def _reduce_matrix33(M: torch.Tensor, tolerance: float) -> torch.Tensor:
             return T  # converged
 
 
-def _symmetrize_lattice(
-    self: qp.symmetries.Symmetries, Rbasis: torch.Tensor
+def symmetrize_lattice(
+    self: symmetries.Symmetries, Rbasis: torch.Tensor
 ) -> torch.Tensor:
     """Symmetrize lattice vectors `Rbasis` (3 x 3)."""
     # Compute symmetrized metric:
@@ -87,9 +89,7 @@ def _symmetrize_lattice(
     )  # metric_sym^(1/2)
 
 
-def _symmetrize_matrix(
-    self: qp.symmetries.Symmetries, mat: torch.Tensor
-) -> torch.Tensor:
+def symmetrize_matrix(self: symmetries.Symmetries, mat: torch.Tensor) -> torch.Tensor:
     """Symmetrize Cartesian matrix `mat` (3 x 3).
     Suitable to symmetrize, e.g., stress tensors.
     """

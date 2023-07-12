@@ -1,11 +1,14 @@
 from __future__ import annotations
-import qimpy as qp
-import numpy as np
-import torch
 from typing import Sequence
 
+import numpy as np
+import torch
 
-def _check_grid_shape(self: qp.symmetries.Symmetries, shape: Sequence[int]) -> None:
+from qimpy import rc, log, symmetries
+from qimpy.utils import ceildiv, fft_suitable
+
+
+def check_grid_shape(self: symmetries.Symmetries, shape: Sequence[int]) -> None:
     """Check whether grid dimensions are compatible with symmetries.
 
     Raises
@@ -16,7 +19,7 @@ def _check_grid_shape(self: qp.symmetries.Symmetries, shape: Sequence[int]) -> N
     """
 
     # Compute rotation matrix in mesh coordinates
-    S = torch.tensor(shape, dtype=torch.double, device=qp.rc.device)
+    S = torch.tensor(shape, dtype=torch.double, device=rc.device)
     rot_mesh = S.view(1, 3, 1) * self.rot * (1.0 / S).view(1, 1, 3)
 
     # Commensurate => matrix should still be an integer:
@@ -29,13 +32,11 @@ def _check_grid_shape(self: qp.symmetries.Symmetries, shape: Sequence[int]) -> N
         )
 
 
-def _get_grid_shape(
-    self: qp.symmetries.Symmetries, shape_min: np.ndarray
-) -> np.ndarray:
+def get_grid_shape(self: symmetries.Symmetries, shape_min: np.ndarray) -> np.ndarray:
     """Smallest symmetric, FFT-suitable shape >= shape_min."""
 
     # Determine constraints on S due to symmetries:
-    rot = self.rot.to(dtype=torch.int, device=qp.rc.cpu).numpy()
+    rot = self.rot.to(dtype=torch.int, device=rc.cpu).numpy()
     ratios = np.gcd.reduce(rot, axis=0)
 
     # Recursive function to set grid shapes compatible with one dimension
@@ -50,7 +51,7 @@ def _get_grid_shape(
             if Sb[k]:  # pre-existing entry
                 if ((ratios[j, k] * Sb[j]) % Sb[k]) or ((ratios[k, j] * Sb[k]) % Sb[j]):
                     # Sb violates constraints between j and k
-                    qp.log.info(
+                    log.info(
                         "could not find anisotropic shape"
                         " commensurate with symmetries"
                     )
@@ -78,14 +79,14 @@ def _get_grid_shape(
             Sb //= np.gcd.reduce(Sb)  # remove common factors
             # check FFT suitability of Sb:
             i_nz = np.where(Sb)[0]
-            if not np.logical_and.reduce([qp.utils.fft_suitable(s) for s in Sb[i_nz]]):
-                qp.log.info(
+            if not np.logical_and.reduce([fft_suitable(s) for s in Sb[i_nz]]):
+                log.info(
                     "could not find anisotropic shape with" " FFT-suitable factors"
                 )
                 Sb[i_nz] = 1
             # determine smallest fft-suitable scale factor to reach shape_min
-            scale_Sb = 2 * qp.utils.ceildiv(shape_min[i_nz], 2 * Sb[i_nz]).max()
-            while not qp.utils.fft_suitable(scale_Sb):
+            scale_Sb = 2 * ceildiv(shape_min[i_nz], 2 * Sb[i_nz]).max()
+            while not fft_suitable(scale_Sb):
                 scale_Sb += 2  # move through even numbers
             shape += scale_Sb * Sb
     return shape

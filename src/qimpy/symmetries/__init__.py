@@ -2,6 +2,6 @@
 # List exported symbols for doc generation
 __all__ = ("LabeledPositions", "Symmetries", "FieldSymmetrizer")
 
-from ._positions import LabeledPositions
-from ._symmetries import Symmetries
-from ._field import FieldSymmetrizer
+from .positions import LabeledPositions
+from .symmetries import Symmetries
+from .field import FieldSymmetrizer

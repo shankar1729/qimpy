@@ -9,7 +9,7 @@ import torch
 from qimpy import TreeNode, log, rc, dft
 from qimpy.utils import fmt, cis, CheckpointPath, CheckpointContext
 from qimpy.lattice import Lattice
-from qimpy.symmetries._positions import LabeledPositions
+from qimpy.symmetries.positions import LabeledPositions
 from qimpy.grid import FieldH
 from . import Pseudopotential, ions_projectors, ions_atomic, ions_update
 

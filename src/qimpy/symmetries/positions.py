@@ -1,7 +1,10 @@
 from __future__ import annotations
 from typing import NamedTuple, Optional
+
 import torch
-import qimpy as qp
+
+from qimpy import symmetries
+from qimpy.lattice import Lattice
 
 
 class LabeledPositions(NamedTuple):
@@ -13,9 +16,9 @@ class LabeledPositions(NamedTuple):
     pseudovectors: Optional[torch.Tensor] = None  #: pseudovector labels (Npv x N x 3)
 
 
-def _get_space_group(
+def get_space_group(
     lattice_sym: torch.Tensor,
-    lattice: qp.lattice.Lattice,
+    lattice: Lattice,
     labeled_positions: LabeledPositions,
     tolerance: float,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -100,8 +103,8 @@ def _get_space_group(
     return rot, trans, position_map
 
 
-def _symmetrize_positions(
-    self: qp.symmetries.Symmetries, positions: torch.Tensor
+def symmetrize_positions(
+    self: symmetries.Symmetries, positions: torch.Tensor
 ) -> torch.Tensor:
     """Symmetrize `positions` (n_ions x 3)"""
     pos_rot = positions @ self.rot.transpose(-2, -1) + self.trans[:, None]
@@ -114,8 +117,8 @@ def _symmetrize_positions(
     return positions + dpos.mean(dim=0)
 
 
-def _symmetrize_forces(
-    self: qp.symmetries.Symmetries, positions_grad: torch.Tensor
+def symmetrize_forces(
+    self: symmetries.Symmetries, positions_grad: torch.Tensor
 ) -> torch.Tensor:
     """Symmetrize forces `positions_grad` (n_ions x 3) in lattice coordinates.
     Note that these are contravariant lattice coordinates, as in dE/dpositions.

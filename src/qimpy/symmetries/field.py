@@ -1,18 +1,21 @@
 from __future__ import annotations
-import qimpy as qp
+
 import numpy as np
 import torch
+
+import qimpy
+from qimpy import rc, log
+from qimpy.utils import BufferView, TaskDivision, cis, stopwatch
 
 
 class FieldSymmetrizer:
     """Space group symmetrization of reciprocal-space :class:`FieldH`'s."""
 
-    grid: qp.grid.Grid
+    grid: qimpy.grid.Grid
 
-    def __init__(self, grid: qp.grid.Grid) -> None:
+    def __init__(self, grid: qimpy.grid.Grid) -> None:
         """Initialize symmetrization for fields on `grid`."""
         self.grid = grid
-        rc = qp.rc
         shapeH = grid.shapeH
         rot = grid.symmetries.rot.to(torch.long)  # rotations (lattice coords)
         trans = grid.symmetries.trans
@@ -48,7 +51,7 @@ class FieldSymmetrizer:
 
         if grid.n_procs > 1:
             # Set up 'dest' split over orbits:
-            div_dest = qp.utils.TaskDivision(
+            div_dest = TaskDivision(
                 n_tot=iH_reduced.shape[0], n_procs=grid.n_procs, i_proc=grid.i_proc
             )
 
@@ -63,7 +66,7 @@ class FieldSymmetrizer:
 
             # Identify what grid data to send from this process and to whom:
             mine_src = torch.where(whose_src == grid.i_proc)
-            dest_n_prev = torch.from_numpy(div_dest.n_prev).to(qp.rc.device)
+            dest_n_prev = torch.from_numpy(div_dest.n_prev).to(rc.device)
             send_prev = torch.searchsorted(mine_src[0].contiguous(), dest_n_prev)
             iH_local = iH[index[mine_src]] % shapeR  # wrap to positive
             iH_local[..., 2] -= div_src.i_start  # now local H-space index
@@ -79,18 +82,18 @@ class FieldSymmetrizer:
 
             # Identify what data is received from each process:
             whose_src_mine = whose_src[mine_dest].flatten()
-            local_index = torch.arange(len(whose_src_mine), device=qp.rc.device)
+            local_index = torch.arange(len(whose_src_mine), device=rc.device)
             recv_index = (
                 whose_src_mine * len(whose_src_mine) + local_index
             ).argsort()  # indices of recv'd data
             recv_prev = torch.searchsorted(
                 whose_src_mine[recv_index],
-                torch.arange(grid.n_procs + 1, device=qp.rc.device),
+                torch.arange(grid.n_procs + 1, device=rc.device),
             )
 
             # Store required indexing arrays:
-            self.send_prev = send_prev.to(qp.rc.cpu).numpy()
-            self.recv_prev = recv_prev.to(qp.rc.cpu).numpy()
+            self.send_prev = send_prev.to(rc.cpu).numpy()
+            self.recv_prev = recv_prev.to(rc.cpu).numpy()
             self.grid_index = grid_index
             self.recv_index = recv_index
             self.orbit_index = torch.empty_like(local_index)
@@ -104,17 +107,17 @@ class FieldSymmetrizer:
         self.inv_multiplicity = (1.0 / self.n_sym) / multiplicity
 
         # Combine translation phase and conjugation into a 2 x 2 real matrix:
-        phase = qp.utils.cis((-2 * np.pi) * (iH_reduced[:, None] * trans).sum(dim=-1))
+        phase = cis((-2 * np.pi) * (iH_reduced[:, None] * trans).sum(dim=-1))
         self.phase_conj = (
-            phase.real[..., None, None] * torch.eye(2, device=qp.rc.device)[None, None]
+            phase.real[..., None, None] * torch.eye(2, device=rc.device)[None, None]
         )
         self.phase_conj[..., 0, 1] = phase.imag
         self.phase_conj[..., 1, 0] = -phase.imag
         self.phase_conj[:, :, 1][is_conj] *= -1
-        qp.log.info(f"Initialized field symmetrization in {len(index)} orbits")
+        log.info(f"Initialized field symmetrization in {len(index)} orbits")
 
-    @qp.utils.stopwatch(name="FieldH.symmetrize")
-    def __call__(self, v: qp.grid.FieldH) -> None:
+    @stopwatch(name="FieldH.symmetrize")
+    def __call__(self, v: qimpy.grid.FieldH) -> None:
         """Symmetrize field `v` in-place."""
         grid = self.grid
         assert v.grid == grid
@@ -131,17 +134,17 @@ class FieldSymmetrizer:
             dest_data = torch.empty(
                 (len(self.recv_index), n_batch),
                 dtype=v_data.dtype,
-                device=qp.rc.device,
+                device=rc.device,
             )
-            mpi_type = qp.rc.mpi_type[v_data.dtype]
+            mpi_type = rc.mpi_type[v_data.dtype]
             send_counts = np.diff(self.send_prev) * n_batch
             send_offsets = self.send_prev[:-1] * n_batch
             recv_counts = np.diff(self.recv_prev) * n_batch
             recv_offsets = self.recv_prev[:-1] * n_batch
-            qp.rc.current_stream_synchronize()
+            rc.current_stream_synchronize()
             grid.comm.Alltoallv(
-                (qp.utils.BufferView(src_data), send_counts, send_offsets, mpi_type),
-                (qp.utils.BufferView(dest_data), recv_counts, recv_offsets, mpi_type),
+                (BufferView(src_data), send_counts, send_offsets, mpi_type),
+                (BufferView(dest_data), recv_counts, recv_offsets, mpi_type),
             )
             # Rearrange data by orbit:
             v_orbits = dest_data[self.orbit_index].T.view(
@@ -165,10 +168,10 @@ class FieldSymmetrizer:
             assert grid.comm is not None
             # Rerrange data and send to process that holds grid point:
             dest_data = v_orbits.flatten(1).T[self.recv_index].contiguous()
-            qp.rc.current_stream_synchronize()
+            rc.current_stream_synchronize()
             grid.comm.Alltoallv(
-                (qp.utils.BufferView(dest_data), recv_counts, recv_offsets, mpi_type),
-                (qp.utils.BufferView(src_data), send_counts, send_offsets, mpi_type),
+                (BufferView(dest_data), recv_counts, recv_offsets, mpi_type),
+                (BufferView(src_data), send_counts, send_offsets, mpi_type),
             )
             # Set back to grid (accumulate with all possible rotations):
             v_data.index_put_(

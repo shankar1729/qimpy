@@ -1,23 +1,23 @@
-import qimpy as qp
+from typing import Union, Optional
+
 import numpy as np
 import torch
-from typing import Union, Optional
-from ._lattice import _get_lattice_point_group, _symmetrize_lattice, _symmetrize_matrix
-from ._positions import (
-    LabeledPositions,
-    _get_space_group,
-    _symmetrize_positions,
-    _symmetrize_forces,
-)
-from ._grid import _check_grid_shape, _get_grid_shape
+
+from qimpy import rc, log, TreeNode
+from qimpy.utils import CheckpointPath, fmt
+from qimpy.lattice import Lattice
+from . import LabeledPositions
+from .lattice import get_lattice_point_group, symmetrize_lattice, symmetrize_matrix
+from .positions import get_space_group, symmetrize_positions, symmetrize_forces
+from .grid import check_grid_shape, get_grid_shape
 
 
-class Symmetries(qp.TreeNode):
+class Symmetries(TreeNode):
     """Space group symmetries.
     Detects space group from lattice and ions, and provides methods to
     symmetrize properties such as positions, forces and densities."""
 
-    lattice: qp.lattice.Lattice  #: Corresponding lattice vectors
+    lattice: Lattice  #: Corresponding lattice vectors
     labeled_positions: Optional[LabeledPositions]  #: Positions determining space group
     tolerance: float  #: Relative error threshold in detecting symmetries
     n_sym: int  #: Number of space group operations
@@ -27,18 +27,18 @@ class Symmetries(qp.TreeNode):
     i_id: int  #: Index of identity operation within space group
     i_inv: list[int]  #: Indices of any inversion operations in space group
 
-    symmetrize_lattice = _symmetrize_lattice
-    symmetrize_matrix = _symmetrize_matrix
-    symmetrize_positions = _symmetrize_positions
-    symmetrize_forces = _symmetrize_forces
-    check_grid_shape = _check_grid_shape
-    get_grid_shape = _get_grid_shape
+    symmetrize_lattice = symmetrize_lattice
+    symmetrize_matrix = symmetrize_matrix
+    symmetrize_positions = symmetrize_positions
+    symmetrize_forces = symmetrize_forces
+    check_grid_shape = check_grid_shape
+    get_grid_shape = get_grid_shape
 
     def __init__(
         self,
         *,
-        checkpoint_in: qp.utils.CheckpointPath = qp.utils.CheckpointPath(),
-        lattice: qp.lattice.Lattice,
+        checkpoint_in: CheckpointPath = CheckpointPath(),
+        lattice: Lattice,
         labeled_positions: Optional[LabeledPositions] = None,
         axes: dict[str, np.ndarray] = {},
         tolerance: float = 1e-6,
@@ -70,7 +70,7 @@ class Symmetries(qp.TreeNode):
         self.lattice = lattice
         self.labeled_positions = labeled_positions
         self.tolerance = tolerance
-        qp.log.info("\n--- Initializing Symmetries ---")
+        log.info("\n--- Initializing Symmetries ---")
         rot, trans, position_map = Symmetries.detect(
             lattice, labeled_positions, axes, tolerance
         )
@@ -81,13 +81,13 @@ class Symmetries(qp.TreeNode):
                 assert override == "identity"
                 sel = [Symmetries.find_identity(rot, trans, tolerance)]
             else:
-                ops = torch.tensor(override, device=qp.rc.device)
+                ops = torch.tensor(override, device=rc.device)
                 assert len(ops.shape) == 3
                 assert ops.shape[-2:] == (4, 3)
                 rot_in = ops[:, :3, :]
                 trans_in = ops[:, 3, :]
                 sel = Symmetries.find(rot, trans, rot_in, trans_in, tolerance)
-            qp.log.info(f"Override: {len(sel)} space-group symmetries")
+            log.info(f"Override: {len(sel)} space-group symmetries")
             rot = rot[sel]
             trans = trans[sel]
             position_map = position_map[sel]
@@ -108,16 +108,16 @@ class Symmetries(qp.TreeNode):
 
     @staticmethod
     def detect(
-        lattice: qp.lattice.Lattice,
+        lattice: Lattice,
         labeled_positions: Optional[LabeledPositions],
         axes: dict[str, np.ndarray],
         tolerance: float,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Detect space group: rotations, translations and mapping of ions."""
         # Point group:
-        lattice_sym = _get_lattice_point_group(lattice.Rbasis, tolerance)
+        lattice_sym = get_lattice_point_group(lattice.Rbasis, tolerance)
         n_point = lattice_sym.shape[0]
-        qp.log.info(f"Found {n_point} point-group symmetries of the Bravais lattice")
+        log.info(f"Found {n_point} point-group symmetries of the Bravais lattice")
         lattice_sym = Symmetries.reduce_axes(lattice_sym, lattice, axes, tolerance)
         # Space group:
         if labeled_positions is None:
@@ -129,55 +129,53 @@ class Symmetries(qp.TreeNode):
             )
             return rot, trans, position_map
         else:
-            rot, trans, position_map = _get_space_group(
+            rot, trans, position_map = get_space_group(
                 lattice_sym, lattice, labeled_positions, tolerance
             )
-            qp.log.info(f"Found {rot.shape[0]} space-group symmetries with basis")
+            log.info(f"Found {rot.shape[0]} space-group symmetries with basis")
             return rot, trans, position_map
 
     @staticmethod
     def reduce_axes(
         lattice_sym: torch.Tensor,
-        lattice: qp.lattice.Lattice,
+        lattice: Lattice,
         axes: dict[str, np.ndarray],
         tolerance: float,
     ) -> torch.Tensor:
         """Reduce lattice (point group) symmetries by any global `axes`."""
         sym_axis = (lattice.Rbasis @ lattice_sym) @ lattice.invRbasis
         for axis_name, axis_np in axes.items():
-            axis = torch.from_numpy(axis_np).to(qp.rc.device)
+            axis = torch.from_numpy(axis_np).to(rc.device)
             sel = torch.where((sym_axis @ axis - axis).norm(dim=-1) < tolerance)[0]
             lattice_sym = lattice_sym[sel]
             sym_axis = sym_axis[sel]
             n_point = len(sel)
-            qp.log.info(f"Reduced to {n_point} point-group symmetries with {axis_name}")
+            log.info(f"Reduced to {n_point} point-group symmetries with {axis_name}")
         return lattice_sym
 
     def report(self) -> None:
         """Print symmetry matrices."""
         for rot, trans in zip(
-            self.rot.to(qp.rc.cpu, dtype=torch.int), self.trans.to(qp.rc.cpu)
+            self.rot.to(rc.cpu, dtype=torch.int), self.trans.to(rc.cpu)
         ):
-            rot_str = ", ".join(qp.utils.fmt(row) for row in rot)
-            qp.log.info(f"- [{rot_str}, {qp.utils.fmt(trans)}]")
-        qp.log.debug("Ion map:\n" + qp.utils.fmt(self.position_map))
+            rot_str = ", ".join(fmt(row) for row in rot)
+            log.info(f"- [{rot_str}, {fmt(trans)}]")
+        log.debug("Ion map:\n" + fmt(self.position_map))
 
-    def enforce(
-        self, lattice: qp.lattice.Lattice, positions: Optional[torch.Tensor]
-    ) -> None:
+    def enforce(self, lattice: Lattice, positions: Optional[torch.Tensor]) -> None:
         """Enforce symmetries exactly on lattice and ions."""
-        qp.log.info("Enforcing symmetries:")
+        log.info("Enforcing symmetries:")
         lattice.update(self.symmetrize_lattice(lattice.Rbasis))
         if positions is not None:
             positions_sym = self.symmetrize_positions(positions)
             rms = (positions_sym - positions).square().mean().sqrt()
             positions[:] = positions_sym
-            qp.log.info(f"RMS change in fractional positions of ions: {rms:e}")
+            log.info(f"RMS change in fractional positions of ions: {rms:e}")
 
     @staticmethod
     def find_identity(rot: torch.Tensor, trans: torch.Tensor, tolerance: float) -> int:
         """Find index of identity matrix in space group."""
-        id = torch.eye(3, device=qp.rc.device)
+        id = torch.eye(3, device=rc.device)
         id_diff = ((rot - id) ** 2).sum(dim=(1, 2)) + (trans**2).sum(dim=1)
         i_id = int(id_diff.argmin().item())
         if id_diff[i_id] > tolerance**2:
@@ -187,7 +185,7 @@ class Symmetries(qp.TreeNode):
     @staticmethod
     def find_inversion(rot: torch.Tensor, tolerance: float) -> list[int]:
         """Find list of indices of space group operations with inversion."""
-        id = torch.eye(3, device=qp.rc.device)
+        id = torch.eye(3, device=rc.device)
         inv_diff = ((rot + id) ** 2).sum(dim=(1, 2))
         return torch.where(inv_diff < tolerance**2)[0].tolist()
 
