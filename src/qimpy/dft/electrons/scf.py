@@ -5,7 +5,7 @@ import torch
 from mpi4py import MPI
 
 from qimpy import dft, Energy
-from qimpy.utils import CpPath, globalreduce
+from qimpy.utils import CheckpointPath, globalreduce
 from qimpy.algorithms import Pulay
 from qimpy.grid import FieldH
 
@@ -28,7 +28,7 @@ class SCF(Pulay[FieldH]):
         self,
         *,
         comm: MPI.Comm,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
         n_iterations: int = 50,
         energy_threshold: float = 1e-8,
         residual_threshold: float = 1e-7,

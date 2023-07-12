@@ -4,7 +4,7 @@ from typing import Optional
 import torch
 
 from qimpy import rc
-from qimpy.utils import Gradable, TaskDivision, CpPath, abs_squared
+from qimpy.utils import Gradable, TaskDivision, CheckpointPath, abs_squared
 from . import Basis
 from .wavefunction_init import _randomize, _randomize_selected
 from .wavefunction_split import _split_bands, _split_basis
@@ -157,7 +157,7 @@ class Wavefunction(Gradable["Wavefunction"]):
         """Get number of bands in wavefunction"""
         return self.coeff.shape[2]
 
-    def read(self, cp_path: CpPath) -> int:
+    def read(self, cp_path: CheckpointPath) -> int:
         """Read wavefunctions from `cp_path`. Return number of bands read."""
         checkpoint, path = cp_path
         assert checkpoint is not None
@@ -181,7 +181,7 @@ class Wavefunction(Gradable["Wavefunction"]):
         self._proj_invalidate()
         return n_bands_in
 
-    def write(self, cp_path: CpPath) -> None:
+    def write(self, cp_path: CheckpointPath) -> None:
         """Write wavefunctions to `cp_path`."""
         checkpoint, path = cp_path
         assert checkpoint is not None

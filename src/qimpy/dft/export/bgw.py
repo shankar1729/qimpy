@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from qimpy import log, TreeNode, dft
-from qimpy.utils import CpPath
+from qimpy.utils import CheckpointPath
 
 
 class BGW(TreeNode):
@@ -14,7 +14,7 @@ class BGW(TreeNode):
         *,
         system: dft.System,
         filename: str,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """Export data for BerkeleyGW.
 

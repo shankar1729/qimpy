@@ -1,7 +1,7 @@
 from typing import Union, TypeVar, Type, final
 
 from . import log, utils
-from .utils import CpPath, CpContext
+from .utils import CheckpointPath, CheckpointContext
 
 
 ClassType = TypeVar("ClassType")
@@ -21,7 +21,9 @@ class TreeNode:
         self.child_names = []
 
     @final
-    def save_checkpoint(self, cp_path: CpPath, context: CpContext) -> None:
+    def save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> None:
         """Save `self` and all children in hierarchy to `cp_path`.
         Here, `context` helps identify why/when this checkpoint is being called,
         e.g. at a geometry step, or at the end of the simulation.
@@ -42,7 +44,9 @@ class TreeNode:
                     cp_path.relative(child_name), context
                 )
 
-    def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
         """Override to save required quantities to `cp_path`.
         Return names of objects saved (for logging)."""
         return []
@@ -52,7 +56,7 @@ class TreeNode:
         attr_name: str,
         cls: Type[TreeNodeType],
         params: Union[TreeNodeType, dict, str, None],
-        checkpoint_in: CpPath,
+        checkpoint_in: CheckpointPath,
         attr_version_name: str = "",
         **kwargs,
     ) -> None:
@@ -132,7 +136,7 @@ class TreeNode:
     def add_child_one_of(
         self,
         attr_name: str,
-        checkpoint_in: CpPath,
+        checkpoint_in: CheckpointPath,
         *args: ChildOptions,
         have_default: bool,
     ) -> None:
@@ -181,7 +185,7 @@ class TreeNode:
 
         # Prevent loading data from inconsistent checkpoint:
         if arg_sel.attr_version_name != attr_version_name_checkpoint:
-            checkpoint_in = CpPath()
+            checkpoint_in = CheckpointPath()
 
         self.add_child(
             attr_name,

@@ -5,7 +5,7 @@ from typing import Union, Protocol, Callable, Optional
 import torch
 
 from qimpy import rc, TreeNode
-from qimpy.utils import CpPath, CpContext, BufferView, Unit, UnitOrFloat
+from qimpy.utils import CheckpointPath, CheckpointContext, BufferView, Unit, UnitOrFloat
 from qimpy.dft import geometry
 from .gradient import Gradient
 
@@ -29,7 +29,7 @@ class Thermostat(TreeNode):
         self,
         *,
         dynamics: geometry.Dynamics,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
         nve: Union[dict, NVE, None] = None,
         nose_hoover: Union[dict, NoseHoover, None] = None,
         berendsen: Union[dict, Berendsen, None] = None,
@@ -87,7 +87,7 @@ class NVE(TreeNode):
         self,
         *,
         dynamics: geometry.Dynamics,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         super().__init__()
         self.dynamics = dynamics
@@ -121,7 +121,7 @@ class NoseHoover(TreeNode):
         dynamics: geometry.Dynamics,
         chain_length_T: int = 3,
         chain_length_P: int = 3,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """
         Specify thermostat parameters.
@@ -150,7 +150,9 @@ class NoseHoover(TreeNode):
             self.thermostat_velocity = torch.zeros(chain_length_T, device=rc.device)
             self.barostat_velocity = None
 
-    def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
         attrs = cp_path.attrs
         attrs["chain_length_T"] = self.chain_length_T
         attrs["chain_length_P"] = self.chain_length_P
@@ -250,7 +252,7 @@ class Berendsen(TreeNode):
         *,
         dynamics: geometry.Dynamics,
         B0: UnitOrFloat = Unit(2.2, "GPa"),
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """
         Specify thermostat parameters.
@@ -269,7 +271,9 @@ class Berendsen(TreeNode):
         self.dynamics = dynamics
         self.B0 = checkpoint_in.attrs["B0"] if checkpoint_in else float(B0)
 
-    def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
         cp_path.attrs["B0"] = self.B0
         return ["B0"]
 
@@ -311,7 +315,7 @@ class Langevin(TreeNode):
         self,
         *,
         dynamics: geometry.Dynamics,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         super().__init__()
         self.dynamics = dynamics

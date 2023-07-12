@@ -1,13 +1,14 @@
 from typing import Union, Optional, Any, Sequence
+
 import numpy as np
 import torch
 from mpi4py import MPI
 
-from .. import rc, log, TreeNode, Energy
-from ..utils import Checkpoint, CpPath, ProcessGrid
-from ..lattice import Lattice
-from ..symmetries import Symmetries
-from ..grid import Grid, Coulomb
+from qimpy import rc, log, TreeNode, Energy
+from qimpy.utils import Checkpoint, CheckpointPath, ProcessGrid
+from qimpy.lattice import Lattice
+from qimpy.symmetries import Symmetries
+from qimpy.grid import Grid, Coulomb
 from .ions import Ions
 from .electrons import Electrons
 from .geometry import Geometry
@@ -26,7 +27,7 @@ class System(TreeNode):
     geometry: Geometry  #: Geometry actions, e.g., relaxation / dynamics
     export: Export  #: Exporters to interface with other codes
     energy: Energy  #: Energy components
-    checkpoint_in: CpPath  #: Input checkpoint
+    checkpoint_in: CheckpointPath  #: Input checkpoint
     checkpoint_out: Optional[str]  #: Filename for output checkpoint
     process_grid: ProcessGrid  #: Process grid for parallelization
 
@@ -84,10 +85,10 @@ class System(TreeNode):
             comm if comm else rc.comm, "rkb", process_grid_shape
         )
         # Set in and out checkpoints:
-        checkpoint_in = CpPath()
+        checkpoint_in = CheckpointPath()
         if checkpoint is not None:
             try:
-                checkpoint_in = CpPath(Checkpoint(checkpoint))
+                checkpoint_in = CheckpointPath(Checkpoint(checkpoint))
             except OSError:  # Raised by h5py when file not readable
                 log.info(f"Cannot load checkpoint file '{checkpoint}'")
         self.checkpoint_out = checkpoint if checkpoint_out is None else checkpoint_out

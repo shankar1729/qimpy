@@ -5,7 +5,7 @@ import torch
 from mpi4py import MPI
 
 from qimpy import rc, dft
-from qimpy.utils import BufferView, CpPath, eighg, dagger
+from qimpy.utils import BufferView, CheckpointPath, eighg, dagger
 from qimpy.algorithms import Minimize, MinimizeState, MatrixArray
 from qimpy.grid import FieldH
 
@@ -20,7 +20,7 @@ class LCAO(Minimize[MatrixArray]):
         self,
         *,
         comm: MPI.Comm,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
         n_iterations: int = 30,
         energy_threshold: float = 1e-6,
         gradient_threshold: float = 1e-8,

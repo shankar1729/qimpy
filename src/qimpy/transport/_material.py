@@ -1,5 +1,5 @@
 from .. import TreeNode
-from ..utils import CpPath
+from ..utils import CheckpointPath
 from typing import Sequence
 
 
@@ -11,7 +11,7 @@ class Material(TreeNode):
         *,
         fname: str,
         rotation: Sequence[Sequence[float]] = ((1, 0, 0), (0, 1, 0, (0, 0, 1))),
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
         """
         Initialize material parameters.

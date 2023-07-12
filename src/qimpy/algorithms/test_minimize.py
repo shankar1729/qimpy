@@ -20,7 +20,7 @@ class RandomFunction(qp.algorithms.Minimize[qp.grid.FieldR]):  # type: ignore
         self,
         n_dim: int,
         method: str,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        checkpoint_in: qp.utils.CheckpointPath = qp.utils.CheckpointPath(),
     ):
         super().__init__(
             comm=qp.rc.comm,

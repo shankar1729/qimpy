@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Protocol, Optional, Union
 
 from qimpy import TreeNode, dft
-from qimpy.utils import CpPath
+from qimpy.utils import CheckpointPath
 from . import BGW
 
 
@@ -23,7 +23,7 @@ class Export(TreeNode):
         self,
         *,
         system: dft.System,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
         bgw: Optional[Union[dict, BGW]] = None,
     ) -> None:
         """Specify one or more export formats.

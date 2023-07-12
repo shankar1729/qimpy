@@ -6,7 +6,7 @@ import numpy as np
 from mpi4py import MPI
 
 from qimpy import rc, TreeNode
-from qimpy.utils import CpPath, CpContext, TaskDivision
+from qimpy.utils import CheckpointPath, CheckpointContext, TaskDivision
 
 
 class History(TreeNode):
@@ -18,7 +18,11 @@ class History(TreeNode):
     save_map: dict[str, np.ndarray]  # Names and data for quantities to save
 
     def __init__(
-        self, *, comm: MPI.Comm, n_max: int, checkpoint_in: CpPath = CpPath()
+        self,
+        *,
+        comm: MPI.Comm,
+        n_max: int,
+        checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         super().__init__()
         self.comm = comm
@@ -57,7 +61,9 @@ class History(TreeNode):
             i_out = self.i_iter - self.iter_division.i_start  # local index
             self.save_map[name][i_out] = data
 
-    def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
         cp_path.attrs["i_iter"] = self.i_iter
         saved_list = []
         for name, data in self.save_map.items():
@@ -65,7 +71,7 @@ class History(TreeNode):
             saved_list.append(name)
         return saved_list
 
-    def _save(self, cp_path: CpPath, data: np.ndarray) -> None:
+    def _save(self, cp_path: CheckpointPath, data: np.ndarray) -> None:
         """Save history `data` up to `i_iter`'th iteration to `cp_path`."""
         checkpoint, path = cp_path
         assert checkpoint is not None

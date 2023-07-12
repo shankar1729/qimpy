@@ -8,8 +8,8 @@ from mpi4py import MPI
 from qimpy import log, rc, TreeNode, dft
 from qimpy.utils import (
     ProcessGrid,
-    CpPath,
-    CpContext,
+    CheckpointPath,
+    CheckpointContext,
     Checkpoint,
     globalreduce,
     BufferView,
@@ -69,7 +69,7 @@ class Electrons(TreeNode):
         lattice: Lattice,
         ions: Ions,
         symmetries: Symmetries,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
         k_mesh: Optional[Union[dict, Kmesh]] = None,
         k_path: Optional[Union[dict, Kpath]] = None,
         spin_polarized: bool = False,
@@ -319,7 +319,7 @@ class Electrons(TreeNode):
     def initialize_fixed_hamiltonian(self, system: dft.System) -> None:
         """Load density/potential from checkpoint for fixed-H calculation"""
         assert self.fixed_H
-        cp_H = CpPath(checkpoint=Checkpoint(self.fixed_H), path="/electrons")
+        cp_H = CheckpointPath(checkpoint=Checkpoint(self.fixed_H), path="/electrons")
         # Read n and V_ks (n.grad) in real space from checkpoint:
         n_densities = self.n_densities
         n = FieldR(system.grid, shape_batch=(n_densities,))
@@ -484,7 +484,9 @@ class Electrons(TreeNode):
         if isinstance(self.kpoints, Kpath):
             self.kpoints.plot(self, "bandstruct.pdf")
 
-    def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
         (~self.n_tilde).write(cp_path.relative("n"))
         (~self.n_tilde.grad).write(cp_path.relative("V_ks"))
         self.fillings.write_band_scalars(cp_path.relative("eig"), self.eig)

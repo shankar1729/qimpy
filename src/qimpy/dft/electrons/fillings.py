@@ -8,7 +8,14 @@ from mpi4py import MPI
 
 from qimpy import rc, log, TreeNode, Energy, dft
 from qimpy.dft.ions import Ions
-from qimpy.utils import BufferView, CpPath, CpContext, stopwatch, globalreduce, fmt
+from qimpy.utils import (
+    BufferView,
+    CheckpointPath,
+    CheckpointContext,
+    stopwatch,
+    globalreduce,
+    fmt,
+)
 
 
 class SmearingResults(NamedTuple):
@@ -46,7 +53,7 @@ class Fillings(TreeNode):
         *,
         ions: Ions,
         electrons: dft.electrons.Electrons,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
         charge: float = 0.0,
         smearing: str = "gauss",
         sigma: float = 0.002,
@@ -248,7 +255,7 @@ class Fillings(TreeNode):
             f"  n_bands_extra: {self.n_bands_extra} ({n_bands_extra_method})"
         )
 
-    def _initialize_f(self, checkpoint_in: CpPath) -> None:
+    def _initialize_f(self, checkpoint_in: CheckpointPath) -> None:
         """Create or load initial fillings."""
         el = self.electrons
         k_division = el.kpoints.division
@@ -434,12 +441,14 @@ class Fillings(TreeNode):
             f"  n_electrons: {n_electrons:.6f}{M_str}"
         )
 
-    def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
         self.write_band_scalars(cp_path.relative("f"), self.f)
         cp_path.attrs["mu"] = self.mu
         return ["f", "mu"]
 
-    def write_band_scalars(self, cp_path: CpPath, v: torch.Tensor) -> None:
+    def write_band_scalars(self, cp_path: CheckpointPath, v: torch.Tensor) -> None:
         """Write `v` containing one scalar per band to `cp_path`.
         This is useful for writing fillings, eigenvalues etc."""
         checkpoint, path = cp_path
@@ -452,7 +461,7 @@ class Fillings(TreeNode):
         if el.basis.division.i_proc == 0:
             checkpoint.write_slice(dset, offset, v[:, :, : self.n_bands])
 
-    def read_band_scalars(self, cp_path: CpPath, v: torch.Tensor) -> int:
+    def read_band_scalars(self, cp_path: CheckpointPath, v: torch.Tensor) -> int:
         """Read one scalar per band from `cp_path` into `v`.
         Returns number of bands read, which may be <= `self.n_bands`.
         This is useful for reading fillings, eigenvalues etc."""

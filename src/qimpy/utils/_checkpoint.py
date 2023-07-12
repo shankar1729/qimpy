@@ -118,7 +118,7 @@ class Checkpoint(h5py.File):
         return torch.view_as_complex(self.read_slice(dset, offset + (0,), size + (2,)))
 
 
-class CpPath(NamedTuple):
+class CheckpointPath(NamedTuple):
     """Combination of optional checkpoint and path within it.
     Useful as construction parameter for objects, to load data from
     checkpoint when available."""
@@ -126,24 +126,24 @@ class CpPath(NamedTuple):
     checkpoint: Optional[Checkpoint] = None  #: Checkpoint, if available.
     path: str = ""  #: Path within checkpoint
 
-    def relative(self, relative_path: str) -> CpPath:
+    def relative(self, relative_path: str) -> CheckpointPath:
         """Create `CpPath` with path relative to current one.
         Specifically, `relative_path` is the path of the result relative
         to `self.path`.
         """
-        return CpPath(
+        return CheckpointPath(
             checkpoint=self.checkpoint, path="/".join((self.path, relative_path))
         )
 
-    def member(self, name: str) -> CpPath:
+    def member(self, name: str) -> CheckpointPath:
         """Member `name` at `path` within `checkpoint`, if present.
         Otherwise, return an empty `CpPath`.
         """
         path = "/".join((self.path, name))
         return (
-            CpPath(checkpoint=self.checkpoint, path=path)
+            CheckpointPath(checkpoint=self.checkpoint, path=path)
             if ((self.checkpoint is not None) and (path in self.checkpoint))
-            else CpPath()
+            else CheckpointPath()
         )
 
     def __bool__(self):
@@ -189,7 +189,7 @@ class CpPath(NamedTuple):
             return None
 
 
-class CpContext(NamedTuple):
+class CheckpointContext(NamedTuple):
     """Identify from where/when a checkpoint is being written."""
 
     stage: str  #: Stage of calculation being checkpointed e.g. "geometry", "end"

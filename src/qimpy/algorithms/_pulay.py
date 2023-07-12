@@ -39,7 +39,7 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
     def __init__(
         self,
         *,
-        checkpoint_in: qp.utils.CpPath,
+        checkpoint_in: qp.utils.CheckpointPath,
         comm: MPI.Comm,
         name: str,
         n_iterations: int,

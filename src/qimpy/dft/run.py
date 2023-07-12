@@ -44,9 +44,10 @@ instaling from pip/conda."""
 import argparse
 import sys
 import os
+
 from mpi4py import MPI
 
-from .. import log, rc, utils, __version__
+from qimpy import log, rc, utils, __version__
 from . import System
 
 

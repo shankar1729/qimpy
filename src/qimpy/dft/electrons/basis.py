@@ -12,7 +12,7 @@ from qimpy.utils import (
     ProcessGrid,
     BufferView,
     ceildiv,
-    CpPath,
+    CheckpointPath,
     globalreduce,
 )
 from qimpy.lattice import Lattice
@@ -74,7 +74,7 @@ class Basis(TreeNode):
         kpoints: Kpoints,
         n_spins: int,
         n_spinor: int,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
         ke_cutoff: float = 20.0,
         real_wavefunctions: bool = False,
         grid: Optional[Union[Grid, dict]] = None,

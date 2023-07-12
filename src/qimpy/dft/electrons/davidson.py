@@ -8,7 +8,7 @@ from mpi4py import MPI
 
 from qimpy import rc, log, TreeNode, dft
 from qimpy.utils import (
-    CpPath,
+    CheckpointPath,
     stopwatch,
     BufferView,
     globalreduce,
@@ -34,7 +34,7 @@ class Davidson(TreeNode):
         self,
         *,
         electrons: dft.electrons.Electrons,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
         n_iterations: int = 100,
         eig_threshold: float = 1e-8,
     ) -> None:

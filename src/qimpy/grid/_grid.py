@@ -42,7 +42,7 @@ class Grid(qp.TreeNode):
         lattice: qp.lattice.Lattice,
         symmetries: qp.symmetries.Symmetries,
         comm: Optional[MPI.Comm],
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        checkpoint_in: qp.utils.CheckpointPath = qp.utils.CheckpointPath(),
         ke_cutoff_wavefunction: Optional[float] = None,
         ke_cutoff: Optional[float] = None,
         shape: Optional[Sequence[int]] = None,

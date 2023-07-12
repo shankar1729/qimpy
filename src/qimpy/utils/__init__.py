@@ -28,8 +28,8 @@ __all__ = (
     "BufferView",
     "Iallreduce_in_place",
     "Checkpoint",
-    "CpPath",
-    "CpContext",
+    "CheckpointPath",
+    "CheckpointContext",
     "Unit",
     "UnitOrFloat",
 )
@@ -55,5 +55,5 @@ from ._waitable import Waitable, Waitless
 from ._taskdivision import TaskDivision, TaskDivisionCustom, get_block_slices
 from ._bufferview import BufferView
 from ._async_reduce import Iallreduce_in_place
-from ._checkpoint import Checkpoint, CpPath, CpContext
+from ._checkpoint import Checkpoint, CheckpointPath, CheckpointContext
 from ._unit import Unit, UnitOrFloat

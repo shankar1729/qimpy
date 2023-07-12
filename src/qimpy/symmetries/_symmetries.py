@@ -37,7 +37,7 @@ class Symmetries(qp.TreeNode):
     def __init__(
         self,
         *,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        checkpoint_in: qp.utils.CheckpointPath = qp.utils.CheckpointPath(),
         lattice: qp.lattice.Lattice,
         labeled_positions: Optional[LabeledPositions] = None,
         axes: dict[str, np.ndarray] = {},

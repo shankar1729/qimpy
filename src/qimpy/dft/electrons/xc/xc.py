@@ -5,7 +5,7 @@ import torch
 from mpi4py import MPI
 
 from qimpy import log, TreeNode
-from qimpy.utils import CpPath, StopWatch
+from qimpy.utils import CheckpointPath, StopWatch
 from qimpy.grid import FieldH, FieldR
 from .functional import Functional, get_libxc_functional_names, FunctionalsLibxc
 from . import lda, gga
@@ -26,7 +26,7 @@ class XC(TreeNode):
         self,
         *,
         spin_polarized: bool,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
         functional: Union[str, list[str]] = "gga-pbe",
     ):
         """Initialize exchange-correlation functional.

@@ -43,10 +43,10 @@ class Transport(TreeNode):
             comm if comm else qp.rc.comm, "rk", process_grid_shape
         )
         # Set in and out checkpoints:
-        checkpoint_in = qp.utils.CpPath()
+        checkpoint_in = qp.utils.CheckpointPath()
         if checkpoint is not None:
             try:
-                checkpoint_in = qp.utils.CpPath(qp.utils.Checkpoint(checkpoint))
+                checkpoint_in = qp.utils.CheckpointPath(qp.utils.Checkpoint(checkpoint))
             except OSError:  # Raised by h5py when file not readable
                 qp.log.info(f"Cannot load checkpoint file '{checkpoint}'")
         self.checkpoint_out = checkpoint if checkpoint_out is None else checkpoint_out

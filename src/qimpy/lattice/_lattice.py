@@ -24,7 +24,7 @@ class Lattice(qp.TreeNode):
     def __init__(
         self,
         *,
-        checkpoint_in: qp.utils.CpPath = qp.utils.CpPath(),
+        checkpoint_in: qp.utils.CheckpointPath = qp.utils.CheckpointPath(),
         system: Optional[str] = None,
         modification: Optional[str] = None,
         a: Optional[float] = None,
@@ -168,7 +168,7 @@ class Lattice(qp.TreeNode):
             assert self.move_scale.shape == (3,)
 
     def _save_checkpoint(
-        self, cp_path: qp.utils.CpPath, context: qp.utils.CpContext
+        self, cp_path: qp.utils.CheckpointPath, context: qp.utils.CheckpointContext
     ) -> list[str]:
         attrs = cp_path.attrs
         attrs["compute_stress"] = self.compute_stress

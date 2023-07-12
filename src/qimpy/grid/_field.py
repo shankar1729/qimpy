@@ -312,7 +312,7 @@ class Field(qp.utils.Gradable[FieldType]):
         """Create zero Field with same grid and batch dimensions."""
         return self.__class__(self.grid, shape_batch=self.data.shape[:-3])
 
-    def read(self, cp_path: qp.utils.CpPath) -> None:
+    def read(self, cp_path: qp.utils.CheckpointPath) -> None:
         """Read field from `cp_path`."""
         checkpoint, path = cp_path
         assert checkpoint is not None
@@ -327,7 +327,7 @@ class Field(qp.utils.Gradable[FieldType]):
             else checkpoint.read_slice(dset, offset, size)
         )
 
-    def write(self, cp_path: qp.utils.CpPath) -> None:
+    def write(self, cp_path: qp.utils.CheckpointPath) -> None:
         """Write field to `cp_path`."""
         checkpoint, path = cp_path
         assert checkpoint is not None

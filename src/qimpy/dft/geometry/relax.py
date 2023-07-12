@@ -7,7 +7,7 @@ from mpi4py import MPI
 
 from qimpy import log, dft
 from qimpy.lattice import Lattice
-from qimpy.utils import Checkpoint, CpPath, CpContext, BufferView
+from qimpy.utils import Checkpoint, CheckpointPath, CheckpointContext, BufferView
 from qimpy.algorithms import Minimize, MinimizeState
 from .gradient import Gradient
 from .stepper import Stepper
@@ -41,7 +41,7 @@ class Relax(Minimize[Gradient]):
         converge_on: Union[str, int] = "all",
         drag_wavefunctions: bool = True,
         save_history: bool = True,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """
         Specify geometry relaxation algorithm and convergence parameters.
@@ -139,7 +139,7 @@ class Relax(Minimize[Gradient]):
         # Check point at end:
         if system.checkpoint_out:
             with Checkpoint(system.checkpoint_out, writable=True) as cp:
-                system.save_checkpoint(CpPath(cp), CpContext("end"))
+                system.save_checkpoint(CheckpointPath(cp), CheckpointContext("end"))
 
     def step(self, direction: Gradient, step_size: float) -> None:
         """Update the geometry along `direction` by amount `step_size`"""
@@ -167,7 +167,9 @@ class Relax(Minimize[Gradient]):
         system = self.stepper.system
         if system.checkpoint_out:
             with Checkpoint(system.checkpoint_out, writable=True) as cp:
-                system.save_checkpoint(CpPath(cp), CpContext("geometry", i_iter))
+                system.save_checkpoint(
+                    CheckpointPath(cp), CheckpointContext("geometry", i_iter)
+                )
         self.stepper.report()
         return False  # State not changed by report
 
@@ -199,7 +201,9 @@ class Relax(Minimize[Gradient]):
         )
         self.finite_difference_test(direction)
 
-    def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
         stage, i_iter = context
         saved_list = ["i_iter"]
         cp_path.attrs["i_iter"] = i_iter if (stage == "geometry") else self.n_iterations

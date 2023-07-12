@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from qimpy import dft
-from qimpy.utils import CpPath, eighg, globalreduce
+from qimpy.utils import CheckpointPath, eighg, globalreduce
 from .davidson import Davidson
 
 
@@ -19,7 +19,7 @@ class CheFSI(Davidson):
         self,
         *,
         electrons: dft.electrons.Electrons,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
         n_iterations: int = 100,
         eig_threshold: float = 1e-8,
         filter_order: int = 10,

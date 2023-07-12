@@ -8,7 +8,7 @@ from mpi4py import MPI
 from qimpy import log, rc, TreeNode, dft
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
-from qimpy.utils import ProcessGrid, TaskDivision, CpPath
+from qimpy.utils import ProcessGrid, TaskDivision, CheckpointPath
 
 
 class Kpoints(TreeNode):
@@ -25,7 +25,7 @@ class Kpoints(TreeNode):
         process_grid: ProcessGrid,
         k: torch.Tensor,
         wk: torch.Tensor,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """Initialize from list of k-points and weights. Typically, this should
         be used only by derived classes :class:`Kmesh` or :class:`Kpath`.
@@ -60,7 +60,7 @@ class Kmesh(Kpoints):
         process_grid: ProcessGrid,
         symmetries: Symmetries,
         lattice: Lattice,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
         offset: Union[Sequence[float], np.ndarray] = (0.0, 0.0, 0.0),
         size: Union[float, Sequence[int], np.ndarray] = (1, 1, 1),
         use_inversion: bool = True,
@@ -200,7 +200,7 @@ class Kpath(Kpoints):
         lattice: Lattice,
         dk: float,
         points: list,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """Initialize k-path with spacing `dk` connecting `points`.
 

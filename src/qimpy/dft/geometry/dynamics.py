@@ -6,7 +6,14 @@ import torch
 from mpi4py import MPI
 
 from qimpy import rc, log, TreeNode, dft
-from qimpy.utils import Unit, UnitOrFloat, Checkpoint, CpPath, CpContext, BufferView
+from qimpy.utils import (
+    Unit,
+    UnitOrFloat,
+    Checkpoint,
+    CheckpointPath,
+    CheckpointContext,
+    BufferView,
+)
 from qimpy.dft.ions import Ions
 from qimpy.dft.ions.symbols import ATOMIC_WEIGHTS, ATOMIC_NUMBERS
 from .stepper import Stepper
@@ -60,7 +67,7 @@ class Dynamics(TreeNode):
         drag_wavefunctions: bool = True,
         save_history: bool = True,
         report_callback: Optional[Callable[[Dynamics, int], None]] = None,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """
         Specify molecular dynamics parameters.
@@ -177,7 +184,7 @@ class Dynamics(TreeNode):
         # Check point at end:
         if system.checkpoint_out:
             with Checkpoint(system.checkpoint_out, writable=True) as cp:
-                system.save_checkpoint(CpPath(cp), CpContext("end"))
+                system.save_checkpoint(CheckpointPath(cp), CheckpointContext("end"))
 
     def thermal_velocities(self, T: float, seed: int) -> torch.Tensor:
         """Thermal velocity distribution at `T`, randomized with `seed`."""
@@ -220,7 +227,9 @@ class Dynamics(TreeNode):
         # Checkpoint:
         if system.checkpoint_out:
             with Checkpoint(system.checkpoint_out, writable=True) as cp:
-                system.save_checkpoint(CpPath(cp), CpContext("geometry", i_iter))
+                system.save_checkpoint(
+                    CheckpointPath(cp), CheckpointContext("geometry", i_iter)
+                )
 
         # Report positions, forces, stresses etc.:
         self.stepper.report(total_stress=self.stress)
@@ -281,7 +290,9 @@ class Dynamics(TreeNode):
         self.thermostat.method.initialize_gradient(gradient)
         return gradient
 
-    def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
         stage, i_iter = context
         saved_list = ["i_iter"]
         cp_path.attrs["i_iter"] = i_iter if (stage == "geometry") else self.n_steps

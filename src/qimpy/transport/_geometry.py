@@ -1,6 +1,6 @@
 from __future__ import annotations
 from .. import TreeNode, rc
-from ..utils import CpPath
+from ..utils import CheckpointPath
 from typing import Sequence, Union, Any, Optional
 import numpy as np
 import torch
@@ -20,7 +20,7 @@ class Geometry(TreeNode):
         vertices: Union[Sequence[Sequence[float]], np.ndarray, torch.Tensor],
         edges: Union[Sequence[Sequence[int]], np.ndarray, torch.Tensor],
         quads: Union[Sequence[Sequence[int]], np.ndarray, torch.Tensor],
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
         """
         Initialize geometry parameters.

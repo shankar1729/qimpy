@@ -4,7 +4,7 @@ from typing import Protocol, Optional, Union
 from mpi4py import MPI
 
 from qimpy import TreeNode, dft
-from qimpy.utils import CpPath
+from qimpy.utils import CheckpointPath
 from qimpy.lattice import Lattice
 from . import Fixed, Relax, Dynamics
 
@@ -26,7 +26,7 @@ class Geometry(TreeNode):
         *,
         comm: MPI.Comm,
         lattice: Lattice,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
         fixed: Optional[Union[dict, Fixed]] = None,
         relax: Optional[Union[dict, Relax]] = None,
         dynamics: Optional[Union[dict, Dynamics]] = None,

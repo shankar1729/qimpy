@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from qimpy import TreeNode, log, rc, dft
-from qimpy.utils import fmt, cis, CpPath, CpContext
+from qimpy.utils import fmt, cis, CheckpointPath, CheckpointContext
 from qimpy.lattice import Lattice
 from qimpy.symmetries._positions import LabeledPositions
 from qimpy.grid import FieldH
@@ -53,7 +53,7 @@ class Ions(TreeNode):
     def __init__(
         self,
         *,
-        checkpoint_in: CpPath = CpPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
         lattice: Lattice,
         fractional: bool = True,
         coordinates: Optional[list] = None,
@@ -333,7 +333,9 @@ class Ions(TreeNode):
         assert self.positions.grad is not None
         return -self.positions.grad.detach() @ self.lattice.invRbasis
 
-    def _save_checkpoint(self, cp_path: CpPath, context: CpContext) -> list[str]:
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
         # TODO: decide how / whether pseudopotentials are checkpoint'd
         cp_path.attrs["symbols"] = ",".join(self.symbols)
         saved_list = ["symbols"]
@@ -349,7 +351,7 @@ class Ions(TreeNode):
             saved_list.append(cp_path.write("M", self.M))
         return saved_list
 
-    def _read_checkpoint(self, cp_path: CpPath) -> None:
+    def _read_checkpoint(self, cp_path: CheckpointPath) -> None:
         checkpoint, path = cp_path
         assert checkpoint is not None
         symbol_str = cp_path.attrs["symbols"]
