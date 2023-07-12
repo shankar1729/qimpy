@@ -1,18 +1,22 @@
 from __future__ import annotations
-import qimpy as qp
-import numpy as np
-from ._minimize_lbfgs import _lbfgs
-from ._minimize_cg import _cg
-from ._minimize_line import LINE_MINIMIZE, Vector
-from abc import ABC, abstractmethod
 from typing import Generic, Sequence, NamedTuple, Optional, Union
+from abc import ABC, abstractmethod
+
+import numpy as np
 from mpi4py import MPI
+
+from qimpy import log, Energy, TreeNode
+from qimpy.utils import CheckpointPath
+from qimpy.utils.dict import key_cleanup
+from .minimize_lbfgs import lbfgs
+from .minimize_cg import cg
+from .minimize_line import LINE_MINIMIZE, Vector
 
 
 class MinimizeState(Generic[Vector]):
     """Current energies and gradients of `Minimize` algorithm."""
 
-    energy: qp.Energy  #: Current energy (objective function)
+    energy: Energy  #: Current energy (objective function)
     extra: Sequence[float]  #: Extra convergence quantities
     gradient: Vector  #: Gradient of energy w.r.t. parameters
     K_gradient: Vector  #: Preconditioned version of `gradient`
@@ -21,14 +25,14 @@ class MinimizeState(Generic[Vector]):
         self.clear()
 
     def clear(self) -> None:
-        self.energy = qp.Energy()
+        self.energy = Energy()
         self.extra = []
         for attr_name in ("gradient", "K_gradient"):
             if hasattr(self, attr_name):
                 delattr(self, attr_name)
 
 
-class Minimize(Generic[Vector], ABC, qp.TreeNode):
+class Minimize(Generic[Vector], ABC, TreeNode):
     """Abstract base class implementing large-scale minimization algorithms.
     The `Vector` that is minimized over must support vector-space operators
     as specified by the `Optimizable` abstract base class."""
@@ -73,7 +77,7 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
     def __init__(
         self,
         *,
-        checkpoint_in: qp.utils.CheckpointPath,
+        checkpoint_in: CheckpointPath,
         comm: MPI.Comm,
         name: str,
         n_iterations: int,
@@ -99,12 +103,10 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         self.extra_thresholds = extra_thresholds
         self.n_consecutive = n_consecutive
         self.step_size = Minimize.StepSize(
-            **qp.utils.dict.key_cleanup({} if (step_size is None) else step_size)
+            **key_cleanup({} if (step_size is None) else step_size)
         )
         self.n_history = n_history
-        self.wolfe = Minimize.Wolfe(
-            **qp.utils.dict.key_cleanup({} if (wolfe is None) else wolfe)
-        )
+        self.wolfe = Minimize.Wolfe(**key_cleanup({} if (wolfe is None) else wolfe))
         self.converge_on = converge_on
         self.n_converge = _get_nconverge(converge_on, 1 + len(extra_thresholds))
 
@@ -162,9 +164,9 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         By default, there is no upper bound on step size."""
         return float(np.finfo(np.float64).max)
 
-    def minimize(self) -> qp.Energy:
+    def minimize(self) -> Energy:
         """Minimize, and return optimized energy of system"""
-        return _lbfgs(self) if (self.method == "l-bfgs") else _cg(self)
+        return lbfgs(self) if (self.method == "l-bfgs") else cg(self)
 
     def finite_difference_test(
         self, direction: Vector, step_sizes: Optional[Sequence[float]] = None
@@ -176,11 +178,11 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
         approaching 1 for a range of step sizes, with deviations at lower
         step sizes due to round off error and at higher step sizes due to
         nonlinearity."""
-        qp.log.info(f'{self.name}: {"-"*12} Finite difference test {"-"*12}')
+        log.info(f'{self.name}: {"-"*12} Finite difference test {"-"*12}')
         if step_sizes is None:
             step_sizes = np.logspace(-9, 1, 11).tolist()
         # Initial state with gradient:
-        state = qp.algorithms.MinimizeState["Vector"]()
+        state = MinimizeState["Vector"]()
         E0 = self._compute(state, energy_only=False)
         dE_step = self._sync(
             state.gradient.vdot(direction)
@@ -192,12 +194,12 @@ class Minimize(Generic[Vector], ABC, qp.TreeNode):
             step_size_prev = step_size
             deltaE = self._compute(state, energy_only=True) - E0
             dE_expected = dE_step * step_size
-            qp.log.info(
+            log.info(
                 f"{self.name}: step size: {step_size:.3e}"
                 f"  d{state.energy.name}"
                 f" ratio: {deltaE/dE_expected:.11f}"
             )
-        qp.log.info(f'{self.name}: {"-"*48}')
+        log.info(f'{self.name}: {"-"*48}')
         # Restore original position:
         self.step(direction, -step_size_prev)
 

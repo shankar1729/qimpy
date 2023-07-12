@@ -1,47 +1,44 @@
 from __future__ import annotations
-import qimpy as qp
-import numpy as np
-from ._optimizable import Optimizable
 from typing import TypeVar, Callable
+
+import numpy as np
+
+from qimpy import log, algorithms
+from .optimizable import Optimizable
 
 
 Vector = TypeVar("Vector", bound=Optimizable)
 
 
 LineMinimize = Callable[
-    [
-        "qp.algorithms.Minimize[Vector]",
-        Vector,
-        float,
-        "qp.algorithms.MinimizeState[Vector]",
-    ],
+    ["algorithms.Minimize[Vector]", Vector, float, "algorithms.MinimizeState[Vector]"],
     tuple[float, float, bool],
 ]
 
 
-def _constant(
-    self: qp.algorithms.Minimize[Vector],
+def constant(
+    self: algorithms.Minimize[Vector],
     direction: Vector,
     step_size_test: float,
-    state: qp.algorithms.MinimizeState[Vector],
+    state: algorithms.MinimizeState[Vector],
 ) -> tuple[float, float, bool]:
     """Take a pre-specified step size."""
     step_size = step_size_test  # Constant specified step size
     self.step(direction, step_size)
     E = self._compute(state, energy_only=False)
     if not np.isfinite(E):
-        qp.log.info(
+        log.info(
             f"{self.name}: Constant step failed with" f" {state.energy.name} = {E}"
         )
         return E, step_size, False
     return E, step_size, True
 
 
-def _quadratic(
-    self: qp.algorithms.Minimize[Vector],
+def quadratic(
+    self: algorithms.Minimize[Vector],
     direction: Vector,
     step_size_test: float,
-    state: qp.algorithms.MinimizeState[Vector],
+    state: algorithms.MinimizeState[Vector],
 ) -> tuple[float, float, bool]:
     """Take a quadratic step calculated from an energy-only test step.
     Adjusts step size to back off if energy increases."""
@@ -52,14 +49,14 @@ def _quadratic(
     E_orig = E
     g_d = self._sync(state.gradient.vdot(direction))
     if g_d >= 0.0:
-        qp.log.info(f"{self.name}: Bad step direction with positive gradient component")
+        log.info(f"{self.name}: Bad step direction with positive gradient component")
         return E_orig, step_size_prev, False
 
     # Test step and quadratic step size prediction:
     for i_step in range(self.step_size.n_adjust):
         # Check test step size:
         if step_size_test < self.step_size.minimum:
-            qp.log.info(f"{self.name}: Test step size below threshold.")
+            log.info(f"{self.name}: Test step size below threshold.")
             return E, step_size_prev, False
         # Try test step:
         self.step(direction, step_size_test - step_size_prev)
@@ -69,7 +66,7 @@ def _quadratic(
         if not np.isfinite(E_test):
             # Back off from difficult region
             step_size_test *= self.step_size.reduce_factor
-            qp.log.info(
+            log.info(
                 f"{self.name}: Test step failed with"
                 f" {state.energy.name} = {E_test:.3e};"
                 f" reducing test step size to {step_size_test:.3e}."
@@ -84,7 +81,7 @@ def _quadratic(
             # Curvature has wrong sign, but E_test < E, so accept step
             # for now and try descending further next time:
             step_size_test *= self.step_size.grow_factor
-            qp.log.info(
+            log.info(
                 f"{self.name}: Wrong curvature in test step,"
                 f" growing test step size to {step_size_test:.3e}."
             )
@@ -92,7 +89,7 @@ def _quadratic(
             return E, step_size_prev, True
         if step_size / step_size_test > self.step_size.grow_factor:
             step_size_test *= self.step_size.grow_factor
-            qp.log.info(
+            log.info(
                 f"{self.name}: Predicted step size growth"
                 f" > {self.step_size.grow_factor},"
                 f" growing test step size to {step_size_test:.3e}."
@@ -100,7 +97,7 @@ def _quadratic(
             continue
         if step_size / step_size_test < self.step_size.reduce_factor:
             step_size_test *= self.step_size.reduce_factor
-            qp.log.info(
+            log.info(
                 f"{self.name}: Predicted step size reduction"
                 f" < {self.step_size.reduce_factor},"
                 f" reducing test step size to {step_size_test:.3e}."
@@ -109,7 +106,7 @@ def _quadratic(
         # Successful test step:
         break
     if not np.isfinite(E_test):
-        qp.log.info(
+        log.info(
             f"{self.name}: Test step failed {self.step_size.n_adjust}"
             " times. Quitting step."
         )
@@ -123,7 +120,7 @@ def _quadratic(
         E = self._compute(state, energy_only=False)
         if not np.isfinite(E):
             step_size *= self.step_size.reduce_factor
-            qp.log.info(
+            log.info(
                 f"{self.name}: Step failed with"
                 f" {state.energy.name} = {E:.3e};"
                 f" reducing step size to {step_size:.3e}."
@@ -131,7 +128,7 @@ def _quadratic(
             continue
         if E > E_orig + self.energy_threshold:
             step_size *= self.step_size.reduce_factor
-            qp.log.info(
+            log.info(
                 f"{self.name}: Step increased"
                 f" {state.energy.name} by {E - E_orig:.3e};"
                 f" reducing step size to {step_size:.3e}."
@@ -140,7 +137,7 @@ def _quadratic(
         # Step successful:
         break
     if (not np.isfinite(E)) or (E > E_orig + self.energy_threshold):
-        qp.log.info(
+        log.info(
             f"{self.name}: Step failed to reduce {state.energy.name}"
             f" after {self.step_size.n_adjust} attempts."
             " Quitting step."
@@ -150,11 +147,11 @@ def _quadratic(
     return E, step_size_prev, True
 
 
-def _wolfe(
-    self: qp.algorithms.Minimize[Vector],
+def wolfe(
+    self: algorithms.Minimize[Vector],
     direction: Vector,
     step_size_test: float,
-    state: qp.algorithms.MinimizeState[Vector],
+    state: algorithms.MinimizeState[Vector],
 ) -> tuple[float, float, bool]:
     """Take cubic steps till the Wolfe energy and gradient criteria are
     satisfied. This uses a full energy and gradient test step, and does not
@@ -165,9 +162,7 @@ def _wolfe(
     E = self._sync(float(state.energy))
     g_d = self._sync(state.gradient.vdot(direction))
     if g_d >= 0.0:
-        qp.log.info(
-            f"{self.name}: Bad step direction with positive" " gradient component"
-        )
+        log.info(f"{self.name}: Bad step direction with positive" " gradient component")
         return E, step_size_prev, False
     # --- remember initial energy and gradient projection for Wolfe check:
     E0 = E_prev = E
@@ -189,7 +184,7 @@ def _wolfe(
             step_size = step_size_prev + (
                 self.step_size.reduce_factor * (step_size - step_size_prev)
             )
-            qp.log.info(
+            log.info(
                 f"{self.name}: Step failed with {state.energy.name}"
                 f" = {E:.3e}; reducing step size to {step_size:.3e}."
             )
@@ -199,7 +194,7 @@ def _wolfe(
         wolfe_g = g_d / g_d0
         if (wolfe_E >= self.wolfe.energy) and (wolfe_g <= self.wolfe.gradient):
             return E, step_size_state, True
-        qp.log.info(
+        log.info(
             f"{self.name}: Wolfe criteria failed at step size"
             f" = {step_size:.3e}: reduction {wolfe_E:.3e} in energy"
             f" and {wolfe_g:.3f} in gradient."
@@ -249,7 +244,7 @@ def _wolfe(
 
 
 LINE_MINIMIZE: dict[str, LineMinimize] = {
-    "constant": _constant,
-    "quadratic": _quadratic,
-    "wolfe": _wolfe,
+    "constant": constant,
+    "quadratic": quadratic,
+    "wolfe": wolfe,
 }

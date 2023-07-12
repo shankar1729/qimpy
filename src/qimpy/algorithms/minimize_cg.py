@@ -1,16 +1,18 @@
 from __future__ import annotations
-import qimpy as qp
+
 import numpy as np
-from ._minimize_line import LINE_MINIMIZE, Vector
+
+from qimpy import log, rc, algorithms, Energy
+from .minimize_line import LINE_MINIMIZE, Vector
 
 
-def _cg(self: qp.algorithms.Minimize[Vector]) -> qp.Energy:
+def cg(self: algorithms.Minimize[Vector]) -> Energy:
     """Conjugate gradients implementation for `Minimize.minimize`.
     Also supports steepest descents (Gradient method) as a special case."""
     assert self.method in {"cg", "gradient"}
 
     # Initial energy and gradients:
-    state = qp.algorithms.MinimizeState[Vector]()
+    state = algorithms.MinimizeState[Vector]()
     E = self._compute(state, energy_only=False)
     E_prev = 0.0
     along_gradient = True  # Whether current search direction is along gradient
@@ -22,13 +24,13 @@ def _cg(self: qp.algorithms.Minimize[Vector]) -> qp.Energy:
     )  # whether previous gradient used in direction update
     step_size_test = self.step_size.initial  # test step size
     line_minimize = LINE_MINIMIZE[self.line_minimize]
-    checks = _initialize_convergence_checks(self, state)
+    checks = initialize_convergence_checks(self, state)
 
     # Iterate till convergence (or iteration limit):
     for i_iter in range(self.i_iter_start, self.n_iterations + 1):
         # Optional reporting:
         if self.report(i_iter):
-            qp.log.info(
+            log.info(
                 f"{self.name}: State modified externally:"
                 " resetting search direction."
             )
@@ -36,7 +38,7 @@ def _cg(self: qp.algorithms.Minimize[Vector]) -> qp.Energy:
             along_gradient = True
 
         # Check and report convergence:
-        E, E_prev, should_exit = _check_convergence(
+        E, E_prev, should_exit = check_convergence(
             self, state, i_iter, checks, E, E_prev
         )
         if should_exit:
@@ -62,7 +64,7 @@ def _cg(self: qp.algorithms.Minimize[Vector]) -> qp.Energy:
                 beta = g_Kg / g_prev_Kg_prev
             # --- reset if needed:
             if beta < 0.0:
-                qp.log.info(f"{self.name}: Encountered beta < 0:" " resetting CG.")
+                log.info(f"{self.name}: Encountered beta < 0:" " resetting CG.")
                 beta = 0.0
         along_gradient = False
         direction = self.constrain(
@@ -85,48 +87,45 @@ def _cg(self: qp.algorithms.Minimize[Vector]) -> qp.Energy:
                     else self.step_size.initial
                 )  # else reset
         else:
-            qp.log.info(f"{self.name}: Undoing step.")
+            log.info(f"{self.name}: Undoing step.")
             self.step(direction, -step_size)
             E = self._compute(state, energy_only=False)
             if beta:
                 # Step failed, but not along gradient direction:
-                qp.log.info(f"{self.name}: Step failed:" " resetting search direction.")
+                log.info(f"{self.name}: Step failed:" " resetting search direction.")
                 along_gradient = True  # forget current search direction
             else:
                 # Step failed along gradient direction:
-                qp.log.info(
+                log.info(
                     f"{self.name}: Step failed along gradient: likely"
                     " at roundoff / inner-solve accuracy limit."
                 )
                 return state.energy
 
-    qp.log.info(f"{self.name}: Not converged in {self.n_iterations}" " iterations.")
+    log.info(f"{self.name}: Not converged in {self.n_iterations}" " iterations.")
     return state.energy
 
 
-def _initialize_convergence_checks(
-    self: qp.algorithms.Minimize[Vector], state: qp.algorithms.MinimizeState[Vector]
-) -> dict[str, qp.algorithms.ConvergenceCheck]:
+def initialize_convergence_checks(
+    self: algorithms.Minimize[Vector], state: algorithms.MinimizeState[Vector]
+) -> dict[str, algorithms.ConvergenceCheck]:
     """Initialize convergence checkers for energy and `extra_thresholds`."""
-    Ename = state.energy.name
+    dEname = f"d{state.energy.name}"
     checks = {
-        "d"
-        + Ename: qp.algorithms.ConvergenceCheck(
-            self.energy_threshold, self.n_consecutive
-        )
+        dEname: algorithms.ConvergenceCheck(self.energy_threshold, self.n_consecutive)
     }
     for extra_name, extra_threshold in self.extra_thresholds.items():
-        checks[extra_name] = qp.algorithms.ConvergenceCheck(
+        checks[extra_name] = algorithms.ConvergenceCheck(
             extra_threshold, self.n_consecutive
         )
     return checks
 
 
-def _check_convergence(
-    self: qp.algorithms.Minimize[Vector],
-    state: qp.algorithms.MinimizeState[Vector],
+def check_convergence(
+    self: algorithms.Minimize[Vector],
+    state: algorithms.MinimizeState[Vector],
     i_iter: int,
-    checks: dict[str, qp.algorithms.ConvergenceCheck],
+    checks: dict[str, algorithms.ConvergenceCheck],
     E: float,
     E_prev: float,
 ) -> tuple[float, float, bool]:
@@ -146,15 +145,15 @@ def _check_convergence(
         line += f"  {check_name:s}: {value_str}"
         if check.check(value):
             converged.append(check_name)
-    line += f"  t[s]: {qp.rc.clock():.2f}"
-    qp.log.info(line)
+    line += f"  t[s]: {rc.clock():.2f}"
+    log.info(line)
 
     # Stopping criteria:
     if len(converged) >= self.n_converge:
-        qp.log.info(f"{self.name}: Converged on " f'{", ".join(converged)} criteria.')
+        log.info(f"{self.name}: Converged on " f'{", ".join(converged)} criteria.')
         return E, E_prev, True
     if not np.isfinite(E):
-        qp.log.info(f"{self.name}: Stopping due to non-finite energy.")
+        log.info(f"{self.name}: Stopping due to non-finite energy.")
         return E, E_prev, True
     if i_iter == self.n_iterations:
         return E, E_prev, True

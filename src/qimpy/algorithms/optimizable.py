@@ -1,8 +1,11 @@
-import qimpy as qp
-import torch
-from dataclasses import dataclass
 from typing import Protocol, TypeVar, Deque
+from dataclasses import dataclass
+
+import torch
 from mpi4py import MPI
+
+from qimpy.utils import BufferView
+
 
 T = TypeVar("T")
 
@@ -92,5 +95,5 @@ class MatrixArray:
     def vdot(self, other: "MatrixArray") -> float:
         """Global vector-space dot product collected over `comm`."""
         result = torch.vdot(self.M.flatten(), other.M.flatten()).real
-        self.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(result), MPI.SUM)
+        self.comm.Allreduce(MPI.IN_PLACE, BufferView(result), MPI.SUM)
         return result.item()

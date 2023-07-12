@@ -1,17 +1,20 @@
 from __future__ import annotations
-import qimpy as qp
-import numpy as np
-from ._optimizable import Optimizable, ConvergenceCheck
-from collections import deque
-from abc import ABC, abstractmethod
 from typing import TypeVar, Generic, Sequence, Deque
+from abc import ABC, abstractmethod
+from collections import deque
+
+import numpy as np
 from mpi4py import MPI
+
+from qimpy import log, rc, TreeNode, Energy
+from qimpy.utils import CheckpointPath
+from .optimizable import Optimizable, ConvergenceCheck
 
 
 Variable = TypeVar("Variable", bound=Optimizable)
 
 
-class Pulay(Generic[Variable], ABC, qp.TreeNode):
+class Pulay(Generic[Variable], ABC, TreeNode):
     """Abstract base class implementing the Pulay mixing algorithm.
     The mixed `Variable` must support vector-space operators as specified
     by the `Optimizable` abstract base class.
@@ -39,7 +42,7 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
     def __init__(
         self,
         *,
-        checkpoint_in: qp.utils.CheckpointPath,
+        checkpoint_in: CheckpointPath,
         comm: MPI.Comm,
         name: str,
         n_iterations: int,
@@ -84,7 +87,7 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
 
     @property  # type: ignore
     @abstractmethod
-    def energy(self) -> qp.Energy:
+    def energy(self) -> Energy:
         """Current energy components of the system (read-only)."""
 
     @property  # type: ignore
@@ -165,18 +168,18 @@ class Pulay(Generic[Variable], ABC, qp.TreeNode):
                 line += f"  {check_name:s}: {value_str}"
                 if check.check(value):
                     converged.append(check_name)
-            line += f"  t[s]: {qp.rc.clock():.2f}"
-            qp.log.info(line)
+            line += f"  t[s]: {rc.clock():.2f}"
+            log.info(line)
             # --- optional reporting:
             self.report(i_iter)
             # --- stopping criteria:
             if converged:
-                qp.log.info(
+                log.info(
                     f"{self.name}: Converged on " f'{", ".join(converged)} criteria.'
                 )
                 break
             if not np.isfinite(E):
-                qp.log.info(f"{self.name}: Stopping due to non-finite energy.")
+                log.info(f"{self.name}: Stopping due to non-finite energy.")
                 break
 
             # Pulay mixing / DIIS step:
