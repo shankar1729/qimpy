@@ -1,6 +1,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
-import qimpy as qp
+
+from qimpy import rc
+from qimpy.utils import log_config
 
 
 def plot_nyquist():
@@ -39,9 +41,9 @@ def plot_nyquist():
 
 
 def main():
-    qp.utils.log_config()
-    qp.rc.init()
-    if qp.rc.is_head:
+    log_config()
+    rc.init()
+    if rc.is_head:
         plot_nyquist()
 
 

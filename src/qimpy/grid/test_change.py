@@ -1,22 +1,25 @@
-import pytest
-import torch
-import qimpy as qp
-import numpy as np
-from ._field import Field, FieldType
-from .test_common import get_sequential_grid, get_parallel_grid, get_reference_field
 from typing import Type, Sequence, Any
 
+import pytest
+import torch
+import numpy as np
 
-def get_test_field(cls: Type[FieldType], grid: qp.grid.Grid) -> Field[Any]:
+from qimpy import rc
+from qimpy.utils import log_config
+from . import Grid, FieldType, Field, FieldR, FieldH, FieldC, FieldG
+from .test_common import get_sequential_grid, get_parallel_grid, get_reference_field
+
+
+def get_test_field(cls: Type[FieldType], grid: Grid) -> Field[Any]:
     """A highly oscillatory and non-trivial function to test resampling."""
-    if cls is qp.grid.FieldC:
-        field = get_test_field(qp.grid.FieldR, grid)
-        return qp.grid.FieldC(grid, data=field.data * (0.6 + 0.4j))
-    assert cls is qp.grid.FieldR
-    x = grid.get_mesh("R") / torch.tensor(grid.shape, device=qp.rc.device)
-    k1 = (2 * np.pi) * torch.tensor([2, -1, 3], device=qp.rc.device)
-    k2 = (2 * np.pi) * torch.tensor([1, 0, -2], device=qp.rc.device)
-    return qp.grid.FieldR(grid, data=torch.exp(torch.cos(x @ k1) + torch.sin(x @ k2)))
+    if cls is FieldC:
+        field = get_test_field(FieldR, grid)
+        return FieldC(grid, data=field.data * (0.6 + 0.4j))
+    assert cls is FieldR
+    x = grid.get_mesh("R") / torch.tensor(grid.shape, device=rc.device)
+    k1 = (2 * np.pi) * torch.tensor([2, -1, 3], device=rc.device)
+    k2 = (2 * np.pi) * torch.tensor([1, 0, -2], device=rc.device)
+    return FieldR(grid, data=torch.exp(torch.cos(x @ k1) + torch.sin(x @ k2)))
 
 
 def get_test_shapes() -> Sequence[Sequence[int]]:
@@ -25,7 +28,7 @@ def get_test_shapes() -> Sequence[Sequence[int]]:
 
 def get_shape_field_combinations() -> Sequence[tuple[Sequence[int], Type]]:
     shapes = get_test_shapes()
-    field_types = (qp.grid.FieldR, qp.grid.FieldC, qp.grid.FieldH, qp.grid.FieldG)
+    field_types = (FieldR, FieldC, FieldH, FieldG)
     return [(shape, field_type) for shape in shapes for field_type in field_types]
 
 
@@ -45,7 +48,7 @@ def test_scatter_gather(shape: Sequence[int], cls: Type[FieldType]) -> None:
 
 
 @pytest.mark.mpi
-@pytest.mark.parametrize("cls", (qp.grid.FieldH, qp.grid.FieldG))
+@pytest.mark.parametrize("cls", (FieldH, FieldG))
 def test_resample_mpi(cls: Type[FieldType]) -> None:
     """Check up/down sampling consistency between MPI and serial versions."""
     # Create sequential and parallel grids of two shapes:
@@ -67,7 +70,7 @@ def test_resample_mpi(cls: Type[FieldType]) -> None:
 
 
 @pytest.mark.mpi_skip
-@pytest.mark.parametrize("cls", (qp.grid.FieldR, qp.grid.FieldC))
+@pytest.mark.parametrize("cls", (FieldR, FieldC))
 def test_resample(cls: Type[FieldType]) -> None:
     shapes = get_test_shapes()[:2]
     grid1, grid2 = [get_sequential_grid(shape) for shape in shapes]
@@ -83,19 +86,19 @@ def get_plot_slice(v: Field) -> tuple[np.ndarray, np.ndarray]:
     Lz = v.grid.lattice.Rbasis[:, 2].norm().item()
     Nz = v.grid.shape[2]
     z = np.arange(Nz) * (Lz / Nz)
-    return z, v.data[0, 0].to(qp.rc.cpu).numpy()
+    return z, v.data[0, 0].to(rc.cpu).numpy()
 
 
 def main() -> None:
-    qp.utils.log_config()
-    qp.rc.init()
-    if qp.rc.is_head:
+    log_config()
+    rc.init()
+    if rc.is_head:
         # Visually inspect resampling sequentially (MPI equivalence captured in tests):
         import matplotlib.pyplot as plt
 
         grid1, grid2 = [get_sequential_grid(shape) for shape in get_test_shapes()[:2]]
-        v1 = get_test_field(qp.grid.FieldR, grid1)
-        v2 = get_test_field(qp.grid.FieldR, grid2)
+        v1 = get_test_field(FieldR, grid1)
+        v2 = get_test_field(FieldR, grid2)
         v12 = ~((~v1).to(grid2))
         v21 = ~((~v2).to(grid1))
         plt.plot(*get_plot_slice(v1), "r", label="Created on 1")

@@ -1,21 +1,24 @@
 from __future__ import annotations
-import qimpy as qp
+
 import numpy as np
 import torch
+
+from qimpy import log, rc, grid
+from . import Grid, FieldH
 
 
 class Coulomb:
     """Coulomb interactions between fields and point charges.
     TODO: support non-periodic geometries (truncation)."""
 
-    grid: qp.grid.Grid  #: Grid associated with fields for coulomb interaction
+    grid: Grid  #: Grid associated with fields for coulomb interaction
     ion_width: float  #: Ion-charge gaussian width for embedding and solvation
     sigma: float  #: Ewald range-separation parameter
     iR: torch.Tensor  #: Ewald real-space mesh points
     iG: torch.Tensor  #: Ewald reciprocal-space mesh points
     _kernel: torch.Tensor  #: Cached coulomb kernel
 
-    def __init__(self, grid: qp.grid.Grid, n_ions: int) -> None:
+    def __init__(self, grid: Grid, n_ions: int) -> None:
         """Initialize coulomb interactions.
 
         Parameters
@@ -29,12 +32,12 @@ class Coulomb:
 
         # Determine ionic width from maximum grid spacing
         h_max = (
-            (grid.lattice.Rbasis.norm(dim=0).to(qp.rc.cpu) / torch.tensor(grid.shape))
+            (grid.lattice.Rbasis.norm(dim=0).to(rc.cpu) / torch.tensor(grid.shape))
             .max()
             .item()
         )
         self.ion_width = 2.2 * h_max  # Best balance from test_nyquist()
-        qp.log.info(f"Ionic width for embedding / fluids: {self.ion_width:f}")
+        log.info(f"Ionic width for embedding / fluids: {self.ion_width:f}")
         self.update_lattice_dependent(n_ions)
 
     def update_lattice_dependent(self, n_ions: int) -> None:
@@ -66,7 +69,7 @@ class Coulomb:
             include_margin=False,
             exclude_zero=True,
         )
-        qp.log.info(
+        log.info(
             f"Ewald:  sigma: {self.sigma:f}"
             f"  nR: {self.iR.shape[0]}  nG: {self.iG.shape[0]}"
         )
@@ -76,20 +79,18 @@ class Coulomb:
         Gsq = (iG @ grid.lattice.Gbasis.T).square().sum(dim=-1)
         self._kernel = torch.where(Gsq == 0.0, 0.0, (4 * np.pi) / Gsq)
 
-    def __call__(
-        self, rho: qp.grid.FieldH, correct_G0_width: bool = False
-    ) -> qp.grid.FieldH:
+    def __call__(self, rho: FieldH, correct_G0_width: bool = False) -> FieldH:
         """Apply coulomb operator on charge density `rho`.
         If correct_G0_width = True, rho is a point charge distribution
         widened by `ion_width` and needs a corresponding G=0 correction.
         """
         assert self.grid is rho.grid
-        result = qp.grid.FieldH(self.grid, data=(self._kernel * rho.data))
+        result = FieldH(self.grid, data=(self._kernel * rho.data))
         if correct_G0_width:
             result.o += rho.o * (4 * np.pi * (-0.5 * (self.ion_width**2)))
         return result
 
-    def stress(self, rho1: qp.grid.FieldH, rho2: qp.grid.FieldH) -> torch.Tensor:
+    def stress(self, rho1: FieldH, rho2: FieldH) -> torch.Tensor:
         """Return stress due to Coulomb interaction between `rho1` and `rho2`.
         The result has dimensions of energy, appropriate for adding to `lattice.grad`.
         """
@@ -101,7 +102,7 @@ class Coulomb:
             * G[None]
             * G[:, None]
         )
-        stress_rho2 = qp.grid.FieldH(self.grid, data=(stress_kernel * rho2.data))
+        stress_rho2 = FieldH(self.grid, data=(stress_kernel * rho2.data))
         return rho1 ^ stress_rho2
 
     def ewald(
@@ -142,7 +143,7 @@ class Coulomb:
         x = self.iR.view(1, 1, -1, 3) + (pos.view(-1, 1, 1, 3) - pos.view(1, -1, 1, 3))
         rVec = x @ lattice.Rbasis.T  # Cartesian separations for all pairs
         r = rVec.norm(dim=-1)
-        r[torch.where(r < rCut)] = qp.grid.N_SIGMAS_PER_WIDTH * sigma
+        r[torch.where(r < rCut)] = grid.N_SIGMAS_PER_WIDTH * sigma
         Zprod = Z.view(-1, 1, 1) * Z.view(1, -1, 1)
         Eterm = Zprod * torch.erfc(eta * r) / r
         minus_E_r_by_r = (
@@ -196,25 +197,23 @@ def get_mesh(
     """Create mesh to cover non-negligible terms of Gaussian with width `sigma`.
     The mesh is integral in the coordinates specified by `Rbasis`,
     with `Gbasis` being the corresponding reciprocal basis.
-    Negligible is defined at double precision using `qp.grid.N_SIGMAS_PER_WIDTH`.
+    Negligible is defined at double precision using `grid.N_SIGMAS_PER_WIDTH`.
     Optionally, include a margin of 1 in grid units if `include_margin`.
     Optionally, exclude the zero (origin) point if `exclude_zero`."""
-    Rcut = qp.grid.N_SIGMAS_PER_WIDTH * sigma
+    Rcut = grid.N_SIGMAS_PER_WIDTH * sigma
 
     # Create parallelopiped mesh:
-    RlengthInv = Gbasis.norm(dim=0).to(qp.rc.cpu) / (2 * np.pi)
+    RlengthInv = Gbasis.norm(dim=0).to(rc.cpu) / (2 * np.pi)
     Ncut = 1 + torch.ceil(Rcut * RlengthInv).to(torch.int)
     iRgrids = tuple(
-        torch.arange(-N, N + 1, device=qp.rc.device, dtype=torch.double) for N in Ncut
+        torch.arange(-N, N + 1, device=rc.device, dtype=torch.double) for N in Ncut
     )
     iR = torch.stack(torch.meshgrid(*iRgrids, indexing="ij")).flatten(1).T
     if exclude_zero:
         iR = iR[torch.where(iR.abs().sum(dim=-1))[0]]
 
     # Add margin mesh:
-    marginGrid = torch.tensor(
-        [-1, 0, +1] if include_margin else [0], device=qp.rc.device
-    )
+    marginGrid = torch.tensor([-1, 0, +1] if include_margin else [0], device=rc.device)
     iMargin = torch.stack(torch.meshgrid([marginGrid] * 3, indexing="ij")).flatten(1).T
     iRmargin = iR[None, ...] + iMargin[:, None, :]
 

@@ -1,21 +1,26 @@
-import qimpy as qp
+from typing import Optional, Sequence
+
 import numpy as np
 import torch
-from ._fft import _init_grid_fft, _FFT, _IFFT, IndicesType
-from typing import Optional, Sequence
 from mpi4py import MPI
 
+from qimpy import rc, log, TreeNode
+from qimpy.utils import TaskDivision, CheckpointPath
+from qimpy.lattice import Lattice
+from qimpy.symmetries import Symmetries, FieldSymmetrizer
+from .fft import init_grid_fft, FFT, IFFT, IndicesType
 
-class Grid(qp.TreeNode):
+
+class Grid(TreeNode):
     """Real and reciprocal space grids for a unit cell.
     The grid could either be local or distributed over an MPI communicator,
     and this class provides FFT routines to switch fields on these grids,
     and routines to convert fields between grids.
     """
 
-    lattice: qp.lattice.Lattice
-    symmetries: qp.symmetries.Symmetries
-    _field_symmetrizer: Optional[qp.symmetries.FieldSymmetrizer]
+    lattice: Lattice
+    symmetries: Symmetries
+    _field_symmetrizer: Optional[FieldSymmetrizer]
     comm: Optional[MPI.Comm]  #: Communicator to split grid and FFTs over
     n_procs: int  #: Size of comm
     i_proc: int  #: Rank within comm
@@ -26,9 +31,9 @@ class Grid(qp.TreeNode):
     shapeR_mine: tuple[int, ...]  #: Local real grid dimensions
     shapeG_mine: tuple[int, ...]  #: Local reciprocal grid dimensions
     shapeH_mine: tuple[int, ...]  #: Local half-reciprocal grid dimensions
-    split0: qp.utils.TaskDivision  #: MPI split of real-space dimension 0
-    split2: qp.utils.TaskDivision  #: MPI split of reciprocal dimension 2
-    split2H: qp.utils.TaskDivision  #: MPI split of half-reciprocal dimension 2
+    split0: TaskDivision  #: MPI split of real-space dimension 0
+    split2: TaskDivision  #: MPI split of reciprocal dimension 2
+    split2H: TaskDivision  #: MPI split of half-reciprocal dimension 2
     _mesh1D: dict[str, tuple[torch.Tensor, ...]]  # Global 1D meshes
     _mesh1D_mine: dict[str, tuple[torch.Tensor, ...]]  # Local 1D meshes
     _indices_fft: IndicesType  #: All-to-all unscramble indices for `fft`
@@ -39,10 +44,10 @@ class Grid(qp.TreeNode):
     def __init__(
         self,
         *,
-        lattice: qp.lattice.Lattice,
-        symmetries: qp.symmetries.Symmetries,
+        lattice: Lattice,
+        symmetries: Symmetries,
         comm: Optional[MPI.Comm],
-        checkpoint_in: qp.utils.CheckpointPath = qp.utils.CheckpointPath(),
+        checkpoint_in: CheckpointPath = CheckpointPath(),
         ke_cutoff_wavefunction: Optional[float] = None,
         ke_cutoff: Optional[float] = None,
         shape: Optional[Sequence[int]] = None,
@@ -98,7 +103,7 @@ class Grid(qp.TreeNode):
                     f"ke_cutoff_wavefunction (={ke_cutoff_wavefunction:g})"
                 )
             elif self.ke_cutoff < 4 * ke_cutoff_wavefunction:
-                qp.log.info(
+                log.info(
                     f"Note: ke_cutoff (={self.ke_cutoff:g}) < 4"
                     f"*ke_cutoff_wavefunction (={4*ke_cutoff_wavefunction:g})"
                     " truncates high wave vectors in density calculation"
@@ -112,13 +117,13 @@ class Grid(qp.TreeNode):
             # corresponding spacing between reciprocal lattice planes (2pi/R).
             # Therefore shape_min >= 2 * Gmax / (2pi/R)
             shape_min = (lattice.Rbasis.norm(dim=0) * (Gmax / np.pi)).tolist()
-            qp.log.info(
+            log.info(
                 f"minimum shape for ke-cutoff: ({shape_min[0]:.2f},"
                 f" {shape_min[1]:.2f}, {shape_min[2]:.2f})"
             )
             # Align to multiple of 4 for FFT efficiency:
             shape_min = 4 * np.ceil(np.array(shape_min) / 4).astype(int)
-            qp.log.info(f"minimum multiple-of-4 shape: {tuple(shape_min)}")
+            log.info(f"minimum multiple-of-4 shape: {tuple(shape_min)}")
 
         if shape:
             self.shape = tuple(shape)
@@ -133,8 +138,8 @@ class Grid(qp.TreeNode):
                     "ke-cutoff or shape must be specified"
                 )
             self.shape = tuple(symmetries.get_grid_shape(shape_min))
-        qp.log.info(f"selected shape: {self.shape}")
-        _init_grid_fft(self)
+        log.info(f"selected shape: {self.shape}")
+        init_grid_fft(self)
 
     @property
     def dV(self) -> float:
@@ -147,7 +152,7 @@ class Grid(qp.TreeNode):
         split2H = self.split2H
         iz_start = max(1, split2H.i_start) - split2H.i_start
         iz_stop = min(split2H.n_tot - 1, split2H.i_stop) - split2H.i_start
-        result = torch.ones(split2H.n_mine, device=qp.rc.device)
+        result = torch.ones(split2H.n_mine, device=rc.device)
         result[iz_start:iz_stop] *= 2.0
         return result
 
@@ -199,16 +204,16 @@ class Grid(qp.TreeNode):
         iG_box = torch.tensor(
             np.array([[+1, +1, +1], [+1, +1, -1], [+1, -1, +1], [+1, -1, -1]])
             * (np.array(self.shape) // 2)[None, :],
-            device=qp.rc.device,
+            device=rc.device,
             dtype=torch.double,
         )
         return (iG_box @ self.lattice.Gbasis.T).norm(dim=1).max().item()
 
     @property
-    def field_symmetrizer(self) -> qp.symmetries.FieldSymmetrizer:
+    def field_symmetrizer(self) -> FieldSymmetrizer:
         """Symmetrizer for fields on this grid (initialized on first use)."""
         if self._field_symmetrizer is None:
-            self._field_symmetrizer = qp.symmetries.FieldSymmetrizer(self)
+            self._field_symmetrizer = FieldSymmetrizer(self)
         return self._field_symmetrizer
 
     def fft(self, v: torch.Tensor) -> torch.Tensor:
@@ -234,7 +239,7 @@ class Grid(qp.TreeNode):
             depending on whether `v` is complex or real respectively,
             preceded by any batch dimensions in the input.
         """
-        return _FFT.apply(self, v)
+        return FFT.apply(self, v)
 
     def ifft(self, v: torch.Tensor) -> torch.Tensor:
         """
@@ -259,4 +264,4 @@ class Grid(qp.TreeNode):
             The result will be complex or real, depending on whether the last
             three dimensions of `v` match `shapeG_mine` or `shapeH_mine`.
         """
-        return _IFFT.apply(self, v)
+        return IFFT.apply(self, v)

@@ -1,23 +1,27 @@
 from __future__ import annotations
-import qimpy as qp
-import torch
-from abc import abstractmethod
-from ._change import _change_real, _change_recip
 from typing import TypeVar, Any, Union, Optional, Sequence
+from abc import abstractmethod
+
+import torch
 from mpi4py import MPI
+
+from qimpy import rc
+from qimpy.utils import Gradable, BufferView, CheckpointPath
+from . import Grid
+from .change import _change_real, _change_recip
 
 
 FieldType = TypeVar("FieldType", bound="Field")  #: Type for field ops.
 
 
-class Field(qp.utils.Gradable[FieldType]):
+class Field(Gradable[FieldType]):
     """Abstract base class for scalar/vector fields in real/reciprocal space.
     Provides common operators for fields in either space, but any fields
     used must specifically be in real (:class:`FieldR` and :class:`FieldC`),
     full-reciprocal (:class:`FieldG`) or half-reciprocal (:class:`FieldH`)
     space."""
 
-    grid: qp.grid.Grid  #: Associated grid that determines dimensions of field
+    grid: Grid  #: Associated grid that determines dimensions of field
     data: torch.Tensor  #: Underlying data, with last three dimensions on grid
 
     @abstractmethod
@@ -56,12 +60,12 @@ class Field(qp.utils.Gradable[FieldType]):
         """Fourier transform (enables the ~ operator)"""
 
     @abstractmethod
-    def to(self: FieldType, grid: qp.grid.Grid) -> FieldType:
+    def to(self: FieldType, grid: Grid) -> FieldType:
         """Switch field to a grid that is different in shape or parallelization."""
 
     def __init__(
         self,
-        grid: qp.grid.Grid,
+        grid: Grid,
         *,
         shape_batch: Sequence[int] = tuple(),
         data: Optional[torch.Tensor] = None,
@@ -85,7 +89,7 @@ class Field(qp.utils.Gradable[FieldType]):
         if data is None:
             # Initialize to zero:
             self.data = torch.zeros(
-                tuple(shape_batch) + shape_grid_mine, dtype=dtype, device=qp.rc.device
+                tuple(shape_batch) + shape_grid_mine, dtype=dtype, device=rc.device
             )
         else:
             # Initialize to provided data:
@@ -181,8 +185,8 @@ class Field(qp.utils.Gradable[FieldType]):
         # Collect over MPI if needed:
         if self.grid.comm is not None:
             result = result.contiguous()
-            qp.rc.current_stream_synchronize()
-            self.grid.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(result), MPI.SUM)
+            rc.current_stream_synchronize()
+            self.grid.comm.Allreduce(MPI.IN_PLACE, BufferView(result), MPI.SUM)
         return result
 
     def dot(self: FieldType, other: FieldType) -> torch.Tensor:
@@ -208,8 +212,8 @@ class Field(qp.utils.Gradable[FieldType]):
         # Collect over MPI if needed:
         if self.grid.comm is not None:
             result = result.contiguous()
-            qp.rc.current_stream_synchronize()
-            self.grid.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(result), MPI.SUM)
+            rc.current_stream_synchronize()
+            self.grid.comm.Allreduce(MPI.IN_PLACE, BufferView(result), MPI.SUM)
         return result
 
     __xor__ = dot
@@ -220,7 +224,7 @@ class Field(qp.utils.Gradable[FieldType]):
         """
         result = torch.vdot(self.data.flatten(), other.data.flatten()).real
         if self.grid.comm is not None:
-            self.grid.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(result), MPI.SUM)
+            self.grid.comm.Allreduce(MPI.IN_PLACE, BufferView(result), MPI.SUM)
         return result.item()
 
     def norm(self: FieldType) -> torch.Tensor:
@@ -312,7 +316,7 @@ class Field(qp.utils.Gradable[FieldType]):
         """Create zero Field with same grid and batch dimensions."""
         return self.__class__(self.grid, shape_batch=self.data.shape[:-3])
 
-    def read(self, cp_path: qp.utils.CheckpointPath) -> None:
+    def read(self, cp_path: CheckpointPath) -> None:
         """Read field from `cp_path`."""
         checkpoint, path = cp_path
         assert checkpoint is not None
@@ -327,7 +331,7 @@ class Field(qp.utils.Gradable[FieldType]):
             else checkpoint.read_slice(dset, offset, size)
         )
 
-    def write(self, cp_path: qp.utils.CheckpointPath) -> None:
+    def write(self, cp_path: CheckpointPath) -> None:
         """Write field to `cp_path`."""
         checkpoint, path = cp_path
         assert checkpoint is not None
@@ -370,7 +374,7 @@ class FieldR(Field["FieldR"]):
         """Fourier transform (enables the ~ operator)"""
         return FieldH(self.grid, data=self.grid.fft(self.data))
 
-    def to(self, grid: qp.grid.Grid) -> FieldR:
+    def to(self, grid: Grid) -> FieldR:
         """Switch field to another `grid` with same `shape`.
         The new grid can only differ in the MPI split."""
         if grid is self.grid:
@@ -411,7 +415,7 @@ class FieldC(Field["FieldC"]):
         """Fourier transform (enables the ~ operator)"""
         return FieldG(self.grid, data=self.grid.fft(self.data))
 
-    def to(self, grid: qp.grid.Grid) -> FieldC:
+    def to(self, grid: Grid) -> FieldC:
         """Switch field to another `grid` with same `shape`.
         The new grid can only differ in the MPI split."""
         if grid is self.grid:
@@ -448,7 +452,7 @@ class FieldH(Field["FieldH"]):
         """Fourier transform (enables the ~ operator)"""
         return FieldR(self.grid, data=self.grid.ifft(self.data))
 
-    def to(self, grid: qp.grid.Grid) -> FieldH:
+    def to(self, grid: Grid) -> FieldH:
         """Switch field to another `grid` with possibly different `shape`.
         This routine will perform Fourier resampling and MPI rearrangements,
         as necessary."""
@@ -488,7 +492,7 @@ class FieldG(Field["FieldG"]):
         """Fourier transform (enables the ~ operator)"""
         return FieldC(self.grid, data=self.grid.ifft(self.data))
 
-    def to(self, grid: qp.grid.Grid) -> FieldG:
+    def to(self, grid: Grid) -> FieldG:
         """Switch field to another `grid` with possibly different `shape`.
         This routine will perform Fourier resampling and MPI rearrangements,
         as necessary."""

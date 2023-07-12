@@ -1,47 +1,49 @@
 from __future__ import annotations
-import qimpy as qp
+from typing import Callable
+
 import numpy as np
 import torch
-from qimpy.utils import TaskDivision, BufferView
-from typing import Callable
 from mpi4py import MPI
+
+from qimpy import log, rc, grid
+from qimpy.utils import TaskDivision, BufferView
 
 
 IndicesType = tuple[torch.Tensor, torch.Tensor, torch.Tensor]
 FunctionFFT = Callable[[torch.Tensor, str], torch.Tensor]
 
 
-class _FFT(torch.autograd.Function):
+class FFT(torch.autograd.Function):
     """Differentiable interface to :func:`_fft`."""
 
     @staticmethod
-    def forward(ctx, grid: qp.grid.Grid, input: torch.Tensor) -> torch.Tensor:  # type: ignore
+    def forward(ctx, grid: grid.Grid, input: torch.Tensor) -> torch.Tensor:  # type: ignore
         ctx.grid = grid
-        return _fft(grid, input, norm="forward")
+        return fft(grid, input, norm="forward")
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor) -> tuple[None, torch.Tensor]:  # type: ignore
-        return None, _ifft(ctx.grid, grad_output, norm="backward")
+        return None, ifft(ctx.grid, grad_output, norm="backward")
 
 
-class _IFFT(torch.autograd.Function):
+class IFFT(torch.autograd.Function):
     """Differentiable interface to :func:`_ifft`."""
 
     @staticmethod
-    def forward(ctx, grid: qp.grid.Grid, input: torch.Tensor) -> torch.Tensor:  # type: ignore
+    def forward(ctx, grid: grid.Grid, input: torch.Tensor) -> torch.Tensor:  # type: ignore
         ctx.grid = grid
-        return _ifft(grid, input, norm="forward")
+        return ifft(grid, input, norm="forward")
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor) -> tuple[None, torch.Tensor]:  # type: ignore
-        return None, _fft(ctx.grid, grad_output, norm="backward")
+        return None, fft(ctx.grid, grad_output, norm="backward")
 
 
-def _init_grid_fft(self: qp.grid.Grid) -> None:
+def init_grid_fft(self: grid.Grid) -> None:
     """Initialize local or parallel FFTs for class Grid."""
     # Half-reciprocal space global dimensions (for rfft/irfft):
     self.shapeH = (self.shape[0], self.shape[1], 1 + self.shape[2] // 2)
-    qp.log.info(f"real-fft shape: {self.shapeH}")
+    log.info(f"real-fft shape: {self.shapeH}")
     # MPI division:
     self.split0 = TaskDivision(
         n_tot=self.shape[0], n_procs=self.n_procs, i_proc=self.i_proc
@@ -57,13 +59,13 @@ def _init_grid_fft(self: qp.grid.Grid) -> None:
     self.shapeG_mine = (self.shape[0], self.shape[1], self.split2.n_mine)
     self.shapeH_mine = (self.shape[0], self.shape[1], self.split2H.n_mine)
     if self.n_procs > 1:
-        qp.log.info(f"split over {self.n_procs} processes:")
-        qp.log.info(f"  local selected shape: {self.shapeR_mine}")
-        qp.log.info(f"  local full-fft shape: {self.shapeG_mine}")
-        qp.log.info(f"  local real-fft shape: {self.shapeH_mine}")
+        log.info(f"split over {self.n_procs} processes:")
+        log.info(f"  local selected shape: {self.shapeR_mine}")
+        log.info(f"  local full-fft shape: {self.shapeG_mine}")
+        log.info(f"  local real-fft shape: {self.shapeH_mine}")
     # Create 1D grids for real and reciprocal spaces:
     # --- global versions first
-    iv1D = tuple(torch.arange(s, device=qp.rc.device) for s in self.shape)
+    iv1D = tuple(torch.arange(s, device=rc.device) for s in self.shape)
     iG1D = tuple(
         torch.where(iv <= self.shape[dim] // 2, iv, iv - self.shape[dim])
         for dim, iv in enumerate(iv1D)
@@ -125,10 +127,10 @@ def _init_grid_fft(self: qp.grid.Grid) -> None:
         index_1 = torch.tensor(
             S1 * (i_in - in_prev[src_proc])[None, None, None, :]
             + i1[None, None, :, None]
-        ).to(qp.rc.device)
+        ).to(rc.device)
         # --- coefficient of i_batch
         index_i_batch = torch.tensor(S1 * in_counts[None, None, None, src_proc]).to(
-            qp.rc.device
+            rc.device
         )
         # --- coefficient of n_batch
         index_n_batch = torch.tensor(
@@ -138,7 +140,7 @@ def _init_grid_fft(self: qp.grid.Grid) -> None:
                 * S1
                 * in_counts[None, None, None, src_proc]
             )
-        ).to(qp.rc.device)
+        ).to(rc.device)
         return index_1, index_i_batch, index_n_batch
 
     # Pre-calculate these arrays for each of the transforms:
@@ -206,8 +208,8 @@ def parallel_transform(
     send_prev = in_prev * v_tilde.shape[1]
     recv_prev = out_prev * (np.prod(shape_out[:2]) * n_batch)
     v_tmp = torch.zeros(recv_prev[-1], dtype=v_tilde.dtype, device=v_tilde.device)
-    mpi_type = qp.rc.mpi_type[v_tilde.dtype]
-    qp.rc.current_stream_synchronize()
+    mpi_type = rc.mpi_type[v_tilde.dtype]
+    rc.current_stream_synchronize()
     comm.Alltoallv(
         (BufferView(v_tilde), np.diff(send_prev), send_prev[:-1], mpi_type),
         (BufferView(v_tmp), np.diff(recv_prev), recv_prev[:-1], mpi_type),
@@ -224,7 +226,7 @@ def parallel_transform(
     return fft_after(v_tilde, norm)  # Transform 1 or 2 dims here
 
 
-def _fft(self: qp.grid.Grid, v: torch.Tensor, norm: str) -> torch.Tensor:
+def fft(self: grid.Grid, v: torch.Tensor, norm: str) -> torch.Tensor:
     """
     Underlying implementation of :meth:`qimpy.grid.Grid.fft`.
     Additional argument `norm` matches torch.fft routines and is used internally
@@ -276,7 +278,7 @@ def _fft(self: qp.grid.Grid, v: torch.Tensor, norm: str) -> torch.Tensor:
         ).swapaxes(-1, -3)
 
 
-def _ifft(self: qp.grid.Grid, v: torch.Tensor, norm: str) -> torch.Tensor:
+def ifft(self: grid.Grid, v: torch.Tensor, norm: str) -> torch.Tensor:
     """
     Underlying implementation of :meth:`qimpy.grid.Grid.ifft`.
     Additional argument `norm` matches torch.fft routines and is used internally

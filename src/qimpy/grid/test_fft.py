@@ -1,7 +1,10 @@
-import qimpy as qp
-import pytest
 from typing import Sequence, Type
-from ._field import FieldType
+
+import pytest
+
+from qimpy import rc, log
+from qimpy.utils import log_config, StopWatch
+from . import FieldType, FieldR, FieldH, FieldC, FieldG
 from .test_common import get_sequential_grid, get_parallel_grid, get_reference_field
 
 
@@ -10,9 +13,9 @@ def get_shape_batch_field_combinations(
 ) -> Sequence[tuple[Sequence[int], Sequence[int], Type]]:
     shapes = ((48, 64, 96), (64, 72, 128))
     n_batches = ((2, 3), tuple[int, ...]())
-    field_types = [qp.grid.FieldR, qp.grid.FieldC]
+    field_types = [FieldR, FieldC]
     if include_tilde:
-        field_types += [qp.grid.FieldH, qp.grid.FieldG]
+        field_types += [FieldH, FieldG]
     return [
         (shape, n_batch, field_type)
         for shape, n_batch in zip(shapes, n_batches)
@@ -42,20 +45,20 @@ def test_fft(
     if n_repeat:
         for field, name in ((field_s, "seq"), (field_p, "par")):
             for i_repeat in range(n_repeat):
-                watch = qp.utils.StopWatch(f"{cls.__name__}.fft({name})")
+                watch = StopWatch(f"{cls.__name__}.fft({name})")
                 field_tilde = ~field
                 watch.stop()
-                qp.log.info(f"Rep: {i_repeat}  norm: {field_tilde.norm().max().item()}")
+                log.info(f"Rep: {i_repeat}  norm: {field_tilde.norm().max().item()}")
 
 
 def main():
-    qp.utils.log_config()
-    qp.rc.init()
+    log_config()
+    rc.init()
     for shape, n_batch, field_type in get_shape_batch_field_combinations(
         include_tilde=True
     ):
         test_fft(shape, n_batch, field_type, n_repeat=10)
-    qp.utils.StopWatch.print_stats()
+    StopWatch.print_stats()
 
 
 if __name__ == "__main__":

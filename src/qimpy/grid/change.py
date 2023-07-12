@@ -1,14 +1,16 @@
 from __future__ import annotations
-import qimpy as qp
+from typing import Optional, TypeVar
+
 import numpy as np
 import torch
-from typing import Optional, TypeVar
 from mpi4py import MPI
 
+from qimpy import rc, grid
+from qimpy.utils import TaskDivision, TaskDivisionCustom, BufferView
+from . import Grid
 
-def scatter(
-    v: torch.Tensor, split_out: qp.utils.TaskDivision, dim: int
-) -> torch.Tensor:
+
+def scatter(v: torch.Tensor, split_out: TaskDivision, dim: int) -> torch.Tensor:
     """Return the contents of v, changed from not-split (i.e. fully available
     on all processes) to split based on split_out along dimension dim."""
     dim = dim % len(v.shape)  # handle negative dim correctly
@@ -17,7 +19,7 @@ def scatter(
 
 def gather(
     v: torch.Tensor,
-    split_in: qp.utils.TaskDivision,
+    split_in: TaskDivision,
     comm: MPI.Comm,
     dim: int,
 ) -> torch.Tensor:
@@ -27,16 +29,16 @@ def gather(
     # Bring split dimension to outermost (if necessary):
     sendbuf = (v.swapaxes(0, dim) if dim else v).contiguous()
     prod_rest = np.prod(sendbuf.shape[1:])  # number in all but the split dim
-    mpi_type = qp.rc.mpi_type[v.dtype]
+    mpi_type = rc.mpi_type[v.dtype]
     # Gather pieces from each process to all:
     recvbuf = torch.empty(
         (split_in.n_tot,) + sendbuf.shape[1:], dtype=v.dtype, device=v.device
     )
     recv_prev = split_in.n_prev * prod_rest
-    qp.rc.current_stream_synchronize()
+    rc.current_stream_synchronize()
     comm.Allgatherv(
-        (qp.utils.BufferView(sendbuf), split_in.n_mine * prod_rest, 0, mpi_type),
-        (qp.utils.BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1], mpi_type),
+        (BufferView(sendbuf), split_in.n_mine * prod_rest, 0, mpi_type),
+        (BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1], mpi_type),
     )
     # Restore dimension order of output (if necessary):
     return recvbuf.swapaxes(0, dim) if dim else recvbuf
@@ -44,8 +46,8 @@ def gather(
 
 def redistribute(
     v: torch.Tensor,
-    split_in: qp.utils.TaskDivision,
-    split_out: qp.utils.TaskDivision,
+    split_in: TaskDivision,
+    split_out: TaskDivision,
     comm: MPI.Comm,
     dim: int,
 ) -> torch.Tensor:
@@ -54,7 +56,7 @@ def redistribute(
     # Bring split dimension to outermost (if necessary):
     sendbuf = (v.swapaxes(0, dim) if dim else v).contiguous()
     prod_rest = np.prod(sendbuf.shape[1:])  # number in all but the split dim
-    mpi_type = qp.rc.mpi_type[v.dtype]
+    mpi_type = rc.mpi_type[v.dtype]
     # Determine destinations of my input pieces:
     send_prev = (
         np.maximum(np.minimum(split_out.n_prev, split_in.i_stop), split_in.i_start)
@@ -69,10 +71,10 @@ def redistribute(
     recvbuf = torch.empty(
         (split_out.n_mine,) + sendbuf.shape[1:], dtype=v.dtype, device=v.device
     )
-    qp.rc.current_stream_synchronize()
+    rc.current_stream_synchronize()
     comm.Alltoallv(
-        (qp.utils.BufferView(sendbuf), np.diff(send_prev), send_prev[:-1], mpi_type),
-        (qp.utils.BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1], mpi_type),
+        (BufferView(sendbuf), np.diff(send_prev), send_prev[:-1], mpi_type),
+        (BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1], mpi_type),
     )
     # Restore dimension order of output (if necessary):
     return recvbuf.swapaxes(0, dim) if dim else recvbuf
@@ -80,9 +82,9 @@ def redistribute(
 
 def fix_split(
     v: torch.Tensor,
-    split_in: qp.utils.TaskDivision,
+    split_in: TaskDivision,
     comm_in: Optional[MPI.Comm],
-    split_out: qp.utils.TaskDivision,
+    split_out: TaskDivision,
     comm_out: Optional[MPI.Comm],
     dim: int,
 ) -> torch.Tensor:
@@ -104,11 +106,11 @@ def fix_split(
             return redistribute(v, split_in, split_out, comm_in, dim)
 
 
-FieldTypeReal = TypeVar("FieldTypeReal", "qp.grid.FieldR", "qp.grid.FieldC")
-FieldTypeRecip = TypeVar("FieldTypeRecip", "qp.grid.FieldH", "qp.grid.FieldG")
+FieldTypeReal = TypeVar("FieldTypeReal", "grid.FieldR", "grid.FieldC")
+FieldTypeRecip = TypeVar("FieldTypeRecip", "grid.FieldH", "grid.FieldG")
 
 
-def _change_real(v: FieldTypeReal, grid_out: qp.grid.Grid) -> FieldTypeReal:
+def _change_real(v: FieldTypeReal, grid_out: Grid) -> FieldTypeReal:
     """Switch real-space field to grid_out."""
     grid_in = v.grid
     assert grid_in.shape == grid_out.shape
@@ -118,10 +120,10 @@ def _change_real(v: FieldTypeReal, grid_out: qp.grid.Grid) -> FieldTypeReal:
     return v.__class__(grid_out, data=data_out)
 
 
-def _change_recip(v: FieldTypeRecip, grid_out: qp.grid.Grid) -> FieldTypeRecip:
+def _change_recip(v: FieldTypeRecip, grid_out: Grid) -> FieldTypeRecip:
     """Switch reciprocal-space field to grid_out."""
     grid_in = v.grid
-    is_half = v.__class__ is qp.grid.FieldH
+    is_half = v.__class__ is grid.FieldH
     if is_half:
         split_in = grid_in.split2H
         split_out = grid_out.split2H
@@ -204,15 +206,15 @@ def _change_recip(v: FieldTypeRecip, grid_out: qp.grid.Grid) -> FieldTypeRecip:
                         if whose_pos != split_in.i_proc:
                             assert grid_in.comm is not None
                             neg_slice = neg_slice.contiguous()
-                            qp.rc.current_stream_synchronize()
-                            grid_in.comm.Send(qp.utils.BufferView(neg_slice), whose_pos)
+                            rc.current_stream_synchronize()
+                            grid_in.comm.Send(BufferView(neg_slice), whose_pos)
                     elif whose_pos == split_in.i_proc:
                         neg_slice = torch.zeros(
                             data.shape[:-1], dtype=data.dtype, device=data.device
                         )
                         assert grid_in.comm is not None
-                        qp.rc.current_stream_synchronize()
-                        grid_in.comm.Recv(qp.utils.BufferView(neg_slice), whose_neg)
+                        rc.current_stream_synchronize()
+                        grid_in.comm.Recv(BufferView(neg_slice), whose_neg)
                     # Negative Nyquist slice is now on proc with positive one
                 neg_start += 1  # can only have + Nyquist freq in output
             sel = torch.where(torch.logical_or(i_mine <= S_hlf, i_mine >= neg_start))[0]
@@ -233,7 +235,7 @@ def _change_recip(v: FieldTypeRecip, grid_out: qp.grid.Grid) -> FieldTypeRecip:
                 data_out[..., i_pos] *= 0.5
 
         # Revised split_in to match updated data (for MPI rearrangement below):
-        split_in = qp.utils.TaskDivisionCustom(n_mine=n_mine_new, comm=grid_in.comm)
+        split_in = TaskDivisionCustom(n_mine=n_mine_new, comm=grid_in.comm)
     else:
         data_out = data
 
