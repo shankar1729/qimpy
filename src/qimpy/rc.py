@@ -12,10 +12,10 @@ uses SLURM_LOCALID or OMPI_COMM_WORLD_LOCAL_RANK to pick a specific GPU and alte
 CUDA_VISIBLE_DEVICES before any torch or MPI calls.
 """
 
-import os
-import time
-import datetime
 from typing import Optional
+import datetime
+import time
+import os
 
 import torch
 import numpy as np

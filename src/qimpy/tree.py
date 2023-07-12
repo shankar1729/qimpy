@@ -1,7 +1,8 @@
 from typing import Union, TypeVar, Type, final
 
-from . import log, utils
-from .utils import CheckpointPath, CheckpointContext
+from qimpy.utils import CheckpointPath, CheckpointContext
+from qimpy.utils.dict import key_cleanup
+from . import log
 
 
 ClassType = TypeVar("ClassType")
@@ -94,7 +95,7 @@ class TreeNode:
         if isinstance(params, dict):
             result = cls(
                 **kwargs,
-                **utils.dict.key_cleanup(params),
+                **key_cleanup(params),
                 checkpoint_in=checkpoint_in.relative(attr_name),
             )
         elif isinstance(params, cls):
