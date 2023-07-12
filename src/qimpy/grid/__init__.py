@@ -8,12 +8,14 @@ __all__ = (
     "FieldC",
     "FieldH",
     "FieldG",
+    "FieldSymmetrizer",
     "Coulomb",
     "N_SIGMAS_PER_WIDTH",
 )
 
 from .grid import Grid
 from .field import FieldType, Field, FieldR, FieldC, FieldH, FieldG
+from .field_symmetrizer import FieldSymmetrizer
 from .coulomb import Coulomb
 import numpy as np
 

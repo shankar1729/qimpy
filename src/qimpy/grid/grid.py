@@ -1,13 +1,14 @@
+from __future__ import annotations
 from typing import Optional, Sequence
 
 import numpy as np
 import torch
 from mpi4py import MPI
 
-from qimpy import rc, log, TreeNode
+from qimpy import rc, log, TreeNode, grid
 from qimpy.utils import TaskDivision, CheckpointPath
 from qimpy.lattice import Lattice
-from qimpy.symmetries import Symmetries, FieldSymmetrizer
+from qimpy.symmetries import Symmetries
 from .fft import init_grid_fft, FFT, IFFT, IndicesType
 
 
@@ -20,7 +21,7 @@ class Grid(TreeNode):
 
     lattice: Lattice
     symmetries: Symmetries
-    _field_symmetrizer: Optional[FieldSymmetrizer]
+    _field_symmetrizer: Optional[grid.FieldSymmetrizer]
     comm: Optional[MPI.Comm]  #: Communicator to split grid and FFTs over
     n_procs: int  #: Size of comm
     i_proc: int  #: Rank within comm
@@ -210,10 +211,10 @@ class Grid(TreeNode):
         return (iG_box @ self.lattice.Gbasis.T).norm(dim=1).max().item()
 
     @property
-    def field_symmetrizer(self) -> FieldSymmetrizer:
+    def field_symmetrizer(self) -> grid.FieldSymmetrizer:
         """Symmetrizer for fields on this grid (initialized on first use)."""
         if self._field_symmetrizer is None:
-            self._field_symmetrizer = FieldSymmetrizer(self)
+            self._field_symmetrizer = grid.FieldSymmetrizer(self)
         return self._field_symmetrizer
 
     def fft(self, v: torch.Tensor) -> torch.Tensor:

@@ -3,17 +3,17 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-import qimpy
 from qimpy import rc, log
 from qimpy.utils import BufferView, TaskDivision, cis, stopwatch
+from . import Grid, FieldH
 
 
 class FieldSymmetrizer:
     """Space group symmetrization of reciprocal-space :class:`FieldH`'s."""
 
-    grid: qimpy.grid.Grid
+    grid: Grid
 
-    def __init__(self, grid: qimpy.grid.Grid) -> None:
+    def __init__(self, grid: Grid) -> None:
         """Initialize symmetrization for fields on `grid`."""
         self.grid = grid
         shapeH = grid.shapeH
@@ -117,7 +117,7 @@ class FieldSymmetrizer:
         log.info(f"Initialized field symmetrization in {len(index)} orbits")
 
     @stopwatch(name="FieldH.symmetrize")
-    def __call__(self, v: qimpy.grid.FieldH) -> None:
+    def __call__(self, v: FieldH) -> None:
         """Symmetrize field `v` in-place."""
         grid = self.grid
         assert v.grid == grid
