@@ -3,9 +3,8 @@ from typing import Callable
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
-from qimpy import log, rc, grid
+from qimpy import log, rc, grid, MPI
 from qimpy.mpi import TaskDivision, BufferView
 
 

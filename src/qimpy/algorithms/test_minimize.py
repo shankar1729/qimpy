@@ -3,9 +3,8 @@ from typing import Sequence
 import numpy as np
 import torch
 import pytest
-from mpi4py import MPI
 
-from qimpy import rc
+from qimpy import rc, MPI
 from qimpy.io import CheckpointPath, log_config
 from qimpy.mpi import BufferView
 from qimpy.lattice import Lattice

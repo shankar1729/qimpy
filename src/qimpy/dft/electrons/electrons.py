@@ -3,9 +3,8 @@ from typing import Union, Optional
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
-from qimpy import log, rc, TreeNode, dft
+from qimpy import log, rc, TreeNode, dft, MPI
 from qimpy.io import CheckpointPath, CheckpointContext, Checkpoint
 from qimpy.mpi import ProcessGrid, globalreduce, BufferView
 from qimpy.math import abs_squared

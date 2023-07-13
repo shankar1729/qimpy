@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
-from qimpy import rc, dft
+from qimpy import rc, dft, MPI
 from qimpy.io import CheckpointPath
 from qimpy.mpi import BufferView
 from qimpy.math import eighg, dagger

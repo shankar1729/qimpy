@@ -3,9 +3,9 @@ from typing import Union
 
 import torch
 import numpy as np
-from mpi4py import MPI
 
-from qimpy import rc, TreeNode
+
+from qimpy import rc, TreeNode, MPI
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import TaskDivision
 

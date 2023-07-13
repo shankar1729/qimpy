@@ -3,9 +3,8 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
-from qimpy import rc
+from qimpy import rc, MPI
 from qimpy.mpi import Waitable, Waitless, TaskDivision, BufferView
 from qimpy.dft import electrons
 

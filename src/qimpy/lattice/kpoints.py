@@ -3,10 +3,9 @@ from typing import Union, Sequence
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
 import qimpy
-from qimpy import log, rc, TreeNode
+from qimpy import log, rc, TreeNode, MPI
 from qimpy.io import CheckpointPath
 from qimpy.mpi import ProcessGrid, TaskDivision
 from . import Lattice

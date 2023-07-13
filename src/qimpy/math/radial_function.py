@@ -2,9 +2,8 @@ from typing import Optional, Union
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
-from qimpy import log
+from qimpy import log, MPI
 from qimpy.mpi import BufferView, TaskDivision
 from . import spherical_bessel, quintic_spline
 

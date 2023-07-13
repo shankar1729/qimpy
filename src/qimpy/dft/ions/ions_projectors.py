@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from mpi4py import MPI
 import numpy as np
 import torch
 
-from qimpy import rc, dft
+from qimpy import rc, dft, MPI
 from qimpy.profiler import stopwatch
 from qimpy.mpi import BufferView
 from qimpy.math import RadialFunction, spherical_harmonics as sh

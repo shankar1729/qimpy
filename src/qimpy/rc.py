@@ -20,13 +20,11 @@ import os
 import torch
 import numpy as np
 from psutil import cpu_count
-from mpi4py import MPI
 
-from . import log, set_gpu_visibility
+from . import log, set_gpu_visibility, MPI
 
 # List exported symbols for doc generation
 __all__ = (
-    "MPI",
     "comm",
     "i_proc",
     "n_procs",

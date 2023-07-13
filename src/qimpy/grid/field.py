@@ -3,9 +3,8 @@ from typing import TypeVar, Any, Union, Optional, Sequence
 from abc import abstractmethod
 
 import torch
-from mpi4py import MPI
 
-from qimpy import rc
+from qimpy import rc, MPI
 from qimpy.algorithms import Gradable
 from qimpy.mpi import BufferView
 from qimpy.io import CheckpointPath

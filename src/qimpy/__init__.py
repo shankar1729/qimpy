@@ -3,6 +3,7 @@
 __all__ = (
     "log",
     "set_gpu_visibility",
+    "MPI",
     "rc",
     "profiler",
     "io",
@@ -21,6 +22,7 @@ __all__ = (
 
 # Module import definition
 from .pre_init import log, set_gpu_visibility
+from mpi4py import MPI  #: Must initialize MPI after pre_init for correct GPU behavior.
 from . import rc, profiler, io, mpi, math
 from .tree import TreeNode
 from .energy import Energy

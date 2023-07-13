@@ -4,9 +4,8 @@ from typing import Optional
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
-from qimpy import rc, log, TreeNode, dft
+from qimpy import rc, log, TreeNode, dft, MPI
 from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath
 from qimpy.mpi import BufferView, Waitable, globalreduce

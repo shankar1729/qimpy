@@ -3,9 +3,8 @@ from typing import Optional, Sequence
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
-from qimpy import rc, log, TreeNode, grid
+from qimpy import rc, log, TreeNode, grid, MPI
 from qimpy.mpi import TaskDivision
 from qimpy.io import CheckpointPath
 from qimpy.lattice import Lattice

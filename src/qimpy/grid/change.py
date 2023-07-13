@@ -3,9 +3,8 @@ from typing import Optional, TypeVar
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
-from qimpy import rc, grid
+from qimpy import rc, grid, MPI
 from qimpy.mpi import TaskDivision, TaskDivisionCustom, BufferView
 from . import Grid
 

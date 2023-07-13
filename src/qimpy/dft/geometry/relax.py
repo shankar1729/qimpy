@@ -3,9 +3,8 @@ from typing import Union, Optional
 import os
 
 import torch
-from mpi4py import MPI
 
-from qimpy import log, dft
+from qimpy import log, dft, MPI
 from qimpy.lattice import Lattice
 from qimpy.io import Checkpoint, CheckpointPath, CheckpointContext
 from qimpy.mpi import BufferView

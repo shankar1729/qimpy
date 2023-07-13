@@ -7,7 +7,8 @@ __all__ = ["sum", "prod", "min", "max", "all", "any"]
 from typing import Any
 
 import torch
-from mpi4py import MPI
+
+from qimpy import MPI
 
 
 def sum(v: torch.Tensor, comm: MPI.Comm) -> Any:

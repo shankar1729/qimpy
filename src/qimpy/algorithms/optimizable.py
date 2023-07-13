@@ -2,8 +2,8 @@ from typing import Protocol, TypeVar, Deque
 from dataclasses import dataclass
 
 import torch
-from mpi4py import MPI
 
+from qimpy import MPI
 from qimpy.mpi import BufferView
 
 

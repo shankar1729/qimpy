@@ -2,9 +2,8 @@ from typing import Union
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
-from qimpy import log, TreeNode
+from qimpy import log, TreeNode, MPI
 from qimpy.profiler import StopWatch
 from qimpy.io import CheckpointPath
 from qimpy.grid import FieldH, FieldR

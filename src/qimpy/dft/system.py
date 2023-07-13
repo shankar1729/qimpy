@@ -2,9 +2,8 @@ from typing import Union, Optional, Any, Sequence
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
-from qimpy import rc, log, TreeNode, Energy
+from qimpy import rc, log, TreeNode, Energy, MPI
 from qimpy.io import Checkpoint, CheckpointPath
 from qimpy.mpi import ProcessGrid
 from qimpy.lattice import Lattice

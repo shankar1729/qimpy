@@ -3,9 +3,8 @@ from typing import Optional
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
-from qimpy import rc
+from qimpy import rc, MPI
 from qimpy.profiler import stopwatch
 from qimpy.math import ceildiv, accum_prod_, accum_norm_
 from qimpy.grid import FieldR, FieldH

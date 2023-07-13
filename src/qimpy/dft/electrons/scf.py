@@ -2,9 +2,8 @@ from __future__ import annotations
 from typing import Optional, Sequence
 
 import torch
-from mpi4py import MPI
 
-from qimpy import dft, Energy
+from qimpy import dft, Energy, MPI
 from qimpy.io import CheckpointPath
 from qimpy.mpi import globalreduce
 from qimpy.algorithms import Pulay

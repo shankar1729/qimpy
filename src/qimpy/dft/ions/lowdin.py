@@ -3,9 +3,8 @@ from typing import NamedTuple, Optional
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
-from qimpy import rc, dft
+from qimpy import rc, dft, MPI
 from qimpy.profiler import stopwatch
 from qimpy.mpi import BufferView
 from qimpy.math import ortho_matrix, cis, abs_squared

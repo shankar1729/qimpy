@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
+from qimpy import MPI
 from qimpy.profiler import stopwatch
 from qimpy.mpi import Waitable, Waitless, globalreduce, Iallreduce_in_place
 from qimpy.math import abs_squared, ortho_matrix

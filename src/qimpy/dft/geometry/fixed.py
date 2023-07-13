@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from mpi4py import MPI
-
+from qimpy import MPI
 from qimpy.io import CheckpointPath
 from qimpy.lattice import Lattice
 from . import Relax

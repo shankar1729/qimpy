@@ -4,9 +4,8 @@ import sys
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
-from qimpy import rc, log
+from qimpy import rc, log, MPI
 
 
 def log_config(

@@ -4,9 +4,8 @@ import pathlib
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
-from qimpy import log
+from qimpy import log, MPI
 from qimpy.math import RadialFunction
 from qimpy.dft.ions import PseudoQuantumNumbers
 from qimpy.dft.ions.read_upf import read_upf

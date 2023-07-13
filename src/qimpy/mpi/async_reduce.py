@@ -2,9 +2,8 @@ from functools import cache
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
-from qimpy import rc
+from qimpy import rc, MPI
 from . import BufferView, TaskDivision
 
 

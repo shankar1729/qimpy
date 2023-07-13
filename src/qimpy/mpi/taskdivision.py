@@ -2,10 +2,9 @@ from typing import Optional
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
 import qimpy
-from qimpy import log
+from qimpy import log, MPI
 
 
 class TaskDivision:

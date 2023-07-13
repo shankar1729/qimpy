@@ -4,9 +4,8 @@ from abc import ABC, abstractmethod
 from collections import deque
 
 import numpy as np
-from mpi4py import MPI
 
-from qimpy import log, rc, TreeNode, Energy
+from qimpy import log, rc, TreeNode, Energy, MPI
 from qimpy.io import CheckpointPath
 from .optimizable import Optimizable, ConvergenceCheck
 

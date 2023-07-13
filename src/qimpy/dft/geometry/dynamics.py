@@ -3,9 +3,8 @@ from typing import Union, Optional, Callable
 
 import numpy as np
 import torch
-from mpi4py import MPI
 
-from qimpy import rc, log, TreeNode, dft
+from qimpy import rc, log, TreeNode, dft, MPI
 from qimpy.io import Unit, UnitOrFloat, Checkpoint, CheckpointPath, CheckpointContext
 from qimpy.mpi import BufferView
 from qimpy.dft.ions import Ions

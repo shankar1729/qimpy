@@ -4,9 +4,8 @@ from typing import Optional, Union, NamedTuple, Callable, Sequence
 import numpy as np
 import torch
 from scipy import optimize
-from mpi4py import MPI
 
-from qimpy import rc, log, TreeNode, Energy, dft
+from qimpy import rc, log, TreeNode, Energy, dft, MPI
 from qimpy.profiler import stopwatch
 from qimpy.dft.ions import Ions
 from qimpy.io import CheckpointPath, CheckpointContext, fmt

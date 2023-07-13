@@ -3,9 +3,8 @@ from typing import Generic, Sequence, NamedTuple, Optional, Union
 from abc import ABC, abstractmethod
 
 import numpy as np
-from mpi4py import MPI
 
-from qimpy import log, Energy, TreeNode
+from qimpy import log, Energy, TreeNode, MPI
 from qimpy.io import CheckpointPath
 from qimpy.io.dict import key_cleanup
 from .minimize_lbfgs import lbfgs
