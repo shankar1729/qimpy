@@ -115,7 +115,9 @@ class Symmetries(TreeNode):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Detect space group: rotations, translations and mapping of ions."""
         # Point group:
-        lattice_sym = get_lattice_point_group(lattice.Rbasis, tolerance)
+        lattice_sym = get_lattice_point_group(
+            lattice.Rbasis, lattice.periodic, tolerance
+        )
         n_point = lattice_sym.shape[0]
         log.info(f"Found {n_point} point-group symmetries of the Bravais lattice")
         lattice_sym = Symmetries.reduce_axes(lattice_sym, lattice, axes, tolerance)

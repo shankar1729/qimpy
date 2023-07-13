@@ -5,9 +5,11 @@ import torch
 from qimpy import symmetries
 
 
-def get_lattice_point_group(Rbasis: torch.Tensor, tolerance: float) -> torch.Tensor:
+def get_lattice_point_group(
+    Rbasis: torch.Tensor, periodic: tuple[bool, ...], tolerance: float
+) -> torch.Tensor:
     """Return point group (n_sym x 3 x 3 tensor in lattice coordinates),
-    given lattice vectors Rbasis (3 x 3 tensor)."""
+    given lattice vectors Rbasis (3 x 3 tensor) and if each of them is `periodic`."""
 
     # Reduce lattice vectors:
     T = reduce_matrix33(Rbasis, tolerance)
@@ -17,6 +19,15 @@ def get_lattice_point_group(Rbasis: torch.Tensor, tolerance: float) -> torch.Ten
     entries = torch.tensor([-1, 0, 1], device=T.device, dtype=torch.double)
     matrices = torch.stack(torch.meshgrid([entries] * 9, indexing="ij"))
     matrices = matrices.reshape((9, -1)).T.reshape((-1, 3, 3))
+
+    # Drop any matrices that couple periodic and non-periodic directions:
+    for i_dir in range(3):
+        j_dir = (i_dir + 1) % 3
+        if periodic[i_dir] != periodic[j_dir]:
+            not_coupled_ij = torch.logical_and(
+                matrices[:, i_dir, j_dir] == 0.0, matrices[:, j_dir, i_dir] == 0.0
+            )
+            matrices = matrices[torch.where(not_coupled_ij)[0]]
 
     # Find matrices that preserve reduced metric:
     metric = Rreduced.T @ Rreduced
