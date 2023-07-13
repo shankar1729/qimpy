@@ -121,6 +121,7 @@ class Symmetries(TreeNode):
         n_point = lattice_sym.shape[0]
         log.info(f"Found {n_point} point-group symmetries of the Bravais lattice")
         lattice_sym = Symmetries.reduce_axes(lattice_sym, lattice, axes, tolerance)
+
         # Space group:
         if labeled_positions is None:
             # Special case of no ions: space group = point group:
@@ -129,13 +130,21 @@ class Symmetries(TreeNode):
             position_map = torch.zeros(
                 (lattice_sym.shape[0], 0), dtype=torch.long, device=rot.device
             )
-            return rot, trans, position_map
         else:
             rot, trans, position_map = get_space_group(
                 lattice_sym, lattice, labeled_positions, tolerance
             )
             log.info(f"Found {rot.shape[0]} space-group symmetries with basis")
-            return rot, trans, position_map
+
+        # Reduce by lattice center:
+        center_rot = rot @ lattice.center + trans
+        sel = torch.where((center_rot - lattice.center).norm(dim=-1) < tolerance)[0]
+        if len(sel) < rot.shape[0]:
+            log.info(f"Reduced to {len(sel)} space-group symmetries by lattice center")
+            rot = rot[sel]
+            trans = trans[sel]
+            position_map = position_map[sel]
+        return rot, trans, position_map
 
     @staticmethod
     def reduce_axes(
@@ -167,12 +176,15 @@ class Symmetries(TreeNode):
     def enforce(self, lattice: Lattice, positions: Optional[torch.Tensor]) -> None:
         """Enforce symmetries exactly on lattice and ions."""
         log.info("Enforcing symmetries:")
-        lattice.update(self.symmetrize_lattice(lattice.Rbasis))
+        lattice.update(
+            self.symmetrize_lattice(lattice.Rbasis),
+            center=(self.rot @ lattice.center + self.trans).mean(dim=0),
+        )
         if positions is not None:
             positions_sym = self.symmetrize_positions(positions)
             rms = (positions_sym - positions).square().mean().sqrt()
             positions[:] = positions_sym
-            log.info(f"RMS change in fractional positions of ions: {rms:e}")
+            log.info(f"RMS change in positions (fractional): {rms:e}")
 
     @staticmethod
     def find_identity(rot: torch.Tensor, trans: torch.Tensor, tolerance: float) -> int:

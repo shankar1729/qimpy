@@ -26,6 +26,7 @@ class Lattice(TreeNode):
     move_scale: torch.Tensor  #: Scale factors to precondition / constrain lattice move
 
     periodic: tuple[bool, ...]  #: Whether each direction is periodic
+    center: torch.Tensor  #: Center (fractional coords) for non-periodic directions
 
     def __init__(
         self,
@@ -47,6 +48,7 @@ class Lattice(TreeNode):
         movable: Optional[bool] = None,
         move_scale: Optional[Sequence[float]] = None,
         periodic: Optional[Sequence[bool]] = None,
+        center: Optional[Sequence[float]] = None,
     ) -> None:
         """Initialize from lattice vectors or lengths and angles.
         Either specify a lattice `system` and optional `modification`,
@@ -117,6 +119,10 @@ class Lattice(TreeNode):
             :yaml:`Whether each lattice direction is periodic.`
             Set to False for some directions for lower-dimensional / no periodicity.
             Defaults to (True, True, True) if unspecified.
+        center
+            :yaml:`Center of cell for periodicity break along non-periodic directions.`
+            In fractional coordinates, and values along periodic directions are
+            irrelevant. Defaults to (0, 0, 0) if unspecified.
         """
         super().__init__()
         log.info("\n--- Initializing Lattice ---")
@@ -124,6 +130,7 @@ class Lattice(TreeNode):
         if checkpoint_in:
             attrs = checkpoint_in.attrs
             self.periodic = tuple[bool](attrs["periodic"])
+            self.center = checkpoint_in.read("center")
             self.compute_stress = attrs["compute_stress"]
             self.movable = attrs["movable"]
             self.move_scale = checkpoint_in.read("move_scale")
@@ -132,6 +139,11 @@ class Lattice(TreeNode):
             stress = checkpoint_in.read_optional("stress")  # converted to grad below
         else:
             self.periodic = (True, True, True) if periodic is None else tuple(periodic)
+            self.center = (
+                torch.zeros(3, device=rc.device)
+                if (center is None)
+                else torch.tensor(center, device=rc.device)
+            )
             self.compute_stress = False
             self.movable = False
             self.move_scale = torch.ones(3, device=rc.device)
@@ -186,9 +198,10 @@ class Lattice(TreeNode):
     ) -> list[str]:
         attrs = cp_path.attrs
         attrs["periodic"] = self.periodic
+        cp_path.write("center", self.center)
         attrs["compute_stress"] = self.compute_stress
         attrs["movable"] = self.movable
-        saved_list = ["compute_stress", "movable"]
+        saved_list = ["periodic", "center", "compute_stress", "movable"]
         saved_list.append(cp_path.write("move_scale", self.move_scale))
         if self.strain_rate is not None:
             saved_list.append(cp_path.write("strain_rate", self.strain_rate))
@@ -197,7 +210,12 @@ class Lattice(TreeNode):
             saved_list.append(cp_path.write("stress", self.stress.detach()))
         return saved_list
 
-    def update(self, Rbasis: torch.Tensor, report_change: bool = True) -> None:
+    def update(
+        self,
+        Rbasis: torch.Tensor,
+        report_change: bool = True,
+        center: Optional[torch.Tensor] = None,
+    ) -> None:
         """Update lattice vectors and dependent quantities.
         If `report_change` is True, report the relative change of lattice and volume.
         """
@@ -215,6 +233,11 @@ class Lattice(TreeNode):
         self.Rbasis = Rbasis
         self.Gbasis = Gbasis
         self.volume = volume
+        if center is not None:
+            if report_change:
+                change_center = (center - self.center).norm()
+                log.info(f"RMS change in center (fractional): {change_center:e}")
+            self.center = center
 
     def report(self, report_grad: bool) -> None:
         """Report lattice vectors, and optionally stress if `report_grad`."""
@@ -223,7 +246,7 @@ class Lattice(TreeNode):
             "Gbasis (reciprocal-space basis [1/a0] in columns):\n"
             f"{fmt(self.Gbasis)}"
             f"\nUnit cell volume: {self.volume}"
-            f"\nPeriodicity: {self.periodic}"
+            f"\nPeriodicity: {self.periodic} with center: {fmt(self.center)}"
         )
         if report_grad and self.compute_stress:
             log.info(f"Stress [Eh/a0^3]:\n{fmt(self.stress)}")
