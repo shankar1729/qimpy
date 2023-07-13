@@ -1,9 +1,6 @@
 """Electronic sub-system"""
 # List exported symbols for doc generation
-__all__ = [
-    "Kpoints",
-    "Kmesh",
-    "Kpath",
+__all__ = (
     "Fillings",
     "Basis",
     "Wavefunction",
@@ -13,9 +10,8 @@ __all__ = [
     "LCAO",
     "xc",
     "Electrons",
-]
+)
 
-from .kpoints import Kpoints, Kmesh, Kpath
 from .fillings import Fillings
 from .basis import Basis
 from .wavefunction import Wavefunction

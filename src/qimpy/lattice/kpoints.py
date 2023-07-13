@@ -5,11 +5,11 @@ import numpy as np
 import torch
 from mpi4py import MPI
 
-from qimpy import log, rc, TreeNode, dft
+import qimpy
+from qimpy import log, rc, TreeNode
 from qimpy.io import CheckpointPath
 from qimpy.mpi import ProcessGrid, TaskDivision
-from qimpy.lattice import Lattice
-from qimpy.symmetries import Symmetries
+from . import Lattice
 
 
 class Kpoints(TreeNode):
@@ -59,7 +59,7 @@ class Kmesh(Kpoints):
         self,
         *,
         process_grid: ProcessGrid,
-        symmetries: Symmetries,
+        symmetries: qimpy.symmetries.Symmetries,
         lattice: Lattice,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         offset: Union[Sequence[float], np.ndarray] = (0.0, 0.0, 0.0),
@@ -258,7 +258,7 @@ class Kpath(Kpoints):
             process_grid=process_grid, k=k, wk=wk, checkpoint_in=checkpoint_in
         )
 
-    def plot(self, electrons: dft.electrons.Electrons, filename: str) -> None:
+    def plot(self, electrons: qimpy.dft.electrons.Electrons, filename: str) -> None:
         """Save band structure plot for `electrons` to `filename`.
         TODO: MOVE. This is a postprocessing utility that does not belong here!"""
         if electrons.basis.division.i_proc:

@@ -9,22 +9,11 @@ from qimpy import log, rc, TreeNode, dft
 from qimpy.io import CheckpointPath, CheckpointContext, Checkpoint
 from qimpy.mpi import ProcessGrid, globalreduce, BufferView
 from qimpy.math import abs_squared
-from qimpy.lattice import Lattice
+from qimpy.lattice import Lattice, Kpoints, Kmesh, Kpath
 from qimpy.symmetries import Symmetries
 from qimpy.grid import FieldH, FieldR
 from qimpy.dft.ions import Ions
-from . import (
-    Kpoints,
-    Kmesh,
-    Kpath,
-    Fillings,
-    Basis,
-    Davidson,
-    CheFSI,
-    SCF,
-    LCAO,
-    Wavefunction,
-)
+from . import Fillings, Basis, Davidson, CheFSI, SCF, LCAO, Wavefunction
 from .xc import XC
 from .hamiltonian import _hamiltonian
 

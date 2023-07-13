@@ -10,11 +10,10 @@ from qimpy import rc, log, TreeNode
 from qimpy.io import CheckpointPath
 from qimpy.mpi import TaskDivision, ProcessGrid, BufferView, globalreduce
 from qimpy.math import ceildiv
-from qimpy.lattice import Lattice
+from qimpy.lattice import Lattice, Kpoints
 from qimpy.symmetries import Symmetries
 from qimpy.grid import Grid
 from qimpy.dft.ions import Ions
-from . import Kpoints
 from .basis_ops import _apply_gradient, _apply_ke, _apply_potential, _collect_density
 from .basis_real import BasisReal
 
