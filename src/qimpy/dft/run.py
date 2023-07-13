@@ -2,7 +2,7 @@
 
 Typical usage:
 
-:code:`mpirun [mpi-options] python -m qimpy.run -i INPUT_FILE [qimpy-options]`
+:code:`mpirun [mpi-options] python -m qimpy.dft -i INPUT_FILE [qimpy-options]`
 
 Command-line parameters (obtained using :code:`python -m qimpy.run -h`):
 

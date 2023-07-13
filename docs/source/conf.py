@@ -38,6 +38,7 @@ extensions = [
 ]
 autosummary_generate = True
 autosummary_imported_members = True
+autosummary_ignore_module_all = False
 coverage_show_missing_items = True
 
 # Add any paths that contain templates here, relative to this directory.
