@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Optional, Union, Sequence
 
 import numpy as np
@@ -24,6 +25,8 @@ class Lattice(TreeNode):
     movable: bool  #: Whether lattice can be moved in geometry relaxation / dynamics
     move_scale: torch.Tensor  #: Scale factors to precondition / constrain lattice move
 
+    periodic: tuple[bool, ...]  #: Whether each direction is periodic
+
     def __init__(
         self,
         *,
@@ -43,6 +46,7 @@ class Lattice(TreeNode):
         compute_stress: Optional[bool] = None,
         movable: Optional[bool] = None,
         move_scale: Optional[Sequence[float]] = None,
+        periodic: Optional[Sequence[bool]] = None,
     ) -> None:
         """Initialize from lattice vectors or lengths and angles.
         Either specify a lattice `system` and optional `modification`,
@@ -109,12 +113,17 @@ class Lattice(TreeNode):
             or dynamics. Can also adjust the magnitude to precondition lattice
             motion relative to the ions (internal coordinates).
             Defaults to (1, 1, 1) if unspecified.
+        periodic
+            :yaml:`Whether each lattice direction is periodic.`
+            Set to False for some directions for lower-dimensional / no periodicity.
+            Defaults to (True, True, True) if unspecified.
         """
         super().__init__()
         log.info("\n--- Initializing Lattice ---")
 
         if checkpoint_in:
             attrs = checkpoint_in.attrs
+            self.periodic = tuple[bool](attrs["periodic"])
             self.compute_stress = attrs["compute_stress"]
             self.movable = attrs["movable"]
             self.move_scale = checkpoint_in.read("move_scale")
@@ -122,6 +131,7 @@ class Lattice(TreeNode):
             self.Rbasis = checkpoint_in.read("Rbasis")
             stress = checkpoint_in.read_optional("stress")  # converted to grad below
         else:
+            self.periodic = (True, True, True) if periodic is None else tuple(periodic)
             self.compute_stress = False
             self.movable = False
             self.move_scale = torch.ones(3, device=rc.device)
@@ -138,11 +148,11 @@ class Lattice(TreeNode):
                 def check_vectors(**kwargs):
                     for key, value in kwargs.items():
                         if value is None:
-                            raise KeyError(key + " must be specified")
+                            raise KeyError(f"{key} must be specified")
                         try:
                             np.array(value, dtype=float).reshape(3)
                         except ValueError:
-                            raise ValueError(key + " must contain 3 numbers")
+                            raise ValueError(f"{key} must contain 3 numbers")
 
                 check_vectors(vector1=vector1, vector2=vector2, vector3=vector3)
                 self.Rbasis = torch.tensor([vector1, vector2, vector3]).T
@@ -156,6 +166,7 @@ class Lattice(TreeNode):
         # Compute dependent quantities:
         self.update(self.Rbasis.to(rc.device), report_change=False)
         self.report(report_grad=False)
+        check_perpendicular(self.Rbasis, self.periodic)
         self.requires_grad_(False, clear=True)  # initialize gradient
         if stress is not None:
             self.grad = self.volume * stress
@@ -174,6 +185,7 @@ class Lattice(TreeNode):
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
         attrs = cp_path.attrs
+        attrs["periodic"] = self.periodic
         attrs["compute_stress"] = self.compute_stress
         attrs["movable"] = self.movable
         saved_list = ["compute_stress", "movable"]
@@ -211,6 +223,7 @@ class Lattice(TreeNode):
             "Gbasis (reciprocal-space basis [1/a0] in columns):\n"
             f"{fmt(self.Gbasis)}"
             f"\nUnit cell volume: {self.volume}"
+            f"\nPeriodicity: {self.periodic}"
         )
         if report_grad and self.compute_stress:
             log.info(f"Stress [Eh/a0^3]:\n{fmt(self.stress)}")
@@ -257,3 +270,22 @@ class Lattice(TreeNode):
                 self.grad = torch.zeros_like(self.Rbasis)
             else:
                 self.grad = torch.full_like(self.Rbasis, np.nan)
+
+
+def check_perpendicular(
+    Rbasis: torch.Tensor, periodic: tuple[bool, ...], ORTHO_TOL: float = 1e-8
+) -> None:
+    """Check and raise error if lattice diretcions in `Rbasis` with differing
+    `periodic` are not perpendicular to each other beyond tolerance `ORTHO_TOL`."""
+    metric = (Rbasis.T @ Rbasis).to(rc.cpu).numpy()
+    inv_lengths = 1.0 / np.sqrt(np.diag(metric))
+    cos_theta = inv_lengths * metric * inv_lengths[:, None]
+    violations = []
+    for i in range(3):
+        j = (i + 1) % 2
+        if (periodic[i] != periodic[j]) and (abs(cos_theta[i, j]) > ORTHO_TOL):
+            violations.append((i, j))
+    if violations:
+        raise ValueError(
+            f"Periodic/non-periodic direction pair(s) {violations} not perpendicular"
+        )
