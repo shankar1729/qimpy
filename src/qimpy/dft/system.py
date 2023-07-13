@@ -78,7 +78,7 @@ class System(TreeNode):
             Overall communicator for system. Defaults to `qimpy.rc.comm` if unspecified.
         process_grid_shape
             Parallelization dimensions over replicas, k-points and bands/basis, used
-            to initialize a `qimpy.utils.ProcessGrid`. Dimensions that are -1 will be
+            to initialize a `qimpy.mpi.ProcessGrid`. Dimensions that are -1 will be
             auto-determined based on number of tasks available to split along them.
             Default: all process grid dimensions are auto-determined."""
         super().__init__()

@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from qimpy import rc, dft
-from qimpy.utils import stopwatch
+from qimpy.profiler import stopwatch
 from qimpy.grid import FieldH
 from qimpy.dft import ions
 from . import RadialFunction

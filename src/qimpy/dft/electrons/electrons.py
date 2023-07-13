@@ -8,7 +8,7 @@ from mpi4py import MPI
 from qimpy import log, rc, TreeNode, dft
 from qimpy.io import CheckpointPath, CheckpointContext, Checkpoint
 from qimpy.mpi import ProcessGrid, globalreduce, BufferView
-from qimpy.utils import abs_squared
+from qimpy.math import abs_squared
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
 from qimpy.grid import FieldH, FieldR

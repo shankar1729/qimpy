@@ -5,7 +5,7 @@ import torch
 from mpi4py import MPI
 
 from qimpy import log
-from qimpy.utils import BufferView, TaskDivision
+from qimpy.mpi import BufferView, TaskDivision
 from . import spherical_bessel, quintic_spline
 
 

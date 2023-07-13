@@ -5,7 +5,8 @@ import numpy as np
 import torch
 
 from qimpy import rc, dft
-from qimpy.utils import stopwatch, BufferView
+from qimpy.profiler import stopwatch
+from qimpy.mpi import BufferView
 from qimpy.dft import ions
 from . import RadialFunction
 from .quintic_spline import Interpolator

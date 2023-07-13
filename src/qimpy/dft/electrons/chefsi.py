@@ -7,7 +7,7 @@ import torch
 from qimpy import dft
 from qimpy.io import CheckpointPath
 from qimpy.mpi import globalreduce
-from qimpy.utils import eighg
+from qimpy.math import eighg
 from .davidson import Davidson
 
 

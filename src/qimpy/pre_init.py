@@ -9,7 +9,7 @@ import os
 
 
 log: logging.Logger = logging.getLogger("qimpy")
-"Log for the qimpy module, configurable using :func:`qimpy.utils.log_config`"
+"Log for the qimpy module, configurable using :func:`qimpy.mpi.log_config`"
 
 
 def set_gpu_visibility(local_rank: int) -> int:

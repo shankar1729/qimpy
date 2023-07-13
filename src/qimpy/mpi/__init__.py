@@ -1,22 +1,20 @@
 """Shared utility functions and classes"""
 # List exported symbols for doc generation
 __all__ = (
-    "globalreduce",
+    "BufferView",
     "ProcessGrid",
     "TaskDivision",
     "TaskDivisionCustom",
     "get_block_slices",
-    "BufferView",
+    "Waitable",
+    "Waitless",
     "Iallreduce_in_place",
+    "globalreduce",
 )
 
-# Temporary alias before actual split of utils into mpi
-from ..utils import (
-    globalreduce,
-    ProcessGrid,
-    TaskDivision,
-    TaskDivisionCustom,
-    get_block_slices,
-    BufferView,
-    Iallreduce_in_place,
-)
+from .bufferview import BufferView
+from .process_grid import ProcessGrid
+from .taskdivision import TaskDivision, TaskDivisionCustom, get_block_slices
+from .async_reduce import Iallreduce_in_place
+from .waitable import Waitable, Waitless
+from . import globalreduce

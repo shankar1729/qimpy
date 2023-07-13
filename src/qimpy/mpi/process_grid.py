@@ -1,8 +1,11 @@
-import qimpy as qp
-import numpy as np
-import functools
 from typing import Optional, Sequence
+import functools
+
+import numpy as np
 from mpi4py import MPI
+
+import qimpy
+from qimpy import log
 
 
 IMBALANCE_THRESHOLD = 20.0  #: max cpu time% waste tolerated in process grid dimension
@@ -64,7 +67,7 @@ class ProcessGrid:
         n_procs_dim = np.arange(1, prod_unknown + 1, dtype=int)  # shape[dim] candidates
         n_procs_dim = n_procs_dim[self.n_procs % n_procs_dim == 0]  # must be a factor
         # --- filter by imbalance:
-        n_tasks_each = qp.utils.ceildiv(n_tasks, n_procs_dim)  # for each candidate
+        n_tasks_each = qimpy.math.ceildiv(n_tasks, n_procs_dim)  # for each candidate
         imbalance = 100.0 * (1.0 - n_tasks / (n_tasks_each * n_procs_dim))
         n_procs_dim = n_procs_dim[imbalance < IMBALANCE_THRESHOLD]
         # --- pick largest candidate
@@ -125,7 +128,7 @@ class ProcessGrid:
             f"{dim} {name}" for dim, name in zip(self.shape, self.dim_names)
         )
         unknown_str = " (-1's determined later)" if n_unknown else ""
-        qp.log.info(f"Process grid: {dims_str}{unknown_str}")
+        log.info(f"Process grid: {dims_str}{unknown_str}")
 
     def _fill_unkwown(self, shape: np.ndarray) -> tuple[np.ndarray, int]:
         """Fill in unknown dimensions in special cases where possible.

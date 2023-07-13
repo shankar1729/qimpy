@@ -7,10 +7,10 @@ from scipy import optimize
 from mpi4py import MPI
 
 from qimpy import rc, log, TreeNode, Energy, dft
+from qimpy.profiler import stopwatch
 from qimpy.dft.ions import Ions
 from qimpy.io import CheckpointPath, CheckpointContext, fmt
 from qimpy.mpi import BufferView, globalreduce
-from qimpy.utils import stopwatch
 
 
 class SmearingResults(NamedTuple):

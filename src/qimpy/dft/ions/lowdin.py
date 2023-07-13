@@ -6,7 +6,9 @@ import torch
 from mpi4py import MPI
 
 from qimpy import rc, dft
-from qimpy.utils import BufferView, stopwatch, ortho_matrix, cis, abs_squared
+from qimpy.profiler import stopwatch
+from qimpy.mpi import BufferView
+from qimpy.math import ortho_matrix, cis, abs_squared
 
 
 class LowdinResults(NamedTuple):

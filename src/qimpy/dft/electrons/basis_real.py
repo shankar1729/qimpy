@@ -3,7 +3,7 @@ import numpy as np
 import torch
 
 from qimpy import rc, log
-from qimpy.utils import BufferView
+from qimpy.mpi import BufferView
 from qimpy.dft import electrons
 
 

@@ -2,7 +2,7 @@ import os
 import torch
 import matplotlib.pyplot as plt
 import qimpy as qp
-from qimpy.utils import Unit
+from qimpy.mpi import Unit
 
 
 def main() -> None:

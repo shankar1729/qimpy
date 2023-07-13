@@ -6,16 +6,10 @@ import torch
 from mpi4py import MPI
 
 from qimpy import rc
+from qimpy.profiler import stopwatch
+from qimpy.math import ceildiv, accum_prod_, accum_norm_
 from qimpy.grid import FieldR, FieldH
-from qimpy.utils import (
-    stopwatch,
-    ceildiv,
-    get_block_slices,
-    Waitable,
-    Iallreduce_in_place,
-    accum_norm_,
-    accum_prod_,
-)
+from qimpy.mpi import get_block_slices, Waitable, Iallreduce_in_place
 from qimpy.dft import electrons
 
 

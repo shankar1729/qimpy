@@ -4,7 +4,7 @@ from typing import Optional
 import numpy as np
 import torch
 
-from qimpy.utils import stopwatch
+from qimpy.profiler import stopwatch
 from qimpy.dft import electrons
 
 

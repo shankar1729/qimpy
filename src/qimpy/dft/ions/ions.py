@@ -8,7 +8,7 @@ import torch
 
 from qimpy import TreeNode, log, rc, dft
 from qimpy.io import fmt, CheckpointPath, CheckpointContext
-from qimpy.utils import cis
+from qimpy.math import cis
 from qimpy.lattice import Lattice
 from qimpy.symmetries.positions import LabeledPositions
 from qimpy.grid import FieldH

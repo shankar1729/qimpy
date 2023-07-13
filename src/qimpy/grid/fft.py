@@ -6,7 +6,7 @@ import torch
 from mpi4py import MPI
 
 from qimpy import log, rc, grid
-from qimpy.utils import TaskDivision, BufferView
+from qimpy.mpi import TaskDivision, BufferView
 
 
 IndicesType = tuple[torch.Tensor, torch.Tensor, torch.Tensor]

@@ -6,7 +6,7 @@ import torch
 from mpi4py import MPI
 
 from qimpy import rc, grid
-from qimpy.utils import TaskDivision, TaskDivisionCustom, BufferView
+from qimpy.mpi import TaskDivision, TaskDivisionCustom, BufferView
 from . import Grid
 
 

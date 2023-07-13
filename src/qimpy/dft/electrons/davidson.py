@@ -7,9 +7,10 @@ import torch
 from mpi4py import MPI
 
 from qimpy import rc, log, TreeNode, dft
+from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath
-from qimpy.mpi import BufferView, globalreduce
-from qimpy.utils import stopwatch, eighg, Waitable, dagger
+from qimpy.mpi import BufferView, Waitable, globalreduce
+from qimpy.math import eighg, dagger
 from . import Wavefunction
 
 

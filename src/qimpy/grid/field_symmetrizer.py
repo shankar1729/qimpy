@@ -4,7 +4,9 @@ import numpy as np
 import torch
 
 from qimpy import rc, log
-from qimpy.utils import BufferView, TaskDivision, cis, stopwatch
+from qimpy.profiler import stopwatch
+from qimpy.mpi import BufferView, TaskDivision
+from qimpy.math import cis
 from . import Grid, FieldH
 
 

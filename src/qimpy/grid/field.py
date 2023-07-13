@@ -6,7 +6,7 @@ import torch
 from mpi4py import MPI
 
 from qimpy import rc
-from qimpy.utils import Gradable
+from qimpy.algorithms import Gradable
 from qimpy.mpi import BufferView
 from qimpy.io import CheckpointPath
 from . import Grid

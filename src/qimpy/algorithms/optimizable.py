@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import torch
 from mpi4py import MPI
 
-from qimpy.utils import BufferView
+from qimpy.mpi import BufferView
 
 
 T = TypeVar("T")

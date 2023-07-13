@@ -1,11 +1,14 @@
-import qimpy as qp
+from functools import cache
+
 import numpy as np
 import torch
-import functools
 from mpi4py import MPI
 
+from qimpy import rc
+from . import BufferView, TaskDivision
 
-@functools.cache
+
+@cache
 def is_async_reduce_supported(is_cuda: bool) -> bool:
     """Determine whether async reduce is supported."""
     if is_cuda:
@@ -30,32 +33,32 @@ class Iallreduce_in_place:
         self.buf = buf
         if self.async_supported:
             # Initiate the MPI async operation:
-            self.request = comm.Iallreduce(MPI.IN_PLACE, qp.utils.BufferView(buf), op)
+            self.request = comm.Iallreduce(MPI.IN_PLACE, BufferView(buf), op)
         elif self.local_reduce:
             # Initiate an MPI transpose for subsequent local reduction:
             # Determine division for MPI transpose:
             n_procs = comm.Get_size()
-            division = qp.utils.TaskDivision(
+            division = TaskDivision(
                 n_tot=int(np.prod(buf.shape)), n_procs=n_procs, i_proc=comm.Get_rank()
             )
             send_counts = np.diff(division.n_prev)
             send_offset = division.n_prev[:-1]
             recv_counts = division.n_mine
             recv_offset = np.arange(n_procs) * recv_counts
-            mpi_type = qp.rc.mpi_type[buf.dtype]
+            mpi_type = rc.mpi_type[buf.dtype]
             # Initiate MPI transpose:
             self.buf_t = torch.empty(
                 (n_procs, division.n_mine), dtype=buf.dtype, device=buf.device
             )
             self.buf_view = (
-                qp.utils.BufferView(buf),
+                BufferView(buf),
                 send_counts,
                 send_offset,
                 mpi_type,
             )
             self.request = comm.Ialltoallv(
                 self.buf_view,
-                (qp.utils.BufferView(self.buf_t), recv_counts, recv_offset, mpi_type),
+                (BufferView(self.buf_t), recv_counts, recv_offset, mpi_type),
             )
             self.n_mine = division.n_mine
             self.mpi_type = mpi_type
@@ -76,10 +79,10 @@ class Iallreduce_in_place:
             result = self.local_reduce_op(self.buf_t, dim=0)
             # Gather results:
             self.comm.Allgatherv(
-                (qp.utils.BufferView(result), self.n_mine, 0, self.mpi_type),
+                (BufferView(result), self.n_mine, 0, self.mpi_type),
                 self.buf_view,  # back in original buffer
             )
         else:
             # Perform the blocking MPI operation now:
-            self.comm.Allreduce(MPI.IN_PLACE, qp.utils.BufferView(self.buf), self.op)
+            self.comm.Allreduce(MPI.IN_PLACE, BufferView(self.buf), self.op)
         return self.buf

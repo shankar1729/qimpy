@@ -4,15 +4,9 @@ import numpy as np
 import torch
 from mpi4py import MPI
 
-from qimpy.utils import (
-    stopwatch,
-    Waitable,
-    Waitless,
-    globalreduce,
-    abs_squared,
-    Iallreduce_in_place,
-    ortho_matrix,
-)
+from qimpy.profiler import stopwatch
+from qimpy.mpi import Waitable, Waitless, globalreduce, Iallreduce_in_place
+from qimpy.math import abs_squared, ortho_matrix
 from qimpy.dft import electrons
 
 
@@ -201,5 +195,5 @@ def _orthonormalize(self: electrons.Wavefunction) -> electrons.Wavefunction:
     """Return orthonormalized version of wavefunctions.
     This internally uses Gram-Schmidt scheme using a Cholesky decomposition,
     which is not differentiable. Use a symmetric orthonormalization scheme
-    using :meth:`qimpy.utils.ortho_matrix` for a differentiable scheme."""
+    using :meth:`qimpy.mpi.ortho_matrix` for a differentiable scheme."""
     return self @ ortho_matrix(self.dot_O(self).wait(), use_cholesky=True)

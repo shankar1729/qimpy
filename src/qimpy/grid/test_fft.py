@@ -4,7 +4,7 @@ import pytest
 
 from qimpy import rc, log
 from qimpy.io import log_config
-from qimpy.utils import StopWatch
+from qimpy.profiler import StopWatch
 from . import FieldType, FieldR, FieldH, FieldC, FieldG
 from .test_common import get_sequential_grid, get_parallel_grid, get_reference_field
 

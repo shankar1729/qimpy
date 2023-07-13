@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from qimpy import rc, log, symmetries
-from qimpy.utils import ceildiv, fft_suitable
+from qimpy.math import ceildiv, fft_suitable
 
 
 def check_grid_shape(self: symmetries.Symmetries, shape: Sequence[int]) -> None:

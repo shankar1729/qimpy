@@ -5,7 +5,7 @@ import torch
 import pytest
 
 from qimpy import rc, dft
-from qimpy.utils import TaskDivision
+from qimpy.mpi import TaskDivision
 from . import Wavefunction
 
 

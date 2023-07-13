@@ -4,8 +4,9 @@ distributed tensors on certain processes, whic is a frequently
 encountered and cumbersome corner case in such global reductions. """
 __all__ = ["sum", "prod", "min", "max", "all", "any"]
 
-import torch
 from typing import Any
+
+import torch
 from mpi4py import MPI
 
 

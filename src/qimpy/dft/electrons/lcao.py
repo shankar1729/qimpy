@@ -7,7 +7,7 @@ from mpi4py import MPI
 from qimpy import rc, dft
 from qimpy.io import CheckpointPath
 from qimpy.mpi import BufferView
-from qimpy.utils import eighg, dagger
+from qimpy.math import eighg, dagger
 from qimpy.algorithms import Minimize, MinimizeState, MatrixArray
 from qimpy.grid import FieldH
 

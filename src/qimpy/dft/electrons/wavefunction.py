@@ -6,7 +6,8 @@ import torch
 from qimpy import rc
 from qimpy.io import CheckpointPath
 from qimpy.mpi import TaskDivision
-from qimpy.utils import Gradable, abs_squared
+from qimpy.algorithms import Gradable
+from qimpy.math import abs_squared
 from . import Basis
 from .wavefunction_init import _randomize, _randomize_selected
 from .wavefunction_split import _split_bands, _split_basis

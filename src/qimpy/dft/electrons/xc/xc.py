@@ -5,7 +5,7 @@ import torch
 from mpi4py import MPI
 
 from qimpy import log, TreeNode
-from qimpy.utils import StopWatch
+from qimpy.profiler import StopWatch
 from qimpy.io import CheckpointPath
 from qimpy.grid import FieldH, FieldR
 from .functional import Functional, get_libxc_functional_names, FunctionalsLibxc

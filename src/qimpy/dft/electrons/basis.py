@@ -9,7 +9,7 @@ from mpi4py import MPI
 from qimpy import rc, log, TreeNode
 from qimpy.io import CheckpointPath
 from qimpy.mpi import TaskDivision, ProcessGrid, BufferView, globalreduce
-from qimpy.utils import ceildiv
+from qimpy.math import ceildiv
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
 from qimpy.grid import Grid
@@ -21,7 +21,7 @@ from .basis_real import BasisReal
 
 class Basis(TreeNode):
     """Plane-wave basis for electronic wavefunctions. The underlying
-    :class:`qimpy.utils.TaskDivision` splits plane waves over `rc.comm_b`"""
+    :class:`qimpy.mpi.TaskDivision` splits plane waves over `rc.comm_b`"""
 
     comm: MPI.Comm  #: Basis/bands communicator
     comm_kb: MPI.Comm  #: Overall k-points and basis/bands communicator

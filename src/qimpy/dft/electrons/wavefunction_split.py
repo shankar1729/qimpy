@@ -6,7 +6,7 @@ import torch
 from mpi4py import MPI
 
 from qimpy import rc
-from qimpy.utils import Waitable, Waitless, TaskDivision, BufferView
+from qimpy.mpi import Waitable, Waitless, TaskDivision, BufferView
 from qimpy.dft import electrons
 
 

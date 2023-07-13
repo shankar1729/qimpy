@@ -1,66 +1,16 @@
 from __future__ import annotations
-import qimpy as qp
+
 import numpy as np
 import torch
-from ._stopwatch import stopwatch
-from typing import overload, Union
 
-
-def prime_factorization(N: int) -> list[int]:
-    """Get list of prime factors of `N` in ascending order"""
-    factors = []
-    p = 2
-    while p * p <= N:
-        while N % p == 0:
-            factors.append(p)
-            N //= p
-        p += 1
-    if N > 1:  # any left-over factor must be prime itself
-        factors.append(N)
-    return factors
-
-
-def fft_suitable(N: int) -> bool:
-    """Check whether `N` has only small prime factors. Return True if
-    the prime factorization of `N` is suitable for efficient FFTs,
-    that is contains only 2, 3, 5 and 7."""
-    for p in [2, 3, 5, 7]:
-        while N % p == 0:
-            N //= p
-    # All suitable prime factors taken out
-    # --- a suitable N should be left with just 1
-    return N == 1
-
-
-@overload
-def ceildiv(num: int, den: int) -> int:
-    ...
-
-
-@overload
-def ceildiv(num: np.ndarray, den: Union[int, np.ndarray]) -> np.ndarray:
-    ...
-
-
-@overload
-def ceildiv(num: Union[int, np.ndarray], den: np.ndarray) -> np.ndarray:
-    ...
-
-
-def ceildiv(num, den):
-    """Compute ceil(num/den) with purely integer operations"""
-    return (num + den - 1) // den
+from qimpy import rc
+from qimpy.profiler import stopwatch
+from qimpy.mpi import Waitable
 
 
 def cis(x: torch.Tensor) -> torch.Tensor:
     """Compute complex exponential exp(i x)."""
     return torch.polar(torch.ones_like(x), x)
-
-
-def dagger(x: torch.Tensor) -> torch.Tensor:
-    """Conjugate transpose of a batch of matrices. Matrix dimensions are
-    assumed to be the final two, with all preceding dimensions batched over."""
-    return x.conj().transpose(-2, -1)
 
 
 def abs_squared(x: torch.Tensor) -> torch.Tensor:
@@ -70,6 +20,12 @@ def abs_squared(x: torch.Tensor) -> torch.Tensor:
         return torch.view_as_real(x).square().sum(dim=-1)
     else:
         return x.square()
+
+
+def dagger(x: torch.Tensor) -> torch.Tensor:
+    """Conjugate transpose of a batch of matrices. Matrix dimensions are
+    assumed to be the final two, with all preceding dimensions batched over."""
+    return x.conj().transpose(-2, -1)
 
 
 def accum_norm_(
@@ -186,7 +142,7 @@ def ortho_matrix(O: torch.Tensor, use_cholesky: bool = True) -> torch.Tensor:
 
 @stopwatch
 def eighg(
-    H: qp.utils.Waitable[torch.Tensor],
+    H: Waitable[torch.Tensor],
     O: torch.Tensor,
     use_cholesky: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -204,7 +160,7 @@ def eighg(
         Corresponding overlap (metric) matrices, with same size as H.
         Must additionally be positive-definite.
     use_cholesky
-        See :meth:`qimpy.utils.ortho_matrix`
+        See :meth:`qimpy.mpi.ortho_matrix`
 
     Returns
     -------
@@ -214,13 +170,13 @@ def eighg(
         Eigenvectors (same shape as H and O)
     """
     # Start orthogonoalization:
-    qp.rc.compute_stream_wait_current()
-    with torch.cuda.stream(qp.rc.compute_stream):
+    rc.compute_stream_wait_current()
+    with torch.cuda.stream(rc.compute_stream):
         U = ortho_matrix(O, use_cholesky)
     # Finish pending communication on H (if any)
     Hresult = H.wait()
     # Finish orthogonalization:
-    qp.rc.current_stream_wait_compute()
+    rc.current_stream_wait_compute()
     # Diagonalize:
     E, V = torch.linalg.eigh(dagger(U) @ (Hresult @ U))
     V = U @ V  # transform eigenvectors back to original basis

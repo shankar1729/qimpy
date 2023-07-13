@@ -1,9 +1,14 @@
-import time
-import torch
-import qimpy as qp
-import numpy as np
-import functools
 from typing import ClassVar, Union
+from functools import wraps
+import time
+
+import torch
+import numpy as np
+
+from qimpy import log, rc
+
+# List exported symbols for doc generation
+__all__ = ("StopWatch", "stopwatch")
 
 
 class StopWatch:
@@ -26,7 +31,7 @@ class StopWatch:
     def __init__(self, name: str):
         """Start profiling a block of code named `name`."""
         self.name = name
-        if qp.rc.use_cuda:
+        if rc.use_cuda:
             torch.cuda.nvtx.range_push(name)
             self.t_start = torch.cuda.Event(enable_timing=True)
             self.t_start.record()
@@ -36,7 +41,7 @@ class StopWatch:
     def stop(self):
         """Stop this watch and collect statistics on it."""
         if self.t_start:
-            if qp.rc.use_cuda:
+            if rc.use_cuda:
                 t_stop = torch.cuda.Event(enable_timing=True)
                 t_stop.record()
                 torch.cuda.nvtx.range_pop()
@@ -70,7 +75,7 @@ class StopWatch:
     def print_stats(cls):
         """Print statistics of all timings measured using class StopWatch."""
         cls._process_cuda_events()
-        qp.log.info("")
+        log.info("")
         t_total = 0.0
         n_calls_total = 0
         for name, times in sorted(cls._stats.items()):
@@ -79,11 +84,11 @@ class StopWatch:
             n_calls_total += len(t)
             t_mid = np.median(t)
             t_mad = np.median(abs(t - t_mid))  # mean absolute deviation
-            qp.log.info(
+            log.info(
                 f"StopWatch: {name:30s}  {t_mid:10.6f} +/- {t_mad:10.6f}"
                 f" s, {len(t):4d} calls, {t.sum():10.6f} s total"
             )
-        qp.log.info(
+        log.info(
             f'StopWatch: {"Total":30s}    {"-"*25} {n_calls_total:5d}'
             f" calls, {t_total:10.6f} s total"
         )
@@ -96,7 +101,7 @@ def stopwatch(_func=None, *, name=None):
     name i.e. `@stopwatch(name=function_name)`."""
 
     def stopwatch_named(func):
-        @functools.wraps(func)
+        @wraps(func)
         def stopwatch_wrapper(*args, **kwargs):
             watch = StopWatch(func.__qualname__ if (name is None) else name)
             result = func(*args, **kwargs)

@@ -45,10 +45,9 @@ import argparse
 import sys
 import os
 
-from mpi4py import MPI
-
 from qimpy import log, rc, io, __version__
-from qimpy.utils import StopWatch
+from qimpy.rc import MPI
+from qimpy.profiler import StopWatch
 from . import System
 
 

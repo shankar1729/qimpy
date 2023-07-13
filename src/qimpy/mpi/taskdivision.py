@@ -1,8 +1,11 @@
-import numpy as np
-import qimpy as qp
-import torch
 from typing import Optional
+
+import numpy as np
+import torch
 from mpi4py import MPI
+
+import qimpy
+from qimpy import log
 
 
 class TaskDivision:
@@ -27,7 +30,7 @@ class TaskDivision:
         self.n_procs = n_procs
         self.i_proc = i_proc
         # Compute remaining attributes:
-        self.n_each = qp.utils.ceildiv(n_tot, n_procs)
+        self.n_each = qimpy.math.ceildiv(n_tot, n_procs)
         self.n_prev = np.minimum(n_tot, self.n_each * np.arange(n_procs + 1))
         self.i_start = self.n_prev[i_proc]
         self.i_stop = self.n_prev[i_proc + 1]
@@ -35,7 +38,7 @@ class TaskDivision:
         # Optionally report counts and imbalance:
         if name:
             imbalance = 100.0 * (1.0 - n_tot / (self.n_each * n_procs))
-            qp.log.info(
+            log.info(
                 f"{name} division:  n_tot: {n_tot}  "
                 f"n_each: {self.n_each}  imbalance: {imbalance:.0f}%"
             )

@@ -55,7 +55,7 @@ def merge(d_list: list[dict]) -> dict:
 
 
 def remove_units(d: dict) -> dict:
-    """Recursively remove any units (convert each qimpy.utils.Unit to float)."""
+    """Recursively remove any units (convert each qimpy.mpi.Unit to float)."""
     return {
         key: (
             value
