@@ -3,7 +3,7 @@ import os
 import numpy as np
 import qimpy as qp
 
-qp.utils.log_config()  # default set up to log from MPI head alone
+qp.io.log_config()  # default set up to log from MPI head alone
 qp.log.info("Using QimPy " + qp.__version__)
 qp.rc.init()
 
@@ -41,4 +41,4 @@ system = qp.dft.System(
 system.run()
 
 qp.rc.report_end()
-qp.utils.StopWatch.print_stats()
+qp.profiler.StopWatch.print_stats()
