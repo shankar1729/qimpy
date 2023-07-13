@@ -1,13 +1,16 @@
-import qimpy as qp
-from ._advect import Advect
 import torch
 import numpy as np
 
+from qimpy import rc, log
+from qimpy.io import log_config
+from qimpy.profiler import StopWatch
+from ._advect import Advect
+
 
 def convergence(Nxy, N_theta, diag=True):
-    qp.utils.log_config()
-    qp.rc.init()
-    assert qp.rc.n_procs == 1  # MPI not yet supported
+    log_config()
+    rc.init()
+    assert rc.n_procs == 1  # MPI not yet supported
 
     v_F = 200.0
     Lx = 1.0
@@ -32,10 +35,10 @@ def convergence(Nxy, N_theta, diag=True):
 
     t_final = (Lx**2 + Ly**2) ** 0.5 / v_F if diag else Lx / v_F
     time_steps = round(t_final / sim.dt)
-    print(f"Running for {time_steps} steps.")
+    log.info(f"Running for {time_steps} steps.")
 
     for time_step in range(time_steps):
-        qp.log.info(f"{time_step = }")
+        log.info(f"{time_step = }")
         # plt.clf()
         # sim.plot_streamlines(plt, dict(levels=100), dict(linewidth=1.0))
         # plt.gca().set_aspect("equal")
@@ -47,9 +50,9 @@ def convergence(Nxy, N_theta, diag=True):
         sim.time_step()
 
     # Plot only at end (for easier performance benchmarking of time steps):
-    qp.log.info("Plotting density and streamlines")
+    log.info("Plotting density and streamlines")
 
-    qp.utils.StopWatch.print_stats()
+    StopWatch.print_stats()
     diff = float(((density_init - sim.density) ** 2).sum() / (sim.Nx * sim.Ny))
     return diff
 
@@ -62,8 +65,8 @@ def main():
         for j in Ns:
             if not (i == 256 and j == 1024):
                 errors[(i, j)] = convergence(j, i, diag=(True if i > 2 else False))
-                print(i, j, errors[(i, j)])
-    print(errors)
+                log.info(i, j, errors[(i, j)])
+    log.info(errors)
 
 
 if __name__ == "__main__":

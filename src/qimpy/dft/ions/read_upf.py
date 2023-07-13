@@ -5,8 +5,9 @@ import numpy as np
 import torch
 
 from qimpy import log, rc
+from qimpy.math import RadialFunction
 from qimpy.dft import ions
-from . import symbols, RadialFunction
+from . import symbols
 
 
 def read_upf(ps: ions.Pseudopotential, filename: str) -> None:

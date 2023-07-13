@@ -7,8 +7,8 @@ from qimpy import rc, dft
 from qimpy.profiler import stopwatch
 from qimpy.grid import FieldH
 from qimpy.dft import ions
-from . import RadialFunction
-from .quintic_spline import Interpolator
+from qimpy.math import RadialFunction
+from qimpy.math.quintic_spline import Interpolator
 
 
 def update(self: ions.Ions, system: dft.System) -> None:

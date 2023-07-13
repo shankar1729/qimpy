@@ -7,7 +7,8 @@ import torch
 from mpi4py import MPI
 
 from qimpy import log
-from qimpy.dft.ions import RadialFunction, PseudoQuantumNumbers
+from qimpy.math import RadialFunction
+from qimpy.dft.ions import PseudoQuantumNumbers
 from qimpy.dft.ions.read_upf import read_upf
 
 

@@ -11,6 +11,10 @@ __all__ = (
     "accum_prod_",
     "ortho_matrix",
     "eighg",
+    "spherical_harmonics",
+    "spherical_bessel",
+    "quintic_spline",
+    "RadialFunction",
 )
 
 from .integer import prime_factorization, fft_suitable, ceildiv
@@ -23,3 +27,5 @@ from .linalg import (
     ortho_matrix,
     eighg,
 )
+from . import spherical_harmonics, spherical_bessel, quintic_spline
+from .radial_function import RadialFunction

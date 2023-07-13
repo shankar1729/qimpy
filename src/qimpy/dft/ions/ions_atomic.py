@@ -3,10 +3,10 @@ from __future__ import annotations
 import torch
 
 from qimpy import rc, dft
+from qimpy.math import RadialFunction
+from qimpy.math.quintic_spline import Interpolator
 from qimpy.grid import Grid, FieldH
 from qimpy.dft import ions
-from . import RadialFunction
-from .quintic_spline import Interpolator
 
 
 def get_atomic_orbital_index(

@@ -7,10 +7,9 @@ import torch
 from qimpy import rc, dft
 from qimpy.profiler import stopwatch
 from qimpy.mpi import BufferView
+from qimpy.math import RadialFunction, spherical_harmonics as sh
+from qimpy.math.quintic_spline import Interpolator
 from qimpy.dft import ions
-from . import RadialFunction
-from .quintic_spline import Interpolator
-from .spherical_harmonics import get_harmonics_tilde, get_harmonics_tilde_and_prime
 
 
 @stopwatch(name="Ions.get_projectors")
@@ -45,7 +44,7 @@ def _get_projectors(
         return dft.electrons.Wavefunction(basis, coeff=proj)
     # Get harmonics (per l,m):
     l_max = max(ps.l_max for ps in self.pseudopotentials)
-    Ylm_tilde = get_harmonics_tilde(l_max, Gk)
+    Ylm_tilde = sh.get_harmonics_tilde(l_max, Gk)
     # Get per-atom translations:
     translations = self.translation_phase(iGk).transpose(1, 2)  # k, atom, G
     translations *= 1.0 / np.sqrt(self.lattice.volume)  # due to factor in C
@@ -142,7 +141,7 @@ def _projectors_grad(
 
         # Get harmonics (and derivatives):
         l_max = max(ps.l_max for ps in self.pseudopotentials)
-        Ylm_tilde, Ylm_tilde_prime = get_harmonics_tilde_and_prime(l_max, Gk)
+        Ylm_tilde, Ylm_tilde_prime = sh.get_harmonics_tilde_and_prime(l_max, Gk)
         # Get per-atom translations:
         translations = self.translation_phase(iGk).transpose(1, 2)  # k,atom,G
         translations *= 1.0 / np.sqrt(self.lattice.volume)  # due to factor in C
