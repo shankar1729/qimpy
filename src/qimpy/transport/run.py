@@ -2,7 +2,7 @@
 
 Typical usage:
 
-:code:`mpirun [mpi-options] python -m qimpy.run -i INPUT_FILE [qimpy-options]`
+:code:`mpirun [mpi-options] python -m qimpy.transport -i INPUT_FILE [qimpy-options]`
 
 Command-line parameters (obtained using :code:`python -m qimpy.run -h`):
 
@@ -44,7 +44,8 @@ import qimpy as qp
 import argparse
 import sys
 import os
-from ..rc import MPI
+
+from qimpy.rc import MPI
 from . import Transport
 
 

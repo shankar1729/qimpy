@@ -1,6 +1,7 @@
 from ase.calculators.calculator import Calculator
-import qimpy as qp
-from qimpy.utils import Unit
+
+from qimpy import rc, dft
+from qimpy.io import Unit
 
 
 class QimPy(Calculator):
@@ -67,8 +68,8 @@ class QimPy(Calculator):
             "pseudopotentials": self.pseudopotentials,
         }
 
-        qp.rc.init()
-        system = qp.System(lattice=lattice_dict, ions=ions)
+        rc.init()
+        system = dft.System(lattice=lattice_dict, ions=ions)
         system.run()
 
         self.results = {"energy": float(system.energy) * eV}

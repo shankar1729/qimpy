@@ -65,8 +65,8 @@ def test_geometry():
             plt.plot(x, y, color="k", lw=1, ls="dotted")
 
     plt.gca().axis("equal")
-    plt.show()
 
 
 if __name__ == "__main__":
     test_geometry()
+    plt.show()

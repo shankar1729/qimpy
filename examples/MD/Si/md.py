@@ -2,17 +2,17 @@ import os
 import torch
 import matplotlib.pyplot as plt
 import qimpy as qp
-from qimpy.utils import Unit
+from qimpy.io import Unit
 
 
 def main() -> None:
-    qp.utils.log_config()  # default set up to log from MPI head alone
+    qp.io.log_config()  # default set up to log from MPI head alone
     qp.log.info("Using QimPy " + qp.__version__)
     qp.rc.init()
     torch.manual_seed(1234)
 
     # Callback function to analyze trajectory:
-    def analyze(dynamics: qp.geometry.Dynamics, i_iter: int) -> None:
+    def analyze(dynamics: qp.dft.geometry.Dynamics, i_iter: int) -> None:
         energies.append(float(dynamics.system.energy))
         volumes.append(dynamics.system.lattice.volume / Unit.MAP["Angstrom"] ** 3)
         pressures.append(Unit.convert(dynamics.P, "bar").value)
@@ -49,7 +49,7 @@ def main() -> None:
         ["Si", *tuple(pos), {"v": v}] for pos, v in zip(positions, velocities)
     ]
 
-    system = qp.System(
+    system = qp.dft.System(
         lattice=dict(system="cubic", a=float(Unit(5.43, "Å")), movable=True),
         ions=dict(
             pseudopotentials=os.path.join(ps_path, "$ID_ONCV_PBE.upf"),
@@ -76,7 +76,7 @@ def main() -> None:
     )
     system.run()
     qp.rc.report_end()
-    qp.utils.StopWatch.print_stats()
+    qp.profiler.StopWatch.print_stats()
 
     if qp.rc.is_head:
         # Visualize trajectory properties:

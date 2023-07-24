@@ -12,7 +12,7 @@ test-nompi:
 
 .PHONY: test-mpi
 test-mpi:
-	mpirun tests/mpi_print_from_head.sh python -m pytest --with-mpi
+	mpirun ./mpi_print_from_head.sh python -m pytest --with-mpi
 
 .PHONY: test
 test: test-nompi test-mpi

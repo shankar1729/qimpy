@@ -1,5 +1,3 @@
-import qimpy as qp
-from _advect import Advect
 import torch
 import numpy as np
 
@@ -33,7 +31,7 @@ def movie(Nxy, N_theta, diag=True):
 
     t_final = (Lx**2 + Ly**2) ** 0.5 / v_F if diag else Lx / v_F
     time_steps = round(t_final / sim.dt)
-    print(f"Running for {time_steps} steps.")
+    log.info(f"Running for {time_steps} steps.")
 
     for time_step in range(time_steps):
         qp.log.info(f"{time_step = }")
@@ -99,9 +97,9 @@ def convergence(Nxy, N_theta, diag=True):
         sim.time_step()
 
     # Plot only at end (for easier performance benchmarking of time steps):
-    qp.log.info("Plotting density and streamlines")
+    log.info("Plotting density and streamlines")
 
-    qp.utils.StopWatch.print_stats()
+    StopWatch.print_stats()
     diff = float(((density_init - sim.density) ** 2).sum() / (sim.Nx * sim.Ny))
     return diff
 

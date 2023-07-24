@@ -1,8 +1,10 @@
-import qimpy as qp  # TODO: remove
-from .. import TreeNode
-from ..rc import MPI
-from . import Geometry, Material
 from typing import Optional, Sequence, Union
+
+from qimpy import rc, log, TreeNode
+from qimpy.rc import MPI
+from qimpy.io import CheckpointPath, Checkpoint
+from qimpy.mpi import ProcessGrid
+from . import Geometry, Material
 
 
 class Transport(TreeNode):
@@ -35,20 +37,20 @@ class Transport(TreeNode):
             Overall communicator for system. Defaults to `qimpy.rc.comm` if unspecified.
         process_grid_shape
             Parallelization dimensions over replicas, k-points and bands/basis, used
-            to initialize a `qimpy.utils.ProcessGrid`. Dimensions that are -1 will be
+            to initialize a `qimpy.mpi.ProcessGrid`. Dimensions that are -1 will be
             auto-determined based on number of tasks available to split along them.
             Default: all process grid dimensions are auto-determined."""
         super().__init__()
-        self.process_grid = qp.utils.ProcessGrid(
-            comm if comm else qp.rc.comm, "rk", process_grid_shape
+        self.process_grid = ProcessGrid(
+            comm if comm else rc.comm, "rk", process_grid_shape
         )
         # Set in and out checkpoints:
-        checkpoint_in = qp.utils.CpPath()
+        checkpoint_in = CheckpointPath()
         if checkpoint is not None:
             try:
-                checkpoint_in = qp.utils.CpPath(qp.utils.Checkpoint(checkpoint))
+                checkpoint_in = CheckpointPath(Checkpoint(checkpoint))
             except OSError:  # Raised by h5py when file not readable
-                qp.log.info(f"Cannot load checkpoint file '{checkpoint}'")
+                log.info(f"Cannot load checkpoint file '{checkpoint}'")
         self.checkpoint_out = checkpoint if checkpoint_out is None else checkpoint_out
 
         self.add_child("geometry", Geometry, geometry, checkpoint_in)

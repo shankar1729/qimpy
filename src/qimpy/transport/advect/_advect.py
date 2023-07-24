@@ -1,7 +1,10 @@
-import qimpy as qp
+import functools
+
 import numpy as np
 import torch
-import functools
+
+from qimpy import rc
+from qimpy.profiler import stopwatch
 from qimpy.transport import Geometry
 from qimpy.transport._geometry import sqrt_det_g, jacobian_inv
 
@@ -42,8 +45,8 @@ class Advect(Geometry):
         # self.x = centered_grid(-N_ghost, Nx + N_ghost) * self.dx
         # self.y = centered_grid(-N_ghost, Ny + N_ghost) * self.dy
 
-        X = torch.arange(0, self.N1, 1, dtype=torch.float, device=qp.rc.device)
-        Y = torch.arange(0, self.N2, 1, dtype=torch.float, device=qp.rc.device)
+        X = torch.arange(0, self.N1, 1, dtype=torch.float, device=rc.device)
+        Y = torch.arange(0, self.N2, 1, dtype=torch.float, device=rc.device)
 
         self.dX = X[1] - X[0]
         self.dY = Y[1] - Y[0]
@@ -73,10 +76,10 @@ class Advect(Geometry):
 
         # Initialize distribution function:
         self.rho_shape = (self.q.shape[0], self.q.shape[1], N_theta)
-        self.rho = torch.zeros(self.rho_shape, device=qp.rc.device)
+        self.rho = torch.zeros(self.rho_shape, device=rc.device)
 
-        self.v_x = torch.zeros(self.rho_shape, device=qp.rc.device)
-        self.v_y = torch.zeros(self.rho_shape, device=qp.rc.device)
+        self.v_x = torch.zeros(self.rho_shape, device=rc.device)
+        self.v_y = torch.zeros(self.rho_shape, device=rc.device)
 
         self.v_x[:, :, :] = v_F * self.theta.cos()
         self.v_y[:, :, :] = v_F * self.theta.sin()
@@ -103,7 +106,7 @@ class Advect(Geometry):
         rho[self.ghost_l, self.y_contact] = rho_contact
         rho[self.ghost_r, self.y_contact] = rho_contact
 
-    @qp.utils.stopwatch(name="apply_boundaries")
+    @stopwatch(name="apply_boundaries")
     def apply_boundaries(self, rho: torch.Tensor) -> None:
         """Apply all boundary conditions in-place in `rho`."""
         if self.reflect_boundaries:
@@ -113,7 +116,7 @@ class Advect(Geometry):
             rho[:, self.ghost_r] = reflect_y(rho[:, self.boundary_r])
         # self.apply_dirichlet_boundary(rho)
 
-    @qp.utils.stopwatch(name="drho")
+    @stopwatch(name="drho")
     def drho(self, dt: float, rho: torch.Tensor) -> torch.Tensor:
         """Compute drho for time step dt, given current rho."""
         # return (-dt / self.dx) * v_prime(rho, self.v_x, axis=0) + (
@@ -143,7 +146,7 @@ class Advect(Geometry):
         """Average velocity at each point (integrate over momenta)."""
         return (self.rho[self.non_ghost, self.non_ghost] @ self.v) * self.dtheta
 
-    @qp.utils.stopwatch(name="plot_streamlines")
+    @stopwatch(name="plot_streamlines")
     def plot_streamlines(self, plt, contour_kwargs, stream_kwargs):
         contour_kwargs.setdefault("levels", 100)
         contour_kwargs.setdefault("cmap", "bwr")
@@ -165,7 +168,7 @@ class Advect(Geometry):
         N = torch.tensor([self.Nx+2*self.N_ghost, self.Ny+2*self.N_ghost], device=qp.rc.device)
         Nx, Ny, _ = Q.shape
         grad_q = torch.tile(
-            torch.eye(2, device=qp.rc.device)[:, None, None], (1, Nx, Ny, 1)
+            torch.eye(2, device=rc.device)[:, None, None], (1, Nx, Ny, 1)
         )
         Q.requires_grad = True
         Q_by_N = Q / N
@@ -217,7 +220,7 @@ def get_slope_conv(slope_lim_theta: float = 2.0) -> torch.nn.Conv1d:
             [-0.5, 0.0, 0.5],
             [0.0, -slope_lim_theta, slope_lim_theta],
         ],
-        device=qp.rc.device,
+        device=rc.device,
     ).view(
         3, 1, 3
     )  # add singleton in_channels dim
@@ -265,7 +268,7 @@ def v_prime(rho: torch.Tensor, v: torch.Tensor, axis: int) -> torch.Tensor:
 
 def centered_grid(start: int, stop: int) -> torch.Tensor:
     """Create a grid centered on the intervals of [start, stop]."""
-    return torch.arange(start + 0.5, stop, device=qp.rc.device)
+    return torch.arange(start + 0.5, stop, device=rc.device)
 
 
 def reflect_x(rho: torch.Tensor) -> torch.Tensor:

@@ -1,6 +1,6 @@
 """Point- and space-group detection and enforcement"""
 # List exported symbols for doc generation
-__all__ = ["Symmetries", "FieldSymmetrizer"]
+__all__ = ("LabeledPositions", "Symmetries")
 
-from ._symmetries import Symmetries
-from ._field import FieldSymmetrizer
+from .positions import LabeledPositions
+from .symmetries import Symmetries

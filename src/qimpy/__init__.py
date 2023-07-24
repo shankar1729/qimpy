@@ -1,44 +1,35 @@
 """QimPy: Quantum-Integrated Multi-PhYsics"""
 # List exported symbols for doc generation
-__all__ = [
+__all__ = (
+    "log",
+    "set_gpu_visibility",
+    "MPI",
     "rc",
+    "profiler",
+    "io",
+    "mpi",
+    "utils",
+    "math",
     "TreeNode",
     "Energy",
-    "utils",
-    "ions",
+    "algorithms",
     "lattice",
     "symmetries",
     "grid",
-    "electrons",
-    "geometry",
-    "export",
-    "System",
+    "dft",
     "transport",
-    "log",
-]
+)
 
 # Module import definition
-from . import rc
-from ._tree import TreeNode
-from ._energy import Energy
-from . import utils
-from . import ions
-from . import lattice
-from . import symmetries
-from . import grid
-from . import electrons
-from . import geometry
-from . import export
-from ._system import System
-from . import transport
-import logging
+from .pre_init import log, set_gpu_visibility
+from mpi4py import MPI  #: Must initialize MPI after pre_init for correct GPU behavior.
+from . import rc, profiler, io, mpi, math
+from .tree import TreeNode
+from .energy import Energy
+from . import algorithms, lattice, symmetries, grid, dft, transport
 
 # Automatic versioning added by versioneer
 from ._version import get_versions
 
 __version__: str = get_versions()["version"]
 del get_versions
-
-# Module-level attributes
-log: logging.Logger = logging.getLogger("qimpy")
-"Log for the qimpy module, configurable using :func:`qimpy.utils.log_config`"
