@@ -1,7 +1,7 @@
 """Calculate spherical harmonics and their product expansions."""
 import torch
 
-from . import spherical_harmonics_data as shdata
+from . import _spherical_harmonics_data as shdata
 
 # List exported symbols for doc generation
 __all__ = [

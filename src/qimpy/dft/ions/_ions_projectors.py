@@ -12,7 +12,7 @@ from qimpy.dft import ions
 
 
 @stopwatch(name="Ions.get_projectors")
-def _get_projectors(
+def get_projectors(
     self: ions.Ions,
     basis: dft.electrons.Basis,
     get_psi: bool = False,
@@ -73,7 +73,7 @@ def _get_projectors(
 
 
 @stopwatch(name="Ions.projectors_grad")
-def _projectors_grad(
+def projectors_grad(
     self: ions.Ions, proj: dft.electrons.Wavefunction, is_psi: bool = False
 ) -> None:
     """Propagate `proj.grad` to forces and stresses.

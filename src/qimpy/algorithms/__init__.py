@@ -1,4 +1,4 @@
-"""Shared utility functions and classes"""
+"""Shared algorithms for optimization and self-consistency."""
 # List exported symbols for doc generation
 __all__ = (
     "Gradable",
@@ -10,7 +10,7 @@ __all__ = (
     "Pulay",
 )
 
-from .gradable import Gradable
-from .optimizable import Optimizable, ConvergenceCheck, MatrixArray
-from .minimize import Minimize, MinimizeState
-from .pulay import Pulay
+from ._gradable import Gradable
+from ._optimizable import Optimizable, ConvergenceCheck, MatrixArray
+from ._minimize import Minimize, MinimizeState
+from ._pulay import Pulay

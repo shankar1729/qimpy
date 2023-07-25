@@ -8,7 +8,7 @@ from qimpy import rc
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
 from . import Grid, FieldH, FieldG
-from .field import FieldType
+from ._field import FieldType
 
 
 @cache

@@ -9,7 +9,7 @@ from qimpy.mpi import TaskDivision
 from qimpy.io import CheckpointPath
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
-from .fft import init_grid_fft, FFT, IFFT, IndicesType
+from ._fft import init_grid_fft, FFT, IFFT, IndicesType
 
 
 class Grid(TreeNode):

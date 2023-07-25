@@ -6,7 +6,7 @@ import torch
 
 from qimpy import log, rc, TreeNode
 from qimpy.io import CheckpointPath, CheckpointContext, fmt
-from .lattice_systems import get_Rbasis
+from ._lattice_systems import get_Rbasis
 
 
 class Lattice(TreeNode):

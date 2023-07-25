@@ -7,7 +7,7 @@ import numpy as np
 
 from qimpy import log, rc, TreeNode, Energy, MPI
 from qimpy.io import CheckpointPath
-from .optimizable import Optimizable, ConvergenceCheck
+from ._optimizable import Optimizable, ConvergenceCheck
 
 
 Variable = TypeVar("Variable", bound=Optimizable)

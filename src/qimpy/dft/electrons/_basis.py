@@ -13,8 +13,8 @@ from qimpy.lattice import Lattice, Kpoints
 from qimpy.symmetries import Symmetries
 from qimpy.grid import Grid
 from qimpy.dft.ions import Ions
-from .basis_ops import _apply_gradient, _apply_ke, _apply_potential, _collect_density
-from .basis_real import BasisReal
+from ._basis_ops import _apply_gradient, _apply_ke, _apply_potential, _collect_density
+from ._basis_real import BasisReal
 
 
 class Basis(TreeNode):

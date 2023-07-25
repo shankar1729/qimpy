@@ -42,7 +42,7 @@ def generate_harmonic_coefficients(l_max_hlf: int) -> None:
     solid harmonics up to l_max = 2 * l_max_hlf, as well as tables of
     product coefficients (Clebsch-Gordon coefficients) for real solid
     harmonics up to order l_max_hlf. Print results formatted as Python
-    code that can be pasted into spherical_harmonics_data.py."""
+    code that can be pasted into _spherical_harmonics_data.py."""
     l_max = 2 * l_max_hlf
     log.info(
         f"L_MAX: int = {l_max}  # Maximum l for harmonics\n"

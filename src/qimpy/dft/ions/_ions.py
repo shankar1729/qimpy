@@ -10,9 +10,9 @@ from qimpy import TreeNode, log, rc, dft
 from qimpy.io import fmt, CheckpointPath, CheckpointContext
 from qimpy.math import cis
 from qimpy.lattice import Lattice
-from qimpy.symmetries.positions import LabeledPositions
+from qimpy.symmetries import LabeledPositions
 from qimpy.grid import FieldH
-from . import Pseudopotential, ions_projectors, ions_atomic, ions_update
+from . import Pseudopotential, _ions_projectors, _ions_atomic, _ions_update
 
 
 class Ions(TreeNode):
@@ -42,14 +42,14 @@ class Ions(TreeNode):
     D_all: torch.Tensor  #: nonlocal pseudopotential matrix (all atoms)
     dEtot_drho_basis: float  #: dE/d(basis function density) for Pulay correction
 
-    _get_projectors = ions_projectors._get_projectors
-    _projectors_grad = ions_projectors._projectors_grad
-    get_atomic_orbital_index = ions_atomic.get_atomic_orbital_index
-    get_atomic_orbitals = ions_atomic.get_atomic_orbitals
-    get_atomic_density = ions_atomic.get_atomic_density
-    update = ions_update.update
-    accumulate_geometry_grad = ions_update.accumulate_geometry_grad
-    _collect_ps_matrix = ions_update._collect_ps_matrix
+    _get_projectors = _ions_projectors.get_projectors
+    _projectors_grad = _ions_projectors.projectors_grad
+    get_atomic_orbital_index = _ions_atomic.get_atomic_orbital_index
+    get_atomic_orbitals = _ions_atomic.get_atomic_orbitals
+    get_atomic_density = _ions_atomic.get_atomic_density
+    update = _ions_update.update
+    accumulate_geometry_grad = _ions_update.accumulate_geometry_grad
+    _collect_ps_matrix = _ions_update.collect_ps_matrix
 
     def __init__(
         self,

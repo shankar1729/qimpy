@@ -1,3 +1,4 @@
+"""High-level profiling utilities."""
 from typing import ClassVar, Union
 from functools import wraps
 import time

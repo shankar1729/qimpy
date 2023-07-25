@@ -24,8 +24,8 @@ __all__ = (
 from .pre_init import log, set_gpu_visibility
 from mpi4py import MPI  #: Must initialize MPI after pre_init for correct GPU behavior.
 from . import rc, profiler, io, mpi, math
-from .tree import TreeNode
-from .energy import Energy
+from ._tree import TreeNode
+from ._energy import Energy
 from . import algorithms, lattice, symmetries, grid, dft, transport
 
 # Automatic versioning added by versioneer

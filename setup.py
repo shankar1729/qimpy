@@ -15,7 +15,9 @@ version, cmdclass = get_version_cmdclass()
 cmdclass["build_ext"] = cpp_extension.BuildExtension
 
 ext_modules = [
-    cpp_extension.CppExtension("qimpy.mpi.bufferview", ["src/qimpy/mpi/bufferview.cpp"])
+    cpp_extension.CppExtension(
+        "qimpy.mpi._bufferview", ["src/qimpy/mpi/_bufferview.cpp"]
+    )
 ]
 
 setuptools.setup(version=version, cmdclass=cmdclass, ext_modules=ext_modules)

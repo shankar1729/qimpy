@@ -3,4 +3,4 @@
 __all__ = ("functional", "lda", "gga", "XC")
 
 from . import functional, lda, gga
-from .xc import XC
+from ._xc import XC

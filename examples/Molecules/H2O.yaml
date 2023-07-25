@@ -2,6 +2,8 @@ lattice:
   system: cubic
   a: 10.  # bohrs
   compute-stress: yes
+  periodic: [yes, yes, no]
+  center: [0., 0., 0.1]
 
 ions:
   pseudopotentials:

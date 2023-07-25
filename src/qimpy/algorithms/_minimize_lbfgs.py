@@ -4,8 +4,8 @@ from collections import deque
 from dataclasses import dataclass
 
 from qimpy import log, Energy, algorithms
-from .minimize_line import LINE_MINIMIZE, Vector
-from .minimize_cg import initialize_convergence_checks, check_convergence
+from ._minimize_line import LINE_MINIMIZE, Vector
+from ._minimize_cg import initialize_convergence_checks, check_convergence
 
 
 @dataclass

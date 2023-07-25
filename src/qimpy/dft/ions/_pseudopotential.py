@@ -8,7 +8,7 @@ import torch
 from qimpy import log, MPI
 from qimpy.math import RadialFunction
 from qimpy.dft.ions import PseudoQuantumNumbers
-from qimpy.dft.ions.read_upf import read_upf
+from qimpy.dft.ions._read_upf import read_upf
 
 
 class Pseudopotential:

@@ -9,11 +9,11 @@ from qimpy.mpi import TaskDivision
 from qimpy.algorithms import Gradable
 from qimpy.math import abs_squared
 from . import Basis
-from .wavefunction_init import _randomize, _randomize_selected
-from .wavefunction_split import _split_bands, _split_basis
-from .wavefunction_arithmetic import _mul, _imul, _add, _iadd, _sub, _isub
-from .wavefunction_slice import _getitem, _setitem, _cat
-from .wavefunction_dot import _norm, _dot, _dot_O, _overlap, _matmul, _orthonormalize
+from ._wavefunction_init import _randomize, _randomize_selected
+from ._wavefunction_split import _split_bands, _split_basis
+from ._wavefunction_arithmetic import _mul, _imul, _add, _iadd, _sub, _isub
+from ._wavefunction_slice import _getitem, _setitem, _cat
+from ._wavefunction_dot import _norm, _dot, _dot_O, _overlap, _matmul, _orthonormalize
 
 
 class Wavefunction(Gradable["Wavefunction"]):

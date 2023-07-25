@@ -3,7 +3,7 @@ import torch
 import pytest
 
 from qimpy import rc
-from .fillings import _smearing_funcs, SmearingFunc
+from ._fillings import _smearing_funcs, SmearingFunc
 
 
 @functools.cache

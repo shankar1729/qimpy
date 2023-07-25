@@ -13,10 +13,10 @@ __all__ = (
     "N_SIGMAS_PER_WIDTH",
 )
 
-from .grid import Grid
-from .field import FieldType, Field, FieldR, FieldC, FieldH, FieldG
-from .field_symmetrizer import FieldSymmetrizer
-from .coulomb import Coulomb
+from ._grid import Grid
+from ._field import FieldType, Field, FieldR, FieldC, FieldH, FieldG
+from ._field_symmetrizer import FieldSymmetrizer
+from ._coulomb import Coulomb
 import numpy as np
 
 N_SIGMAS_PER_WIDTH: float = 1.0 + np.sqrt(-2.0 * np.log(np.finfo(float).eps))

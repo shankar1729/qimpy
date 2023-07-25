@@ -1,58 +1,57 @@
-"""Stand-alone QimPy calculation from YAML input file
-
-Typical usage:
-
-:code:`mpirun [mpi-options] python -m qimpy.dft -i INPUT_FILE [qimpy-options]`
-
-Command-line parameters (obtained using :code:`python -m qimpy.run -h`):
-
-.. code-block:: bash
-
-    python -m qimpy.dft (-h | -v | -i FILE) [-o FILE] [-c C] [-p Pr Pk Pb]
-                           [-n] [-d] [-m FILE] [-V]
-
-Run a QimPy calculation from an input file
-
-optional arguments:
-  -h, --help            show this help message and exit
-  -v, --version         print version information and quit
-  -i FILE, --input-file FILE
-                        input file in YAML format
-  -o FILE, --output-file FILE
-                        output file (stdout if unspecified)
-  -c C, --cores C       number of cores per process (overridden by SLURM)
-
-  -p Pr Pk Pb, --process-grid Pr Pk Pb
-                        dimensions of process grid: replicas x kpoints x
-                        bands/basis, whose product must match process count;
-                        any -1 will be set to distribute available tasks for
-                        that dimension most equally. Default: -1 -1 -1 implies
-                        all dimensions set automatically.
-
-  -n, --dry-run         quit after initialization (to check input file)
-  -d, --no-append       overwrite output file instead of appending
-  -m FILE, --mpi-log FILE
-                        file prefix for debug logs from other MPI processes
-  -V, --verbose         print extra information in log for debugging
-
-
-Note that qimpy must be installed to the python path for these to work in any
-directory. For development, run `python setup.py develop --user` in the root
-directory of the source repository to make the above usage possible without
-instaling from pip/conda."""
-
 import argparse
 import sys
 import os
 
-from qimpy import log, rc, io, __version__
+import qimpy
+from qimpy import log, rc, io
 from qimpy.rc import MPI
 from qimpy.profiler import StopWatch
-from . import System
+from . import Transport
 
 
 def main():
+    """Stand-alone QimPy transport calculation from YAML input file
 
+    Typical usage:
+
+    :code:`mpirun [mpi-options] python -m qimpy.transport -i INPUT_FILE [qimpy-options]`
+
+    Command-line parameters (obtained using :code:`python -m qimpy.run -h`):
+
+    .. code-block:: bash
+
+        python -m qimpy.transport (-h | -v | -i FILE) [-o FILE] [-c C] [-p Pr Pk]
+                               [-n] [-d] [-m FILE] [-V]
+
+    optional arguments:
+
+    Run a QimPy transport calculation from an input file
+      -h, --help            show this help message and exit
+      -v, --version         print version information and quit
+      -i FILE, --input-file FILE
+                            input file in YAML format
+      -o FILE, --output-file FILE
+                            output file (stdout if unspecified)
+      -c C, --cores C       number of cores per process (overridden by SLURM)
+
+      -p Pr Pk, --process-grid Pr Pk
+                            dimensions of process grid: real-space x kpoints, whose
+                            product must match process count; any -1 will be set to
+                            distribute available tasks for that dimension most equally.
+                            Default: -1 -1 implies all dimensions set automatically.
+
+      -n, --dry-run         quit after initialization (to check input file)
+      -d, --no-append       overwrite output file instead of appending
+      -m FILE, --mpi-log FILE
+                            file prefix for debug logs from other MPI processes
+      -V, --verbose         print extra information in log for debugging
+
+
+    Note that qimpy must be installed to the python path for these to work in any
+    directory. For development, run `python setup.py develop --user` in the root
+    directory of the source repository to make the above usage possible without
+    instaling from pip/conda.
+    """
     # Parse the commandline arguments on main process:
     i_proc = MPI.COMM_WORLD.Get_rank()
     if i_proc == 0:
@@ -74,8 +73,8 @@ def main():
 
         parser = ArgumentParser(
             add_help=False,
-            prog="python -m qimpy.run",
-            description="Run a QimPy calculation from an input file",
+            prog="python -m qimpy.transport",
+            description="Run a QimPy transport calculation from an input file",
         )
         # --- mutually-exclusive group of help, version or input file
         group = parser.add_mutually_exclusive_group(required=True)
@@ -109,13 +108,13 @@ def main():
             "-p",
             "--process-grid",
             type=int,
-            nargs=3,
-            default=[-1, -1, -1],
-            metavar=("Pr", "Pk", "Pb"),
-            help="dimensions of process grid: replicas x kpoints x bands/basis"
+            nargs=2,
+            default=[-1, -1],
+            metavar=("Pr", "Pk"),
+            help="dimensions of process grid: real-space x kpoints"
             ", whose product must match process count; any -1 will be set to "
             "distribute available tasks for that dimension most equally. "
-            "Default: -1 -1 -1 implies all dimensions set automatically.",
+            "Default: -1 -1 implies all dimensions set automatically.",
         )
         parser.add_argument(
             "-n",
@@ -158,7 +157,7 @@ def main():
     if args.version:
         # Print version and exit:
         if i_proc == 0:
-            print("QimPy", __version__)
+            print("QimPy", qimpy.__version__)
         exit()
 
     if args.help:
@@ -177,7 +176,7 @@ def main():
     )
 
     # Print version header
-    log.info("*" * 15 + " QimPy " + __version__ + " " + "*" * 15)
+    log.info("*" * 15 + " QimPy " + qimpy.__version__ + " " + "*" * 15)
 
     # Configure hardware resources
     rc.init(cores_override=args.cores)
@@ -191,7 +190,7 @@ def main():
     input_dict = io.dict.remove_units(input_dict)  # Remove units
 
     # Initialize system with input parameters:
-    system = System(process_grid_shape=args.process_grid, **input_dict)
+    transport = Transport(process_grid_shape=args.process_grid, **input_dict)
 
     # Dry-run bypass:
     if args.dry_run:
@@ -201,12 +200,8 @@ def main():
         exit()
 
     # Perform specified actions:
-    system.run()
+    transport.run()
 
     # Report timings:
     rc.report_end()
     StopWatch.print_stats()
-
-
-if __name__ == "__main__":
-    main()

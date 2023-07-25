@@ -9,7 +9,7 @@ __all__ = [
 ]
 
 from . import symbols
-from .pseudo_quantum_numbers import PseudoQuantumNumbers
-from .pseudopotential import Pseudopotential
-from .ions import Ions
-from .lowdin import Lowdin
+from ._pseudo_quantum_numbers import PseudoQuantumNumbers
+from ._pseudopotential import Pseudopotential
+from ._ions import Ions
+from ._lowdin import Lowdin

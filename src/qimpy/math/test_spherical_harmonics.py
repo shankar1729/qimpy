@@ -5,7 +5,7 @@ import pytest
 from qimpy import rc, log
 from qimpy.io import log_config
 from . import spherical_harmonics as sh
-from .spherical_harmonics_generate import get_harmonics_ref
+from ._spherical_harmonics_generate import get_harmonics_ref
 
 
 def get_r_ylm() -> tuple[torch.Tensor, torch.Tensor]:

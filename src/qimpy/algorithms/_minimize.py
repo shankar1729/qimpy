@@ -7,9 +7,9 @@ import numpy as np
 from qimpy import log, Energy, TreeNode, MPI
 from qimpy.io import CheckpointPath
 from qimpy.io.dict import key_cleanup
-from .minimize_lbfgs import lbfgs
-from .minimize_cg import cg
-from .minimize_line import LINE_MINIMIZE, Vector
+from ._minimize_lbfgs import lbfgs
+from ._minimize_cg import cg
+from ._minimize_line import LINE_MINIMIZE, Vector
 
 
 class MinimizeState(Generic[Vector]):

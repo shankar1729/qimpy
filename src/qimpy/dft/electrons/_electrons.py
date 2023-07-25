@@ -14,7 +14,7 @@ from qimpy.grid import FieldH, FieldR
 from qimpy.dft.ions import Ions
 from . import Fillings, Basis, Davidson, CheFSI, SCF, LCAO, Wavefunction
 from .xc import XC
-from .hamiltonian import _hamiltonian
+from ._hamiltonian import _hamiltonian
 
 
 class Electrons(TreeNode):

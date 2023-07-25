@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from qimpy import log, rc, algorithms, Energy
-from .minimize_line import LINE_MINIMIZE, Vector
+from ._minimize_line import LINE_MINIMIZE, Vector
 
 
 def cg(self: algorithms.Minimize[Vector]) -> Energy:

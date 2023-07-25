@@ -6,7 +6,7 @@ import torch
 from qimpy import log, rc, dft, Energy
 from qimpy.io import fmt
 from qimpy.dft.ions import Lowdin
-from .gradient import Gradient
+from ._gradient import Gradient
 
 
 class Stepper:

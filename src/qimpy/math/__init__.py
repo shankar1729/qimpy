@@ -17,8 +17,8 @@ __all__ = (
     "RadialFunction",
 )
 
-from .integer import prime_factorization, fft_suitable, ceildiv
-from .linalg import (
+from ._integer import prime_factorization, fft_suitable, ceildiv
+from ._linalg import (
     cis,
     abs_squared,
     dagger,
@@ -28,4 +28,4 @@ from .linalg import (
     eighg,
 )
 from . import spherical_harmonics, spherical_bessel, quintic_spline
-from .radial_function import RadialFunction
+from ._radial_function import RadialFunction

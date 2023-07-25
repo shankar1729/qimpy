@@ -4,7 +4,7 @@ from typing import TypeVar, Callable
 import numpy as np
 
 from qimpy import log, algorithms
-from .optimizable import Optimizable
+from ._optimizable import Optimizable
 
 
 Vector = TypeVar("Vector", bound=Optimizable)

@@ -8,7 +8,7 @@ from qimpy import rc, TreeNode
 from qimpy.io import CheckpointPath, CheckpointContext, Unit, UnitOrFloat
 from qimpy.mpi import BufferView
 from qimpy.dft import geometry
-from .gradient import Gradient
+from ._gradient import Gradient
 
 # List exported symbols for doc generation
 __all__ = (

@@ -9,7 +9,7 @@ from qimpy.algorithms import Gradable
 from qimpy.mpi import BufferView
 from qimpy.io import CheckpointPath
 from . import Grid
-from .change import _change_real, _change_recip
+from ._change import _change_real, _change_recip
 
 
 FieldType = TypeVar("FieldType", bound="Field")  #: Type for field ops.

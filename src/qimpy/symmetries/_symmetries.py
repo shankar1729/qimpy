@@ -7,9 +7,9 @@ from qimpy import rc, log, TreeNode
 from qimpy.io import CheckpointPath, fmt
 from qimpy.lattice import Lattice
 from . import LabeledPositions
-from .lattice import get_lattice_point_group, symmetrize_lattice, symmetrize_matrix
-from .positions import get_space_group, symmetrize_positions, symmetrize_forces
-from .grid import check_grid_shape, get_grid_shape
+from ._lattice import get_lattice_point_group, symmetrize_lattice, symmetrize_matrix
+from ._positions import get_space_group, symmetrize_positions, symmetrize_forces
+from ._grid import check_grid_shape, get_grid_shape
 
 
 class Symmetries(TreeNode):

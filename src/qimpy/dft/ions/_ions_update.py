@@ -226,7 +226,7 @@ class _LocalTerms:
             pos_grad[slice_i] += FieldH(grid, data=SF_grad_i) ^ dphase_by_dpos
 
 
-def _collect_ps_matrix(self: ions.Ions, n_spinor: int) -> None:
+def collect_ps_matrix(self: ions.Ions, n_spinor: int) -> None:
     """Collect pseudopotential matrices across species and atoms.
     Initializes `D_all`."""
     n_proj = self.n_projectors * n_spinor

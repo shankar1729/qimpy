@@ -9,9 +9,9 @@ from qimpy.lattice import Lattice
 from qimpy.io import Checkpoint, CheckpointPath, CheckpointContext
 from qimpy.mpi import BufferView
 from qimpy.algorithms import Minimize, MinimizeState
-from .gradient import Gradient
-from .stepper import Stepper
-from .history import History
+from ._gradient import Gradient
+from ._stepper import Stepper
+from ._history import History
 
 
 class Relax(Minimize[Gradient]):
