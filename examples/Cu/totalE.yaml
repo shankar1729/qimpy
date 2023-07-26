@@ -21,6 +21,9 @@ electrons:
     size: [8, 8, 8]
   xc: 
     functional: gga-xc-pbe
+    plus-U:
+      Cu:
+        d: 0.080
   save-wavefunction: no  #keeps checkpoint small
 
 geometry:

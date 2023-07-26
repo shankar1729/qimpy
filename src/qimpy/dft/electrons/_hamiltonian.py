@@ -22,4 +22,8 @@ def _hamiltonian(self: dft.electrons.Electrons, C: Wavefunction) -> Wavefunction
     beta_C = C.proj
     beta = ions.beta_full if C.band_division else ions.beta
     HC += beta @ (ions.D_all @ beta_C)
+
+    # DFT+U:
+    if self.xc.plus_U:
+        HC += self.xc.plus_U(C)  # TODO
     return HC

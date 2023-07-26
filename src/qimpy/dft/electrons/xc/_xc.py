@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, Optional
 
 import numpy as np
 import torch
@@ -8,7 +8,7 @@ from qimpy.profiler import StopWatch
 from qimpy.io import CheckpointPath
 from qimpy.grid import FieldH, FieldR
 from .functional import Functional, get_libxc_functional_names, FunctionalsLibxc
-from . import lda, gga
+from . import lda, gga, PlusU
 
 
 N_CUT = 1e-16  # Regularization threshold for densities
@@ -18,6 +18,7 @@ class XC(TreeNode):
     """Exchange-correlation functional."""
 
     _functionals: list[Functional]  #: list of functionals that add up to XC
+    plus_U: Optional[PlusU]  #: optional DFT+U correction
     need_sigma: bool  #: whether overall functional needs gradient
     need_lap: bool  #: whether overall functional needs laplacian
     need_tau: bool  #: whether overall functional needs KE density
@@ -28,6 +29,7 @@ class XC(TreeNode):
         spin_polarized: bool,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         functional: Union[str, list[str]] = "gga-pbe",
+        plus_U: Optional[Union[dict, PlusU]] = None,
     ):
         """Initialize exchange-correlation functional.
 
@@ -55,6 +57,9 @@ class XC(TreeNode):
             used to compute a 50-50 mix of two functionals. Warning: there is
             no normalization or check to make the fractions of exchange or
             correlation to add up to 1.
+
+        plus_U
+            :yaml:`Optional DFT+U correction.`
         """
         super().__init__()
         log.info("\nInitializing XC:")
@@ -79,6 +84,8 @@ class XC(TreeNode):
                     libxc_names[func] += 1.0
         if libxc_names:
             self._functionals.append(FunctionalsLibxc(spin_polarized, libxc_names))
+
+        self.add_child("plus_U", PlusU, plus_U, checkpoint_in)
 
         # Collect overall needs:
         self.need_sigma = any(func.needs_sigma for func in self._functionals)
