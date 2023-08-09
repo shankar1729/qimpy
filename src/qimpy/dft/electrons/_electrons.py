@@ -394,6 +394,7 @@ class Electrons(TreeNode):
         # Exchange-correlation:
         n_xc_tilde = self.n_tilde + system.ions.n_core_tilde
         n_xc_tilde.requires_grad_(True, clear=True)
+        self.tau_tilde.requires_grad_(True, clear=True)
         self.xc(n_xc_tilde, self.tau_tilde)
         if system.ions.n_core_tilde.requires_grad:
             system.ions.n_core_tilde.grad += n_xc_tilde.grad
@@ -425,6 +426,20 @@ class Electrons(TreeNode):
             eig = self.eig[..., : self.fillings.n_bands]
             eye3 = torch.eye(3, device=rc.device)
             lattice_grad_mine -= (wf_coeff_sq.sum(dim=-1) * eig).sum() * eye3
+
+            # KE-density contribution for meta-GGAs
+            if self.xc.need_tau:
+                for i_dir in range(3):
+                    HC = C.basis.apply_potential(
+                            self.tau_tilde.grad, C.basis.apply_gradient(C, i_dir))
+                    for j_dir in range(i_dir, 3):
+                        C_grad = C.basis.apply_gradient(C, j_dir)
+                        HC_coeff = HC.coeff
+                        C_grad_coeff = C_grad.coeff
+                        result = -torch.einsum("ijk,ijklm->", wf, (HC_coeff * C_grad_coeff.conj()).real)
+                        lattice_grad_mine[i_dir, j_dir] += result
+                        if i_dir != j_dir:
+                            lattice_grad_mine[j_dir, i_dir] += result
 
             # Collect above local contributions over MPI:
             self.comm.Allreduce(MPI.IN_PLACE, BufferView(lattice_grad_mine))

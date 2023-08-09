@@ -12,9 +12,9 @@ def _hamiltonian(self: dft.electrons.Electrons, C: Wavefunction) -> Wavefunction
     HC += basis.apply_potential(self.n_tilde.grad, C)
     if self.xc.need_tau:
         for i_dir in range(3):
-            HC -= 0.5 * self.basis.apply_gradient(
+            HC -= 0.5 * basis.apply_gradient(
                 basis.apply_potential(
-                    self.tau_tilde.grad, self.basis.apply_gradient(C, i_dir)
+                    self.tau_tilde.grad, basis.apply_gradient(C, i_dir)
                 ),
                 i_dir,
             )
