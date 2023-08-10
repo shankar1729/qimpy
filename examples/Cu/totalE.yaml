@@ -6,7 +6,7 @@ lattice:
 
 ions:
   pseudopotentials:
-    - ../../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
+    - SG15/$ID_ONCV_PBE.upf
   coordinates:
     - [Cu, 0., 0., 0.]
 
