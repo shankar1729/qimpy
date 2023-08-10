@@ -114,7 +114,7 @@ class Ions(TreeNode):
             pseudopotentials = [pseudopotentials]
         prefixes = [""]
         if "QIMPY_PSEUDO_DIR" in os.environ:
-            prefixes.append(os.environ["QIMPY_PSEUDO_DIR"])
+            prefixes.extend(os.environ["QIMPY_PSEUDO_DIR"].split(":"))
         pseudopotential_filenames = [
             self._get_pseudopotential_filename(symbol, pseudopotentials, prefixes)
             for symbol in self.symbols
