@@ -431,12 +431,15 @@ class Electrons(TreeNode):
             if self.xc.need_tau:
                 for i_dir in range(3):
                     HC = C.basis.apply_potential(
-                            self.tau_tilde.grad, C.basis.apply_gradient(C, i_dir))
+                        self.tau_tilde.grad, C.basis.apply_gradient(C, i_dir)
+                    )
                     for j_dir in range(i_dir, 3):
                         C_grad = C.basis.apply_gradient(C, j_dir)
                         HC_coeff = HC.coeff
                         C_grad_coeff = C_grad.coeff
-                        result = -torch.einsum("ijk,ijklm->", wf, (HC_coeff * C_grad_coeff.conj()).real)
+                        result = -torch.einsum(
+                            "ijk,ijklm->", wf, (HC_coeff * C_grad_coeff.conj()).real
+                        )
                         lattice_grad_mine[i_dir, j_dir] += result
                         if i_dir != j_dir:
                             lattice_grad_mine[j_dir, i_dir] += result
