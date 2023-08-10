@@ -24,7 +24,7 @@ Save the following to `water.yaml`:
 
     ions:
       pseudopotentials:
-        - ../../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
+        - PATH_TO_PSEUDOPOTENTIALS/SG15/$ID_ONCV_PBE.upf
       fractional: no
       coordinates:
         - [H, 0., -1.432, +0.6]
@@ -35,21 +35,16 @@ Save the following to `water.yaml`:
 
 See :doc:`/inputfile` for details on all the settings that can be specified in YAML input.
 
-TODO: change. This input-file illustrates the bare minimum commands needed to set up a calculation.
-The lattice and ion commands set up the unit cell and geometry,
-and elec-cutoff controls the resolution of the plane-wave basis
-that is used to represent the wavefunctions and densities. 
-See \ref Commands for a list of all available input file commands and their options.
+This YAML input-file illustrates the bare minimum commands needed to set up a calculation.
+The **lattice** and **ions** keys set up the unit cell and geometry, and the default parameters
+for the electronic calculation are used. The **checkpoint** key specifies the name of the HDF5 file in
+which data from the calculation is saved, where it can also be read at start-up to restart a
+calculation.
 
-TODO: change. In a plane-wave basis, bare nuclei are replaced by an effective potential
+In a plane-wave basis, bare nuclei are replaced by an effective potential
 due to the nucleus and core electrons, termed the pseudopotential,
 and only the remaining valence electrons are included explicitly in the DFT calculation.
-The ion-species commands select the GBRV pseudopotentials distributed with QimPy.
-These are installed to the build directory, and QimPy will automatically look for them there.
-If you use pseudopotentials not built into QimPy, specify the absolute or relative paths instead.
-See the \ref Pseudopotentials page for supported pseudopotential formats,
-other sets of pseudopotentials distributed with QimPy, and a wildcard syntax
-for selecting an entire set of pseudopotentials (which we shall use henceforth).
+The **ions/pseudopotentials** key points to the path of the pseudopotentials.
 
 Now, that basic input file can be run with
 
@@ -57,41 +52,42 @@ Now, that basic input file can be run with
 
     python -m qimpy.dft -i water.yaml | tee water.out
 
-TODO: change. That should complete in a few seconds and create files water.out and water.h5.
-Note that the default behavior of qimpy is to concatenate output files.
-If you wish to overwrite a previous water.out file, then add option -d to the command line. 
+For more details about this stand-alone calculation check :doc:`/api/qimpy.dft.main`. That should complete in a few seconds and create files `water.out` and `water.h5`.
+Have a look at `water.out`.
+It lists the key-value pairs that were specified in the input file, then the initialization of
+:doc:`lattice </yamldoc/qimpy.lattice.Lattice>`, :doc:`ions </yamldoc/qimpy.dft.ions.Ions>`,
+:doc:`symmetries </yamldoc/qimpy.symmetries.Symmetries>`, :doc:`electrons </yamldoc/qimpy.dft.electrons.Electrons>` and
+:doc:`charge density grid </yamldoc/qimpy.grid.Grid>`, which have sensible defaults.
+For instance, in :doc:`electrons </yamldoc/qimpy.dft.electrons.Electrons>` the exchange functional defaults to PBE GGA.
+To use LDA instead, you would add the following to the YAML input file
 
-TODO: change. Have a look at water.out.
-It lists the commands that were issued in the input file along with several more which have sensible defaults.
-For instance, the exchange functional defaults to GGA (<b>elec-ex-corr gga-PBE</b>).
-To use LDA instead, you would add command <b>elec-ex-corr lda</b> to the input file.
-Other commands do not have defaults, such as \ref CommandVanDerWaals to include dispersion
-interactions which standard DFT functionals miss (discussed later in \ref Dispersion tutorial);
-so don't forget to see \ref Commands for the full list of available commands.
+.. code-block:: yaml
 
-TODO: change. The commands section is followed by initialization of the plane-wave grid, symmetries, pseudopotentials etc.,
-and then the electronic minimization which logs the progress of the conjugate gradients minimizer
-(lines starting with ElecMinimize).
-The default is to minimize for 100 iterations or an energy difference between
-consecutive iterations of 10<sup>-8</sup> Hartrees, whichever comes first.
-This example converges to that accuracy in around 15 iterations.
+    electrons:
+        xc:
+            functional: lda_pw
+
+The initializations are then followed by the electronic optimization, which first logs the optimization of the
+electronic states in atomic-orbital subspace (lines starting with LCAO), then the progress of the electronic
+self-consistent field iterations (lines starting with SCF).
+The default is to minimize for 50 iterations or an energy difference between
+consecutive iterations of 1e-08 Hartrees, whichever comes first.
+This example converges to that accuracy in around 13 iterations.
 Note that the ions have not been moved and the end of the output file lists the forces at the initial position.
 
-TODO: change. Additional output files are written based on the options provided by the dump command.
-Here, we have requested a dump of energy components (in water.Ecomponents)
-and electron density (in water.n) at the end of the run, 
-with filenames specified by dump-name.
+To check which data is saved in the HDF5 checkpoint file, run :code:`h5dump -H water.h5` to see the header,
+which lists the data saved and their data type.
 
-TODO: change. Finally, let's visualize the electron density output by this calculation.
-Use the createXSF script to create water.xsf containing the
-ionic geometry (extracted from water.out) and electron density (from water.n):
+Finally, let's visualize the electron density output by this calculation.
+Use :doc:`/api/qimpy.interfaces.xsf` to create `water.xsf`, containing the
+ionic geometry and the electron density, from HDF5 checkpoint file `water.h5`:
 
 .. code-block:: bash
 
     python -m qimpy.interfaces.xsf -c water.h5 -x water.xsf -d n
 
-TODO: change. Note that the script recognizes dump-name, so n will be understood to be water.n,
-but you can also specify the file name directly.
+You can specify 3d data to be written in the XSF file by specifying its symbol in the checkpoint file
+(electron density's symbol is *n*).
 Now open the XSF file using the visualization program VESTA
 (or another program that supports XSF such as XCrysDen).
 You should initially see the water molecule torn between the
