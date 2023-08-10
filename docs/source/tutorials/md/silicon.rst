@@ -4,6 +4,7 @@ Silicon AIMD
 We will show an ab-initio molecular dynamics simulation with a silicon crystal.
 
 TODO: insert example input
+
 .. code-block:: yaml
 
     lattice:
