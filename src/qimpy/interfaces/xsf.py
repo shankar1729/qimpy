@@ -1,3 +1,28 @@
+"""Write XSF file from HDF5 checkpoint file.
+
+Typical usage:
+:code:`python -m qimpy.interfaces.xsf (-h | -c FILE) [-x FILE] [-a] [-d SYMBOL]`
+
+Command-line parameters (obtained using :code:`python -m qimpy.interfaces.xsf -h`):
+
+.. code-block:: bash
+
+    python -m qimpy.interfaces.xsf [-h] -c FILE [-x FILE] [-a] [-d SYMBOL]
+
+write XSF file from HDF5 checkpoint file
+
+options:
+  -h, --help            show this help message and exit
+  -c FILE, --checkpoint-file FILE
+                        checkpoint file in HDF5 format
+  -x FILE, --xsf-file FILE
+                        output file in XSF format (crystal.xsf if unspecified)
+  -a, --animated        make output an animated XSF file
+  -d SYMBOL, --data-symbol SYMBOL
+                        add 3d data to XSF file such as electron density (SYMBOL=n)
+
+
+"""
 from typing import Optional, TextIO
 import argparse
 
@@ -69,28 +94,7 @@ def write_xsf(
         Make output an animated XSF file.
     dataset_symbol
         Add 3d data to XSF file such as electron density (dataset_symbol=n).
-
-    Usage
-    -----
-    :code:`python -m qimpy.interfaces.xsf [-h] -c FILE [-x FILE] [-a] [-d SYMBOL]`
-
-    Command-line parameters (obtained using :code:`python -m qimpy.interfaces.xsf -h`):
-
-    .. code-block:: bash
-
-        python -m qimpy.interfaces.xsf [-h] -c FILE [-x FILE] [-a] [-d SYMBOL]
-
-    write XSF file from HDF5 checkpoint file
-
-    options:
-      -h, --help            show this help message and exit
-      -c FILE, --checkpoint-file FILE
-                            checkpoint file in HDF5 format
-      -x FILE, --xsf-file FILE
-                            output file in XSF format (crystal.xsf if unspecified)
-      -a, --animated        make output an animated XSF file
-      -d SYMBOL, --data-symbol SYMBOL
-                            add 3d data to XSF file such as electron density (SYMBOL=n)"""
+    """
     h5_file = h5py.File(checkpoint, "r")
     ions = h5_file["ions"]
     types = ions["types"][:]
