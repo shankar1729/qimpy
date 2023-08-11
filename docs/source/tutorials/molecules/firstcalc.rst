@@ -24,7 +24,7 @@ Save the following to `water.yaml`:
 
     ions:
       pseudopotentials:
-        - PATH_TO_PSEUDOPOTENTIALS/SG15/$ID_ONCV_PBE.upf
+        - SG15/$ID_ONCV_PBE.upf
       fractional: no
       coordinates:
         - [H, 0., -1.432, +0.6]
@@ -44,15 +44,17 @@ calculation.
 In a plane-wave basis, bare nuclei are replaced by an effective potential
 due to the nucleus and core electrons, termed the pseudopotential,
 and only the remaining valence electrons are included explicitly in the DFT calculation.
-The **ions/pseudopotentials** key points to the path of the pseudopotentials.
+The **ions/pseudopotentials** key points to the pseudopotentials specified by
+the environment variable **QIMPY_PSEUDO_DIR**.
 
 Now, that basic input file can be run with
 
 .. code-block:: bash
 
-    python -m qimpy.dft -i water.yaml | tee water.out
+    python -m qimpy.dft -i water.yaml | tee -o water.out
 
-For more details about this stand-alone calculation check :doc:`/api/qimpy.dft.main`. That should complete in a few seconds and create files `water.out` and `water.h5`.
+For more details about this stand-alone calculation check :doc:`/api/qimpy.dft.main`. That should complete in a few
+seconds and create files `water.out` and `water.h5`.
 Have a look at `water.out`.
 It lists the key-value pairs that were specified in the input file, then the initialization of
 :doc:`lattice </yamldoc/qimpy.lattice.Lattice>`, :doc:`ions </yamldoc/qimpy.dft.ions.Ions>`,
@@ -68,8 +70,8 @@ To use LDA instead, you would add the following to the YAML input file
             functional: lda_pw
 
 The initializations are then followed by the electronic optimization, which first logs the optimization of the
-electronic states in atomic-orbital subspace (lines starting with LCAO), then the progress of the electronic
-self-consistent field iterations (lines starting with SCF).
+electronic states in atomic-orbital subspace (lines starting with **LCAO**), then the progress of the electronic
+self-consistent field iterations (lines starting with **SCF**).
 The default is to minimize for 50 iterations or an energy difference between
 consecutive iterations of 1e-08 Hartrees, whichever comes first.
 This example converges to that accuracy in around 13 iterations.
@@ -84,10 +86,10 @@ ionic geometry and the electron density, from HDF5 checkpoint file `water.h5`:
 
 .. code-block:: bash
 
-    python -m qimpy.interfaces.xsf -c water.h5 -x water.xsf -d n
+    python -m qimpy.interfaces.xsf -c water.h5 -x water.xsf --data-symbol n
 
 You can specify 3d data to be written in the XSF file by specifying its symbol in the checkpoint file
-(electron density's symbol is *n*).
+(electron density's symbol is **n**).
 Now open the XSF file using the visualization program VESTA
 (or another program that supports XSF such as XCrysDen).
 You should initially see the water molecule torn between the
