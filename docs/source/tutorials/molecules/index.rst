@@ -5,3 +5,4 @@ Molecules tutorials
     :maxdepth: 1
 
     firstcalc
+    geometryopt
