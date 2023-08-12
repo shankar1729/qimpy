@@ -12,14 +12,14 @@ Here's an example input file for silicon
     lattice:
       system: cubic
       modification: face-centered
-      a: 10.26  # bohrs
-      
+      a: 5.43 Å
+
     ions:
       pseudopotentials:
-        - ../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
+        - SG15/$ID_ONCV_PBE.upf
       coordinates:
-        - [Si, 0.125, 0.07, 0.01]
-        - [Si, 0.375, 0.32, 0.26]
+        - [Si, 0.00, 0.00, 0.00]
+        - [Si, 0.25, 0.25, 0.25]
     
     electrons:
       k-mesh:
@@ -29,6 +29,4 @@ Here's an example input file for silicon
     grid:
       ke-cutoff: 100
     
-    checkpoint: null  # disable reading checkpoint
-    checkpoint-out: Si.h5  # but still create it
-
+    checkpoint: Si.h5

@@ -8,13 +8,18 @@ and also how to continue a calculation.
 This time, let's start with a very coarse geometry.
 In reality, the water molecule has an O-H bond length of roughly 0.97 Angstrom and a bond angle of 104.5 degrees.
 To give the geometry optimizer something to do, let's start with a bond length of 1 Angstrom and bond angle of 90 degrees.
-Save the following to `water.yaml` including ionic relaxation:
+Save the following to `water.yaml` including ionic relaxation,
+and more converged box sizes and plane-wave cutoffs:
 
 .. code-block:: yaml
 
     lattice:
       system: cubic
-      a: 10.0
+      a: 20.0
+
+    electrons:
+      basis:
+        ke-cutoff: 30
 
     ions:
       pseudopotentials:
@@ -37,7 +42,7 @@ and run
 
 .. code-block:: bash
 
-    python -m qimpy.dft -i water.yaml | tee -o water.out
+    (qimpy) $ python -m qimpy.dft -i water.yaml | tee -o water.out
 
 Notice that in this run, after finishing one electronic optimization (lines starting with **SCF**),
 the calculation prints a line starting with **Relax** with the same energy as the last preceding SCF step.
@@ -51,7 +56,7 @@ We can examine the progress of the geometry optimizer by pulling out the lines c
 
 .. code-block:: bash
 
-     grep Relax water.out
+    (qimpy) $ grep Relax water.out
 
 Note that the geometry optimizer updates the ionic positions three times (limited by the **n-iterations** we specified),
 but does not yet reach the maximum force or energy-difference convergence criteria we specified.
@@ -66,7 +71,7 @@ To overwrite the output file use
 
 .. code-block:: bash
 
-    python -m qimpy.dft -i water.yaml | tee -o water.out --no-append
+    (qimpy) $ python -m qimpy.dft -i water.yaml | tee -o water.out --no-append
 
 Examine the output file again.
 (If you appended the outut file, scroll past the first calculation to where the second one begins.)
@@ -85,10 +90,9 @@ We can visualize the geometry optimization steps using :doc:`/api/qimpy.interfac
 
 .. code-block:: bash
 
-    python -m qimpy.interfaces.xsf -c water.h5 -x water.axsf --animated
+    (qimpy) $ python -m qimpy.interfaces.xsf -c water.h5 -x water.axsf --animated
 
 Unfortunately, VESTA does not support animated XSF files.
 Open this file in XCrysDen instead, and you should be able to click through a number of slides corresponding to the geometry optimization steps.
 As before, you need to change the boundary settings to see the molecule intact instead of torn across the boundaries.
 Change the unit of repetition in the XCrysDen menu: Display -> Unit of Repetition -> Translational asymmetric unit.
-

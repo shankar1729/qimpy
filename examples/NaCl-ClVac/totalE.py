@@ -1,5 +1,4 @@
 # Calculation analogous to totalE.yaml with Python input:
-import os
 import numpy as np
 import qimpy as qp
 
@@ -17,7 +16,6 @@ lattice = qp.lattice.Lattice(
 )  # scaled for supercell
 
 # Ion parameters:
-ps_path = "../../../../JDFTx/build_testing/pseudopotentials/SG15"
 coords_mesh_1d = np.arange(n_sup) * (1.0 / n_sup)
 coords_mesh = (
     np.stack(np.meshgrid(*((coords_mesh_1d,) * 3), indexing="ij")).reshape(3, -1).T
@@ -30,7 +28,7 @@ coordinates.extend(
 system = qp.dft.System(
     lattice=lattice,
     ions={
-        "pseudopotentials": os.path.join(ps_path, "$ID_ONCV_PBE.upf"),
+        "pseudopotentials": "SG15/$ID_ONCV_PBE.upf",
         "coordinates": coordinates,
     },
     electrons={

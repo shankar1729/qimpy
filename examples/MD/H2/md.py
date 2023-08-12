@@ -1,4 +1,3 @@
-import os
 import torch
 import matplotlib.pyplot as plt
 import qimpy as qp
@@ -21,11 +20,10 @@ def main() -> None:
         bond_distances.append(bond_distance)
 
     bond_distances = []  # to be populated by analyze()
-    ps_path = "../../../../../JDFTx/build_testing/pseudopotentials/SG15"
     system = qp.dft.System(
         lattice=dict(system="cubic", modification="face-centered", a=14.0),
         ions=dict(
-            pseudopotentials=os.path.join(ps_path, "$ID_ONCV_PBE.upf"),
+            pseudopotentials="SG15/$ID_ONCV_PBE.upf",
             coordinates=[["H", 0.0, 0.0, 0.0], ["H", 0.3, 0.2, 1.4]],
             fractional=False,
         ),

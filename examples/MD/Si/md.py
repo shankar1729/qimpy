@@ -1,4 +1,3 @@
-import os
 import torch
 import matplotlib.pyplot as plt
 import qimpy as qp
@@ -22,7 +21,6 @@ def main() -> None:
     volumes = []  # to be populated by analyze()
     pressures = []  # to be populated by analyze()
     temperatures = []  # to be populated by analyze()
-    ps_path = "../../../../../JDFTx/build_testing/pseudopotentials/SG15"
 
     # Construct coordinates input:
     positions = [
@@ -52,7 +50,7 @@ def main() -> None:
     system = qp.dft.System(
         lattice=dict(system="cubic", a=float(Unit(5.43, "Å")), movable=True),
         ions=dict(
-            pseudopotentials=os.path.join(ps_path, "$ID_ONCV_PBE.upf"),
+            pseudopotentials="SG15/$ID_ONCV_PBE.upf",
             coordinates=coordinates,
         ),
         electrons=dict(

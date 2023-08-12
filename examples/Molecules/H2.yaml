@@ -5,7 +5,7 @@ lattice:
 
 ions:
   pseudopotentials:
-    - ../../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf  # has nonlocal s projectors
+    - SG15/$ID_ONCV_PBE.upf  # has nonlocal s projectors
   fractional: no
   coordinates:
     - [H, 0., 0., -0.7]

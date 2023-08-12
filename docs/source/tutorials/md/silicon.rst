@@ -13,7 +13,7 @@ TODO: insert example input
 
     ions:
       pseudopotentials:
-        - ../../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
+        - SG15/$ID_ONCV_PBE.upf
       fractional: no
       coordinates:
         - [H, 0., -1.432, +0.6]
@@ -21,4 +21,3 @@ TODO: insert example input
         - [O, 0.,  0.000, -0.6]
 
     checkpoint: water.h5
-

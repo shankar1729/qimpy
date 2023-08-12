@@ -11,9 +11,7 @@ in a self-consistent potential determined from the electron density.
 This tutorial demonstrates a DFT calculation of the energy
 and electron density of a water molecule.
 
-A lot of effort in the research behind QimPy has involved water:
-its dielectric response, equation of state, free energy functional etc.
-Therefore, a water molecule is a fitting first calculation.
+Let's start with a water molecule as a first calculation.
 Save the following to `water.yaml`:
 
 .. code-block:: yaml
@@ -47,11 +45,11 @@ and only the remaining valence electrons are included explicitly in the DFT calc
 The **ions/pseudopotentials** key points to the pseudopotentials specified by
 the environment variable **QIMPY_PSEUDO_DIR**.
 
-Now, that basic input file can be run with
+Now, that basic input file can be run with output logged to a file and to the terminal as:
 
 .. code-block:: bash
 
-    python -m qimpy.dft -i water.yaml | tee -o water.out
+    (qimpy) $ python -m qimpy.dft -i water.yaml | tee -o water.out
 
 For more details about this stand-alone calculation check :doc:`/api/qimpy.dft.main`. That should complete in a few
 seconds and create files `water.out` and `water.h5`.
@@ -86,7 +84,7 @@ ionic geometry and the electron density, from HDF5 checkpoint file `water.h5`:
 
 .. code-block:: bash
 
-    python -m qimpy.interfaces.xsf -c water.h5 -x water.xsf --data-symbol n
+    (qimpy) $ python -m qimpy.interfaces.xsf -c water.h5 -x water.xsf --data-symbol n
 
 You can specify 3d data to be written in the XSF file by specifying its symbol in the checkpoint file
 (electron density's symbol is **n**).
@@ -96,4 +94,3 @@ You should initially see the water molecule torn between the
 corners of the box since it was centered at [0,0,0].
 Change the visualization boundary settings from [0,1) to [-0.5,0.5)
 to see the (intact molecule) image at the top of the page!
-

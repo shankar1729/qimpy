@@ -7,9 +7,9 @@ lattice:
 
 ions:
   pseudopotentials:
-    - ../../../../JDFTx/build_testing/pseudopotentials/SG15/$ID_ONCV_PBE.upf
+    - SG15/$ID_ONCV_PBE.upf
   coordinates:
-    - [Si, 0.125, 0.07, 0.01]
+    - [Si, 0.125, 0.07, 0.01]  # specified off-center to test space group detection
     - [Si, 0.375, 0.32, 0.26]
 
 electrons:
