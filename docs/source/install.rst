@@ -95,7 +95,7 @@ To install the last versioned QimPy from PyPI, simply:
 
     (qimpy) $ pip install qimpy
 
-For the latest version from git:
+For the latest version from `git <https://github.com/shankar1729/qimpy>`_:
 
 .. code-block:: bash
 

@@ -1,7 +1,8 @@
 Development
 ===========
 
-To get started with QimPy development, fetch QimPy from git
+To get started with QimPy development, fetch QimPy from
+`git <https://github.com/shankar1729/qimpy>`_
 and install it in develop mode as discussed in :doc:`/install`.
 QimPy maintains a consistent object heirarchy in the API,
 input and checkpoint files, so once you get familiar with

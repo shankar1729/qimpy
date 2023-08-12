@@ -1,7 +1,8 @@
 QimPy: Quantum-Integrated Multi-PhYsics
 =======================================
 
-QimPy is an open-source electronic structure software designed to enable
+QimPy (pronounced `kɪm-paɪ <https://en.wikipedia.org/wiki/Help:IPA/English>`_)
+is an open-source electronic structure software designed to enable
 tight integration with classical multi-physics and multi-scale modeling.
 A key focus of this code is facilitating simultaneous performance and rapid technique development,
 making it as easy to develop new electronic-structure-integrated features,
@@ -30,6 +31,8 @@ all inter-GPU communications with the primary computation involving wavefunction
     inputfile
     api
     development/index
+
+See the `QimPy github page <https://github.com/shankar1729/qimpy>`_ for the source code.
 
 Auxiliary packages
 ------------------
