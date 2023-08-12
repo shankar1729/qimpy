@@ -1,5 +1,5 @@
-Input file documentation for transport package
-==============================================
+Input file documentation for qimpy.transport
+============================================
 
 QimPy uses the `YAML format <https://yaml.org>`_ for input files.
 See below for a complete list of settings.

@@ -29,4 +29,12 @@ all inter-GPU communications with the primary computation involving wavefunction
     tutorials/index
     api
     inputfile
-    transportinput
+
+
+Auxiliary packages
+------------------
+
+.. toctree::
+    :maxdepth: 1
+
+    transport/index
