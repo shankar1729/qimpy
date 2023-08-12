@@ -20,7 +20,7 @@ sys.path.append(os.path.abspath("./_ext/"))
 # -- Project information -----------------------------------------------------
 
 project = "QimPy"
-copyright = "2021, QimPy Collaboration"
+copyright = "2023, QimPy Collaboration"
 author = "QimPy Collaboration"
 
 
