@@ -27,9 +27,9 @@ all inter-GPU communications with the primary computation involving wavefunction
 
     install
     tutorials/index
-    api
     inputfile
-
+    api
+    development/index
 
 Auxiliary packages
 ------------------
