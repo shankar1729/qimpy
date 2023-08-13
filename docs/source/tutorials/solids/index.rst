@@ -5,3 +5,5 @@ Solids tutorials
     :maxdepth: 1
 
     bz
+    band_structures
+    metals
