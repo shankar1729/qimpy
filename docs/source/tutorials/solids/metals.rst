@@ -1,9 +1,9 @@
 Metals
 ======
 
-Silicon, the crystalline solid we have worked with is a semiconductor with a band gap which we identified in the tutorials on :doc:`band_structures` calculations. This gap clearly demarcates occupied states from unoccupied states for all k-points, so electron 'fillings' are straightforward: the lowest (nElectrons/2) bands of all k-points are filled, and the remaining are empty. This is no longer true for metals, where one or more bands are partially filled, and these fillings (or occupation factors) must be optimized self-consistently. This tutorial introduces such a calculation for platinum.
+Silicon, the crystalline solid we have worked with is a semiconductor with a band gap which we identified in the tutorials in :doc:`band_structures`. This gap clearly demarcates occupied states from unoccupied states for all k-points, so electron 'fillings' are straightforward: the lowest (nElectrons/2) bands of all k-points are filled, and the remaining are empty. This is no longer true for metals, where one or more bands are partially filled, and these fillings (or occupation factors) must be optimized self-consistently. This tutorial introduces such a calculation for platinum.
 
-Platinum is a face-centered cubic metal with a cubic lattice constant of 3.92 Angstroms (7.41 bohrs), which we can specify easily in the input file Pt.in:
+Platinum is a face-centered cubic metal with a cubic lattice constant of 3.92 Angstroms (7.41 bohrs), which we can specify easily in the input file Pt.yaml:
 
 .. code-block:: yaml
 
@@ -45,7 +45,7 @@ Run the calculation using
 
 .. code-block:: bash
 
-  (qimpy) $ python -m qimpy.dft -i Pt.in -o Pt.out
+  (qimpy) $ python -m qimpy.dft -i Pt.yaml -o Pt.out
 
 and examine the output file. The main difference is that every SCF line is preceded by a line starting with FillingsUpdate. This line reports the chemical potential, mu, of the Fermi function that produces the correct number of electrons with the current Kohn-Sham eigenvalues, and the number of electrons, nElectrons, which of course stays constant.
 
