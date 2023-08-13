@@ -47,3 +47,44 @@ Here's an example input file for silicon
       ke-cutoff: 100
     
     checkpoint: Si.h5
+
+
+Next, we see how the Brillouin zone sampling affects the total energies. 
+
+Change the line
+
+.. code-block:: yaml
+	
+	size: [8, 8, 8]
+
+to 
+
+.. code-block:: yaml
+
+	size: [${nk}, ${nk}, ${nk}]
+	
+Then create the following bash script
+
+.. code-block:: yaml
+
+	#!/bin/bash
+	for nk in 1 2 4 8 12 16; do
+		export nk  #Export adds shell variable nk to the enviornment
+               #Without it, nk will not be visible to jdftx below
+		mpirun -n 4 python -m qimpy.dft -i Si.yaml | tee Si-$nk.out
+		done
+
+	for nk in 1 2 4 8 12 16; do
+		grep "Relax" Si-$nk.out
+	done
+
+This should then give an output like
+
+.. code-block:: yaml
+
+	Relax: 0  F: -7.78898685689    fmax: +5.100e-18  t[s]: 6.03
+	Relax: 0  F: -7.87689519309    fmax: +2.343e-18  t[s]: 6.46
+	Relax: 0  F: -7.88283692282    fmax: +3.018e-19  t[s]: 7.66
+	Relax: 0  F: -7.88293690637    fmax: +2.803e-19  t[s]: 15.24
+	Relax: 0  F: -7.88293685116    fmax: +2.520e-19  t[s]: 38.74
+	Relax: 0  F: -7.88293695436    fmax: +2.803e-19  t[s]: 78.41
