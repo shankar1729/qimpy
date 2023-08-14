@@ -38,12 +38,8 @@ Here's an example input file for silicon, which you may save as ``Si.yaml``.
     
     electrons:
       k-mesh:
-        offset: [0.5, 0.5, 0.5] #Monkhorst-Pack
         size: [8, 8, 8]
-    
-    grid:
-      ke-cutoff: 100
-    
+     
     checkpoint: Si.h5
 
 Run the above input file using 4 mpi processes as follows: 
@@ -59,7 +55,7 @@ The default is a single kpoint with wavevector [0,0,0] (also called the Gamma-po
 This was acceptable for the molecules, where we picked large enough unit cells that the wavefunctions went to zero in each cell anyway and this periodicity didn't matter. 
 But now, we need to account for all possible relative phases of wavefunctions in neighbouring unit cells, which corresponds to integrating over the wave vectors in the reciprocal space unit cell, 
 or equivalently the Brillouin zone. Essentially, k-mesh replaces the specified kpoint(s) (default Gamma in this case) with a uniform mesh of kpoints (8 x 8 x 8 in this case), 
-covering the reciprocal space unit cell. Next, the code reduces the number of kpoints that need to be calculated explicitly using symmetries, from 512 to 60 in this case. 
+covering the reciprocal space unit cell. Next, the code reduces the number of kpoints that need to be calculated explicitly using symmetries, from 512 to 29 in this case. 
 
 To visualize the Silicon unit cell as well as its ground state density, run: 
 
@@ -84,7 +80,7 @@ to
 
 	size: [${nk}, ${nk}, ${nk}]
 	
-Then create the following bash script
+In addition, change the line ``checkpoint: Si.h5`` to ``checkpoint: Si-$nk.h5``. Then create the following bash script and save it as ``run.sh``: 
 
 .. code-block:: yaml
 
@@ -99,16 +95,45 @@ Then create the following bash script
 		grep "Relax" Si-$nk.out
 	done
 
-This should then give an output like
+To run this script, do ``chmod +x run.sh && ./run.sh``. This should then give an output like
 
 .. code-block:: yaml
 
-	Relax: 0  F: -7.78898685689    fmax: +5.100e-18  t[s]: 6.03
-	Relax: 0  F: -7.87689519309    fmax: +2.343e-18  t[s]: 6.46
-	Relax: 0  F: -7.88283692282    fmax: +3.018e-19  t[s]: 7.66
-	Relax: 0  F: -7.88293690637    fmax: +2.803e-19  t[s]: 15.24
-	Relax: 0  F: -7.88293685116    fmax: +2.520e-19  t[s]: 38.74
-	Relax: 0  F: -7.88293695436    fmax: +2.803e-19  t[s]: 78.41
+	Relax: 0  F: -7.25985524162    fmax: +2.383e-23  t[s]: 7.58
+	Relax: 0  F: -7.78880323458    fmax: +1.562e-18  t[s]: 9.00
+	Relax: 0  F: -7.87596489290    fmax: +2.054e-18  t[s]: 9.89
+	Relax: 0  F: -7.88279086578    fmax: +3.219e-18  t[s]: 14.09
+	Relax: 0  F: -7.88293043013    fmax: +1.637e-18  t[s]: 20.86
+	Relax: 0  F: -7.88293650650    fmax: +1.562e-18  t[s]: 32.93
+
 
 K-point offsets (Monkhorst-Pack)
 --------------------------------
+
+We implement a k-point offset by adding an offset command to the k-mesh block of the input file, changing it from: 
+
+.. code-block:: yaml
+
+ k-mesh:
+        size: [${nk}, ${nk}, ${nk}]
+
+to: 
+
+.. code-block:: yaml
+
+ k-mesh:
+        offset: [0.5, 0.5, 0.5] #Monkhorst-Pack
+        size: [${nk}, ${nk}, ${nk}]
+
+Now, running the same script to calculate the total energies as a function of k-point sampling, we obtain: 
+
+.. code-block:: yaml
+
+	Relax: 0  F: -7.78898667517    fmax: +6.247e-18  t[s]: 10.03
+	Relax: 0  F: -7.87689497983    fmax: +1.562e-18  t[s]: 10.89
+	Relax: 0  F: -7.88283670473    fmax: +4.024e-19  t[s]: 13.06
+	Relax: 0  F: -7.88293668812    fmax: +4.647e-19  t[s]: 20.81
+	Relax: 0  F: -7.88293663292    fmax: +4.392e-19  t[s]: 41.32	
+	Relax: 0  F: -7.88293673612    fmax: +3.508e-19  t[s]: 91.51
+
+Note also that for the 8x8x8 sampling we examined at the outset of this tutorial, we now have 60 (not 29) kpoints under symmetries. 
