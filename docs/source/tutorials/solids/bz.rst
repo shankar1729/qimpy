@@ -46,7 +46,7 @@ Run the above input file using 4 mpi processes as follows:
 
 .. code-block:: yaml
 
-	mpirun -n 4 python -m qimpy.dft -i Si.yaml | tee Si.out 
+    mpirun -n 4 python -m qimpy.dft -i Si.yaml | tee Si.out
 
 And inspect the resulting output file, ``Si.out``. First note the symmetry initialization: the Bravais lattice, in this case the face-centered Cubic structure, has 48 point group symmetries,
 and 48 space group symmetries (defined with translations modulo unit cell) after including the basis, in this case the two atoms per unit cell. The number of kpoints is 8x8x8=512 kpoints, 
@@ -61,7 +61,7 @@ To visualize the Silicon unit cell as well as its ground state density, run:
 
 .. code-block:: yaml
 
-	python -m qimpy.interfaces.xsf -c Si.h5 -x Si.xsf --data-symbol n
+    python -m qimpy.interfaces.xsf -c Si.h5 -x Si.xsf --data-symbol n
 
 and visualize the resulting xsf file with Vesta. 
 
@@ -71,40 +71,40 @@ Convergence with respect to k-point sampling
 Next, we see how the Brillouin zone sampling affects the total energies. Change the line
 
 .. code-block:: yaml
-	
-	size: [8, 8, 8]
+    
+    size: [8, 8, 8]
 
 to 
 
 .. code-block:: yaml
 
-	size: [${nk}, ${nk}, ${nk}]
-	
+    size: [${nk}, ${nk}, ${nk}]
+    
 In addition, change the line ``checkpoint: Si.h5`` to ``checkpoint: Si-$nk.h5``. Then create the following bash script and save it as ``run.sh``: 
 
 .. code-block:: yaml
 
-	#!/bin/bash
-	for nk in 1 2 4 8 12 16; do
-		export nk  #Export adds shell variable nk to the enviornment
-               #Without it, nk will not be visible to jdftx below
-		mpirun -n 4 python -m qimpy.dft -i Si.yaml | tee Si-$nk.out
-	done
+    #!/bin/bash
+    for nk in 1 2 4 8 12 16; do
+        export nk  #Export adds shell variable nk to the enviornment
+        #Without it, nk will not be visible to jdftx below
+        mpirun -n 4 python -m qimpy.dft -i Si.yaml | tee Si-$nk.out
+    done
 
-	for nk in 1 2 4 8 12 16; do
-		grep "Relax" Si-$nk.out
-	done
+    for nk in 1 2 4 8 12 16; do
+        grep "Relax" Si-$nk.out
+    done
 
 To run this script, do ``chmod +x run.sh && ./run.sh``. This should then give an output like
 
 .. code-block:: yaml
 
-	Relax: 0  F: -7.25985524162    fmax: +2.383e-23  t[s]: 7.58
-	Relax: 0  F: -7.78880323458    fmax: +1.562e-18  t[s]: 9.00
-	Relax: 0  F: -7.87596489290    fmax: +2.054e-18  t[s]: 9.89
-	Relax: 0  F: -7.88279086578    fmax: +3.219e-18  t[s]: 14.09
-	Relax: 0  F: -7.88293043013    fmax: +1.637e-18  t[s]: 20.86
-	Relax: 0  F: -7.88293650650    fmax: +1.562e-18  t[s]: 32.93
+    Relax: 0  F: -7.25985524162    fmax: +2.383e-23  t[s]: 7.58
+    Relax: 0  F: -7.78880323458    fmax: +1.562e-18  t[s]: 9.00
+    Relax: 0  F: -7.87596489290    fmax: +2.054e-18  t[s]: 9.89
+    Relax: 0  F: -7.88279086578    fmax: +3.219e-18  t[s]: 14.09
+    Relax: 0  F: -7.88293043013    fmax: +1.637e-18  t[s]: 20.86
+    Relax: 0  F: -7.88293650650    fmax: +1.562e-18  t[s]: 32.93
 
 
 K-point offsets (Monkhorst-Pack)
@@ -114,26 +114,26 @@ We implement a k-point offset by adding an offset command to the k-mesh block of
 
 .. code-block:: yaml
 
- k-mesh:
-        size: [${nk}, ${nk}, ${nk}]
+    k-mesh:
+      size: [${nk}, ${nk}, ${nk}]
 
 to: 
 
 .. code-block:: yaml
 
- k-mesh:
-        offset: [0.5, 0.5, 0.5] #Monkhorst-Pack
-        size: [${nk}, ${nk}, ${nk}]
+    k-mesh:
+      offset: [0.5, 0.5, 0.5] #Monkhorst-Pack
+      size: [${nk}, ${nk}, ${nk}]
 
 Now, running the same script to calculate the total energies as a function of k-point sampling, we obtain: 
 
 .. code-block:: yaml
 
-	Relax: 0  F: -7.78898667517    fmax: +6.247e-18  t[s]: 10.03
-	Relax: 0  F: -7.87689497983    fmax: +1.562e-18  t[s]: 10.89
-	Relax: 0  F: -7.88283670473    fmax: +4.024e-19  t[s]: 13.06
-	Relax: 0  F: -7.88293668812    fmax: +4.647e-19  t[s]: 20.81
-	Relax: 0  F: -7.88293663292    fmax: +4.392e-19  t[s]: 41.32	
-	Relax: 0  F: -7.88293673612    fmax: +3.508e-19  t[s]: 91.51
+    Relax: 0  F: -7.78898667517    fmax: +6.247e-18  t[s]: 10.03
+    Relax: 0  F: -7.87689497983    fmax: +1.562e-18  t[s]: 10.89
+    Relax: 0  F: -7.88283670473    fmax: +4.024e-19  t[s]: 13.06
+    Relax: 0  F: -7.88293668812    fmax: +4.647e-19  t[s]: 20.81
+    Relax: 0  F: -7.88293663292    fmax: +4.392e-19  t[s]: 41.32    
+    Relax: 0  F: -7.88293673612    fmax: +3.508e-19  t[s]: 91.51
 
 Note also that for the 8x8x8 sampling we examined at the outset of this tutorial, we now have 60 (not 29) kpoints under symmetries. 
