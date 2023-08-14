@@ -1,6 +1,8 @@
 Band structure calculations
 ===========================
 
+.. image:: Si_bandstructure.png
+
 In the previous tutorial, we calculated the total energy of silicon and explored its Brillouin zone convergence. This tutorial illustrates calculations of the electronic band structure, specifically, the variation of the Kohn-Sham eigenvalues along a special kpoint path in the Brillouin zone.
 
 First lets specify the bulk silicon energy calculation in Si.yaml, or reuse the file from the :doc:`bz`:
@@ -74,4 +76,16 @@ Then you can calculate the band structure along the k-point path with
 
    (qimpy) $ python -m qimpy.dft -i kpoints.yaml -o kpoints.out
 
-TODO: Create bandstructure plot and put it here
+and if you investigate the electron fillings using :code:`h5dump -g electrons/fillings kpoints.h5` then you can see that half of the bands are filled completely, while the other half are completely empty, in line with what is expected for a semiconductor. 
+
+And to generate the band structure plot, run 
+
+.. code-block:: bash
+
+   (qimpy) $ python -m qimpy.interfaces.bandstructure -c kpoints.h5 -o Si_bandstructure.png
+
+which should produce 
+
+.. image:: Si_bandstructure.png 
+
+Notice that at the Gamma point, the lowest band is single while the next three higher bands are degenerate: these line up with the s and p valence orbitals on the Silicon atoms. These degeneracies change in different parts of the Brillouin zone: the XW segment has two pairs of degenerate bands, while the WL and Gamma-K segments have no degeneracies.

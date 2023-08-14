@@ -49,8 +49,52 @@ Run the calculation using
 
 and examine the output file. The main difference is that every SCF line is preceded by a line starting with FillingsUpdate. This line reports the chemical potential, mu, of the Fermi function that produces the correct number of electrons with the current Kohn-Sham eigenvalues, and the number of electrons, nElectrons, which of course stays constant.
 
-Also notice that the energy in the SCF lines is called F instead of Etot. The total energy Etot satisfies a variational theorem at fixed occupations, which we dealt with so far. However, now the occupations equilibrate at a specified temperature T, and the Helmholtz free energy F = E - TS, where S is the electronic entropy, is the appropriate variational free energy to work with. Note the corresponding changes in the energy component printout at the end as well.
+Also notice that the energy in the SCF lines is called F instead of Etot. The total energy Etot satisfies a variational theorem at fixed occupations, which we dealt with so far. However, now the occupations equilibrate at a specified temperature T, and the Helmholtz free energy F = E - TS, where S is the electronic entropy, is the appropriate variational free energy to work with. Note the corresponding changes in the energy component printout at the end as well. Additionally, in the initialization, note that nBands is now larger than nElectrons/2, since the code needs a few empty states to use Fermi fillings.
 
-Additionally, in the initialization, note that nBands is now larger than nElectrons/2, since the code needs a few empty states to use Fermi fillings. Examine the fillings in the HDF5 checkpoint file using :code:`h5dump -g /electrons/fillings Pt_out.h5`
+Then you can specify the k-point path through the Brillouin Zone similarly to :doc:`band_structures` in kpoints.yaml:
 
-TODO: Explain what these numbers mean and show the bandstructure calcultion
+.. code-block:: yaml
+
+  include: Pt.yaml
+
+  electrons:
+
+    fillings:
+      n-bands: 12
+      n-bands-extra: 5
+
+    fixed-H: Pt_out.h5 #fixed Hamiltonian so there's no more SCF
+
+    k-mesh: null #de-specify the k-mesh from Si.yaml
+
+    k-path:
+      dk: 0.05
+      points:
+        - [0, 0, 0, $\Gamma$]
+        - [0, 0.5, 0.5, X]
+        - [ 0.25, 0.75, 0.5, W]
+        - [0.5, 0.5, 0.5, L]
+        - [0, 0, 0, $\Gamma$]
+        - [ 0.375, 0.75, 0.375, K]
+
+  checkpoint-out: null #de-specify the checkpoint file creation from Pt.yaml
+
+and run it with 
+
+.. code-block:: bash
+
+   (qimpy) $ python -m qimpy.dft -i kpoints.yaml -o kpoints.out
+
+Now when you inspect the electron fillings at each k-point using :code:`h5dump -g electrons/fillings kpoints.h5` you should see that some bands completely filled, some bands are completely empty, and in the middle there are some partially filled bands, implying they've crossed the Fermi level. 
+
+Finally you can produce the band structure plot with 
+
+.. code-block:: bash
+
+   (qimpy) $ python -m qimpy.interfaces.bandstructure -c kpoints.h5 -o Pt_bandstructure.png
+
+which should produce 
+
+.. image:: Pt_bandstructure.png
+
+
