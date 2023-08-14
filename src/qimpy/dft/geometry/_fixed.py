@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from qimpy import MPI
-from qimpy.io import CheckpointPath
+from qimpy import MPI, dft
+from qimpy.io import CheckpointPath, CheckpointContext, Checkpoint
 from qimpy.lattice import Lattice
 from . import Relax
 
@@ -19,3 +19,13 @@ class Fixed(Relax):
         super().__init__(
             n_iterations=0, comm=comm, lattice=lattice, checkpoint_in=checkpoint_in
         )
+
+    def run(self, system: dft.System) -> None:
+        if system.electrons.fixed_H:
+            # Bypass stepper and force calculations for non-SCF calculations:
+            system.electrons.run(system)
+            if system.checkpoint_out:
+                with Checkpoint(system.checkpoint_out, writable=True) as cp:
+                    system.save_checkpoint(CheckpointPath(cp), CheckpointContext("end"))
+        else:
+            Relax.run(self, system)

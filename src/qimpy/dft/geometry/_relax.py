@@ -122,6 +122,7 @@ class Relax(Minimize[Gradient]):
             self.history = None
 
     def run(self, system: dft.System) -> None:
+        assert not system.electrons.fixed_H
         log.info(
             "\n--- Geometry relaxation ---\n"
             if self.n_iterations
