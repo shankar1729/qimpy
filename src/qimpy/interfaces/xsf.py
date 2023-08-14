@@ -1,17 +1,12 @@
 """Write XSF file from HDF5 checkpoint file.
 
-Typical usage:
-:code:`python -m qimpy.interfaces.xsf (-h | -c FILE) [-x FILE] [-a] [-d SYMBOL]`
-
 Command-line parameters (obtained using :code:`python -m qimpy.interfaces.xsf -h`):
 
 .. code-block:: bash
 
     python -m qimpy.interfaces.xsf [-h] -c FILE [-x FILE] [-a] [-d SYMBOL]
 
-write XSF file from HDF5 checkpoint file
-
-options:
+Options:
   -h, --help            show this help message and exit
   -c FILE, --checkpoint-file FILE
                         checkpoint file in HDF5 format
@@ -147,11 +142,14 @@ def write_xsf(
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="python -m qimpy.interfaces.xsf",
-        description="write XSF file from HDF5 checkpoint file",
+        description="Write XSF file from HDF5 checkpoint file",
     )
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument(
-        "-c", "--checkpoint-file", metavar="FILE", help="checkpoint file in HDF5 format"
+    parser.add_argument(
+        "-c",
+        "--checkpoint-file",
+        metavar="FILE",
+        help="checkpoint file in HDF5 format",
+        required=True,
     )
     parser.add_argument(
         "-x",
