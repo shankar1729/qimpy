@@ -302,16 +302,26 @@ class Electrons(TreeNode):
         """Load density/potential from checkpoint for fixed-H calculation"""
         assert self.fixed_H
         cp_H = CheckpointPath(checkpoint=Checkpoint(self.fixed_H), path="/electrons")
-        # Read n and V_ks (n.grad) in real space from checkpoint:
+        # Read n and V_ks (n.grad) from checkpoint:
         n_densities = self.n_densities
         n = FieldR(system.grid, shape_batch=(n_densities,))
         V_ks = FieldR(system.grid, shape_batch=(n_densities,))
         n.read(cp_H.relative("n"))
         V_ks.read(cp_H.relative("V_ks"))
-        # Store in reciprocal space:
         self.n_tilde = ~n
         self.n_tilde.grad = ~V_ks
         log.info("  Read n and V_ks.")
+        # Optional kinetic density and gradient:
+        if self.xc.need_tau:
+            tau = FieldR(system.grid, shape_batch=(n_densities,))
+            V_tau = FieldR(system.grid, shape_batch=(n_densities,))
+            tau.read(cp_H.relative("tau"))
+            V_tau.read(cp_H.relative("V_tau"))
+            self.tau_tilde = ~tau
+            self.tau_tilde.grad = ~V_tau
+            log.info("  Read tau and V_tau.")
+        else:
+            self.tau_tilde = FieldH(system.grid, shape_batch=(0,))
         # Use mu from checkpoint for fillings:
         self.fillings.mu = cp_H.relative("fillings").attrs["mu"]
         self.fillings.mu_constrain = True  # make sure it's not updated
@@ -477,12 +487,6 @@ class Electrons(TreeNode):
             self.initialize_wavefunctions(system)  # LCAO / randomize
             self.scf.update(system)
             self.scf.optimize()
-        self.output()
-
-    def output(self) -> None:
-        """Save any configured outputs (TODO: systematize this)"""
-        if isinstance(self.kpoints, Kpath):
-            self.kpoints.plot(self, "bandstruct.pdf")
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
@@ -495,4 +499,8 @@ class Electrons(TreeNode):
             n_bands = self.fillings.n_bands
             self.C[:, :, :n_bands].write(cp_path.relative("C"))
             saved_list.append("C")
+        if self.xc.need_tau:
+            (~self.tau_tilde).write(cp_path.relative("tau"))
+            (~self.tau_tilde.grad).write(cp_path.relative("V_tau"))
+            saved_list.extend(["tau", "V_tau"])
         return saved_list
