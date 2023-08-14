@@ -89,7 +89,7 @@ In addition, change the line ``checkpoint: Si.h5`` to ``checkpoint: Si-$nk.h5``.
 		export nk  #Export adds shell variable nk to the enviornment
                #Without it, nk will not be visible to jdftx below
 		mpirun -n 4 python -m qimpy.dft -i Si.yaml | tee Si-$nk.out
-		done
+	done
 
 	for nk in 1 2 4 8 12 16; do
 		grep "Relax" Si-$nk.out
