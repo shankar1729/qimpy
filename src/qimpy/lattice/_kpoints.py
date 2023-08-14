@@ -6,7 +6,7 @@ import torch
 
 import qimpy
 from qimpy import log, rc, TreeNode, MPI
-from qimpy.io import CheckpointPath
+from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import ProcessGrid, TaskDivision
 from . import Lattice
 
@@ -44,6 +44,11 @@ class Kpoints(TreeNode):
             i_proc=self.comm.rank,
             name="k-point",
         )
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        return [cp_path.write("k", self.k), cp_path.write("wk", self.wk)]
 
 
 class Kmesh(Kpoints):
@@ -175,6 +180,7 @@ class Kmesh(Kpoints):
         )
         # --- store mapping from full k-mesh to reduced set:
         size = tuple(size)
+        self.size = size
         self.i_reduced = i_reduced.reshape(size)  # index into k
         self.i_sym = i_sym.reshape(size)  # symmetry number to get to k
         # --- seperate combined symmetry index into symmetry and inversion:
@@ -188,10 +194,28 @@ class Kmesh(Kpoints):
             process_grid=process_grid, k=k, wk=wk, checkpoint_in=checkpoint_in
         )
 
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        saved_list = super()._save_checkpoint(cp_path, context)
+        cp_path.attrs["size"] = self.size
+        saved_list.extend(
+            [
+                "size",
+                cp_path.write("i_reduced", self.i_reduced),
+                cp_path.write("i_sym", self.i_sym),
+                cp_path.write("invert", self.invert),
+            ]
+        )
+        return saved_list
+
 
 class Kpath(Kpoints):
     """Path of k-points traversing Brillouin zone.
     Typically used only for band structure calculations."""
+
+    labels: dict[int, str]  #: Special k-point indices and corresponding labels
+    k_length: torch.Tensor  #: Cumulative k-path length till each k
 
     def __init__(
         self,
@@ -234,7 +258,7 @@ class Kpath(Kpoints):
         # Create path one segment at a time:
         k_list = [kverts[:1]]
         self.labels = {0: labels[0]}
-        k_length = [np.zeros((1,), dtype=float)]
+        k_length = [torch.zeros(1, device=rc.device)]
         nk_tot = 1
         distance_tot = 0.0
         dkverts = kverts.diff(dim=0)
@@ -245,17 +269,25 @@ class Kpath(Kpoints):
             k_list.append(kverts[i] + t[:, None] * dkverts[i])
             nk_tot += nk
             self.labels[nk_tot - 1] = labels[i + 1]  # label at end of segment
-            k_length.append((distance_tot + distance * t).to(rc.cpu).numpy())
+            k_length.append(distance_tot + distance * t)
             distance_tot += distance
         k = torch.cat(k_list)
         wk = torch.full((nk_tot,), 1.0 / nk_tot, device=rc.device)
-        self.k_length = np.concatenate(k_length)  # cumulative length on path
+        self.k_length = torch.cat(k_length)
         log.info(f"Created {nk_tot} k-points on k-path of" f" length {distance_tot:g}")
 
         # Initialize base class:
         super().__init__(
             process_grid=process_grid, k=k, wk=wk, checkpoint_in=checkpoint_in
         )
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        saved_list = super()._save_checkpoint(cp_path, context)
+        cp_path.attrs["labels"] = str(self.labels)
+        saved_list.extend(["labels", cp_path.write("k_length", self.k_length)])
+        return saved_list
 
     def plot(self, electrons: qimpy.dft.electrons.Electrons, filename: str) -> None:
         """Save band structure plot for `electrons` to `filename`.
