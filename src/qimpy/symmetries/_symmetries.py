@@ -136,14 +136,23 @@ class Symmetries(TreeNode):
             )
             log.info(f"Found {rot.shape[0]} space-group symmetries with basis")
 
-        # Reduce by lattice center:
-        center_rot = rot @ lattice.center + trans
-        sel = torch.where((center_rot - lattice.center).norm(dim=-1) < tolerance)[0]
-        if len(sel) < rot.shape[0]:
-            log.info(f"Reduced to {len(sel)} space-group symmetries by lattice center")
-            rot = rot[sel]
-            trans = trans[sel]
-            position_map = position_map[sel]
+        # Reduce by lattice center along non-periodic directions:
+        i_truncated = [
+            i_dim
+            for i_dim, is_periodic in enumerate(lattice.periodic)
+            if (not is_periodic)
+        ]
+        if i_truncated:
+            center_rot = rot @ lattice.center + trans
+            dcenter_truncated = (center_rot - lattice.center)[..., i_truncated]
+            sel = torch.where(dcenter_truncated.norm(dim=-1) < tolerance)[0]
+            if len(sel) < rot.shape[0]:
+                log.info(
+                    f"Reduced to {len(sel)} space-group symmetries by lattice center"
+                )
+                rot = rot[sel]
+                trans = trans[sel]
+                position_map = position_map[sel]
         return rot, trans, position_map
 
     @staticmethod

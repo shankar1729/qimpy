@@ -1,5 +1,8 @@
 include: totalE.yaml
 
+lattice:
+  a: 10.3492926  # relaxed lattice constant
+
 electrons:
   fixed-H: totalE.h5
   fillings:
@@ -16,4 +19,6 @@ electrons:
     - [0.000, 0.000, 0.000, $\Gamma$]
     - [0.375, 0.750, 0.375, K]
 
-checkpoint-out: null  # disable totalE.h5 output included from totalE.yaml
+geometry: fixed
+checkpoint-out: bandstruct.h5
+
