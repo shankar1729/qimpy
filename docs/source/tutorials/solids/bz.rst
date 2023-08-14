@@ -19,7 +19,7 @@ However, this does not capture all the spatial periodicity of the lattice
 and we can work with the smaller unit cell of the face-centered Cubic lattice,
 which will contain only two silicon atoms.
 
-Here's an example input file for silicon, which you may save as Si.yaml.
+Here's an example input file for silicon, which you may save as ``Si.yaml``.
 
 .. code-block:: yaml
 
@@ -48,11 +48,11 @@ Here's an example input file for silicon, which you may save as Si.yaml.
 
 Run the above input file using 4 mpi processes as follows: 
 
-.. code-block::yaml
+.. code-block:: yaml
 
 	mpirun -n 4 python -m qimpy.dft -i Si.yaml | tee Si.out 
 
-And inspect the resulting output file, Si.out. First note the symmetry initialization: the Bravais lattice, in this case the face-centered Cubic structure, has 48 point group symmetries,
+And inspect the resulting output file, ``Si.out``. First note the symmetry initialization: the Bravais lattice, in this case the face-centered Cubic structure, has 48 point group symmetries,
 and 48 space group symmetries (defined with translations modulo unit cell) after including the basis, in this case the two atoms per unit cell. The number of kpoints is 8x8x8=512 kpoints, 
 which is the result of the k-mesh command included above. Kpoints correspond to Bloch wave-vectors which set the phase that the wavefunction picks up when moving from one unit cell to another. 
 The default is a single kpoint with wavevector [0,0,0] (also called the Gamma-point), which means that the wavefunction picks up no phase or is periodic on the unit cell. 
@@ -68,6 +68,9 @@ To visualize the Silicon unit cell as well as its ground state density, run:
 	python -m qimpy.interfaces.xsf -c Si.h5 -x Si.xsf --data-symbol n
 
 and visualize the resulting xsf file with Vesta. 
+
+Convergence with respect to k-point sampling
+-------------------------------------------
 
 Next, we see how the Brillouin zone sampling affects the total energies. Change the line
 
@@ -106,3 +109,6 @@ This should then give an output like
 	Relax: 0  F: -7.88293690637    fmax: +2.803e-19  t[s]: 15.24
 	Relax: 0  F: -7.88293685116    fmax: +2.520e-19  t[s]: 38.74
 	Relax: 0  F: -7.88293695436    fmax: +2.803e-19  t[s]: 78.41
+
+K-point offsets (Monkhorst-Pack)
+--------------------------------
