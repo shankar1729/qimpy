@@ -84,7 +84,7 @@ the geometry optimizer now converges with maximum force within the threshold we 
 Calculate the DFT-predicted bond length and angle from the positions written at the end of `water.out` or by using the
 checkpoint file (:code:`h5dump -d /ions/positions water.h5`).
 With the SG15 pseudopotentials and the PBE exchange-correlation functional,
-I get a converged O-H bond length of 0.98 A and an H-O-H bond angle of 102.7 degrees.
+I get a converged O-H bond length of 0.97 A and an H-O-H bond angle of 104.3 degrees.
 
 We can visualize the geometry optimization steps using :doc:`/api/qimpy.interfaces.xsf`:
 
