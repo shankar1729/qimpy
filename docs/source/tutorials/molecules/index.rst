@@ -6,3 +6,4 @@ Molecules tutorials
 
     firstcalc
     geometryopt
+    openshell
