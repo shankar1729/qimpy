@@ -1,6 +1,10 @@
 Geometry optimization
 =====================
 
+.. image:: water.gif
+    :width: 400
+    :align: center
+
 So far, we have calculated the energy of a water molecule with specified atom positions.
 This tutorial shows you how to optimize the geometry of the molecule (i.e. atom positions),
 and also how to continue a calculation.
