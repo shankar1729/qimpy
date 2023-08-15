@@ -34,3 +34,31 @@ You should now have two UPF pseudopotential files in your current directory:
       Pt.rel-pbe-n-rrkjus_psl.0.1.UPF   #the relativistic one
       Pt.pbe-n-rrkjus_psl.0.1.UPF       #the non-relativistic one
 
+We first run a non-relativistic calculation (but with the new pseudopotential)
+
+
+.. code-block:: yaml
+
+    lattice:
+      system: cubic
+      modification: face-centered
+      a: 7.41
+
+    ions:
+      pseudopotentials:
+        - $ID.pbe-n-rrkjus_psl.0.1.UPF
+      coordinates:
+        - [Pt, 0, 0, 0]
+
+    electrons:
+      spinorial: no
+      fillings:
+         smearing: Gauss
+         sigma: 0.02
+      k-mesh:
+        size: [12, 12, 12]
+
+      xc:
+        functional: gga_pbe
+
+checkpoint_out: Pt_out.h5
