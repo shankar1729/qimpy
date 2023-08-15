@@ -61,4 +61,11 @@ We first run a non-relativistic calculation (but with the new pseudopotential)
       xc:
         functional: gga_pbe
 
-checkpoint_out: Pt_out.h5
+     checkpoint_out: Pt_out.h5
+
+To change the calculation for a spinorial calculation, change the line ``spinorial: no`` to ``spinorial: true`` and change the pseudopotential line to:
+
+.. code-block:: yaml
+    
+    pseudopotentials:
+      - $ID.rel-pbe-n-rrkjus_psl.0.1.UPF
