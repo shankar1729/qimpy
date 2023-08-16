@@ -14,6 +14,7 @@ diamond-cubic silicon lattice with a Nose-Hoover thermostat. Save this text to
 ``Silicon_md.yaml`` in your calculation directory:
 
 .. code-block:: yaml
+
    # Diamond-cubic silicon
    lattice:
      system: cubic
