@@ -52,7 +52,7 @@ Now you are ready to perform the calculation:
 
 .. code-block:: bash
 
-    (qimpy) $ python -m qimpy.dft -i Silicon_md.yaml | tee -o Silicon_md.out
+    (qimpy) $ python -m qimpy.dft -i Silicon_md.yaml | tee Silicon_md.out
 
 The standard output of this run will be saved to ``Silicon_md.out``, and
 raw data (including forces, trajectories, and all run parameters) will be saved
@@ -103,7 +103,7 @@ this by running the following script within your calculation directory:
 
 .. code-block:: bash
 
-    (qimpy) $ python --animated -m qimpy.interfaces.xsf -c Silicon_md.h5 -x Silicon_md.xsf
+    (qimpy) $ python -m qimpy.interfaces.xsf --animated -c Silicon_md.h5 -x Silicon_md.xsf
 
 The ``--animated`` flag makes sure that this data is parsed into an animated XSF
 file. You may now open this file in Ovito, and you will be able to view an
