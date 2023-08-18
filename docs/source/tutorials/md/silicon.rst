@@ -19,15 +19,21 @@ diamond-cubic silicon lattice with a Nose-Hoover thermostat. Save this text to
    lattice:
      system: cubic
      modification: face-centered
-     a: 5.429 Angstrom
+     a: 5.4437022209 Angstrom
      movable: no
 
    ions:
      pseudopotentials:
        - SG15/$ID_ONCV_PBE-1.0.upf
      coordinates:
-       - [Si, 0.125, 0.07, 0.01]
-       - [Si, 0.380, 0.32, 0.26]
+       - [Si, 0.75,   0.75,   0.25]
+       - [Si, 0.00,   0.50,   0.50]
+       - [Si, 0.75,   0.25,   0.75]
+       - [Si, 0.00,   0.00,   0.00]
+       - [Si, 0.25,   0.75,   0.75]
+       - [Si, 0.50,   0.50,   0.00]
+       - [Si, 0.25,   0.25,   0.25]
+       - [Si, 0.50,   0.00,   0.50]
 
    geometry:
      dynamics:
@@ -85,7 +91,7 @@ Save this script as ``energy_plot.py`` within your calculation directory (make
 sure the ``Silicon_md.h5`` checkpoint file is available), and run it to produce
 the following time-series plot of the system's energy:
 
-.. image:: si_aimd_energy.png
+.. figure:: si_aimd_energy.png
     :align: center
 
 You may just as easily extract all other time series parameters of your run as
@@ -105,3 +111,4 @@ animation of your calculation.
 
 .. image:: ovito_example.png
     :align: center
+    :scale: 80 %
