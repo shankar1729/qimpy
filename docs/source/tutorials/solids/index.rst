@@ -7,3 +7,4 @@ Solids tutorials
     bz
     band_structures
     metals
+    soc 

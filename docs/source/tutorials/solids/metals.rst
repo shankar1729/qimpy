@@ -14,7 +14,7 @@ Platinum is a face-centered cubic metal with a cubic lattice constant of 3.92 An
      
     ions:
       pseudopotentials:
-        - SG15/$ID_ONCV_PBESOL-1.0.upf
+        - SG15/$ID_ONCV_PBE.upf
       coordinates:
         - [Pt, 0, 0, 0] #just one atom per unit cell
      
@@ -26,20 +26,14 @@ Platinum is a face-centered cubic metal with a cubic lattice constant of 3.92 An
         smearing: fermi
         kT: 0.01 #Hartree
       
-      basis:
-        grid:
-          ke-cutoff: 100 #Hartree
+    grid:
+      ke-cutoff: 100 #Hartree
       
-      xc:
-        functional: gga_pbesol
-      
-      checkpoint_out: Pt_out.h5
+    checkpoint_out: Pt_out.h5
 
 The only new command is elec-smearing which specifies that the fillings must be set using a Fermi function based on the current Kohn-Sham eigenvalues, rather than determined once at startup (the default we implicitly used so far). The first parameter of this command specifies the functional form for the occupations, in this case selecting a Fermi function (see :doc:`fillings </yamldoc/qimpy.dft.electrons.Fillings>` for other options). The second parameter determines the width in energy over which the Fermi function goes from one to zero (occupied to unoccupied).
 
 Metals are much more sensitive to k-point sampling, because for some bands, a part of the Brillouin zone is filled and the remainder is empty, separated by a Fermi surface. The number of k-points directly determines how accurately the Fermi surface(s) can be resolved. The Fermi temperature is essentially a smoothing parameter that allows us to resolve the Fermi surface accurately at moderate k-point counts. Note that the tempreature we chose is around ten times room temperature in order to increase the smoothing and use a practical number of k-points.
-
-Finally, we have selected the PBEsol exchange-correlation functional using the **functional** command, which is generally more accurate than PBE for solids (especially for metals). Correspondingly, we selected PBEsol pseudopotentials from the SG15 set.
 
 Run the calculation using 
 

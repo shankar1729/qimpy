@@ -1,6 +1,9 @@
 A first calculation
 ===================
 
+.. image:: water.png
+    :align: center
+
 QimPy is an electronic density-functional theory (DFT) software,
 which means that its primary functionality is to calculate
 the quantum-mechanical energy of electrons in an external potential,

@@ -56,8 +56,8 @@ Create a directory, say /path/to/pseudos where you want to store your pseudopote
 .. code-block:: bash
 
     $ cd /path/to/pseudos
-    pseudos$ wget https://github.com/shankar1729/jdftx/blob/master/jdftx/pseudopotentials/SG15.tgz
-    pseudos$ wget https://github.com/shankar1729/jdftx/blob/master/jdftx/pseudopotentials/SG15-pulay.tgz
+    pseudos$ wget https://raw.githubusercontent.com/shankar1729/jdftx/master/jdftx/pseudopotentials/SG15.tgz
+    pseudos$ wget https://raw.githubusercontent.com/shankar1729/jdftx/master/jdftx/pseudopotentials/SG15-pulay.tgz
     pseudos$ tar xvzf SG15.tgz
     pseudos$ tar xvzf SG15-pulay.tgz
 

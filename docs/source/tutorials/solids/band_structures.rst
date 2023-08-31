@@ -16,7 +16,7 @@ First lets specify the bulk silicon energy calculation in Si.yaml, or reuse the 
 
   ions:
     pseudopotentials:
-      - /SG15/$ID_ONCV_PBE-1.0.upf
+      - SG15/$ID_ONCV_PBE.upf
     coordinates:
       - [Si, 0, 0, 0]
       - [Si, 0.25, 0.25, 0.25]
@@ -25,9 +25,6 @@ First lets specify the bulk silicon energy calculation in Si.yaml, or reuse the 
     k-mesh:
       offset: [0.5, 0.5, 0.5] #Monkhorst-Pack
       size: [8, 8, 8]
-    
-    xc:
-      functional: gga_pbe
 
   grid:
     ke-cutoff: 100 #Hartree
