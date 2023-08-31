@@ -2,7 +2,7 @@
 lattice:
   system: cubic
   modification: face-centered
-  a: 10.26  # bohrs
+  a: 5.43 Angstrom
   movable: yes
 
 ions:

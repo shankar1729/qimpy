@@ -19,6 +19,7 @@ class Pseudopotential:
     element: str  #: Chemical symbol of element
     atomic_number: int  #: Atomic number of element
     is_paw: bool  #: Whether this is a PAW pseudopotential
+    is_ultrasoft: bool  #: Whether this is an ultrasoft pseudopotential
     Z: float  #: Pseudo-atomic number i.e. number of valence electrons / atom
     l_max: int  #: Maximum angular momentum quantum number
     r: torch.Tensor  #: Radial grid

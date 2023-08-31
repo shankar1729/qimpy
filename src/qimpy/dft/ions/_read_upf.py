@@ -66,6 +66,11 @@ def read_upf(ps: ions.Pseudopotential, filename: str) -> None:
         log.error("  PAW datasets are not yet supported.")
         raise ValueError("PAW dataset in " + filename + " unsupported")
 
+    ps.is_ultrasoft = str(section.attrib.get("is_ultrasoft")).lower() in ["t", "true"]
+    if ps.is_ultrasoft:
+        log.error("  Ultrasoft pseudopotentials are not yet supported.")
+        raise ValueError("Ultrasoft pseudopotential in " + filename + " unsupported")
+
     # --- Valence properties:
     ps.Z = float(section.attrib["z_valence"])
     ps.l_max = int(section.attrib["l_max"])
