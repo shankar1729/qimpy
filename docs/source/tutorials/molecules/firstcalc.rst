@@ -48,11 +48,17 @@ and only the remaining valence electrons are included explicitly in the DFT calc
 The **ions/pseudopotentials** key points to the pseudopotentials specified by
 the environment variable **QIMPY_PSEUDO_DIR**.
 
-Now, that basic input file can be run with output logged to a file and to the terminal as:
+Now, that basic input file can be run with output logged to a file named "water.out" as:
 
 .. code-block:: bash
 
-    (qimpy) $ python -m qimpy.dft -i water.yaml | tee -o water.out
+    (qimpy) $ python -m qimpy.dft -i water.yaml -o water.out
+
+Alternatively, to write the output to a file while also printing to standard output you can run:
+
+.. code-block:: bash
+
+    (qimpy) $ python -m qimpy.dft -i water.yaml | tee water.out
 
 For more details about this stand-alone calculation check :doc:`/api/qimpy.dft.main`. That should complete in a few
 seconds and create files `water.out` and `water.h5`.
