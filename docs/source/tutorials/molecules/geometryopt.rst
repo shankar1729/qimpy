@@ -46,7 +46,7 @@ and run
 
 .. code-block:: bash
 
-    (qimpy) $ python -m qimpy.dft -i water.yaml | tee -o water.out
+    (qimpy) $ python -m qimpy.dft -i water.yaml -o water.out
 
 Notice that in this run, after finishing one electronic optimization (lines starting with **SCF**),
 the calculation prints a line starting with **Relax** with the same energy as the last preceding SCF step.
@@ -75,7 +75,14 @@ To overwrite the output file use
 
 .. code-block:: bash
 
-    (qimpy) $ python -m qimpy.dft -i water.yaml | tee -o water.out --no-append
+    (qimpy) $ python -m qimpy.dft -i water.yaml -o water.out --no-append
+
+On the other hand, if you using tee to pipe to standard output please note that the default behavior is to overwrite the output file.
+To append the output file while piping to standard output use
+
+.. code-block:: bash
+
+    (qimpy) $ python -m qimpy.dft -i water.yaml | tee water.out --append
 
 Examine the output file again.
 (If you appended the outut file, scroll past the first calculation to where the second one begins.)
