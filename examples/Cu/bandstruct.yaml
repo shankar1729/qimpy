@@ -16,4 +16,6 @@ electrons:
     - [0.000, 0.000, 0.000, $\Gamma$]
     - [0.375, 0.750, 0.375, K]
 
-checkpoint-out: null  # disable totalE.h5 output included from totalE.yaml
+checkpoint: null
+checkpoint-out: bandstruct.h5
+
