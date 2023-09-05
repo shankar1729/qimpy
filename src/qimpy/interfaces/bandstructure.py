@@ -29,60 +29,70 @@ def plot(checkpoint_files: str, output_file: str, **kwargs) -> None:
     Save plot to `output_file` in a matplotlib supported format (based on extension).
     """
     checkpoint_files = checkpoint_files.split()
-    for cf_num, checkpoint_file in enumerate(checkpoint_files):
-        print(f'Checkpoint file: {checkpoint_file}')
-        # Read required quantities from checkpoint:
-        with h5py.File(checkpoint_file, "r") as h5_file:
+    eigs = [] # list of eigenvalues for each checkpoint
+    mus = np.array([]) # list of chemical potentials for each checkpoint
+    n_occupied_bands = np.array([], dtype=int) #
+    nbands_tot = 0
+    for cp_file in checkpoint_files:
+        with h5py.File(cp_file, "r") as h5_file:
             eig = np.array(h5_file["/electrons/eig"])
+            eigs.append(eig)
             k_length = np.array(h5_file["/electrons/kpoints/k_length"])
             labels: dict[int, str] = ast.literal_eval(
                 str(h5_file["/electrons/kpoints"].attrs["labels"])
             )
             mu = float(h5_file["/electrons/fillings"].attrs["mu"])
-        n_spins, nk, n_bands = eig.shape
-        # Check for semi-core gap (only among occupied bands):
-        n_occupied_bands = max(np.where(eig.min(axis=(0, 1)) < mu)[0]) + 1
-        gaps_start = eig[..., : n_occupied_bands - 1].max(axis=(0, 1))
-        gaps_stop = eig[..., 1:n_occupied_bands].min(axis=(0, 1))
-        gaps = gaps_stop - gaps_start
-        gap_cut = 0.5  # threshold on semi-core gap at which to break y-axis
-        i_gaps = np.where(gaps > gap_cut)[0] + 1
-        split_axis = len(i_gaps) > 0
-        i_band_edges = np.concatenate(
-            (np.zeros(1, dtype=int), i_gaps, np.full(1, n_bands, dtype=int))
-        )
-        band_ranges = list(zip(i_band_edges[:-1], i_band_edges[1:]))
-        # Prepare figure and panels:
-        yformatter = ticker.ScalarFormatter(useOffset=False)
-        ax_heights = [3] + [1] * (len(band_ranges) - 1)
-        if cf_num == 0:
-            if split_axis:
-                _, axes = plt.subplots(
-                    len(band_ranges),
-                    1,
-                    sharex="all",
-                    gridspec_kw={"height_ratios": ax_heights},
-                )
-                plt.subplots_adjust(hspace=0.03)
-            else:
-                plt.figure()
-                axes = [plt.gca()]
+            mus = np.append(mus, mu)
+            n_spins, nk, n_bands = eig.shape
+            nbands_tot += n_bands
+            # Check for semi-core gap (only among occupied bands):
+            n_occupied_bands = np.append(n_occupied_bands, max(np.where(eig.min(axis=(0, 1)) < mu)[0]) + 1)
 
-            # Plot:
+    occupied_eigs = np.concatenate([eigs[i][..., 0:n_occupied_bands[i]] for i in range(0, len(n_occupied_bands))], axis=2)
+    occupied_eigs = np.sort(occupied_eigs, axis=2) 
+    gaps_start = occupied_eigs[..., :-1].max(axis=(0, 1))
+    gaps_stop = occupied_eigs[..., 1:].min(axis=(0, 1))
+    gaps = gaps_stop - gaps_start
+    gap_cut = 0.5  # threshold on semi-core gap at which to break y-axis
+    i_gaps = np.where(gaps > gap_cut)[0] + 1
+    split_axis = len(i_gaps) > 0
+    i_band_edges = np.concatenate(
+        (np.zeros(1, dtype=int), i_gaps, np.full(1, nbands_tot, dtype=int))
+    )
+    band_ranges = list(zip(i_band_edges[:-1], i_band_edges[1:]))
+    ax_heights = [3] + [1] * (len(band_ranges) - 1)
+    # Prepare figure and panels:
+    yformatter = ticker.ScalarFormatter(useOffset=False)
+
+    band_range_energies = [(occupied_eigs[..., r[0]].min()-0.01, occupied_eigs[..., slice(r[1])].max()+0.01) for r in band_ranges]
+    if split_axis:
+        _, axes = plt.subplots(
+            len(band_ranges),
+            1,
+            sharex="all",
+            gridspec_kw={"height_ratios": ax_heights},
+        )
+        plt.subplots_adjust(hspace=0.03)
+    else:
+        plt.figure()
+        axes = [plt.gca()]
+        
+    for cf_num, (mu, eig) in enumerate(zip(mus, eigs)):
+        if cf_num == 0:
+                # Plot:
             tick_pos = [k_length[i] for i in labels.keys()]
-            for i_ax, band_range in enumerate(band_ranges[::-1]):
-                print(f"i_ax: {i_ax}, band_range: {band_range}")
+            for i_ax, brange_energy in enumerate(band_range_energies[::-1]):
                 plt.sca(axes[i_ax])
                 for i_spin in range(n_spins):
                     plt.plot(
                         k_length,
-                        eig[i_spin, :, slice(*band_range)],
-                        color="kr"[i_spin], linestyle="solid"
-                    )
+                        eig[i_spin, ...],
+                        color="kr"[i_spin], linestyle="solid")
                 for pos in tick_pos[1:-1]:
                     plt.axvline(pos, color="k", ls="dotted", lw=1)
                 plt.xlim(0, k_length[-1])
                 axes[i_ax].yaxis.set_major_formatter(yformatter)
+                axes[i_ax].set_ylim(brange_energy)
                 if (not np.isnan(mu)) and (not i_ax):
                     plt.axhline(mu, color="k", ls="dotted", lw=1)
     
@@ -107,7 +117,7 @@ def plot(checkpoint_files: str, output_file: str, **kwargs) -> None:
                     if i_ax + 1 < len(axes):
                         ax.plot((x0 - dx, x0 + dx), (-dy, +dy), **kwargs)
                     if i_ax:
-                        ax.plot((x0 - dx, x0 + dx), (1 - dy, 1 + dy), **kwargs) 
+                        ax.plot((x0 - dx, x0 + dx), (1 - dy, 1 + dy), **kwargs)
 
         else:
             axes = plt.gcf().axes
@@ -119,11 +129,15 @@ def plot(checkpoint_files: str, output_file: str, **kwargs) -> None:
                     plt.plot(
                         k_length,
                         eig[i_spin, :, :],
-                        color="kr"[i_spin], linestyle="dashed", linewidth=3)
+                        color="kr"[i_spin], linestyle="dashed", linewidth=2)
                 ax.set_xlim(xlim)
                 ax.set_ylim(ylim)
-    plt.savefig(output_file, bbox_inches="tight")
-    plt.show()
+                if (not np.isnan(mu)) and (not i_ax):
+                    plt.axhline(mu, color="k", ls="dashed", lw=1)
+
+    plt.savefig(output_file, bbox_inches="tight");
+    plt.show();
+
 
 
 def main() -> None:
