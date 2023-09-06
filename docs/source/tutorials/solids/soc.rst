@@ -16,26 +16,26 @@ on the band structure of metallic platinum.
 
 In plane-wave calculations using pseudopotentials,
 these relativistic effects can be built into the pseudopotentials.
-The GBRV pseudopotentials we have used so far do not have relativistic versions available,
-so we will use another pseudopotential from the 
-`Quantum Espresso pseudopotential library <http://www.quantum-espresso.org/pseudopotentials>`_.
-Download `this relativistic pseudopotential <http://www.quantum-espresso.org/wp-content/uploads/upf_files/Pt.rel-pbe-n-rrkjus_psl.0.1.UPF>`_,
-and also `this conventional non-relativistic pseudopotential <http://www.quantum-espresso.org/wp-content/uploads/upf_files/Pt.pbe-n-rrkjus_psl.0.1.UPF>`_,
-into your current working directory.
-We will use a different non-relativistic pseudopotential as well to compare with
-and identify the relativistic effects, and for this we will use the downloaded one
-instead of GBRV because its generation parameters are much closer to the relativistic one
-and we will see less discrepancies simply due to pseudopotential differences.
+The SG15 pseudopotentials we have used so far do not have relativistic versions available,
+so we will use pseudopotentials from `Pseudo Dojo <http://www.pseudo-dojo.org/>`_. 
+Download scalar relativistic (SR) and full relativistic (FR) pseudopotentials and store them in separate directories, ``$SR`` and 
+``$FR`` (as the SR and FR pseudopotentials share file names for any given atom).
 
-You should now have two UPF pseudopotential files in your current directory:
+Unpacked the tar files as follows: 
+
+.. code-block:: yaml
+
+      tar -zxvf $SR/nc-sr-05_pbe_stringent_upf.tgz # Non (Scalar) Relativistic 
+      tar -zxvf $FR/nc-fr-04_pbe_stringent_upf.tgz # Full Relativistic
+
+Your pseudopotential paths should now be: 
 
 .. code-block:: yaml
       
-      Pt.rel-pbe-n-rrkjus_psl.0.1.UPF   #the relativistic one
-      Pt.pbe-n-rrkjus_psl.0.1.UPF       #the non-relativistic one
+      $FR/Pt.upf   #the relativistic one
+      $SR/Pt.upf   #the non-relativistic one
 
-We first run a non-relativistic calculation (but with the new pseudopotential)
-
+We first run the non-relativistic calculation (but with the new Pseudo Dojo pseudopotential)
 
 .. code-block:: yaml
 
@@ -46,26 +46,100 @@ We first run a non-relativistic calculation (but with the new pseudopotential)
 
     ions:
       pseudopotentials:
-        - $ID.pbe-n-rrkjus_psl.0.1.UPF
+        - $SR/ID.upf
       coordinates:
         - [Pt, 0, 0, 0]
 
     electrons:
       spinorial: no
       fillings:
-         smearing: Gauss
-         sigma: 0.02
+         smearing: fermi
+         sigma: 0.01
       k-mesh:
         size: [12, 12, 12]
-
       xc:
         functional: gga_pbe
+      basis: 
+        ke-cutoff: 45 # Higher wavefunction cutoff as determined from Pseudo Dojo website
 
-     checkpoint_out: Pt_out.h5
+      checkpoint_out: Pt_out.h5
 
-To change the calculation for a spinorial calculation, change the line ``spinorial: no`` to ``spinorial: true`` and change the pseudopotential line to:
+Save the above input commands in ``Pt.yaml``. To change the calculation for a spinorial calculation, change the line ``spinorial: no`` to ``spinorial: true`` and change the pseudopotential line to:
 
 .. code-block:: yaml
     
     pseudopotentials:
-      - $ID.rel-pbe-n-rrkjus_psl.0.1.UPF
+      - $FR/$ID.upf
+
+Remember to also change the value given for ``checkpoint_out`` for the new relativistic calculation. We choose our new checkpoint filename: 
+
+.. code-block:: yaml
+      
+      checkpoint_out: Pt_soc_out.h5
+
+Save the new input file, with the necessary alterations for a relativistic calculation, in ``Pt.soc.yaml`` and run as before. 
+
+Now we run both the nonrelativistic and relativistic band structure calculations. For the nonrelativistic calculation, we use an input file, ``kpoints.yaml``: 
+
+.. code-block:: yaml
+
+      include: Pt.yaml
+
+      electrons:
+        fillings:
+          n-bands: 12
+          n-bands-extra: 5
+
+      fixed-H: Pt_out.h5 #fixed Hamiltonian so there's no more SCF
+
+      k-mesh: null #de-specify the k-mesh from Si.yaml
+
+      k-path:
+        dk: 0.05
+        points:
+          - [0, 0, 0, $\Gamma$]
+          - [0, 0.5, 0.5, X]
+          - [ 0.25, 0.75, 0.5, W]
+          - [0.5, 0.5, 0.5, L]
+          - [0, 0, 0, $\Gamma$]
+          - [ 0.375, 0.75, 0.375, K]
+
+      checkpoint-out: kpoints_out.h5
+
+For the relativistic band structure calculation, we create a new input file, ``kpoints.soc.yaml``: 
+
+.. code-block:: yaml
+
+      include: Pt.soc.yaml
+
+      electrons:
+        fillings:
+          n-bands: 24
+          n-bands-extra: 10
+
+      fixed-H: Pt_soc_out.h5 #fixed Hamiltonian so there's no more SCF
+
+      k-mesh: null #de-specify the k-mesh from Si.yaml
+
+      k-path:
+        dk: 0.05
+        points:
+          - [0, 0, 0, $\Gamma$]
+          - [0, 0.5, 0.5, X]
+          - [ 0.25, 0.75, 0.5, W]
+          - [0.5, 0.5, 0.5, L]
+          - [0, 0, 0, $\Gamma$]
+          - [ 0.375, 0.75, 0.375, K]
+
+      checkpoint-out: kpoints_soc_out.h5
+
+
+We then plot the overlayed band structures as follows:
+
+.. code-block:: yaml
+
+      python -m qimpy.interfaces.bandstructure -c "kpoints_out.h5 kpoints_soc_out.h5"  -o Pt_soc_bandstructure.png     
+
+Which should produce: 
+
+.. image:: Pt_soc_bandstructure.png
