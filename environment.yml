@@ -11,4 +11,5 @@ dependencies:
   - h5py
   - mpi4py
   - scipy
-  - typing_extensions=4.7.1
+  - pip:
+    - typing-extensions=4.7.1
