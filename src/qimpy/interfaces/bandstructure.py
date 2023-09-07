@@ -22,38 +22,55 @@ import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+from qimpy.io import Unit
+from typing import Optional
 
 
-def plot(checkpoint_files: str, output_file: str, **kwargs) -> None:
+def plot(checkpoint_files: str, output_file: str, plot_labels: Optional[str], units: str, **kwargs) -> None:
     """Plot band structure from HDF5 checkpoint name `checkpoint_file`.
     Save plot to `output_file` in a matplotlib supported format (based on extension).
     """
     checkpoint_files = checkpoint_files.split()
-    eigs = [] # list of eigenvalues for each checkpoint
-    mus = np.array([]) # list of chemical potentials for each checkpoint
-    n_occupied_bands = np.array([], dtype=int) #
+    plot_labels = None if plot_labels is None else plot_labels.split()
+    if plot_labels is not None:
+        assert len(plot_labels) == len(checkpoint_files)
+    eigs = []  # list of eigenvalues for each checkpoint
+    mus = np.array([])  # list of chemical potentials for each checkpoint
+    n_occupied_bands = np.array([], dtype=int)  #
     nbands_tot = 0
+    plot_units = (1 if units == "Hartree" else Unit.convert(1, units).value)
     for cp_file in checkpoint_files:
         with h5py.File(cp_file, "r") as h5_file:
             eig = np.array(h5_file["/electrons/eig"])
+            eig *= plot_units 
             eigs.append(eig)
             k_length = np.array(h5_file["/electrons/kpoints/k_length"])
             labels: dict[int, str] = ast.literal_eval(
                 str(h5_file["/electrons/kpoints"].attrs["labels"])
             )
             mu = float(h5_file["/electrons/fillings"].attrs["mu"])
+            mu *= plot_units
             mus = np.append(mus, mu)
             n_spins, nk, n_bands = eig.shape
             nbands_tot += n_bands
             # Check for semi-core gap (only among occupied bands):
-            n_occupied_bands = np.append(n_occupied_bands, max(np.where(eig.min(axis=(0, 1)) < mu)[0]) + 1)
+            n_occupied_bands = np.append(
+                n_occupied_bands, max(np.where(eig.min(axis=(0, 1)) < mu)[0]) + 1
+            )
 
-    occupied_eigs = np.concatenate([eigs[i][..., 0:n_occupied_bands[i]] for i in range(0, len(n_occupied_bands))], axis=2)
-    occupied_eigs = np.sort(occupied_eigs, axis=2) 
+    occupied_eigs = np.concatenate(
+        [
+            eigs[i][..., 0 : n_occupied_bands[i]]
+            for i in range(0, len(n_occupied_bands))
+        ],
+        axis=2,
+    )
+    occupied_eigs = np.sort(occupied_eigs, axis=2)
     gaps_start = occupied_eigs[..., :-1].max(axis=(0, 1))
     gaps_stop = occupied_eigs[..., 1:].min(axis=(0, 1))
     gaps = gaps_stop - gaps_start
     gap_cut = 0.5  # threshold on semi-core gap at which to break y-axis
+    gap_cut *= plot_units
     i_gaps = np.where(gaps > gap_cut)[0] + 1
     split_axis = len(i_gaps) > 0
     i_band_edges = np.concatenate(
@@ -64,7 +81,13 @@ def plot(checkpoint_files: str, output_file: str, **kwargs) -> None:
     # Prepare figure and panels:
     yformatter = ticker.ScalarFormatter(useOffset=False)
 
-    band_range_energies = [(occupied_eigs[..., r[0]].min()-0.01, occupied_eigs[..., slice(r[1])].max()+0.01) for r in band_ranges]
+    band_range_energies = [
+        (
+            occupied_eigs[..., r[0]].min() - 0.01*plot_units,
+            occupied_eigs[..., slice(r[1])].max() + 0.01*plot_units,
+        )
+        for r in band_ranges
+    ]
     if split_axis:
         _, axes = plt.subplots(
             len(band_ranges),
@@ -76,18 +99,24 @@ def plot(checkpoint_files: str, output_file: str, **kwargs) -> None:
     else:
         plt.figure()
         axes = [plt.gca()]
-        
+
     for cf_num, (mu, eig) in enumerate(zip(mus, eigs)):
+        plot_label = plot_labels[cf_num] if (plot_labels is not None) else None
         if cf_num == 0:
-                # Plot:
+            # Plot:
             tick_pos = [k_length[i] for i in labels.keys()]
             for i_ax, brange_energy in enumerate(band_range_energies[::-1]):
                 plt.sca(axes[i_ax])
                 for i_spin in range(n_spins):
-                    plt.plot(
+                    lines = plt.plot(
                         k_length,
                         eig[i_spin, ...],
-                        color="kr"[i_spin], linestyle="solid")
+                        color="kr"[i_spin],
+                        linestyle="solid"
+                    )
+                    if (i_ax == 0) and (plot_label is not None): 
+                        first_legend = plt.gca().legend(lines[:1], [plot_label], loc='upper right')
+                        plt.gca().add_artist(first_legend)
                 for pos in tick_pos[1:-1]:
                     plt.axvline(pos, color="k", ls="dotted", lw=1)
                 plt.xlim(0, k_length[-1])
@@ -95,7 +124,7 @@ def plot(checkpoint_files: str, output_file: str, **kwargs) -> None:
                 axes[i_ax].set_ylim(brange_energy)
                 if (not np.isnan(mu)) and (not i_ax):
                     plt.axhline(mu, color="k", ls="dotted", lw=1)
-    
+
             # Axis settings for arbitrary number of splits:
             axes[0].set_ylabel(r"$E$ [$E_h$]")
             axes[0].set_ylim(None, eig[..., -1].min())
@@ -107,7 +136,7 @@ def plot(checkpoint_files: str, output_file: str, **kwargs) -> None:
             axes[-1].xaxis.tick_bottom()
             axes[-1].set_xticks(tick_pos)
             axes[-1].set_xticklabels(labels.values())
-    
+
             # Axis break annotations:
             for i_ax, ax in enumerate(axes):
                 dx = 0.01
@@ -126,18 +155,23 @@ def plot(checkpoint_files: str, output_file: str, **kwargs) -> None:
                 xlim = ax.get_xlim()
                 ylim = ax.get_ylim()
                 for i_spin in range(n_spins):
-                    plt.plot(
+                    lines = plt.plot(
                         k_length,
                         eig[i_spin, :, :],
-                        color="kr"[i_spin], linestyle="dashed", linewidth=2)
+                        color="kr"[i_spin],
+                        linestyle="dashed",
+                        linewidth=2
+                    )
+                    if (i_ax == 0) and (plot_label is not None): 
+                        additional_legend = plt.legend([*lines[:1]], [plot_label], loc='lower right')
+                        plt.gca().add_artist(additional_legend)
                 ax.set_xlim(xlim)
                 ax.set_ylim(ylim)
                 if (not np.isnan(mu)) and (not i_ax):
                     plt.axhline(mu, color="k", ls="dashed", lw=1)
 
-    plt.savefig(output_file, bbox_inches="tight");
-    plt.show();
-
+    plt.savefig(output_file, bbox_inches="tight")
+    plt.show()
 
 
 def main() -> None:
@@ -159,8 +193,22 @@ def main() -> None:
         help="output plot in matplotlib supported format (based on extension)",
         required=True,
     )
+    parser.add_argument(
+        "-u",
+        "--units",
+        metavar="UNITS",
+        help="energy units for band structure", 
+        choices=["Hartree", "eV"],
+        default="Hartree",
+    )
+    parser.add_argument(
+        "-l", 
+        "--labels", 
+        metavar="Labels",
+        help="labels for band structure plots",
+    )
     args = parser.parse_args()
-    plot(args.checkpoint_file, args.output_file)
+    plot(args.checkpoint_file, args.output_file, args.labels, args.units)
 
 
 if __name__ == "__main__":
