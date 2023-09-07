@@ -12,4 +12,4 @@ dependencies:
   - mpi4py
   - scipy
   - pip:
-    - typing-extensions=4.7.1
+    - typing-extensions==4.7.1
