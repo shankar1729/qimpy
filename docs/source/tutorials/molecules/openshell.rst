@@ -31,7 +31,7 @@ and run
 
 .. code-block:: bash
 
-    (qimpy) $ python -m qimpy.dft -i Hatom.yaml | tee -o Hatom.out
+    (qimpy) $ python -m qimpy.dft -i Hatom.yaml | tee Hatom.out
 
 Since there is only one atom, we don't need geometry optimization.
 Notice that the final energy F = -0.4601 Hartrees, which is rather different
