@@ -4,7 +4,7 @@ import numpy as np
 from qimpy import log, rc
 from qimpy.io import log_config
 from qimpy.profiler import StopWatch
-from ._advect import Advect
+from qimpy.transport.advect import Advect
 
 
 def movie(Nxy, N_theta, diag=True):
