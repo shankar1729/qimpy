@@ -336,7 +336,6 @@ class Electrons(TreeNode):
         self.n_tilde = (~(self.basis.collect_density(C, f, need_Mvec))).to(system.grid)
         # TODO: ultrasoft augmentation
         self.n_tilde.symmetrize()
-        # TODO: actually compute KE density if required
         if self.xc.need_tau:
             self.tau_tilde = self.n_tilde.zeros_like()
             for i_dir in range(3):

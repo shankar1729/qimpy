@@ -58,7 +58,10 @@ class LCAO(Minimize[MatrixArray]):
             el.n_tilde = system.ions.get_atomic_density(
                 system.grid, el.fillings.n_electrons, el.fillings.M
             )
-            el.tau_tilde = FieldH(system.grid, shape_batch=(0,))  # TODO
+            if el.xc.need_tau:
+                el.tau_tilde = el.n_tilde.zeros_like()
+            else:
+                el.tau_tilde = FieldH(system.grid, shape_batch=(0,))
             el.update_potential(system)
         C_OC = el.C.dot_O(el.C).wait()
         C_HC = el.C ^ el.hamiltonian(el.C)
