@@ -5,7 +5,14 @@ import numpy as np
 import torch
 
 from qimpy import log, rc, TreeNode
-from qimpy.io import CheckpointPath, CheckpointContext, fmt
+from qimpy.io import (
+    CheckpointPath,
+    CheckpointContext,
+    fmt,
+    Default,
+    WithDefault,
+    cast_default,
+)
 from ._lattice_systems import get_Rbasis
 
 
@@ -44,11 +51,11 @@ class Lattice(TreeNode):
         vector2: Optional[Sequence[float]] = None,
         vector3: Optional[Sequence[float]] = None,
         scale: Optional[Union[float, Sequence[float]]] = None,
-        compute_stress: Optional[bool] = None,
-        movable: Optional[bool] = None,
-        move_scale: Optional[Sequence[float]] = None,
-        periodic: Optional[Sequence[bool]] = None,
-        center: Optional[Sequence[float]] = None,
+        compute_stress: WithDefault[bool] = Default(False),
+        movable: WithDefault[bool] = Default(False),
+        move_scale: WithDefault[Sequence[float]] = Default((1.0, 1.0, 1.0)),
+        periodic: WithDefault[tuple[bool, ...]] = Default((True, True, True)),
+        center: WithDefault[Sequence[float]] = Default((0.0, 0.0, 0.0)),
     ) -> None:
         """Initialize from lattice vectors or lengths and angles.
         Either specify a lattice `system` and optional `modification`,
@@ -104,21 +111,17 @@ class Lattice(TreeNode):
         compute_stress
             :yaml:`Whether to compute and report stress.`
             Enable to report stress regardless of whether lattice is `movable`.
-            Defaults to False if unspecified.
             (Stresses are always computed when lattice is `movable`.)
         movable
             :yaml:`Whether to move lattice during geometry relaxation / dynamics.`
-            Defaults to False if unspecified.
         move_scale
             :yaml:`Scale factor for moving each lattice vector.`
             Set to zero for some directions to constrain lattice relaxation
             or dynamics. Can also adjust the magnitude to precondition lattice
             motion relative to the ions (internal coordinates).
-            Defaults to (1, 1, 1) if unspecified.
         periodic
             :yaml:`Whether each lattice direction is periodic.`
             Set to False for some directions for lower-dimensional / no periodicity.
-            Defaults to (True, True, True) if unspecified.
         center
             :yaml:`Center of cell for periodicity break along non-periodic directions.`
             In fractional coordinates, and values along periodic directions are
@@ -138,12 +141,8 @@ class Lattice(TreeNode):
             self.Rbasis = checkpoint_in.read("Rbasis")
             stress = checkpoint_in.read_optional("stress")  # converted to grad below
         else:
-            self.periodic = (True, True, True) if periodic is None else tuple(periodic)
-            self.center = (
-                torch.zeros(3, device=rc.device)
-                if (center is None)
-                else torch.tensor(center, device=rc.device)
-            )
+            self.periodic = cast_default(periodic)
+            self.center = torch.tensor(cast_default(center), device=rc.device)
             self.compute_stress = False
             self.movable = False
             self.move_scale = torch.ones(3, device=rc.device)
@@ -184,12 +183,12 @@ class Lattice(TreeNode):
             self.grad = self.volume * stress
 
         # Optionally override optimization / constraints settings:
-        if movable is not None:
+        if not isinstance(movable, Default):
             self.movable = movable
             self.compute_stress = self.compute_stress or movable
-        if compute_stress is not None:
+        if not isinstance(compute_stress, Default):
             self.compute_stress = compute_stress or self.movable
-        if move_scale is not None:
+        if not isinstance(move_scale, Default):
             self.move_scale = torch.tensor(move_scale, device=rc.device)
             assert self.move_scale.shape == (3,)
 
