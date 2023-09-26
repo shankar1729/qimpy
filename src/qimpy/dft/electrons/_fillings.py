@@ -8,7 +8,7 @@ from scipy import optimize
 from qimpy import rc, log, TreeNode, Energy, dft, MPI
 from qimpy.profiler import stopwatch
 from qimpy.dft.ions import Ions
-from qimpy.io import CheckpointPath, CheckpointContext, fmt
+from qimpy.io import CheckpointPath, CheckpointContext, fmt, Default, cast_default
 from qimpy.mpi import BufferView, globalreduce
 
 
@@ -57,8 +57,8 @@ class Fillings(TreeNode):
         B: Union[float, Sequence[float]] = 0.0,
         M: Union[float, Sequence[float]] = 0.0,
         M_constrain: bool = False,
-        n_bands: Optional[Union[int, str]] = None,
-        n_bands_extra: Optional[Union[int, str]] = None,
+        n_bands: Union[int, str, Default[str]] = Default("atomic"),
+        n_bands_extra: Union[int, str, Default[str]] = Default("x0.1"),
     ) -> None:
         r"""Initialize occupation factor (smearing) scheme.
 
@@ -105,7 +105,7 @@ class Fillings(TreeNode):
         M_constrain
             :yaml:`Whether to hold magnetization fixed to M.`
             This only matters when `smearing` is not None.
-        n_bands : {'atomic', 'x<scale>', int}, default: 'atomic'
+        n_bands : {'atomic', 'x<scale>', int}
             :yaml:`Specify number of bands or scheme to determine it.`
 
             * atomic: set to the number of atomic orbitals.
@@ -113,7 +113,7 @@ class Fillings(TreeNode):
               to accommodate electrons ('x1.5' implies 1.5 x n_bands_min).
             * An integer explicitly sets the number of bands.
 
-        n_bands_extra : {'x<scale>', int}, default: 'x0.1'
+        n_bands_extra : {'x<scale>', int}
             :yaml:`Number of extra bands retained by diagonalizers.`
             This is necessary to converge any degenerate subspaces straddling
             n_bands. May be specified as:
@@ -199,17 +199,16 @@ class Fillings(TreeNode):
     def _initialize_n_bands(
         self,
         ions: Ions,
-        n_bands: Optional[Union[int, str]] = None,
-        n_bands_extra: Optional[Union[int, str]] = None,
+        n_bands: Union[int, str, Default[str]],
+        n_bands_extra: Union[int, str, Default[str]],
     ) -> None:
         # Determine number of bands:
-        if n_bands is None:
-            n_bands = "atomic"
         if isinstance(n_bands, int):
             self.n_bands = n_bands
             assert self.n_bands >= 1
             n_bands_method = "explicit"
         else:
+            n_bands = cast_default(n_bands)
             assert isinstance(n_bands, str)
             if n_bands == "atomic":
                 n_bands_method = "atomic"
@@ -229,13 +228,12 @@ class Fillings(TreeNode):
                 self.n_bands = max(1, int(np.ceil(self.n_bands_min * n_bands_scale)))
                 n_bands_method = n_bands[1:] + "*n_bands_min"
         # --- similarly for extra bands:
-        if n_bands_extra is None:
-            n_bands_extra = "x0.1"
         if isinstance(n_bands_extra, int):
             self.n_bands_extra = n_bands_extra
             assert self.n_bands_extra >= 1
             n_bands_extra_method = "explicit"
         else:
+            n_bands_extra = cast_default(n_bands_extra)
             assert isinstance(n_bands_extra, str) and n_bands_extra.startswith("x")
             n_bands_extra_scale = float(n_bands_extra[1:])
             if n_bands_extra_scale <= 0.0:
