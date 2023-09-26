@@ -30,5 +30,5 @@ def cast_default(item: WithDefault[T]) -> T:
 
 def test_default(param: WithDefault[bool] = Default(False)) -> None:
     is_default = isinstance(param, Default)
-    value = cast_default(is_default)
+    value = cast_default(param)
     print(f"param = {value} was {'' if is_default else 'not '}specified as a default")
