@@ -16,6 +16,8 @@ import importlib
 import inspect
 import os
 
+from qimpy.io import cast_default
+
 
 class Parameter(NamedTuple):
     """Parameter within `ClassInputDoc`."""
@@ -59,7 +61,9 @@ class ClassInputDoc:
             if param_name in param_docs:
                 param_doc = param_docs[param_name]
                 if ":yaml:" in param_doc:
-                    default_value = signature.parameters[param_name].default
+                    default_value = cast_default(
+                        signature.parameters[param_name].default
+                    )
                     default_str = (
                         "" if (default_value is inspect._empty) else f" {default_value}"
                     )
