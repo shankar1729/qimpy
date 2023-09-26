@@ -50,7 +50,7 @@ class Lattice(TreeNode):
         vector1: Optional[Sequence[float]] = None,
         vector2: Optional[Sequence[float]] = None,
         vector3: Optional[Sequence[float]] = None,
-        scale: Optional[Union[float, Sequence[float]]] = None,
+        scale: Union[float, Sequence[float], Default[float]] = Default(1.0),
         compute_stress: WithDefault[bool] = Default(False),
         movable: WithDefault[bool] = Default(False),
         move_scale: WithDefault[Sequence[float]] = Default((1.0, 1.0, 1.0)),
@@ -125,7 +125,7 @@ class Lattice(TreeNode):
         center
             :yaml:`Center of cell for periodicity break along non-periodic directions.`
             In fractional coordinates, and values along periodic directions are
-            irrelevant. Defaults to (0, 0, 0) if unspecified.
+            irrelevant.
         """
         super().__init__()
         log.info("\n--- Initializing Lattice ---")
@@ -169,7 +169,7 @@ class Lattice(TreeNode):
                 self.Rbasis = torch.tensor([vector1, vector2, vector3]).T
 
             # Apply scale if needed:
-            if scale and (not checkpoint_in):
+            if (not isinstance(scale, Default)) and (not checkpoint_in):
                 scale_vector = torch.tensor(scale).flatten()
                 assert len(scale_vector) in (1, 3)
                 self.Rbasis = scale_vector[None, :] * self.Rbasis

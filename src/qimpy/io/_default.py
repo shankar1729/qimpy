@@ -16,6 +16,9 @@ class Default(Generic[T]):
 
     value: T  #: The underlying default value
 
+    def __repr__(self) -> str:
+        return f"Default({self.value})"
+
 
 WithDefault = Union[T, Default[T]]  #: Type alias for a type or its default value
 
