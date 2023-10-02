@@ -45,7 +45,7 @@ def movie(Nxy, N_theta, diag=True):
         sim.plot_streamlines(plt, dict(levels=100), dict(linewidth=1.0))
         plt.gca().set_aspect("equal")
         plt.savefig(
-            f"advect_animation/blob_advect_{time_step:04d}.png",
+            f"animation/blob_advect_{time_step:04d}.png",
             bbox_inches="tight",
             dpi=200,
         )
@@ -112,16 +112,16 @@ def convergence(Nxy, N_theta, diag=True):
 
 
 def main():
-    movie(256, 256, diag=True)
-    # errors = dict()
-    # Nthetas = [2, 4, 256]
-    # Ns = [64, 128, 256, 512]
-    # for i in Nthetas:
-    #    for j in Ns:
-    #        if not (i == 256 and j == 1024):
-    #            errors[(i, j)] = convergence(j, i, diag=(True if i > 2 else False))
-    #            print(i, j, errors[(i, j)])
-    # print(errors)
+    movie(64, 256, diag=True)
+    #errors = dict()
+    #Nthetas = [2, 4, 256]
+    #Ns = [64, 128, 256, 512]
+    #for i in Nthetas:
+    #   for j in Ns:
+    #       if not (i == 256 and j == 1024):
+    #           errors[(i, j)] = convergence(j, i, diag=(True if i > 2 else False))
+    #           print(i, j, errors[(i, j)])
+    #print(errors)
 
 
 if __name__ == "__main__":

@@ -178,7 +178,7 @@ class Advect(Geometry):
         q = L * (Q_by_N)  # + amp * torch.sin(2 * np.pi * k * torch.roll(Q_by_N, 1)))
 
         jacobian = torch.autograd.grad(
-            q, Q, grad_outputs=grad_q, is_grads_batched=True
+            q, Q, grad_outputs=grad_q, is_grads_batched=True, retain_graph=False
         )[0]
         jacobian = torch.permute(jacobian, (1, 2, 0, 3))
 
