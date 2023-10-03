@@ -68,7 +68,8 @@ class Advect(Geometry):
         self.g = sqrt_det_g(self.Q, self.custom_transformation).detach()[:, :, None]
         # self.g = torch.nn.functional.pad(self.g, [self.N_ghost] * 4, value=1.0)
 
-        self.theta = centered_grid(0, N_theta) * self.dtheta - init_angle
+        #self.theta = centered_grid(0, N_theta) * self.dtheta - init_angle
+        self.theta = torch.arange(0, N_theta, device=rc.device)*self.dtheta - init_angle
 
         # self.v_x = v_F * self.theta.cos()
         # self.v_y = v_F * self.theta.sin()
@@ -119,9 +120,6 @@ class Advect(Geometry):
     @stopwatch(name="drho")
     def drho(self, dt: float, rho: torch.Tensor) -> torch.Tensor:
         """Compute drho for time step dt, given current rho."""
-        # return (-dt / self.dx) * v_prime(rho, self.v_x, axis=0) + (
-        #    -dt / self.dy
-        # ) * v_prime(rho, self.v_y, axis=1)
         return (-dt / (self.g * self.dX)) * v_prime(
             rho, self.g * self.V[:, :, :, 0], axis=0
         ) + (-dt / (self.g * self.dY)) * v_prime(
@@ -164,7 +162,7 @@ class Advect(Geometry):
 
     def custom_transformation(self, Q, kx=1, ky=1, amp=-0.05):
         L = torch.tensor([self.Lx, self.Ly], device=rc.device)
-        # k = torch.tensor([kx, ky], device=rc.device)
+        k = torch.tensor([kx, ky], device=rc.device)
         N = torch.tensor(
             [self.Nx + 2 * self.N_ghost, self.Ny + 2 * self.N_ghost],
             device=rc.device,
@@ -175,7 +173,7 @@ class Advect(Geometry):
         )
         Q.requires_grad = True
         Q_by_N = Q / N
-        q = L * (Q_by_N)  # + amp * torch.sin(2 * np.pi * k * torch.roll(Q_by_N, 1)))
+        q = L * (Q_by_N)  + amp * torch.sin(2 * np.pi * k * torch.roll(Q_by_N, 1))
 
         jacobian = torch.autograd.grad(
             q, Q, grad_outputs=grad_q, is_grads_batched=True, retain_graph=False

@@ -5,9 +5,10 @@ from qimpy import log, rc
 from qimpy.io import log_config
 from qimpy.profiler import StopWatch
 from qimpy.transport.advect import Advect
+from pathlib import Path
 
 
-def movie(Nxy, N_theta, diag=True):
+def make_movie(Nxy=256, N_theta=256, diag=True):
     import matplotlib.pyplot as plt
 
     log_config()
@@ -60,7 +61,7 @@ def movie(Nxy, N_theta, diag=True):
 
 
 def convergence(Nxy, N_theta, diag=True):
-    # import matplotlib.pyplot as plt
+    import matplotlib.pyplot as plt
 
     log_config()
     rc.init()
@@ -78,7 +79,7 @@ def convergence(Nxy, N_theta, diag=True):
         Nx=Nxy,
         Ny=Nxy,
         N_theta=N_theta,
-        init_angle=np.pi / 4 - np.pi / N_theta if diag else 0.0,
+        init_angle=np.pi / 4 if diag else 0.0,
     )
     sigma = 0.05
     sim.rho[:, :, 0] = torch.exp(
@@ -88,19 +89,21 @@ def convergence(Nxy, N_theta, diag=True):
     density_init = torch.clone(sim.density)
 
     t_final = (Lx**2 + Ly**2) ** 0.5 / v_F if diag else Lx / v_F
-    time_steps = round(t_final / sim.dt)
+    time_steps = int(t_final // sim.dt)
     print(f"Running for {time_steps} steps.")
+    Path(f"animation_{Nxy}").mkdir(parents=True, exist_ok=True)
 
     for time_step in range(time_steps):
         log.info(f"{time_step = }")
-        # plt.clf()
-        # sim.plot_streamlines(plt, dict(levels=100), dict(linewidth=1.0))
-        # plt.gca().set_aspect("equal")
-        # plt.savefig(
-        #    f"advect_animation/blob_advect_{time_step:04d}.png",
-        #    bbox_inches="tight",
-        #    dpi=200,
-        # )
+        plt.clf()
+        sim.plot_streamlines(plt, dict(levels=100), dict(linewidth=1.0))
+        plt.gca().set_aspect("equal")
+        plt.savefig(
+            f"animation_{Nxy}/blob_advect_{time_step:04d}.png",
+            bbox_inches="tight",
+            dpi=200,
+        )
+        sim.time_step()
         sim.time_step()
 
     # Plot only at end (for easier performance benchmarking of time steps):
@@ -112,16 +115,16 @@ def convergence(Nxy, N_theta, diag=True):
 
 
 def main():
-    movie(64, 256, diag=True)
-    #errors = dict()
-    #Nthetas = [2, 4, 256]
-    #Ns = [64, 128, 256, 512]
-    #for i in Nthetas:
-    #   for j in Ns:
-    #       if not (i == 256 and j == 1024):
-    #           errors[(i, j)] = convergence(j, i, diag=(True if i > 2 else False))
-    #           print(i, j, errors[(i, j)])
-    #print(errors)
+    #make_movie(Nxy=128, N_theta=64, diag=True)
+    errors = dict()
+    Nthetas = [2, 4, 64]
+    Ns = [64, 128, 256, 512]
+    for i in Nthetas:
+       for j in Ns:
+           if not (i == 256 and j == 1024):
+               errors[(i, j)] = convergence(j, i, diag=(True if i > 2 else False))
+               print(i, j, errors[(i, j)])
+    print(errors)
 
 
 if __name__ == "__main__":
