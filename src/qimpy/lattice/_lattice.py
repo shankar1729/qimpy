@@ -133,6 +133,8 @@ class Lattice(TreeNode):
         if checkpoint_in:
             attrs = checkpoint_in.attrs
             self.periodic = tuple[bool](attrs["periodic"])
+            if not isinstance(periodic, Default):
+                raise Exception("Defining periodic in YAML not allowed since already defined in checkpoint")
             self.center = checkpoint_in.read("center")
             self.compute_stress = attrs["compute_stress"]
             self.movable = attrs["movable"]
