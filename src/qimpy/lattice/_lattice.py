@@ -5,6 +5,7 @@ import numpy as np
 import torch
 
 from qimpy import log, rc, TreeNode
+from qimpy.io import InvalidInputException, CheckpointOverrideException
 from qimpy.io import (
     CheckpointPath,
     CheckpointContext,
@@ -129,12 +130,13 @@ class Lattice(TreeNode):
         """
         super().__init__()
         log.info("\n--- Initializing Lattice ---")
-
         if checkpoint_in:
             attrs = checkpoint_in.attrs
             self.periodic = tuple[bool](attrs["periodic"])
             if not isinstance(periodic, Default):
-                raise Exception("Defining periodic in YAML not allowed since already defined in checkpoint")
+                raise CheckpointOverrideException("periodic")
+            if not isinstance(center, Default):
+                raise CheckpointOverrideException("center")
             self.center = checkpoint_in.read("center")
             self.compute_stress = attrs["compute_stress"]
             self.movable = attrs["movable"]
