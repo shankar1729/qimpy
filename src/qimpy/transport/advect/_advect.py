@@ -93,7 +93,10 @@ class Advect(Geometry):
         self.V = torch.stack([self.v_X, self.v_Y], dim=-1)
 
         # Initialize slices for contact and ghost/non-ghost regions:
-        self.non_ghost = slice(N_ghost, -N_ghost)
+        if N_ghost == 0:
+            self.non_ghost = slice(0, -1)
+        else:
+            self.non_ghost = slice(N_ghost, -N_ghost)
         self.ghost_l = slice(0, N_ghost)  # ghost indices on left/bottom side
         self.ghost_r = slice(-N_ghost, None)  # ghost indices on right/top side
 
@@ -115,6 +118,12 @@ class Advect(Geometry):
             rho[self.ghost_r] = reflect_x(rho[self.boundary_r])
             rho[:, self.ghost_l] = reflect_y(rho[:, self.boundary_l])
             rho[:, self.ghost_r] = reflect_y(rho[:, self.boundary_r])
+        else:
+            # Periodic boundary conditions
+            rho[self.ghost_l] = rho[self.boundary_r]
+            rho[self.ghost_r] = rho[self.boundary_l]
+            rho[:, self.ghost_l] = rho[:, self.boundary_r]
+            rho[:, self.ghost_r] = rho[:, self.boundary_l]
         # self.apply_dirichlet_boundary(rho)
 
     @stopwatch(name="drho")

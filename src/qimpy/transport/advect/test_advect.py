@@ -30,10 +30,11 @@ def make_movie(Nxy=256, N_theta=256, diag=True):
         init_angle=np.pi / 4 if diag else 0.0,
     )
     sigma = 0.05
-    sim.rho[:, :, 0] = torch.exp(
-        -((sim.q[:, :, 0] - sim.Lx / 2) ** 2 + (sim.q[:, :, 1] - sim.Ly / 2) ** 2)
-        / sigma**2
-    ).detach()
+    #sim.rho[:, :, 0] = torch.exp(
+    #    -((sim.q[:, :, 0] - sim.Lx / 2) ** 2 + (sim.q[:, :, 1] - sim.Ly / 2) ** 2)
+    #    / sigma**2
+    #).detach()
+    #sim.rho[:, :, 0] = torch.zeros_like(sim.q[:, :, 0]).detach()
     density_init = torch.clone(sim.density)
 
     t_final = (Lx**2 + Ly**2) ** 0.5 / v_F if diag else Lx / v_F
@@ -115,16 +116,16 @@ def convergence(Nxy, N_theta, diag=True):
 
 
 def main():
-    #make_movie(Nxy=128, N_theta=64, diag=True)
-    errors = dict()
-    Nthetas = [2, 4, 64]
-    Ns = [64, 128, 256, 512]
-    for i in Nthetas:
-       for j in Ns:
-           if not (i == 256 and j == 1024):
-               errors[(i, j)] = convergence(j, i, diag=(True if i > 2 else False))
-               print(i, j, errors[(i, j)])
-    print(errors)
+    make_movie(Nxy=512, N_theta=4, diag=True)
+    #errors = dict()
+    #Nthetas = [64]
+    #Ns = [64, 128, 256, 512]
+    #for i in Nthetas:
+    #   for j in Ns:
+    #       if not (i == 256 and j == 1024):
+    #           errors[(i, j)] = convergence(j, i, diag=(True if i > 2 else False))
+    #           print(i, j, errors[(i, j)])
+    #print(errors)
 
 
 if __name__ == "__main__":
