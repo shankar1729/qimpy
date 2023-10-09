@@ -27,14 +27,17 @@ def make_movie(Nxy=256, N_theta=256, diag=True, plot_metric=True):
         Nx=Nxy,
         Ny=Nxy,
         N_theta=N_theta,
-        init_angle=5*np.pi / 4 if diag else 0.0,
+        init_angle=5 * np.pi / 4 if diag else 0.0,
     )
     sigma = 0.05
 
     if plot_metric:
         # Initialize density
         sim.rho[:, :, 0] = torch.exp(
-            -((sim.q[:, :, 0] - 3 * sim.Lx / 2) ** 2 + (sim.q[:, :, 1] - 3 * sim.Ly / 4) ** 2)
+            -(
+                (sim.q[:, :, 0] - 3 * sim.Lx / 2) ** 2
+                + (sim.q[:, :, 1] - 3 * sim.Ly / 4) ** 2
+            )
             / sigma**2
         ).detach()
 
@@ -46,18 +49,28 @@ def make_movie(Nxy=256, N_theta=256, diag=True, plot_metric=True):
         log.info(f"Running for {time_steps} steps.")
 
         # Plot metric
+        plt.figure()
         plt.imshow(np.squeeze(to_numpy(sim.g)))
         plt.gca().set_aspect("equal")
         plt.colorbar()
         plt.savefig("transform_metric.png", dpi=300)
-        plt.clf()
 
         # Plot Jacobian
         for index, jac_comp in enumerate((sim.dX_dx, sim.dX_dy, sim.dY_dx, sim.dY_dy)):
+            plt.figure()
             plt.imshow(np.squeeze(to_numpy(jac_comp)))
             plt.gca().set_aspect("equal")
             plt.colorbar()
             plt.savefig(f"jacobian_{index}.png", dpi=300)
+
+        # Plot velocity
+        for index, v_comp in enumerate((sim.v_X, sim.v_Y)):
+            plt.figure()
+            plt.imshow(np.squeeze(to_numpy(v_comp[..., 0])))
+            plt.gca().set_aspect("equal")
+            plt.colorbar()
+            plt.savefig(f"v_{'XY'[index]}.png", dpi=300)
+        exit()
 
     for time_step in range(time_steps):
         log.info(f"{time_step = }")
@@ -102,7 +115,10 @@ def convergence(Nxy, N_theta, diag=True):
     )
     sigma = 0.05
     sim.rho[:, :, 0] = torch.exp(
-        -((sim.q[:, :, 0] - 3 * sim.Lx / 4) ** 2 + (sim.q[:, :, 1] - 3 * sim.Ly / 4) ** 2)
+        -(
+            (sim.q[:, :, 0] - 3 * sim.Lx / 4) ** 2
+            + (sim.q[:, :, 1] - 3 * sim.Ly / 4) ** 2
+        )
         / sigma**2
     ).detach()
 
@@ -135,16 +151,16 @@ def convergence(Nxy, N_theta, diag=True):
 
 def main():
     make_movie(Nxy=512, N_theta=4, diag=True)
-    #errors = dict()
-    #Nthetas = [64]
-    #Ns = [64, 128, 256, 512, 1024, 2048]
-    #for i in Nthetas:
+    # errors = dict()
+    # Nthetas = [64]
+    # Ns = [64, 128, 256, 512, 1024, 2048]
+    # for i in Nthetas:
     #   for j in Ns:
     #       if not (i == 256 and j == 1024):
     #           errors[(i, j)] = convergence(j, i, diag=(True if i > 2 else False))
     #           print(i, j, errors[(i, j)])
     #           print(errors)
-    #print(errors)
+    # print(errors)
 
 
 if __name__ == "__main__":
