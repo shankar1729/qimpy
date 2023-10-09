@@ -60,10 +60,10 @@ class Advect(Geometry):
         self.q, jacobian = self.custom_transformation(self.Q)
 
         jac_inv = jacobian_inv(self.Q, self.custom_transformation)
-        dX_dx = jac_inv[0][0]
-        dX_dy = jac_inv[0][1]
-        dY_dx = jac_inv[1][0]
-        dY_dy = jac_inv[1][1]
+        self.dX_dx = jac_inv[0][0]
+        self.dX_dy = jac_inv[0][1]
+        self.dY_dx = jac_inv[1][0]
+        self.dY_dy = jac_inv[1][1]
 
         self.g = sqrt_det_g(self.Q, self.custom_transformation).detach()[:, :, None]
         # self.g = torch.nn.functional.pad(self.g, [self.N_ghost] * 4, value=1.0)
@@ -87,8 +87,8 @@ class Advect(Geometry):
 
         self.v = torch.stack([self.v_x, self.v_y], dim=-1)
 
-        self.v_X = self.v_x * dX_dx[:, :, None] + self.v_y * dX_dy[:, :, None]
-        self.v_Y = self.v_x * dY_dx[:, :, None] + self.v_y * dY_dy[:, :, None]
+        self.v_X = self.v_x * self.dX_dx[:, :, None] + self.v_y * self.dX_dy[:, :, None]
+        self.v_Y = self.v_x * self.dY_dx[:, :, None] + self.v_y * self.dY_dy[:, :, None]
 
         self.V = torch.stack([self.v_X, self.v_Y], dim=-1)
 
