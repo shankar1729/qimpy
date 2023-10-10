@@ -68,7 +68,7 @@ class Advect:
 
         # self.theta = centered_grid(0, N_theta) * self.dtheta - init_angle
         self.theta = (
-            torch.arange(0, N_theta, device=rc.device) * self.dtheta - init_angle
+            torch.arange(0, N_theta, device=rc.device) * self.dtheta + init_angle
         )
 
         # self.v_x = v_F * self.theta.cos()
@@ -183,7 +183,7 @@ class Advect:
         )
         Q.requires_grad = True
         Q_by_N = Q / N
-        q = L * (Q_by_N) + amp * torch.sin(2 * np.pi * k * torch.roll(Q_by_N, 1))
+        q = L * Q_by_N + amp * torch.sin(2 * np.pi * k * torch.roll(Q_by_N, 1))
 
         jacobian = torch.autograd.grad(
             q, Q, grad_outputs=grad_q, is_grads_batched=True, retain_graph=False

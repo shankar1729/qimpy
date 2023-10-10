@@ -5,15 +5,16 @@ from qimpy import log, rc
 from qimpy.io import log_config
 from qimpy.profiler import StopWatch
 from qimpy.transport.advect._advect import Advect, to_numpy
-from pathlib import Path
 
 
-def make_movie(Nxy=256, N_theta=256, diag=True, plot_metric=True):
+def gaussian_blob(
+    q: torch.Tensor, q0: torch.Tensor, sigma: float = 0.05
+) -> torch.Tensor:
+    return torch.exp(-(q - q0).square().sum(axis=-1) / sigma**2).detach()
+
+
+def run(*, Nxy, N_theta, diag, plot_metric=False):
     import matplotlib.pyplot as plt
-
-    log_config()
-    rc.init()
-    assert rc.n_procs == 1  # MPI not yet supported
 
     v_F = 200.0
     Lx = 1.0
@@ -29,23 +30,23 @@ def make_movie(Nxy=256, N_theta=256, diag=True, plot_metric=True):
         N_theta=N_theta,
         init_angle=np.pi / 4 if diag else 0.0,
     )
-    sigma = 0.05
 
-    # Initialize density
-    sim.rho[:, :, 0] = torch.exp(
-        -((sim.q[:, :, 0] - 0.25 * sim.Lx) ** 2 + (sim.q[:, :, 1] - 0.75 * sim.Ly) ** 2)
-        / sigma**2
-    ).detach()
-
-    density_init = torch.clone(sim.density)
-
-    # Set the time for one period
-    t_final = (Lx**2 + Ly**2) ** 0.5 / v_F if diag else Lx / v_F
-    time_steps = round(t_final / sim.dt)
+    # Set the time for slightly more than one period
+    L_period = np.hypot(Lx, Ly) if diag else Lx
+    t_period = L_period / v_F
+    time_steps = int(np.ceil(1.25 * t_period / sim.dt))
+    t_final = time_steps * sim.dt
     log.info(f"Running for {time_steps} steps.")
 
-    if plot_metric:
+    # Initialize initial and expected final density
+    q0 = torch.tensor([0.25 * Lx, 0.25 * Ly], device=rc.device)
+    sim.rho[:, :, 0] = gaussian_blob(sim.q, q0)
+    q_final = q0 + sim.v[0, 0, 0] * (t_final - t_period)
+    density_final = (
+        gaussian_blob(sim.q, q_final)[sim.non_ghost, sim.non_ghost] * sim.dtheta
+    )
 
+    if plot_metric:
         # Plot metric
         plt.figure()
         plt.imshow(np.squeeze(to_numpy(sim.g)))
@@ -75,6 +76,7 @@ def make_movie(Nxy=256, N_theta=256, diag=True, plot_metric=True):
     for time_step in range(time_steps):
         log.info(f"{time_step = }")
         if time_step % plot_interval == 0:
+            log.info("Plotting density and streamlines")
             plt.clf()
             sim.plot_streamlines(plt, dict(levels=100), dict(linewidth=1.0))
             plt.gca().set_aspect("equal")
@@ -86,73 +88,17 @@ def make_movie(Nxy=256, N_theta=256, diag=True, plot_metric=True):
             plot_frame += 1
         sim.time_step()
 
-    # Plot only at end (for easier performance benchmarking of time steps):
-    log.info("Plotting density and streamlines")
-
-    StopWatch.print_stats()
-    diff = float(((density_init - sim.density) ** 2).sum() / (sim.Nx * sim.Ny))
-    return diff
+    # Return RMS error in density:
+    return (density_final - sim.density).square().mean().sqrt().item()
 
 
-def convergence(Nxy, N_theta, diag=True):
-    import matplotlib.pyplot as plt
-
+def main():
     log_config()
     rc.init()
     assert rc.n_procs == 1  # MPI not yet supported
 
-    v_F = 200.0
-    Lx = 1.0
-    Ly = 1.0
-    sim = Advect(
-        reflect_boundaries=False,
-        contact_width=0.0,
-        v_F=v_F,
-        Lx=Lx,
-        Ly=Ly,
-        Nx=Nxy,
-        Ny=Nxy,
-        N_theta=N_theta,
-        init_angle=np.pi / 4 if diag else 0.0,
-    )
-    sigma = 0.05
-    sim.rho[:, :, 0] = torch.exp(
-        -(
-            (sim.q[:, :, 0] - 3 * sim.Lx / 4) ** 2
-            + (sim.q[:, :, 1] - 3 * sim.Ly / 4) ** 2
-        )
-        / sigma**2
-    ).detach()
-
-    density_init = torch.clone(sim.density)
-
-    t_final = (Lx**2 + Ly**2) ** 0.5 / v_F if diag else Lx / v_F
-    time_steps = int(t_final // sim.dt)
-    print(f"Running for {time_steps} steps.")
-    Path(f"animation_{Nxy}").mkdir(parents=True, exist_ok=True)
-
-    for time_step in range(time_steps):
-        log.info(f"{time_step = }")
-        plt.clf()
-        sim.plot_streamlines(plt, dict(levels=100), dict(linewidth=1.0))
-        plt.gca().set_aspect("equal")
-        plt.savefig(
-            f"animation_{Nxy}/blob_advect_{time_step:04d}.png",
-            bbox_inches="tight",
-            dpi=200,
-        )
-        sim.time_step()
-
-    # Plot only at end (for easier performance benchmarking of time steps):
-    log.info("Plotting density and streamlines")
-
-    StopWatch.print_stats()
-    diff = float(((density_init - sim.density) ** 2).sum() / (sim.Nx * sim.Ny))
-    return diff
-
-
-def main():
-    make_movie(Nxy=512, N_theta=4, diag=True, plot_metric=False)
+    RMSE = run(Nxy=512, N_theta=1, diag=True)
+    log.info(f"{RMSE = }")
     # errors = dict()
     # Nthetas = [64]
     # Ns = [64, 128, 256, 512, 1024, 2048]
@@ -163,6 +109,8 @@ def main():
     #           print(i, j, errors[(i, j)])
     #           print(errors)
     # print(errors)
+
+    StopWatch.print_stats()
 
 
 if __name__ == "__main__":
