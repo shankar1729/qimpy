@@ -26,7 +26,13 @@ from qimpy.io import Unit
 from typing import Optional
 
 
-def plot(checkpoint_files: str, output_file: str, plot_labels: Optional[str], units: str, **kwargs) -> None:
+def plot(
+    checkpoint_files: str,
+    output_file: str,
+    plot_labels: Optional[str],
+    units: str,
+    **kwargs
+) -> None:
     """Plot band structure from HDF5 checkpoint name `checkpoint_file`.
     Save plot to `output_file` in a matplotlib supported format (based on extension).
     """
@@ -38,11 +44,11 @@ def plot(checkpoint_files: str, output_file: str, plot_labels: Optional[str], un
     mus = np.array([])  # list of chemical potentials for each checkpoint
     n_occupied_bands = np.array([], dtype=int)  #
     nbands_tot = 0
-    plot_units = (1 if units == "Hartree" else Unit.convert(1, units).value)
+    plot_units = 1 if units == "Hartree" else Unit.convert(1, units).value
     for cp_file in checkpoint_files:
         with h5py.File(cp_file, "r") as h5_file:
             eig = np.array(h5_file["/electrons/eig"])
-            eig *= plot_units 
+            eig *= plot_units
             eigs.append(eig)
             k_length = np.array(h5_file["/electrons/kpoints/k_length"])
             labels: dict[int, str] = ast.literal_eval(
@@ -83,8 +89,8 @@ def plot(checkpoint_files: str, output_file: str, plot_labels: Optional[str], un
 
     band_range_energies = [
         (
-            occupied_eigs[..., r[0]].min() - 0.01*plot_units,
-            occupied_eigs[..., slice(r[1])].max() + 0.01*plot_units,
+            occupied_eigs[..., r[0]].min() - 0.01 * plot_units,
+            occupied_eigs[..., slice(r[1])].max() + 0.01 * plot_units,
         )
         for r in band_ranges
     ]
@@ -112,10 +118,12 @@ def plot(checkpoint_files: str, output_file: str, plot_labels: Optional[str], un
                         k_length,
                         eig[i_spin, ...],
                         color="kr"[i_spin],
-                        linestyle="solid"
+                        linestyle="solid",
                     )
-                    if (i_ax == 0) and (plot_label is not None): 
-                        first_legend = plt.gca().legend(lines[:1], [plot_label], loc='upper right')
+                    if (i_ax == 0) and (plot_label is not None):
+                        first_legend = plt.gca().legend(
+                            lines[:1], [plot_label], loc="upper right"
+                        )
                         plt.gca().add_artist(first_legend)
                 for pos in tick_pos[1:-1]:
                     plt.axvline(pos, color="k", ls="dotted", lw=1)
@@ -160,10 +168,12 @@ def plot(checkpoint_files: str, output_file: str, plot_labels: Optional[str], un
                         eig[i_spin, :, :],
                         color="kr"[i_spin],
                         linestyle="dashed",
-                        linewidth=2
+                        linewidth=2,
                     )
-                    if (i_ax == 0) and (plot_label is not None): 
-                        additional_legend = plt.legend([*lines[:1]], [plot_label], loc='lower right')
+                    if (i_ax == 0) and (plot_label is not None):
+                        additional_legend = plt.legend(
+                            [*lines[:1]], [plot_label], loc="lower right"
+                        )
                         plt.gca().add_artist(additional_legend)
                 ax.set_xlim(xlim)
                 ax.set_ylim(ylim)
@@ -197,13 +207,13 @@ def main() -> None:
         "-u",
         "--units",
         metavar="UNITS",
-        help="energy units for band structure", 
+        help="energy units for band structure",
         choices=["Hartree", "eV"],
         default="Hartree",
     )
     parser.add_argument(
-        "-l", 
-        "--labels", 
+        "-l",
+        "--labels",
         metavar="Labels",
         help="labels for band structure plots",
     )

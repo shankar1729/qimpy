@@ -36,7 +36,7 @@ def run(*, Nxy, N_theta, diag, plot_frames=False):
     # Initialize initial and expected final density
     q0 = 0.25 * torch.tensor(sim.L, device=rc.device)
     sim.rho[:, :, 0] = gaussian_blob(sim.q, q0)
-    q_final = q0 + sim.v[0, 0, 0] * (t_final - t_period)
+    q_final = q0 + sim.v[0] * (t_final - t_period)
     density_final = (
         gaussian_blob(sim.q, q_final)[sim.non_ghost, sim.non_ghost] * sim.dtheta
     )

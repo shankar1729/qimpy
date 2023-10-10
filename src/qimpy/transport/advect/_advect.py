@@ -5,7 +5,6 @@ import torch
 
 from qimpy import rc
 from qimpy.profiler import stopwatch
-from qimpy.transport._geometry import sqrt_det_g, jacobian_inv
 
 
 class Advect:
@@ -30,8 +29,10 @@ class Advect:
         self.reflect_boundaries = reflect_boundaries
 
         self.dtheta = 2 * np.pi / self.N_theta
+        self.theta = torch.arange(N_theta, device=rc.device) * self.dtheta + init_angle
         self.drift_velocity_fraction = 1e-3  # as a fraction of v_F
 
+        # Initialize grids and transformations:
         grids1d = [
             torch.nn.functional.pad(
                 torch.arange(Ni, device=rc.device, dtype=torch.double),
@@ -41,42 +42,16 @@ class Advect:
         ]
         self.Q = torch.stack(torch.meshgrid(*grids1d, indexing="ij"), dim=-1)
         self.q, jacobian = self.custom_transformation(self.Q)
-
-        jac_inv = jacobian_inv(self.Q, self.custom_transformation)
-        self.dX_dx = jac_inv[0][0]
-        self.dX_dy = jac_inv[0][1]
-        self.dY_dx = jac_inv[1][0]
-        self.dY_dy = jac_inv[1][1]
-
-        self.g = sqrt_det_g(self.Q, self.custom_transformation).detach()[:, :, None]
-        # self.g = torch.nn.functional.pad(self.g, [self.N_ghost] * 4, value=1.0)
-
-        # self.theta = centered_grid(0, N_theta) * self.dtheta - init_angle
-        self.theta = (
-            torch.arange(0, N_theta, device=rc.device) * self.dtheta + init_angle
-        )
-
-        # self.v_x = v_F * self.theta.cos()
-        # self.v_y = v_F * self.theta.sin()
-        # self.v = torch.stack((self.v_x, self.v_y)).T
+        metric = torch.einsum("...aB, ...aC -> ...BC", jacobian, jacobian)
+        self.g = torch.linalg.det(metric).sqrt()[:, :, None]
+        self.v = v_F * torch.stack([self.theta.cos(), self.theta.sin()], dim=-1)
+        V = torch.einsum("ta, ...Ba -> ...tB", self.v, torch.linalg.inv(jacobian))
+        self.dt = 0.5 / V.abs().max().item()
+        self.gV = self.g[..., None] * V
 
         # Initialize distribution function:
         self.rho_shape = (self.q.shape[0], self.q.shape[1], N_theta)
         self.rho = torch.zeros(self.rho_shape, device=rc.device)
-
-        self.v_x = torch.zeros(self.rho_shape, device=rc.device)
-        self.v_y = torch.zeros(self.rho_shape, device=rc.device)
-
-        self.v_x[:, :, :] = v_F * self.theta.cos()
-        self.v_y[:, :, :] = v_F * self.theta.sin()
-
-        self.v = torch.stack([self.v_x, self.v_y], dim=-1)
-
-        self.v_X = self.v_x * self.dX_dx[:, :, None] + self.v_y * self.dX_dy[:, :, None]
-        self.v_Y = self.v_x * self.dY_dx[:, :, None] + self.v_y * self.dY_dy[:, :, None]
-
-        self.V = torch.stack([self.v_X, self.v_Y], dim=-1)
-        self.dt = 0.5 / self.V.abs().max().item()
 
         # Initialize slices for contact and ghost/non-ghost regions:
         if N_ghost == 0:
@@ -115,9 +90,10 @@ class Advect:
     @stopwatch(name="drho")
     def drho(self, dt: float, rho: torch.Tensor) -> torch.Tensor:
         """Compute drho for time step dt, given current rho."""
-        return (-dt / self.g) * v_prime(rho, self.g * self.V[:, :, :, 0], axis=0) + (
-            -dt / self.g
-        ) * v_prime(rho, self.g * self.V[:, :, :, 1], axis=1)
+        return (-dt / self.g) * (
+            v_prime(rho, self.gV[:, :, :, 0], axis=0)
+            + v_prime(rho, self.gV[:, :, :, 1], axis=1)
+        )
 
     def time_step(self):
         # Half step:
@@ -170,13 +146,7 @@ class Advect:
             q, Q, grad_outputs=grad_q, is_grads_batched=True, retain_graph=False
         )[0]
         jacobian = torch.permute(jacobian, (1, 2, 0, 3))
-
         Q.requires_grad = False
-        jacobian = [
-            [jacobian[:, :, 0, 0], jacobian[:, :, 0, 1]],
-            [jacobian[:, :, 1, 0], jacobian[:, :, 1, 1]],
-        ]
-
         return q, jacobian
 
 
