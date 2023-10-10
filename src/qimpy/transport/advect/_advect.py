@@ -39,7 +39,6 @@ class Advect(Geometry):
         self.dx = Lx / Nx
         self.dy = Ly / Ny
         self.dtheta = 2 * np.pi / self.N_theta
-        self.dt = 0.5 * self.dx / v_F
         self.drift_velocity_fraction = 1e-3  # as a fraction of v_F
 
         # self.x = centered_grid(-N_ghost, Nx + N_ghost) * self.dx
@@ -91,6 +90,7 @@ class Advect(Geometry):
         self.v_Y = self.v_x * self.dY_dx[:, :, None] + self.v_y * self.dY_dy[:, :, None]
 
         self.V = torch.stack([self.v_X, self.v_Y], dim=-1)
+        self.dt = 0.5 / self.V.abs().max().item()
 
         # Initialize slices for contact and ghost/non-ghost regions:
         if N_ghost == 0:
