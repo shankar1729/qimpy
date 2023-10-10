@@ -88,10 +88,22 @@ def run(*, Nxy, N_theta, diag, plot_metric=False, plot_frames=False):
             plot_frame += 1
         sim.time_step()
 
+    # Plot final density error:
+    log.info("Plotting error in final density")
+    plt.clf()
+    density_err = density_final - sim.density
+    q = to_numpy(sim.q[sim.non_ghost, sim.non_ghost])
+    plt.contourf(q[..., 0], q[..., 1], to_numpy(density_err), levels=100, cmap="bwr")
+    plt.gca().set_aspect("equal")
+    plt.colorbar()
+    plt.savefig(f"density_err_{Nxy}.png", bbox_inches="tight", dpi=200)
+
     # Return RMS error in density:
-    RMSE = (density_final - sim.density).square().mean().sqrt().item()
-    log.info(f"{RMSE = }")
-    return RMSE
+    RMSE = density_err.square().mean().sqrt().item()
+    RMS_value = density_final.square().mean().sqrt().item()
+    RelativeRMSE = RMSE / RMS_value
+    log.info(f"{RelativeRMSE = }")
+    return RelativeRMSE
 
 
 def main():
@@ -124,7 +136,7 @@ def main():
             Nxy *= 2
 
         # Print
-        log.info("\n#Nxy RMSE")
+        log.info("\n#Nxy RMSE(relative)")
         for Nxy, RMSE in zip(Ns, RMSEs):
             log.info(f"{Nxy:4d} {RMSE:.6f}")
 
@@ -136,7 +148,7 @@ def main():
         plt.xscale("log")
         plt.yscale("log")
         plt.xlabel(r"$N_{xy}$")
-        plt.ylabel("Density RMSE")
+        plt.ylabel("Density RMSE (relative)")
         plt.savefig("convergence.pdf", bbox_inches="tight")
 
     rc.report_end()
