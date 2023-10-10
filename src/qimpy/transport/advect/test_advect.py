@@ -13,7 +13,7 @@ def gaussian_blob(
     return torch.exp(-(q - q0).square().sum(axis=-1) / sigma**2).detach()
 
 
-def run(*, Nxy, N_theta, diag, plot_metric=False):
+def run(*, Nxy, N_theta, diag, plot_metric=False, plot_frames=False):
     import matplotlib.pyplot as plt
 
     v_F = 200.0
@@ -75,7 +75,7 @@ def run(*, Nxy, N_theta, diag, plot_metric=False):
     plot_frame = 0
     for time_step in range(time_steps):
         log.info(f"{time_step = }")
-        if time_step % plot_interval == 0:
+        if plot_frames and (time_step % plot_interval == 0):
             log.info("Plotting density and streamlines")
             plt.clf()
             sim.plot_streamlines(plt, dict(levels=100), dict(linewidth=1.0))
@@ -89,27 +89,57 @@ def run(*, Nxy, N_theta, diag, plot_metric=False):
         sim.time_step()
 
     # Return RMS error in density:
-    return (density_final - sim.density).square().mean().sqrt().item()
+    RMSE = (density_final - sim.density).square().mean().sqrt().item()
+    log.info(f"{RMSE = }")
+    return RMSE
 
 
 def main():
+    import argparse
+
     log_config()
     rc.init()
     assert rc.n_procs == 1  # MPI not yet supported
 
-    RMSE = run(Nxy=512, N_theta=1, diag=True)
-    log.info(f"{RMSE = }")
-    # errors = dict()
-    # Nthetas = [64]
-    # Ns = [64, 128, 256, 512, 1024, 2048]
-    # for i in Nthetas:
-    #   for j in Ns:
-    #       if not (i == 256 and j == 1024):
-    #           errors[(i, j)] = convergence(j, i, diag=(True if i > 2 else False))
-    #           print(i, j, errors[(i, j)])
-    #           print(errors)
-    # print(errors)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--Nxy", help="spatial resolution", type=int, required=True)
+    parser.add_argument("--Ntheta", help="angular resolution", type=int, required=True)
+    parser.add_argument("--diag", help="move diagonally", action="store_true")
+    parser.add_argument("--Nxy_min", help="start resolution for convergence", type=int)
+    args = parser.parse_args()
 
+    if args.Nxy_min is None:
+        run(Nxy=args.Nxy, N_theta=args.Ntheta, diag=args.diag, plot_frames=True)
+    else:
+        # Convergence test:
+        assert isinstance(args.Nxy_min, int)
+        assert args.Nxy_min < args.Nxy
+        Ns = []
+        RMSEs = []
+        Nxy = args.Nxy_min
+        while Nxy <= args.Nxy:
+            RMSE = run(Nxy=Nxy, N_theta=args.Ntheta, diag=args.diag, plot_frames=False)
+            Ns.append(Nxy)
+            RMSEs.append(RMSE)
+            Nxy *= 2
+
+        # Print
+        log.info("\n#Nxy RMSE")
+        for Nxy, RMSE in zip(Ns, RMSEs):
+            log.info(f"{Nxy:4d} {RMSE:.6f}")
+
+        # Plot
+        import matplotlib.pyplot as plt
+
+        plt.scatter(Ns, RMSEs, marker="+")
+        plt.plot([Ns[0], Ns[-1]], [RMSEs[0], RMSEs[0] * Ns[0] / Ns[-1]], "k--")
+        plt.xscale("log")
+        plt.yscale("log")
+        plt.xlabel(r"$N_{xy}$")
+        plt.ylabel("Density RMSE")
+        plt.savefig("convergence.pdf", bbox_inches="tight")
+
+    rc.report_end()
     StopWatch.print_stats()
 
 
