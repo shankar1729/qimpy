@@ -130,7 +130,7 @@ class Advect:
         plt.gca().set_aspect("equal")
         # plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
 
-    def custom_transformation(self, Q, kx=1, ky=1, amp=-0.05):
+    def custom_transformation(self, Q, kx=1, ky=2, amp=-0.05):
         L = torch.tensor(self.L, device=rc.device)
         k = torch.tensor([kx, ky], device=rc.device)
         Nx, Ny, _ = Q.shape
