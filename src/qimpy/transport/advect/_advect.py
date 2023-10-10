@@ -5,11 +5,10 @@ import torch
 
 from qimpy import rc
 from qimpy.profiler import stopwatch
-from qimpy.transport import Geometry
 from qimpy.transport._geometry import sqrt_det_g, jacobian_inv
 
 
-class Advect(Geometry):
+class Advect:
     def __init__(
         self,
         *,
@@ -67,8 +66,10 @@ class Advect(Geometry):
         self.g = sqrt_det_g(self.Q, self.custom_transformation).detach()[:, :, None]
         # self.g = torch.nn.functional.pad(self.g, [self.N_ghost] * 4, value=1.0)
 
-        #self.theta = centered_grid(0, N_theta) * self.dtheta - init_angle
-        self.theta = torch.arange(0, N_theta, device=rc.device)*self.dtheta - init_angle
+        # self.theta = centered_grid(0, N_theta) * self.dtheta - init_angle
+        self.theta = (
+            torch.arange(0, N_theta, device=rc.device) * self.dtheta - init_angle
+        )
 
         # self.v_x = v_F * self.theta.cos()
         # self.v_y = v_F * self.theta.sin()
@@ -182,7 +183,7 @@ class Advect(Geometry):
         )
         Q.requires_grad = True
         Q_by_N = Q / N
-        q = L * (Q_by_N)  + amp * torch.sin(2 * np.pi * k * torch.roll(Q_by_N, 1))
+        q = L * (Q_by_N) + amp * torch.sin(2 * np.pi * k * torch.roll(Q_by_N, 1))
 
         jacobian = torch.autograd.grad(
             q, Q, grad_outputs=grad_q, is_grads_batched=True, retain_graph=False
