@@ -33,10 +33,7 @@ def make_movie(Nxy=256, N_theta=256, diag=True, plot_metric=True):
 
     # Initialize density
     sim.rho[:, :, 0] = torch.exp(
-        -(
-            (sim.q[:, :, 0] - 0.25*sim.Lx) ** 2
-            + (sim.q[:, :, 1] - 0.75*sim.Ly) ** 2
-        )
+        -((sim.q[:, :, 0] - 0.25 * sim.Lx) ** 2 + (sim.q[:, :, 1] - 0.75 * sim.Ly) ** 2)
         / sigma**2
     ).detach()
 
@@ -73,16 +70,20 @@ def make_movie(Nxy=256, N_theta=256, diag=True, plot_metric=True):
             plt.savefig(f"v_{'XY'[index]}.png", dpi=300)
         exit()
 
+    plot_interval = round(0.01 * time_steps)
+    plot_frame = 0
     for time_step in range(time_steps):
         log.info(f"{time_step = }")
-        plt.clf()
-        sim.plot_streamlines(plt, dict(levels=100), dict(linewidth=1.0))
-        plt.gca().set_aspect("equal")
-        plt.savefig(
-            f"animation/blob_advect_{time_step:04d}.png",
-            bbox_inches="tight",
-            dpi=200,
-        )
+        if time_step % plot_interval == 0:
+            plt.clf()
+            sim.plot_streamlines(plt, dict(levels=100), dict(linewidth=1.0))
+            plt.gca().set_aspect("equal")
+            plt.savefig(
+                f"animation/blob_advect_{plot_frame:04d}.png",
+                bbox_inches="tight",
+                dpi=200,
+            )
+            plot_frame += 1
         sim.time_step()
 
     # Plot only at end (for easier performance benchmarking of time steps):
