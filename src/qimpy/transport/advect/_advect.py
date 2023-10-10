@@ -12,49 +12,34 @@ class Advect:
     def __init__(
         self,
         *,
-        Lx: float = 1.0,
-        Ly: float = 1.25,
+        L: tuple[float, ...] = (1.0, 1.25),
         v_F: float = 1.0,
-        Nx: int = 64,
-        Ny: int = 80,
+        N: tuple[int, ...] = (64, 80),
         N_theta: int = 256,
         N_ghost: int = 2,
         contact_width: float = 0.25,
         reflect_boundaries: bool = True,
         init_angle: float = 0.0,
     ) -> None:
-        self.Lx = Lx
-        self.Ly = Ly
+        self.L = L
         self.v_F = v_F
-        self.Nx = Nx
-        self.Ny = Ny
-        self.N1 = Nx
-        self.N2 = Ny
+        self.N = N
         self.N_theta = N_theta
         self.N_ghost = N_ghost
         self.contact_width = contact_width
         self.reflect_boundaries = reflect_boundaries
 
-        self.dx = Lx / Nx
-        self.dy = Ly / Ny
         self.dtheta = 2 * np.pi / self.N_theta
         self.drift_velocity_fraction = 1e-3  # as a fraction of v_F
 
-        # self.x = centered_grid(-N_ghost, Nx + N_ghost) * self.dx
-        # self.y = centered_grid(-N_ghost, Ny + N_ghost) * self.dy
-
-        X = torch.arange(0, self.N1, 1, dtype=torch.float, device=rc.device)
-        Y = torch.arange(0, self.N2, 1, dtype=torch.float, device=rc.device)
-
-        self.dX = X[1] - X[0]
-        self.dY = Y[1] - Y[0]
-        X, Y = torch.meshgrid(X, Y, indexing="ij")
-        self.X, self.Y = torch.nn.functional.pad(
-            X, [self.N_ghost] * 4
-        ), torch.nn.functional.pad(Y, [self.N_ghost] * 4)
-        self.Q = torch.stack([self.X, self.Y], dim=-1)
-
-        # self.x, self.y, jacobian = affine(self.X, self.Y, x_y_corners)
+        grids1d = [
+            torch.nn.functional.pad(
+                torch.arange(Ni, device=rc.device, dtype=torch.double),
+                [self.N_ghost] * 2,
+            )
+            for Ni in N
+        ]
+        self.Q = torch.stack(torch.meshgrid(*grids1d, indexing="ij"), dim=-1)
         self.q, jacobian = self.custom_transformation(self.Q)
 
         jac_inv = jacobian_inv(self.Q, self.custom_transformation)
@@ -130,11 +115,9 @@ class Advect:
     @stopwatch(name="drho")
     def drho(self, dt: float, rho: torch.Tensor) -> torch.Tensor:
         """Compute drho for time step dt, given current rho."""
-        return (-dt / (self.g * self.dX)) * v_prime(
-            rho, self.g * self.V[:, :, :, 0], axis=0
-        ) + (-dt / (self.g * self.dY)) * v_prime(
-            rho, self.g * self.V[:, :, :, 1], axis=1
-        )
+        return (-dt / self.g) * v_prime(rho, self.g * self.V[:, :, :, 0], axis=0) + (
+            -dt / self.g
+        ) * v_prime(rho, self.g * self.V[:, :, :, 1], axis=1)
 
     def time_step(self):
         # Half step:
@@ -172,13 +155,10 @@ class Advect:
         # plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
 
     def custom_transformation(self, Q, kx=1, ky=1, amp=-0.05):
-        L = torch.tensor([self.Lx, self.Ly], device=rc.device)
+        L = torch.tensor(self.L, device=rc.device)
         k = torch.tensor([kx, ky], device=rc.device)
-        N = torch.tensor(
-            [self.Nx + 2 * self.N_ghost, self.Ny + 2 * self.N_ghost],
-            device=rc.device,
-        )
         Nx, Ny, _ = Q.shape
+        N = torch.tensor([Nx, Ny], device=rc.device)
         grad_q = torch.tile(
             torch.eye(2, device=rc.device)[:, None, None], (1, Nx, Ny, 1)
         )

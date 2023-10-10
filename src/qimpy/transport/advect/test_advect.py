@@ -13,63 +13,33 @@ def gaussian_blob(
     return torch.exp(-(q - q0).square().sum(axis=-1) / sigma**2).detach()
 
 
-def run(*, Nxy, N_theta, diag, plot_metric=False, plot_frames=False):
+def run(*, Nxy, N_theta, diag, plot_frames=False):
     import matplotlib.pyplot as plt
 
-    v_F = 200.0
-    Lx = 1.0
-    Ly = 1.0
     sim = Advect(
         reflect_boundaries=False,
         contact_width=0.0,
-        v_F=v_F,
-        Lx=Lx,
-        Ly=Ly,
-        Nx=Nxy,
-        Ny=Nxy,
+        v_F=200.0,
+        L=(1.0, 1.0),
+        N=(Nxy, Nxy),
         N_theta=N_theta,
         init_angle=np.pi / 4 if diag else 0.0,
     )
 
     # Set the time for slightly more than one period
-    L_period = np.hypot(Lx, Ly) if diag else Lx
-    t_period = L_period / v_F
+    L_period = np.hypot(*sim.L) if diag else sim.L[0]
+    t_period = L_period / sim.v_F
     time_steps = int(np.ceil(1.25 * t_period / sim.dt))
     t_final = time_steps * sim.dt
     log.info(f"Running for {time_steps} steps.")
 
     # Initialize initial and expected final density
-    q0 = torch.tensor([0.25 * Lx, 0.25 * Ly], device=rc.device)
+    q0 = 0.25 * torch.tensor(sim.L, device=rc.device)
     sim.rho[:, :, 0] = gaussian_blob(sim.q, q0)
     q_final = q0 + sim.v[0, 0, 0] * (t_final - t_period)
     density_final = (
         gaussian_blob(sim.q, q_final)[sim.non_ghost, sim.non_ghost] * sim.dtheta
     )
-
-    if plot_metric:
-        # Plot metric
-        plt.figure()
-        plt.imshow(np.squeeze(to_numpy(sim.g)))
-        plt.gca().set_aspect("equal")
-        plt.colorbar()
-        plt.savefig("transform_metric.png", dpi=300)
-
-        # Plot Jacobian
-        for index, jac_comp in enumerate((sim.dX_dx, sim.dX_dy, sim.dY_dx, sim.dY_dy)):
-            plt.figure()
-            plt.imshow(np.squeeze(to_numpy(jac_comp)))
-            plt.gca().set_aspect("equal")
-            plt.colorbar()
-            plt.savefig(f"jacobian_{index}.png", dpi=300)
-
-        # Plot velocity
-        for index, v_comp in enumerate((sim.v_X, sim.v_Y)):
-            plt.figure()
-            plt.imshow(np.squeeze(to_numpy(v_comp[..., 0])))
-            plt.gca().set_aspect("equal")
-            plt.colorbar()
-            plt.savefig(f"v_{'XY'[index]}.png", dpi=300)
-        exit()
 
     plot_interval = round(0.01 * time_steps)
     plot_frame = 0
