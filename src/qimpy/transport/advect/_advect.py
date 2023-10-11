@@ -35,7 +35,7 @@ class Advect:
         # Initialize grids and transformations:
         grids1d = [
             torch.nn.functional.pad(
-                torch.arange(Ni, device=rc.device, dtype=torch.double),
+                torch.arange(Ni, device=rc.device) + 0.5,
                 [self.N_ghost] * 2,
             )
             for Ni in N
