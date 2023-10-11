@@ -140,7 +140,7 @@ class Advect:
         )
         Q.requires_grad = True
         Q_by_N = Q / N
-        q = L * Q_by_N + amp * torch.sin(2 * np.pi * k * torch.roll(Q_by_N, 1))
+        q = L * Q_by_N + amp * torch.sin(2 * np.pi * k * torch.roll(Q_by_N, 1, dims=-1))
 
         jacobian = torch.autograd.grad(
             q, Q, grad_outputs=grad_q, is_grads_batched=True, retain_graph=False
