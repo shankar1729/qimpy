@@ -34,11 +34,7 @@ class Advect:
 
         # Initialize grids and transformations:
         grids1d = [
-            torch.nn.functional.pad(
-                torch.arange(Ni, device=rc.device) + 0.5,
-                [self.N_ghost] * 2,
-            )
-            for Ni in N
+            (torch.arange(-N_ghost, Ni + N_ghost, device=rc.device) + 0.5) for Ni in N
         ]
         self.Q = torch.stack(torch.meshgrid(*grids1d, indexing="ij"), dim=-1)
         self.q, jacobian = self.custom_transformation(self.Q)
