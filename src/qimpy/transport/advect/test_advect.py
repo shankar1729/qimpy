@@ -19,27 +19,23 @@ def gaussian_blob(
     return torch.exp(-dq.square().sum(axis=-1) / sigma**2).detach()
 
 
-def gaussian_blob_errors(
+def gaussian_blob_error(
     g: torch.Tensor,
     rho: torch.Tensor,
     q: torch.Tensor,
     q0: torch.Tensor,
     L: torch.Tensor,
     sigma: float,
-) -> tuple[torch.Tensor, torch.Tensor, float]:
-    """Compute errors in position, shape and MAE of shape of density `rho`."""
-    dq = q - q0
-    dq -= torch.floor(0.5 + dq / L) * L  # Minimum-image convention
+) -> tuple[torch.Tensor, float]:
+    """Compute error profile and MAE of density `rho`."""
+    rho_err = rho - gaussian_blob(q, q0, L, sigma)
     rho_norm = (g[..., 0] * rho).sum()
-    dq_average = (g * rho[..., None] * dq).sum(axis=(0, 1)) / rho_norm
-    # Accounting for position error, dq_average, determine shape error:
-    rho_err = rho - gaussian_blob(q, q0 + dq_average, L, sigma)
     rho_mae = (g[..., 0] * rho_err.abs()).sum() / rho_norm
-    return dq_average, rho_err, rho_mae.item()
+    return rho_err, rho_mae.item()
 
 
-def run(*, Nxy, N_theta, diag, plot_frames=False) -> tuple[float, float]:
-    """Run simulation and report errors in position and shape."""
+def run(*, Nxy, N_theta, diag, plot_frames=False) -> float:
+    """Run simulation and report error in final density."""
     sim = Advect(
         reflect_boundaries=False,
         contact_width=0.0,
@@ -84,7 +80,7 @@ def run(*, Nxy, N_theta, diag, plot_frames=False) -> tuple[float, float]:
     plt.clf()
     q_final = q0 + sim.v[0] * t_final
     rho = sim.rho[sim.non_ghost, sim.non_ghost, 0]
-    dq_average, rho_err, rho_mae = gaussian_blob_errors(g, rho, q, q_final, L, sigma)
+    rho_err, rho_mae = gaussian_blob_error(g, rho, q, q_final, L, sigma)
     q_np = to_numpy(q)
     plt.contourf(q_np[..., 0], q_np[..., 1], to_numpy(rho_err), levels=100, cmap="bwr")
     plt.gca().set_aspect("equal")
@@ -92,9 +88,8 @@ def run(*, Nxy, N_theta, diag, plot_frames=False) -> tuple[float, float]:
     plt.savefig(f"density_err_{Nxy}.png", bbox_inches="tight", dpi=200)
 
     # Return RMS error in density:
-    pos_err = dq_average.norm().item()
-    log.info(f"{pos_err = } and {rho_mae = } for {Nxy = }")
-    return pos_err, rho_mae
+    log.info(f"{rho_mae = } for {Nxy = }")
+    return rho_mae
 
 
 def main():
@@ -116,47 +111,40 @@ def main():
         assert isinstance(args.Nxy_min, int)
         assert args.Nxy_min < args.Nxy
         Ns = []
-        pos_errs = []
-        shape_errs = []
+        errs = []
         Nxy = args.Nxy_min
         while Nxy <= args.Nxy:
-            pos_err, shape_err = run(
-                Nxy=Nxy, N_theta=args.Ntheta, diag=args.diag, plot_frames=False
-            )
+            err = run(Nxy=Nxy, N_theta=args.Ntheta, diag=args.diag, plot_frames=False)
             Ns.append(Nxy)
-            pos_errs.append(pos_err)
-            shape_errs.append(shape_err)
+            errs.append(err)
             Nxy *= 2
 
         # Print
-        log.info("\n#Nxy PosErr ShapeErr")
-        for Nxy, pos_err, shape_err in zip(Ns, pos_errs, shape_errs):
-            log.info(f"{Nxy:4d} {pos_err:.6f} {shape_err:.6f}")
+        log.info("\n#Nxy MAE")
+        for Nxy, err in zip(Ns, errs):
+            log.info(f"{Nxy:4d} {err:.6f}")
 
         # Plot
-        fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-        plt.subplots_adjust(wspace=0.3)
-        for ax, errs, name in zip(axes, (pos_errs, shape_errs), ("Position", "Shape")):
-            plt.sca(ax)
-            plt.scatter(Ns, errs, marker="+", label="Observed Errors")
-            # Add scaling guides:
-            x_scale = np.array([0.5 * Ns[0], 2 * Ns[-1]])
-            for exponent, ls in zip((1, 2), ("dashed", "dotted")):
-                plt.plot(
-                    x_scale,
-                    errs[0] * (Ns[0] / x_scale) ** exponent,
-                    color="k",
-                    ls=ls,
-                    lw=1,
-                    label=r"$N^{-" + str(exponent) + r"}$ scaling",
-                )
-            plt.xscale("log")
-            plt.yscale("log")
-            plt.xlabel(r"$N_{xy}$")
-            plt.ylabel(f"{name} error")
-            plt.xlim(*x_scale)
-            plt.ylim(0.5 * min(errs), 2 * max(errs))
-            plt.legend()
+        plt.figure()
+        plt.scatter(Ns, errs, marker="+", label="Observed Errors")
+        # Add scaling guides:
+        x_scale = np.array([0.5 * Ns[0], 2 * Ns[-1]])
+        for exponent, ls in zip((1, 2), ("dashed", "dotted")):
+            plt.plot(
+                x_scale,
+                errs[0] * (Ns[0] / x_scale) ** exponent,
+                color="k",
+                ls=ls,
+                lw=1,
+                label=r"$N^{-" + str(exponent) + r"}$ scaling",
+            )
+        plt.xscale("log")
+        plt.yscale("log")
+        plt.xlabel(r"$N_{xy}$")
+        plt.ylabel(r"MAE($\rho$)")
+        plt.xlim(*x_scale)
+        plt.ylim(0.5 * min(errs), 2 * max(errs))
+        plt.legend()
         plt.savefig("convergence.pdf", bbox_inches="tight")
 
     rc.report_end()
