@@ -54,7 +54,7 @@ def run(*, Nxy, N_theta, diag, plot_frames=False) -> tuple[float, float]:
     L = torch.tensor(sim.L, device=rc.device)
     L_period = np.hypot(*sim.L) if diag else sim.L[0]
     t_period = L_period / sim.v_F
-    time_steps = int(np.ceil(1.25 * t_period / sim.dt))
+    time_steps = round(1.25 * t_period / sim.dt)
     t_final = time_steps * sim.dt
     log.info(f"\nRunning for {time_steps} steps at {Nxy = }:")
 
@@ -62,7 +62,7 @@ def run(*, Nxy, N_theta, diag, plot_frames=False) -> tuple[float, float]:
     sigma = 0.05
     q = sim.q[sim.non_ghost, sim.non_ghost]
     g = sim.g[sim.non_ghost, sim.non_ghost]
-    q0 = 0.5 * L
+    q0 = 0.25 * L
     sim.rho[sim.non_ghost, sim.non_ghost, 0] = gaussian_blob(q, q0, L, sigma)
 
     plot_interval = round(0.01 * time_steps)

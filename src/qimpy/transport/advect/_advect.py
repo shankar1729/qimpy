@@ -37,7 +37,7 @@ class Advect:
             (torch.arange(-N_ghost, Ni + N_ghost, device=rc.device) + 0.5) for Ni in N
         ]
         self.Q = torch.stack(torch.meshgrid(*grids1d, indexing="ij"), dim=-1)
-        self.q, jacobian = self.custom_transformation(self.Q)
+        self.q, jacobian = self.custom_transformation(self.Q, self.N)
         metric = torch.einsum("...aB, ...aC -> ...BC", jacobian, jacobian)
         self.g = torch.linalg.det(metric).sqrt()[:, :, None]
         self.v = v_F * torch.stack([self.theta.cos(), self.theta.sin()], dim=-1)
@@ -126,16 +126,14 @@ class Advect:
         plt.gca().set_aspect("equal")
         # plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
 
-    def custom_transformation(self, Q, kx=1, ky=2, amp=-0.05):
+    def custom_transformation(self, Q, N, kx=1, ky=2, amp=-0.05):
         L = torch.tensor(self.L, device=rc.device)
         k = torch.tensor([kx, ky], device=rc.device)
-        Nx, Ny, _ = Q.shape
-        N = torch.tensor([Nx, Ny], device=rc.device)
         grad_q = torch.tile(
-            torch.eye(2, device=rc.device)[:, None, None], (1, Nx, Ny, 1)
+            torch.eye(2, device=rc.device)[:, None, None], (1,) + Q.shape[:-1] + (1,)
         )
         Q.requires_grad = True
-        Q_by_N = Q / N
+        Q_by_N = Q / torch.tensor(N, device=rc.device)
         q = L * Q_by_N + amp * torch.sin(2 * np.pi * k * torch.roll(Q_by_N, 1, dims=-1))
 
         jacobian = torch.autograd.grad(
