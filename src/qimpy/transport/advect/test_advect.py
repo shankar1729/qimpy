@@ -31,7 +31,7 @@ def run(*, Nxy, N_theta, diag, plot_frames=False):
     t_period = L_period / sim.v_F
     time_steps = int(np.ceil(1.25 * t_period / sim.dt))
     t_final = time_steps * sim.dt
-    log.info(f"Running for {time_steps} steps.")
+    log.info(f"\nRunning for {time_steps} steps at {Nxy = }:")
 
     # Initialize initial and expected final density
     q0 = 0.25 * torch.tensor(sim.L, device=rc.device)
@@ -41,12 +41,12 @@ def run(*, Nxy, N_theta, diag, plot_frames=False):
         gaussian_blob(sim.q, q_final)[sim.non_ghost, sim.non_ghost] * sim.dtheta
     )
 
+    from tqdm import tqdm
+
     plot_interval = round(0.01 * time_steps)
     plot_frame = 0
-    for time_step in range(time_steps):
-        log.info(f"{time_step = }")
+    for time_step in tqdm(range(time_steps)):
         if plot_frames and (time_step % plot_interval == 0):
-            log.info("Plotting density and streamlines")
             plt.clf()
             sim.plot_streamlines(plt, dict(levels=100), dict(linewidth=1.0))
             plt.gca().set_aspect("equal")
@@ -59,7 +59,6 @@ def run(*, Nxy, N_theta, diag, plot_frames=False):
         sim.time_step()
 
     # Plot final density error:
-    log.info("Plotting error in final density")
     plt.clf()
     density_err = density_final - sim.density
     q = to_numpy(sim.q[sim.non_ghost, sim.non_ghost])
@@ -72,7 +71,7 @@ def run(*, Nxy, N_theta, diag, plot_frames=False):
     RMSE = density_err.square().mean().sqrt().item()
     RMS_value = density_final.square().mean().sqrt().item()
     RelativeRMSE = RMSE / RMS_value
-    log.info(f"{RelativeRMSE = }")
+    log.info(f"{RelativeRMSE = } for {Nxy = }")
     return RelativeRMSE
 
 
