@@ -41,9 +41,8 @@ class Advect:
         metric = torch.einsum("...aB, ...aC -> ...BC", jacobian, jacobian)
         self.g = torch.linalg.det(metric).sqrt()[:, :, None]
         self.v = v_F * torch.stack([self.theta.cos(), self.theta.sin()], dim=-1)
-        V = torch.einsum("ta, ...Ba -> ...tB", self.v, torch.linalg.inv(jacobian))
-        self.dt = 0.5 / V.abs().max().item()
-        self.gV = self.g[..., None] * V
+        self.V = torch.einsum("ta, ...Ba -> ...tB", self.v, torch.linalg.inv(jacobian))
+        self.dt = 0.5 / self.V.abs().max().item()
 
         # Initialize distribution function:
         self.rho_shape = (self.q.shape[0], self.q.shape[1], N_theta)
@@ -86,9 +85,9 @@ class Advect:
     @stopwatch(name="drho")
     def drho(self, dt: float, rho: torch.Tensor) -> torch.Tensor:
         """Compute drho for time step dt, given current rho."""
-        return (-dt / self.g) * (
-            v_prime(rho, self.gV[:, :, :, 0], axis=0)
-            + v_prime(rho, self.gV[:, :, :, 1], axis=1)
+        return (-dt) * (
+            v_prime(rho, self.V[:, :, :, 0], axis=0)
+            + v_prime(rho, self.V[:, :, :, 1], axis=1)
         )
 
     def time_step(self):
