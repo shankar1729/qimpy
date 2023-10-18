@@ -59,7 +59,7 @@ def run(*, Nxy, N_theta, diag, plot_frames=False) -> float:
     q = sim.q
     g = sim.g
     q0 = 0.25 * L
-    sim.rho[sim.non_ghost, sim.non_ghost, 0] = gaussian_blob(q, q0, L, sigma)
+    sim.rho[..., 0] = gaussian_blob(q, q0, L, sigma)
 
     plot_interval = round(0.01 * time_steps)
     plot_frame = 0
@@ -79,7 +79,7 @@ def run(*, Nxy, N_theta, diag, plot_frames=False) -> float:
     # Plot final density error:
     plt.clf()
     q_final = q0 + sim.v[0] * t_final
-    rho = sim.rho[sim.non_ghost, sim.non_ghost, 0]
+    rho = sim.rho[..., 0]
     rho_err, rho_mae = gaussian_blob_error(g, rho, q, q_final, L, sigma)
     q_np = to_numpy(q)
     plt.contourf(q_np[..., 0], q_np[..., 1], to_numpy(rho_err), levels=100, cmap="bwr")

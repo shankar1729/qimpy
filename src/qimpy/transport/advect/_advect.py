@@ -43,69 +43,67 @@ class Advect:
         self.dt = 0.5 / self.V.abs().max().item()
 
         # Initialize distribution function:
-        self.rho_shape = (N[0] + 2 * N_ghost, N[1] + 2 * N_ghost, N_theta)
+        self.rho_shape = (N[0], N[1], N_theta)
+        self.rho_padded_shape = (N[0] + 2 * N_ghost, N[1] + 2 * N_ghost, N_theta)
         self.rho = torch.zeros(self.rho_shape, device=rc.device)
 
-        # Initialize slices for contact and ghost/non-ghost regions:
+        # Initialize slices for accessing ghost regions in padded version:
+        # These are also the slices for the boundary region in non-padded version
         self.non_ghost = slice(N_ghost, -N_ghost)
-        self.ghost_l = slice(0, N_ghost)  # ghost indices on left/bottom side
+        self.ghost_l = slice(0, N_ghost)  # ghost indices on left/bottom
         self.ghost_r = slice(-N_ghost, None)  # ghost indices on right/top side
 
-        # Slices to access boundary region adjacent to ghost:
-        self.boundary_l = slice(N_ghost, 2 * N_ghost)
-        self.boundary_r = slice(-2 * N_ghost, -N_ghost)
-
     def apply_dirichlet_boundary(self, rho: torch.Tensor) -> None:
-        """Apply Dirichlet boundary conditions in-place."""
+        """Apply Dirichlet boundary conditions in-place to padded version."""
         rho_contact = self.drift_velocity_fraction * self.v_x
         rho[self.ghost_l, self.y_contact] = rho_contact
         rho[self.ghost_r, self.y_contact] = rho_contact
+        raise NotImplementedError  # This is old DOLT code that is currently unused
 
     @stopwatch(name="apply_boundaries")
-    def apply_boundaries(self, rho: torch.Tensor) -> None:
-        """Apply all boundary conditions in-place in `rho`."""
+    def apply_boundaries(self, rho: torch.Tensor) -> torch.Tensor:
+        """Apply all boundary conditions to `rho` and produce ghost-padded version."""
+        non_ghost = self.non_ghost
+        ghost_l = self.ghost_l
+        ghost_r = self.ghost_r
+        out = torch.zeros(self.rho_padded_shape, device=rc.device)
+        out[non_ghost, non_ghost] = rho
         if self.reflect_boundaries:
-            rho[self.ghost_l] = reflect_x(rho[self.boundary_l])
-            rho[self.ghost_r] = reflect_x(rho[self.boundary_r])
-            rho[:, self.ghost_l] = reflect_y(rho[:, self.boundary_l])
-            rho[:, self.ghost_r] = reflect_y(rho[:, self.boundary_r])
+            out[ghost_l, non_ghost] = reflect_x(rho[ghost_l])
+            out[ghost_r, non_ghost] = reflect_x(rho[ghost_r])
+            out[non_ghost, ghost_l] = reflect_y(rho[:, ghost_l])
+            out[non_ghost, ghost_r] = reflect_y(rho[:, ghost_r])
         else:
             # Periodic boundary conditions
-            rho[self.ghost_l] = rho[self.boundary_r]
-            rho[self.ghost_r] = rho[self.boundary_l]
-            rho[:, self.ghost_l] = rho[:, self.boundary_r]
-            rho[:, self.ghost_r] = rho[:, self.boundary_l]
+            out[ghost_l, non_ghost] = rho[ghost_r]
+            out[ghost_r, non_ghost] = rho[ghost_l]
+            out[non_ghost, self.ghost_l] = rho[:, ghost_r]
+            out[non_ghost, self.ghost_r] = rho[:, ghost_l]
         # self.apply_dirichlet_boundary(rho)
+        return out
 
     @stopwatch(name="drho")
     def drho(self, dt: float, rho: torch.Tensor) -> torch.Tensor:
         """Compute drho for time step dt, given current rho."""
         non_ghost = self.non_ghost
-        result = (-dt) * (
+        return (-dt) * (
             v_prime(rho[:, non_ghost], self.V[..., 0], axis=0)
             + v_prime(rho[non_ghost, :], self.V[..., 1], axis=1)
         )
-        out = torch.zeros_like(rho)
-        out[non_ghost, non_ghost] = result
-        return out
 
     def time_step(self):
-        # Half step:
-        self.apply_boundaries(self.rho)
-        rho_half = self.rho + self.drho(0.5 * self.dt, self.rho)
-        # Full step:
-        self.apply_boundaries(rho_half)
-        self.rho += self.drho(self.dt, rho_half)
+        rho_half = self.rho + self.drho(0.5 * self.dt, self.apply_boundaries(self.rho))
+        self.rho += self.drho(self.dt, self.apply_boundaries(rho_half))
 
     @property
     def density(self):
         """Density at each point (integrate over momenta)."""
-        return self.rho[self.non_ghost, self.non_ghost].sum(dim=2) * self.dtheta
+        return self.rho.sum(dim=2) * self.dtheta
 
     @property
     def velocity(self):
         """Average velocity at each point (integrate over momenta)."""
-        return (self.rho[self.non_ghost, self.non_ghost] @ self.v) * self.dtheta
+        return (self.rho @ self.v) * self.dtheta
 
     @stopwatch(name="plot_streamlines")
     def plot_streamlines(self, plt, contour_kwargs, stream_kwargs):
