@@ -193,17 +193,9 @@ def slope_minmod(f: torch.Tensor) -> torch.Tensor:
 
 def v_prime(rho: torch.Tensor, v: torch.Tensor, axis: int) -> torch.Tensor:
     """Compute v * d`rho`/dx, with velocity `v` along `axis`."""
-    # Axis permutations to bring velocity to front and active axis to end
-    if axis == 0:
-        permute_forward = (2, 1, 0)
-        permute_inverse = (2, 1, 0)
-    else:
-        assert axis == 1
-        permute_forward = (2, 0, 1)
-        permute_inverse = (1, 2, 0)
-
-    rho = rho.permute(permute_forward)
-    v = v.permute(permute_forward)
+    # Bring active axis to end
+    rho = rho.swapaxes(axis, -1)
+    v = v.swapaxes(axis, -1)
 
     # Reconstruction
     half_slope = 0.5 * slope_minmod(rho)
@@ -214,7 +206,7 @@ def v_prime(rho: torch.Tensor, v: torch.Tensor, axis: int) -> torch.Tensor:
     result_minus = (rho_diff - half_slope_diff)[..., 1:]
     result_plus = (rho_diff + half_slope_diff)[..., :-1]
     delta_rho = torch.where(v < 0.0, result_minus, result_plus)
-    return (v * delta_rho).permute(permute_inverse)  # original axis order
+    return (v * delta_rho).swapaxes(axis, -1)  # original axis order
 
 
 def centered_grid(start: int, stop: int) -> torch.Tensor:
