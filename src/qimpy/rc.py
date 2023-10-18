@@ -51,7 +51,7 @@ compute_stream: Optional[torch.cuda.Stream] = None  #: Asynchronous CUDA compute
 t_start: float = time.time()  #: Start time used for `clock` (set by `init`)
 
 # Set reasonable pre-init defaults for torch:
-torch.set_default_tensor_type(torch.DoubleTensor)
+torch.set_default_dtype(torch.double)
 torch.set_num_threads(1)  # to prevent overcommit between MPI processes
 
 # Declare type mappings from torch to MPI and numpy:
