@@ -33,9 +33,7 @@ class Advect:
         self.drift_velocity_fraction = 1e-3  # as a fraction of v_F
 
         # Initialize grids and transformations:
-        grids1d = [
-            (torch.arange(-N_ghost, Ni + N_ghost, device=rc.device) + 0.5) for Ni in N
-        ]
+        grids1d = [(torch.arange(Ni, device=rc.device) + 0.5) for Ni in N]
         self.Q = torch.stack(torch.meshgrid(*grids1d, indexing="ij"), dim=-1)
         self.q, jacobian = self.custom_transformation(self.Q, self.N)
         metric = torch.einsum("...aB, ...aC -> ...BC", jacobian, jacobian)
@@ -45,14 +43,11 @@ class Advect:
         self.dt = 0.5 / self.V.abs().max().item()
 
         # Initialize distribution function:
-        self.rho_shape = (self.q.shape[0], self.q.shape[1], N_theta)
+        self.rho_shape = (N[0] + 2 * N_ghost, N[1] + 2 * N_ghost, N_theta)
         self.rho = torch.zeros(self.rho_shape, device=rc.device)
 
         # Initialize slices for contact and ghost/non-ghost regions:
-        if N_ghost == 0:
-            self.non_ghost = slice(0, -1)
-        else:
-            self.non_ghost = slice(N_ghost, -N_ghost)
+        self.non_ghost = slice(N_ghost, -N_ghost)
         self.ghost_l = slice(0, N_ghost)  # ghost indices on left/bottom side
         self.ghost_r = slice(-N_ghost, None)  # ghost indices on right/top side
 
@@ -85,10 +80,14 @@ class Advect:
     @stopwatch(name="drho")
     def drho(self, dt: float, rho: torch.Tensor) -> torch.Tensor:
         """Compute drho for time step dt, given current rho."""
-        return (-dt) * (
-            v_prime(rho, self.V[:, :, :, 0], axis=0)
-            + v_prime(rho, self.V[:, :, :, 1], axis=1)
+        non_ghost = self.non_ghost
+        result = (-dt) * (
+            v_prime(rho[:, non_ghost], self.V[..., 0], axis=0)
+            + v_prime(rho[non_ghost, :], self.V[..., 1], axis=1)
         )
+        out = torch.zeros_like(rho)
+        out[non_ghost, non_ghost] = result
+        return out
 
     def time_step(self):
         # Half step:
@@ -168,7 +167,7 @@ def get_slope_conv(slope_lim_theta: float = 2.0) -> torch.nn.Conv1d:
     and all remaining dimensions flattened into the first 'batch' dimension.
     On output, the singleton dimension will be replaced by length 3,
     containing backward, central and forward differences (in that order)."""
-    conv = torch.nn.Conv1d(1, 3, 3, padding=1, bias=False)
+    conv = torch.nn.Conv1d(1, 3, 3, bias=False)
     conv.weight.data = torch.tensor(
         [
             [-slope_lim_theta, slope_lim_theta, 0.0],
@@ -211,13 +210,12 @@ def v_prime(rho: torch.Tensor, v: torch.Tensor, axis: int) -> torch.Tensor:
     # Reconstruction
     half_slope = 0.5 * slope_minmod(rho)
 
-    # Riemann selection based on velocity:
-    result_minus = rho - half_slope
-    result_plus = (rho + half_slope).roll(+1, dims=-1)
-    rho_minus_half = torch.where(v < 0.0, result_minus, result_plus)
-
-    # Final central difference derivative from plus and minus half points:
-    delta_rho = rho_minus_half.diff(dim=-1, append=rho_minus_half[..., :1])
+    # Central difference from half points & Riemann selection based on velocity:
+    rho_diff = rho[..., 1:-1].diff(dim=-1)
+    half_slope_diff = half_slope.diff(dim=-1)
+    result_minus = (rho_diff - half_slope_diff)[..., 1:]
+    result_plus = (rho_diff + half_slope_diff)[..., :-1]
+    delta_rho = torch.where(v < 0.0, result_minus, result_plus)
     return (v * delta_rho).permute(permute_inverse)  # original axis order
 
 

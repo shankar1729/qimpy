@@ -56,8 +56,8 @@ def run(*, Nxy, N_theta, diag, plot_frames=False) -> float:
 
     # Initialize initial and expected final density
     sigma = 0.05
-    q = sim.q[sim.non_ghost, sim.non_ghost]
-    g = sim.g[sim.non_ghost, sim.non_ghost]
+    q = sim.q
+    g = sim.g
     q0 = 0.25 * L
     sim.rho[sim.non_ghost, sim.non_ghost, 0] = gaussian_blob(q, q0, L, sigma)
 
