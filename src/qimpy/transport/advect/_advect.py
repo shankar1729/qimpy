@@ -14,8 +14,6 @@ class Advect:
         N: tuple[int, ...] = (64, 80),
         N_theta: int = 256,
         N_ghost: int = 2,
-        contact_width: float = 0.25,
-        reflect_boundaries: bool = True,
         init_angle: float = 0.0,
     ) -> None:
         self.L = L
@@ -23,12 +21,9 @@ class Advect:
         self.N = N
         self.N_theta = N_theta
         self.N_ghost = N_ghost
-        self.contact_width = contact_width
-        self.reflect_boundaries = reflect_boundaries
 
         self.dtheta = 2 * np.pi / self.N_theta
         self.theta = torch.arange(N_theta, device=rc.device) * self.dtheta + init_angle
-        self.drift_velocity_fraction = 1e-3  # as a fraction of v_F
 
         # Initialize grids and transformations:
         grids1d = [(torch.arange(Ni, device=rc.device) + 0.5) for Ni in N]
@@ -54,13 +49,6 @@ class Advect:
         # Initialize v*drho/dx calculator:
         self.v_prime = torch.jit.script(Vprime())
 
-    def apply_dirichlet_boundary(self, rho: torch.Tensor) -> None:
-        """Apply Dirichlet boundary conditions in-place to padded version."""
-        rho_contact = self.drift_velocity_fraction * self.v_x
-        rho[self.ghost_l, self.y_contact] = rho_contact
-        rho[self.ghost_r, self.y_contact] = rho_contact
-        raise NotImplementedError  # This is old DOLT code that is currently unused
-
     @stopwatch(name="apply_boundaries")
     def apply_boundaries(self, rho: torch.Tensor) -> torch.Tensor:
         """Apply all boundary conditions to `rho` and produce ghost-padded version."""
@@ -69,18 +57,12 @@ class Advect:
         ghost_r = self.ghost_r
         out = torch.zeros(self.rho_padded_shape, device=rc.device)
         out[non_ghost, non_ghost] = rho
-        if self.reflect_boundaries:
-            out[ghost_l, non_ghost] = reflect_x(rho[ghost_l])
-            out[ghost_r, non_ghost] = reflect_x(rho[ghost_r])
-            out[non_ghost, ghost_l] = reflect_y(rho[:, ghost_l])
-            out[non_ghost, ghost_r] = reflect_y(rho[:, ghost_r])
-        else:
-            # Periodic boundary conditions
-            out[ghost_l, non_ghost] = rho[ghost_r]
-            out[ghost_r, non_ghost] = rho[ghost_l]
-            out[non_ghost, self.ghost_l] = rho[:, ghost_r]
-            out[non_ghost, self.ghost_r] = rho[:, ghost_l]
-        # self.apply_dirichlet_boundary(rho)
+
+        # Periodic boundary conditions
+        out[ghost_l, non_ghost] = rho[ghost_r]
+        out[ghost_r, non_ghost] = rho[ghost_l]
+        out[non_ghost, self.ghost_l] = rho[:, ghost_r]
+        out[non_ghost, self.ghost_r] = rho[:, ghost_l]
         return out
 
     @stopwatch(name="drho")
@@ -203,27 +185,3 @@ class Vprime(torch.nn.Module):
         result_plus = (rho_diff + half_slope_diff)[..., :-1]
         delta_rho = torch.where(v < 0.0, result_minus, result_plus)
         return (v * delta_rho).swapaxes(axis, -1)  # original axis order
-
-
-def centered_grid(start: int, stop: int) -> torch.Tensor:
-    """Create a grid centered on the intervals of [start, stop]."""
-    return torch.arange(start + 0.5, stop, device=rc.device)
-
-
-def reflect_x(rho: torch.Tensor) -> torch.Tensor:
-    """Reflect a distribution function along x."""
-    # p_x -> -p_x, p_y -> p_y
-    # => cos(theta) -> -cos(theta), sin(theta) -> sin(theta)
-    # => theta -> pi - theta
-    # can achieve this by flipping each half of the theta dimension
-    rho = rho.unflatten(-1, (2, -1))  # split N_theta into 2 x N_theta/2
-    rho = rho.flip(dims=(0, -1))  # flip x and N_theta/2
-    return rho.flatten(-2)  # remerge 2 x N_theta/2 into N_theta
-
-
-def reflect_y(rho: torch.Tensor) -> torch.Tensor:
-    """Reflect a distribution function along y."""
-    # p_x -> p_x, p_y -> -p_y
-    # => cos(theta) -> cos(theta), sin(theta) -> -sin(theta)
-    # => theta -> -theta
-    return rho.flip(dims=(1, -1))

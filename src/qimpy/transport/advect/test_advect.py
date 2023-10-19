@@ -37,8 +37,6 @@ def gaussian_blob_error(
 def run(*, Nxy, N_theta, diag, plot_frames=False) -> float:
     """Run simulation and report error in final density."""
     sim = Advect(
-        reflect_boundaries=False,
-        contact_width=0.0,
         v_F=200.0,
         L=(1.0, 1.0),
         N=(Nxy, Nxy),
