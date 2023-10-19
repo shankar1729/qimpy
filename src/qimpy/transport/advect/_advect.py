@@ -1,3 +1,6 @@
+from __future__ import annotations
+from typing import Callable
+
 import numpy as np
 import torch
 
@@ -9,21 +12,40 @@ class Advect:
     def __init__(
         self,
         *,
+        transformation: Callable[[torch.Tensor], torch.Tensor],
         v: torch.Tensor,
-        L: tuple[float, ...] = (1.0, 1.25),
-        N: tuple[int, ...] = (64, 80),
+        N: tuple[int, ...],
         N_ghost: int = 2,
     ) -> None:
-        self.L = L
         self.N = N
         self.N_ghost = N_ghost
 
-        # Initialize grids and transformations:
+        # Initialize mesh:
         grids1d = [(torch.arange(Ni, device=rc.device) + 0.5) for Ni in N]
         self.Q = torch.stack(torch.meshgrid(*grids1d, indexing="ij"), dim=-1)
-        self.q, jacobian = self.custom_transformation(self.Q, self.N)
+
+        # Initialize transformed coordinates and jacobian using auto-grad
+        grad_q = torch.tile(
+            torch.eye(2, device=rc.device)[:, None, None], (1,) + N + (1,)
+        )
+        self.Q.requires_grad = True
+        Qfrac = self.Q / torch.tensor(N, device=rc.device)
+        self.q = transformation(Qfrac)
+        jacobian = torch.autograd.grad(
+            self.q,
+            self.Q,
+            grad_outputs=grad_q,
+            is_grads_batched=True,
+            retain_graph=False,
+        )[0]
+        jacobian = torch.permute(jacobian, (1, 2, 0, 3))
+        self.Q.requires_grad = False
+
+        # Initialize metric:
         metric = torch.einsum("...aB, ...aC -> ...BC", jacobian, jacobian)
         self.g = torch.linalg.det(metric).sqrt()[:, :, None]
+
+        # Initialize velocities:
         self.v = v
         self.V = torch.einsum("ta, ...Ba -> ...tB", v, torch.linalg.inv(jacobian))
         self.dt = 0.5 / self.V.abs().max().item()
@@ -98,23 +120,6 @@ class Advect:
         plt.contourf(x, y, np.clip(rho, 1e-3, None), **contour_kwargs)
         plt.gca().set_aspect("equal")
         # plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
-
-    def custom_transformation(self, Q, N, kx=1, ky=2, amp=-0.05):
-        L = torch.tensor(self.L, device=rc.device)
-        k = torch.tensor([kx, ky], device=rc.device)
-        grad_q = torch.tile(
-            torch.eye(2, device=rc.device)[:, None, None], (1,) + Q.shape[:-1] + (1,)
-        )
-        Q.requires_grad = True
-        Q_by_N = Q / torch.tensor(N, device=rc.device)
-        q = L * Q_by_N + amp * torch.sin(2 * np.pi * k * torch.roll(Q_by_N, 1, dims=-1))
-
-        jacobian = torch.autograd.grad(
-            q, Q, grad_outputs=grad_q, is_grads_batched=True, retain_graph=False
-        )[0]
-        jacobian = torch.permute(jacobian, (1, 2, 0, 3))
-        Q.requires_grad = False
-        return q, jacobian
 
 
 def to_numpy(f: torch.Tensor) -> np.ndarray:

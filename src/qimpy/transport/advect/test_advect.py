@@ -1,4 +1,5 @@
 import argparse
+from dataclasses import dataclass
 
 import torch
 import numpy as np
@@ -9,6 +10,19 @@ from qimpy import log, rc
 from qimpy.io import log_config
 from qimpy.profiler import StopWatch
 from qimpy.transport.advect._advect import Advect, to_numpy
+
+
+@dataclass
+class WaveTile:
+    L: torch.Tensor
+    k: torch.Tensor
+    amp: float
+
+    def __call__(self, Qfrac: torch.Tensor) -> torch.Tensor:
+        """Define mapping from fractional mesh to Cartesian coordinates"""
+        return self.L * Qfrac + self.amp * torch.sin(
+            2 * np.pi * self.k * torch.roll(Qfrac, 1, dims=-1)
+        )
 
 
 def gaussian_blob(
@@ -37,6 +51,13 @@ def gaussian_blob_error(
 def run(*, Nxy, N_theta, diag, plot_frames=False) -> float:
     """Run simulation and report error in final density."""
 
+    # Initialize geometric transformation:
+    transformation = WaveTile(
+        L=torch.tensor([1.0, 1.0], device=rc.device),
+        k=torch.tensor([1, 2], device=rc.device),
+        amp=-0.05,
+    )
+
     # Initialize velocities (eventually should be in Material):
     v_F = 200.0
     init_angle = np.pi / 4 if diag else 0.0
@@ -44,15 +65,11 @@ def run(*, Nxy, N_theta, diag, plot_frames=False) -> float:
     theta = torch.arange(N_theta, device=rc.device) * dtheta + init_angle
     v = v_F * torch.stack([theta.cos(), theta.sin()], dim=-1)
 
-    sim = Advect(
-        L=(1.0, 1.0),
-        N=(Nxy, Nxy),
-        v=v,
-    )
+    sim = Advect(transformation=transformation, v=v, N=(Nxy, Nxy))
 
     # Set the time for slightly more than one period
-    L = torch.tensor(sim.L, device=rc.device)
-    L_period = np.hypot(*sim.L) if diag else sim.L[0]
+    L = torch.diag(transformation(torch.eye(2, device=rc.device)))
+    L_period = (L.norm() if diag else L[0]).item()
     t_period = L_period / v_F
     time_steps = round(1.25 * t_period / sim.dt)
     t_final = time_steps * sim.dt
