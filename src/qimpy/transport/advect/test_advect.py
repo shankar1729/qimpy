@@ -26,10 +26,10 @@ class WaveTile:
 
 
 def gaussian_blob(
-    q: torch.Tensor, q0: torch.Tensor, L: torch.Tensor, sigma: float
+    q: torch.Tensor, q0: torch.Tensor, Rbasis: torch.Tensor, sigma: float
 ) -> torch.Tensor:
     dq = q - q0
-    dq -= torch.floor(0.5 + dq / L) * L  # Minimum-image convention
+    dq -= torch.floor(0.5 + dq @ torch.linalg.inv(Rbasis.T)) @ Rbasis.T
     return torch.exp(-dq.square().sum(axis=-1) / sigma**2).detach()
 
 
@@ -38,11 +38,11 @@ def gaussian_blob_error(
     rho: torch.Tensor,
     q: torch.Tensor,
     q0: torch.Tensor,
-    L: torch.Tensor,
+    Rbasis: torch.Tensor,
     sigma: float,
 ) -> tuple[torch.Tensor, float]:
     """Compute error profile and MAE of density `rho`."""
-    rho_err = rho - gaussian_blob(q, q0, L, sigma)
+    rho_err = rho - gaussian_blob(q, q0, Rbasis, sigma)
     rho_norm = (g[..., 0] * rho).sum()
     rho_mae = (g[..., 0] * rho_err.abs()).sum() / rho_norm
     return rho_err, rho_mae.item()
@@ -57,10 +57,13 @@ def run(*, Nxy, N_theta, diag, plot_frames=False) -> float:
         k=torch.tensor([1, 2], device=rc.device),
         amp=-0.05,
     )
+    Rbasis = transformation(torch.eye(2, device=rc.device)).T
+    delta_Qfrac = torch.tensor([1.0, 1.0] if diag else [1.0, 0.0], device=rc.device)
+    delta_q = delta_Qfrac @ Rbasis.T
 
     # Initialize velocities (eventually should be in Material):
     v_F = 200.0
-    init_angle = np.pi / 4 if diag else 0.0
+    init_angle = torch.atan2(delta_q[1], delta_q[0]).item()
     dtheta = 2 * np.pi / N_theta
     theta = torch.arange(N_theta, device=rc.device) * dtheta + init_angle
     v = v_F * torch.stack([theta.cos(), theta.sin()], dim=-1)
@@ -68,9 +71,7 @@ def run(*, Nxy, N_theta, diag, plot_frames=False) -> float:
     sim = Advect(transformation=transformation, v=v, N=(Nxy, Nxy))
 
     # Set the time for slightly more than one period
-    L = torch.diag(transformation(torch.eye(2, device=rc.device)))
-    L_period = (L.norm() if diag else L[0]).item()
-    t_period = L_period / v_F
+    t_period = delta_q.norm().item() / v_F
     time_steps = round(1.25 * t_period / sim.dt)
     t_final = time_steps * sim.dt
     log.info(f"\nRunning for {time_steps} steps at {Nxy = }:")
@@ -79,8 +80,8 @@ def run(*, Nxy, N_theta, diag, plot_frames=False) -> float:
     sigma = 0.05
     q = sim.q
     g = sim.g
-    q0 = 0.25 * L
-    sim.rho[..., 0] = gaussian_blob(q, q0, L, sigma)
+    q0 = torch.tensor([0.25, 0.25], device=rc.device) @ Rbasis.T
+    sim.rho[..., 0] = gaussian_blob(q, q0, Rbasis, sigma)
 
     plot_interval = round(0.01 * time_steps)
     plot_frame = 0
@@ -101,7 +102,7 @@ def run(*, Nxy, N_theta, diag, plot_frames=False) -> float:
     plt.clf()
     q_final = q0 + sim.v[0] * t_final
     rho = sim.rho[..., 0]
-    rho_err, rho_mae = gaussian_blob_error(g, rho, q, q_final, L, sigma)
+    rho_err, rho_mae = gaussian_blob_error(g, rho, q, q_final, Rbasis, sigma)
     q_np = to_numpy(q)
     plt.contourf(q_np[..., 0], q_np[..., 1], to_numpy(rho_err), levels=100, cmap="bwr")
     plt.gca().set_aspect("equal")
