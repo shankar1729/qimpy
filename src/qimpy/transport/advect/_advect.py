@@ -9,21 +9,14 @@ class Advect:
     def __init__(
         self,
         *,
+        v: torch.Tensor,
         L: tuple[float, ...] = (1.0, 1.25),
-        v_F: float = 1.0,
         N: tuple[int, ...] = (64, 80),
-        N_theta: int = 256,
         N_ghost: int = 2,
-        init_angle: float = 0.0,
     ) -> None:
         self.L = L
-        self.v_F = v_F
         self.N = N
-        self.N_theta = N_theta
         self.N_ghost = N_ghost
-
-        self.dtheta = 2 * np.pi / self.N_theta
-        self.theta = torch.arange(N_theta, device=rc.device) * self.dtheta + init_angle
 
         # Initialize grids and transformations:
         grids1d = [(torch.arange(Ni, device=rc.device) + 0.5) for Ni in N]
@@ -31,11 +24,12 @@ class Advect:
         self.q, jacobian = self.custom_transformation(self.Q, self.N)
         metric = torch.einsum("...aB, ...aC -> ...BC", jacobian, jacobian)
         self.g = torch.linalg.det(metric).sqrt()[:, :, None]
-        self.v = v_F * torch.stack([self.theta.cos(), self.theta.sin()], dim=-1)
-        self.V = torch.einsum("ta, ...Ba -> ...tB", self.v, torch.linalg.inv(jacobian))
+        self.v = v
+        self.V = torch.einsum("ta, ...Ba -> ...tB", v, torch.linalg.inv(jacobian))
         self.dt = 0.5 / self.V.abs().max().item()
 
         # Initialize distribution function:
+        N_theta = v.shape[0]
         self.rho_shape = (N[0], N[1], N_theta)
         self.rho_padded_shape = (N[0] + 2 * N_ghost, N[1] + 2 * N_ghost, N_theta)
         self.rho = torch.zeros(self.rho_shape, device=rc.device)

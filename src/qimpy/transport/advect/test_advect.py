@@ -36,18 +36,24 @@ def gaussian_blob_error(
 
 def run(*, Nxy, N_theta, diag, plot_frames=False) -> float:
     """Run simulation and report error in final density."""
+
+    # Initialize velocities (eventually should be in Material):
+    v_F = 200.0
+    init_angle = np.pi / 4 if diag else 0.0
+    dtheta = 2 * np.pi / N_theta
+    theta = torch.arange(N_theta, device=rc.device) * dtheta + init_angle
+    v = v_F * torch.stack([theta.cos(), theta.sin()], dim=-1)
+
     sim = Advect(
-        v_F=200.0,
         L=(1.0, 1.0),
         N=(Nxy, Nxy),
-        N_theta=N_theta,
-        init_angle=np.pi / 4 if diag else 0.0,
+        v=v,
     )
 
     # Set the time for slightly more than one period
     L = torch.tensor(sim.L, device=rc.device)
     L_period = np.hypot(*sim.L) if diag else sim.L[0]
-    t_period = L_period / sim.v_F
+    t_period = L_period / v_F
     time_steps = round(1.25 * t_period / sim.dt)
     t_final = time_steps * sim.dt
     log.info(f"\nRunning for {time_steps} steps at {Nxy = }:")
