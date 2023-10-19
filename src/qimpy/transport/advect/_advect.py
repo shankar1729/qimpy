@@ -114,7 +114,7 @@ class Advect:
         stream_kwargs.setdefault("linewidth", 1.0)
         stream_kwargs.setdefault("color", "k")
         stream_kwargs.setdefault("arrowsize", 1.0)
-        q = to_numpy(self.q[self.non_ghost, self.non_ghost])
+        q = to_numpy(self.q)
         x = q[:, :, 0]
         y = q[:, :, 1]
         # v = to_numpy(self.velocity)

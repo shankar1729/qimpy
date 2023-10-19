@@ -1,5 +1,4 @@
 import argparse
-from dataclasses import dataclass
 
 import torch
 import numpy as np
@@ -12,17 +11,48 @@ from qimpy.profiler import StopWatch
 from qimpy.transport.advect._advect import Advect, to_numpy
 
 
-@dataclass
-class WaveTile:
-    L: torch.Tensor
-    k: torch.Tensor
-    amp: float
+class BicubicPatch:
+    """Transformation based on cubic spline edges."""
+
+    control_points: torch.Tensor  #: Control point coordinates (4 x 4 x 2)
+
+    def __init__(self, boundary: torch.Tensor):
+        """Initialize from 12 x 2 coordinates of control points on perimeter."""
+        control_points = torch.empty((4, 4, 2), device=rc.device)
+        # Set boundary control points:
+        control_points[:, 0] = boundary[:4]
+        control_points[-1, 1:] = boundary[4:7]
+        control_points[:-1, -1] = boundary[7:10].flipud()
+        control_points[0, 1:-1] = boundary[10:12].flipud()
+
+        # Set internal control points based on parallelogram completion:
+        def complete_parallelogram(
+            v: torch.Tensor, i0: int, j0: int, i1: int, j1: int
+        ) -> None:
+            v[i1, j1] = v[i0, j1] + v[i1, j0] - v[i0, j0]
+
+        complete_parallelogram(control_points, 0, 0, 1, 1)
+        complete_parallelogram(control_points, 3, 0, 2, 1)
+        complete_parallelogram(control_points, 0, 3, 1, 2)
+        complete_parallelogram(control_points, 3, 3, 2, 2)
+        self.control_points = control_points
 
     def __call__(self, Qfrac: torch.Tensor) -> torch.Tensor:
-        """Define mapping from fractional mesh to Cartesian coordinates"""
-        return self.L * Qfrac + self.amp * torch.sin(
-            2 * np.pi * self.k * torch.roll(Qfrac, 1, dims=-1)
+        """Define mapping from fractional mesh to Cartesian coordinates."""
+        return torch.einsum(
+            "uvi, u..., v... -> ...i",
+            self.control_points,
+            cubic_bernstein(Qfrac[..., 0]),
+            cubic_bernstein(Qfrac[..., 1]),
         )
+
+
+def cubic_bernstein(t: torch.Tensor) -> torch.Tensor:
+    """Return basis of cubic Bernstein polynomials."""
+    t_bar = 1.0 - t
+    return torch.stack(
+        (t_bar**3, 3.0 * (t_bar**2) * t, 3.0 * t_bar * (t**2), t**3)
+    )
 
 
 def gaussian_blob(
@@ -52,10 +82,25 @@ def run(*, Nxy, N_theta, diag, plot_frames=False) -> float:
     """Run simulation and report error in final density."""
 
     # Initialize geometric transformation:
-    transformation = WaveTile(
-        L=torch.tensor([1.0, 1.0], device=rc.device),
-        k=torch.tensor([1, 2], device=rc.device),
-        amp=-0.05,
+    transformation = BicubicPatch(
+        boundary=torch.tensor(
+            [
+                [0.0, 0.0],
+                [0.4, 0.0],
+                [0.6, 0.2],
+                [1.0, 0.2],
+                [1.0, 0.5],
+                [1.1, 0.7],
+                [1.1, 1.0],
+                [0.7, 1.0],
+                [0.5, 0.8],
+                [0.1, 0.8],
+                [0.1, 0.5],
+                [0.0, 0.3],
+                [0.0, 0.0],
+            ],
+            device=rc.device,
+        )
     )
     Rbasis = transformation(torch.eye(2, device=rc.device)).T
     delta_Qfrac = torch.tensor([1.0, 1.0] if diag else [1.0, 0.0], device=rc.device)
