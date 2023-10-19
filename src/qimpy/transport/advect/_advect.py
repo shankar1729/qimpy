@@ -16,6 +16,7 @@ class Advect:
         v: torch.Tensor,
         N: tuple[int, ...],
         N_ghost: int = 2,
+        dk: float = 1.0,
     ) -> None:
         self.N = N
         self.N_ghost = N_ghost
@@ -49,11 +50,12 @@ class Advect:
         self.v = v
         self.V = torch.einsum("ta, ...Ba -> ...tB", v, torch.linalg.inv(jacobian))
         self.dt = 0.5 / self.V.abs().max().item()
+        self.dk = dk
 
         # Initialize distribution function:
-        N_theta = v.shape[0]
-        self.rho_shape = (N[0], N[1], N_theta)
-        self.rho_padded_shape = (N[0] + 2 * N_ghost, N[1] + 2 * N_ghost, N_theta)
+        Nk = v.shape[0]
+        self.rho_shape = (N[0], N[1], Nk)
+        self.rho_padded_shape = (N[0] + 2 * N_ghost, N[1] + 2 * N_ghost, Nk)
         self.rho = torch.zeros(self.rho_shape, device=rc.device)
 
         # Initialize slices for accessing ghost regions in padded version:
@@ -97,12 +99,12 @@ class Advect:
     @property
     def density(self):
         """Density at each point (integrate over momenta)."""
-        return self.rho.sum(dim=2) * self.dtheta
+        return self.rho.sum(dim=2) * self.dk
 
     @property
     def velocity(self):
         """Average velocity at each point (integrate over momenta)."""
-        return (self.rho @ self.v) * self.dtheta
+        return (self.rho @ self.v) * self.dk
 
     @stopwatch(name="plot_streamlines")
     def plot_streamlines(self, plt, contour_kwargs, stream_kwargs):
