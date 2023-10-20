@@ -1,4 +1,5 @@
 from __future__ import annotations
+import argparse
 
 import torch
 import numpy as np
@@ -52,7 +53,11 @@ def plot_spline(ax, spline: torch.Tensor, n_points: int = 64) -> None:
 def main():
     import matplotlib.pyplot as plt
 
-    splines = get_splines("test.svg")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input_svg", help="Input patch (SVG file)", type=str)
+    args = parser.parse_args()
+
+    splines = get_splines(args.input_svg)
     plt.figure()
     ax = plt.gca()
     ax.set_aspect("equal")
