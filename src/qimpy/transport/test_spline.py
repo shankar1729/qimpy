@@ -26,7 +26,7 @@ def get_splines(svg_file: str) -> list[torch.Tensor]:
                 complex_to_coord(segment.control1),
                 complex_to_coord(segment.control2),
                 complex_to_coord(segment.end),
-            ]
+            ], device=rc.device
         )
         for segment in svg_xml
         if isinstance(segment, CubicBezier)

@@ -9,6 +9,7 @@ from qimpy import log, rc
 from qimpy.io import log_config
 from qimpy.profiler import StopWatch
 from qimpy.transport.advect._advect import Advect, to_numpy
+from qimpy.transport.test_spline import get_splines
 
 
 class BicubicPatch:
@@ -78,30 +79,9 @@ def gaussian_blob_error(
     return rho_err, rho_mae.item()
 
 
-def run(*, Nxy, N_theta, diag, plot_frames=False) -> float:
+def run(*, Nxy, N_theta, diag, transformation, plot_frames=False) -> float:
     """Run simulation and report error in final density."""
 
-    # Initialize geometric transformation:
-    transformation = BicubicPatch(
-        boundary=torch.tensor(
-            [
-                [0.0, 0.0],
-                [0.4, 0.0],
-                [0.6, 0.2],
-                [1.0, 0.2],
-                [1.0, 0.5],
-                [1.1, 0.7],
-                [1.1, 1.0],
-                [0.7, 1.0],
-                [0.5, 0.8],
-                [0.1, 0.8],
-                [0.1, 0.5],
-                [0.0, 0.3],
-                [0.0, 0.0],
-            ],
-            device=rc.device,
-        )
-    )
     Rbasis = transformation(torch.eye(2, device=rc.device)).T
     delta_Qfrac = torch.tensor([1.0, 1.0] if diag else [1.0, 0.0], device=rc.device)
     delta_q = delta_Qfrac @ Rbasis.T
@@ -122,10 +102,10 @@ def run(*, Nxy, N_theta, diag, plot_frames=False) -> float:
     log.info(f"\nRunning for {time_steps} steps at {Nxy = }:")
 
     # Initialize initial and expected final density
-    sigma = 0.05
+    sigma = 5.
     q = sim.q
     g = sim.g
-    q0 = torch.tensor([0.25, 0.25], device=rc.device) @ Rbasis.T
+    q0 = torch.tensor([60., 80.], device=rc.device) @ Rbasis.T
     sim.rho[..., 0] = gaussian_blob(q, q0, Rbasis, sigma)
 
     plot_interval = round(0.01 * time_steps)
@@ -169,10 +149,39 @@ def main():
     parser.add_argument("--Ntheta", help="angular resolution", type=int, required=True)
     parser.add_argument("--diag", help="move diagonally", action="store_true")
     parser.add_argument("--Nxy_min", help="start resolution for convergence", type=int)
+    parser.add_argument("--input_svg", help="Input patch transformation (SVG file)", type=str)
     args = parser.parse_args()
+    
+    if args.input_svg is not None:
+        patch_coords = get_splines(args.input_svg)
+        boundary = torch.cat([spline[:-1] for spline in patch_coords])
+        boundary = torch.cat([boundary, boundary[0, None]])
+    else:
+        boundary=torch.tensor(
+            [
+                [0.0, 0.0],
+                [0.4, 0.0],
+                [0.6, 0.2],
+                [1.0, 0.2],
+                [1.0, 0.5],
+                [1.1, 0.7],
+                [1.1, 1.0],
+                [0.7, 1.0],
+                [0.5, 0.8],
+                [0.1, 0.8],
+                [0.1, 0.5],
+                [0.0, 0.3],
+                [0.0, 0.0],
+            ], device=rc.device)
+
+    # Initialize geometric transformation:
+    transformation = BicubicPatch(
+        boundary=boundary
+    )
 
     if args.Nxy_min is None:
-        run(Nxy=args.Nxy, N_theta=args.Ntheta, diag=args.diag, plot_frames=True)
+        run(Nxy=args.Nxy, N_theta=args.Ntheta, diag=args.diag, transformation=transformation, 
+            plot_frames=True,)
     else:
         # Convergence test:
         assert isinstance(args.Nxy_min, int)
@@ -181,7 +190,8 @@ def main():
         errs = []
         Nxy = args.Nxy_min
         while Nxy <= args.Nxy:
-            err = run(Nxy=Nxy, N_theta=args.Ntheta, diag=args.diag, plot_frames=False)
+            err = run(Nxy=Nxy, N_theta=args.Ntheta, diag=args.diag, transformation=transformation,
+                      plot_frames=False)
             Ns.append(Nxy)
             errs.append(err)
             Nxy *= 2
