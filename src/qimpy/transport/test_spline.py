@@ -2,24 +2,33 @@ from __future__ import annotations
 
 import torch
 import numpy as np
+from xml.dom import minidom
+from svg.path import parse_path, CubicBezier
 
 from qimpy import rc
 
 
 def get_splines(svg_file: str) -> list[torch.Tensor]:
-    """Read a list of splines from an SVG file.
-    Each entry in the result must be 4 x 2 (control points x dim).
-    """
-    # TODO
-    # Temporary test splines:
+    doc = minidom.parse(svg_file)
+    # We assume that there is only one path patch and that it is the first.
+    # When we want to support more later, we can iterate through these elements.
+    svg_path = doc.getElementsByTagName("path")[0].getAttribute("d")
+    svg_xml = parse_path(svg_path)
+
+    def complex_to_coord(z):
+        return [z.real, z.imag]
+
     return [
-        torch.tensor(coords, device=rc.device)
-        for coords in [
-            [[0.0, 0.0], [0.4, 0.0], [0.6, 0.2], [1.0, 0.2]],
-            [[1.0, 0.2], [1.0, 0.5], [1.1, 0.7], [1.1, 1.0]],
-            [[1.1, 1.0], [0.7, 1.0], [0.5, 0.8], [0.1, 0.8]],
-            [[0.1, 0.8], [0.1, 0.5], [0.0, 0.3], [0.0, 0.0]],
-        ]
+        torch.tensor(
+            [
+                complex_to_coord(segment.start),
+                complex_to_coord(segment.control1),
+                complex_to_coord(segment.control2),
+                complex_to_coord(segment.end),
+            ]
+        )
+        for segment in svg_xml
+        if isinstance(segment, CubicBezier)
     ]
 
 
