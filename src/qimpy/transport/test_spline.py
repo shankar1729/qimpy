@@ -15,18 +15,12 @@ def get_splines(svg_file: str) -> list[torch.Tensor]:
     # When we want to support more later, we can iterate through these elements.
     svg_path = doc.getElementsByTagName("path")[0].getAttribute("d")
     svg_xml = parse_path(svg_path)
-
-    def complex_to_coord(z):
-        return [z.real, z.imag]
-
     return [
-        torch.tensor(
-            [
-                complex_to_coord(segment.start),
-                complex_to_coord(segment.control1),
-                complex_to_coord(segment.control2),
-                complex_to_coord(segment.end),
-            ], device=rc.device
+        torch.view_as_real(
+            torch.tensor(
+                [segment.start, segment.control1, segment.control2, segment.end],
+                device=rc.device,
+            )
         )
         for segment in svg_xml
         if isinstance(segment, CubicBezier)
