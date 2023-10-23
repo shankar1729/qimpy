@@ -150,16 +150,18 @@ def main():
     parser.add_argument("--Ntheta", help="angular resolution", type=int, required=True)
     parser.add_argument("--diag", help="move diagonally", action="store_true")
     parser.add_argument("--Nxy_min", help="start resolution for convergence", type=int)
-    parser.add_argument("--input_svg", help="Input patch transformation (SVG file)", type=str)
+    parser.add_argument(
+        "--input_svg", help="Input patch transformation (SVG file)", type=str
+    )
     args = parser.parse_args()
-    
+
     if args.input_svg is not None:
         patch_coords = get_splines(args.input_svg)
         boundary = torch.cat([spline[:-1] for spline in patch_coords])
-        boundary /= 100.
+        boundary /= 100.0
         print(boundary)
     else:
-        boundary=torch.tensor(
+        boundary = torch.tensor(
             [
                 [0.0, 0.0],
                 [0.4, 0.0],
@@ -173,16 +175,21 @@ def main():
                 [0.1, 0.8],
                 [0.1, 0.5],
                 [0.0, 0.3],
-            ], device=rc.device)
+            ],
+            device=rc.device,
+        )
 
     # Initialize geometric transformation:
-    transformation = BicubicPatch(
-        boundary=boundary
-    )
+    transformation = BicubicPatch(boundary=boundary)
 
     if args.Nxy_min is None:
-        run(Nxy=args.Nxy, N_theta=args.Ntheta, diag=args.diag, transformation=transformation, 
-            plot_frames=True,)
+        run(
+            Nxy=args.Nxy,
+            N_theta=args.Ntheta,
+            diag=args.diag,
+            transformation=transformation,
+            plot_frames=True,
+        )
     else:
         # Convergence test:
         assert isinstance(args.Nxy_min, int)
@@ -191,8 +198,13 @@ def main():
         errs = []
         Nxy = args.Nxy_min
         while Nxy <= args.Nxy:
-            err = run(Nxy=Nxy, N_theta=args.Ntheta, diag=args.diag, transformation=transformation,
-                      plot_frames=False)
+            err = run(
+                Nxy=Nxy,
+                N_theta=args.Ntheta,
+                diag=args.diag,
+                transformation=transformation,
+                plot_frames=False,
+            )
             Ns.append(Nxy)
             errs.append(err)
             Nxy *= 2

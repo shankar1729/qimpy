@@ -4,26 +4,51 @@ import argparse
 import torch
 import numpy as np
 from xml.dom import minidom
-from svg.path import parse_path, CubicBezier
+from svg.path import parse_path, CubicBezier, Line, Close
 
 from qimpy import rc
 
 
 def get_splines(svg_file: str) -> list[torch.Tensor]:
     doc = minidom.parse(svg_file)
-    # We assume that there is only one path patch and that it is the first.
-    # When we want to support more later, we can iterate through these elements.
-    svg_path = doc.getElementsByTagName("path")[0].getAttribute("d")
-    svg_xml = parse_path(svg_path)
-    return [
-        torch.view_as_real(
-            torch.tensor(
-                [segment.start, segment.control1, segment.control2, segment.end],
-                device=rc.device,
+    svg_elements = []
+    svg_paths = doc.getElementsByTagName("path")
+
+    # Concatenate segments from all paths in SVG file
+    for path in svg_paths:
+        svg_elements.extend(parse_path(path.getAttribute("d")))
+
+    def segment_to_tensor(segment):
+        if isinstance(segment, CubicBezier):
+            return torch.view_as_real(
+                torch.tensor(
+                    [segment.start, segment.control1, segment.control2, segment.end],
+                    device=rc.device,
+                )
             )
-        )
-        for segment in svg_xml
-        if isinstance(segment, CubicBezier)
+        # Both Line and Close can produce linear segments
+        elif isinstance(segment, (Line, Close)):
+            # Generate a spline from a linear segment
+            disp_third = (segment.end - segment.start) / 3.0
+            return torch.view_as_real(
+                torch.tensor(
+                    [
+                        segment.start,
+                        segment.start + disp_third,
+                        segment.start + 2 * disp_third,
+                        segment.end,
+                    ],
+                    device=rc.device,
+                )
+            )
+
+    # Ignore all elements that are not lines or cubic splines (essentially ignore moves)
+    # In the future we may want to throw an error for unsupported segments
+    # (e.g. quadratic splines)
+    return [
+        segment_to_tensor(segment)
+        for segment in svg_elements
+        if isinstance(segment, (Line, Close, CubicBezier))
     ]
 
 
