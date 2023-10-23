@@ -82,7 +82,8 @@ def gaussian_blob_error(
 def run(*, Nxy, N_theta, diag, transformation, plot_frames=False) -> float:
     """Run simulation and report error in final density."""
 
-    Rbasis = transformation(torch.eye(2, device=rc.device)).T
+    origin = transformation(torch.zeros((1, 2), device=rc.device))
+    Rbasis = (transformation(torch.eye(2, device=rc.device)) - origin).T
     delta_Qfrac = torch.tensor([1.0, 1.0] if diag else [1.0, 0.0], device=rc.device)
     delta_q = delta_Qfrac @ Rbasis.T
 
@@ -102,10 +103,10 @@ def run(*, Nxy, N_theta, diag, transformation, plot_frames=False) -> float:
     log.info(f"\nRunning for {time_steps} steps at {Nxy = }:")
 
     # Initialize initial and expected final density
-    sigma = 5.
+    sigma = 0.05
     q = sim.q
     g = sim.g
-    q0 = torch.tensor([60., 80.], device=rc.device) @ Rbasis.T
+    q0 = origin + torch.tensor([0.5, 0.5], device=rc.device) @ Rbasis.T
     sim.rho[..., 0] = gaussian_blob(q, q0, Rbasis, sigma)
 
     plot_interval = round(0.01 * time_steps)
@@ -155,7 +156,8 @@ def main():
     if args.input_svg is not None:
         patch_coords = get_splines(args.input_svg)
         boundary = torch.cat([spline[:-1] for spline in patch_coords])
-        boundary = torch.cat([boundary, boundary[0, None]])
+        boundary /= 100.
+        print(boundary)
     else:
         boundary=torch.tensor(
             [
@@ -171,7 +173,6 @@ def main():
                 [0.1, 0.8],
                 [0.1, 0.5],
                 [0.0, 0.3],
-                [0.0, 0.0],
             ], device=rc.device)
 
     # Initialize geometric transformation:
