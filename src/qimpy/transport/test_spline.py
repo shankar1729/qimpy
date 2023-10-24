@@ -20,27 +20,21 @@ def get_splines(svg_file: str) -> list[torch.Tensor]:
 
     def segment_to_tensor(segment):
         if isinstance(segment, CubicBezier):
-            return torch.view_as_real(
-                torch.tensor(
-                    [segment.start, segment.control1, segment.control2, segment.end],
-                    device=rc.device,
-                )
-            )
+            control1, control2 = segment.control1, segment.control2
         # Both Line and Close can produce linear segments
         elif isinstance(segment, (Line, Close)):
             # Generate a spline from a linear segment
             disp_third = (segment.end - segment.start) / 3.0
-            return torch.view_as_real(
-                torch.tensor(
-                    [
-                        segment.start,
-                        segment.start + disp_third,
-                        segment.start + 2 * disp_third,
-                        segment.end,
-                    ],
-                    device=rc.device,
-                )
+            control1 = segment.start + disp_third
+            control2 = segment.start + 2 * disp_third
+        else:
+            raise ValueError("All segments must be cubic splines or lines")
+        return torch.view_as_real(
+            torch.tensor(
+                [segment.start, control1, control2, segment.end],
+                device=rc.device,
             )
+        )
 
     # Ignore all elements that are not lines or cubic splines (essentially ignore moves)
     # In the future we may want to throw an error for unsupported segments
