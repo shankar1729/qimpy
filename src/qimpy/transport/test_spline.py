@@ -20,16 +20,19 @@ class Patches:
         self.patches = []
         self.epsilon = epsilon
 
+        def coord_to_complex(coord):
+            return complex(coord[0] + coord[1] * 1j)
+
         # First pass: Identify all unique vertices (vertex welding)
         for spline in splines:
             # Add starting and ending vertex for each spline
-            self.add_vertex(complex(spline[0][0] + spline[0][1] * 1j))
-            self.add_vertex(complex(spline[-1][0] + spline[-1][1] * 1j))
+            self.add_vertex(coord_to_complex(spline[0]))
+            self.add_vertex(coord_to_complex(spline[-1]))
         self.N = len(self.vertices)
         for spline in splines:
             # Identify each spline to its respective vertices, building graph
-            i = self.match_vertex(complex(spline[0][0] + spline[0][1] * 1j))
-            j = self.match_vertex(complex(spline[-1][0] + spline[-1][1] * 1j))
+            i = self.match_vertex(coord_to_complex(spline[0]))
+            j = self.match_vertex(coord_to_complex(spline[-1]))
             self.edges.append((i, j))
         self.find_cycles()
         for cycle in self.cycles:
@@ -151,6 +154,7 @@ def main():
     def complex_to_list(z):
         return [z.real, z.imag]
 
+    print(f"Found {len(patches.patches)} patches:")
     [print([complex_to_list(patches.vertices[j]) for j in i]) for i in patches.cycles]
 
     plt.figure()
