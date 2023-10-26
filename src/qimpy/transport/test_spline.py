@@ -1,5 +1,6 @@
 from __future__ import annotations
 import argparse
+from collections import defaultdict
 
 import torch
 import numpy as np
@@ -7,6 +8,38 @@ from xml.dom import minidom
 from svg.path import parse_path, CubicBezier, Line, Close
 
 from qimpy import rc
+
+
+class AdjacencyMatrix:
+    def __init__(self, splines, epsilon=0.005):
+        # Vertex list
+        # (in complex form for ease of distance calculation)
+        self.vertices = []
+        self.epsilon = epsilon
+        # Identify all unique vertices (vertex welding)
+        for spline in splines:
+            # Add starting and ending vertex for each spline
+            self.add_vertex(complex(spline[0][0] + spline[0][1] * 1j))
+            self.add_vertex(complex(spline[-1][0] + spline[-1][1] * 1j))
+        self.N = len(self.vertices)
+        self.data = torch.zeros((self.N, self.N))
+        for spline in splines:
+            # Add starting and ending vertex for each spline
+            i = self.match_vertex(complex(spline[0][0] + spline[0][1] * 1j))
+            j = self.match_vertex(complex(spline[-1][0] + spline[-1][1] * 1j))
+            self.data[i, j] = 1
+            self.data[j, i] = 1
+
+    def add_vertex(self, new_vertex):
+        if self.match_vertex(new_vertex) is None:
+            self.vertices.append(new_vertex)
+
+    def match_vertex(self, search_vertex):
+        # Uniqueness check
+        for i, vertex in enumerate(self.vertices):
+            if np.abs(vertex - search_vertex) < self.epsilon:
+                return i
+        return None
 
 
 def get_splines(svg_file: str) -> list[torch.Tensor]:
@@ -71,6 +104,8 @@ def main():
     args = parser.parse_args()
 
     splines = get_splines(args.input_svg)
+    adjacency_matrix = AdjacencyMatrix(splines)
+    print(adjacency_matrix.data)
     plt.figure()
     ax = plt.gca()
     ax.set_aspect("equal")
