@@ -1,6 +1,5 @@
 from __future__ import annotations
 import argparse
-from collections import defaultdict
 
 import torch
 import numpy as np
@@ -10,25 +9,31 @@ from svg.path import parse_path, CubicBezier, Line, Close
 from qimpy import rc
 
 
-class AdjacencyMatrix:
-    def __init__(self, splines, epsilon=0.005):
+class Patches:
+    def __init__(self, splines, epsilon=0.005, patch_sides=4):
+        self.patch_sides = patch_sides
         # Vertex list
         # (in complex form for ease of distance calculation)
         self.vertices = []
+        self.edges = []
+        self.cycles = []
+        self.patches = []
         self.epsilon = epsilon
-        # Identify all unique vertices (vertex welding)
+
+        # First pass: Identify all unique vertices (vertex welding)
         for spline in splines:
             # Add starting and ending vertex for each spline
             self.add_vertex(complex(spline[0][0] + spline[0][1] * 1j))
             self.add_vertex(complex(spline[-1][0] + spline[-1][1] * 1j))
         self.N = len(self.vertices)
-        self.data = torch.zeros((self.N, self.N))
         for spline in splines:
-            # Add starting and ending vertex for each spline
+            # Identify each spline to its respective vertices, building graph
             i = self.match_vertex(complex(spline[0][0] + spline[0][1] * 1j))
             j = self.match_vertex(complex(spline[-1][0] + spline[-1][1] * 1j))
-            self.data[i, j] = 1
-            self.data[j, i] = 1
+            self.edges.append((i, j))
+        self.find_cycles()
+        for cycle in self.cycles:
+            self.patches.append([splines[i] for i in cycle])
 
     def add_vertex(self, new_vertex):
         if self.match_vertex(new_vertex) is None:
@@ -40,6 +45,41 @@ class AdjacencyMatrix:
             if np.abs(vertex - search_vertex) < self.epsilon:
                 return i
         return None
+
+    def add_cycle(self, cycle):
+        # Add a cycle if it is unique
+
+        def unique(path):
+            return path not in self.cycles
+
+        def normalize_cycle_order(cycle):
+            min_index = cycle.index(min(cycle))
+            return cycle[min_index:] + cycle[:min_index]
+
+        new_cycle = normalize_cycle_order(cycle)
+        # Check both directions
+        if unique(new_cycle) and unique(normalize_cycle_order(new_cycle[::-1])):
+            self.cycles.append(new_cycle)
+
+    def find_cycles(self):
+        # Graph traversal using recursion
+        def cycle_search(self, cycle, depth=1):
+            # Don't bother looking for cycles that exceed a single patch
+            # (limit recursion depth)
+            if depth > self.patch_sides:
+                return
+            start_vertex = cycle[-1]
+            for edge in self.edges:
+                if start_vertex in edge:
+                    next_vertex = edge[1] if edge[0] == start_vertex else edge[0]
+                    if next_vertex not in cycle:
+                        cycle_search(self, cycle + [next_vertex], depth=depth + 1)
+                    elif len(cycle) > 2 and next_vertex == cycle[0]:
+                        self.add_cycle(cycle)
+
+        # Search for cycles from each starting vertex
+        for start_vertex in list(range(self.N)):
+            cycle_search(self, [start_vertex])
 
 
 def get_splines(svg_file: str) -> list[torch.Tensor]:
@@ -104,8 +144,15 @@ def main():
     args = parser.parse_args()
 
     splines = get_splines(args.input_svg)
-    adjacency_matrix = AdjacencyMatrix(splines)
-    print(adjacency_matrix.data)
+
+    # Find each patch and print its respective vertices
+    patches = Patches(splines)
+
+    def complex_to_list(z):
+        return [z.real, z.imag]
+
+    [print([complex_to_list(patches.vertices[j]) for j in i]) for i in patches.cycles]
+
     plt.figure()
     ax = plt.gca()
     ax.set_aspect("equal")
