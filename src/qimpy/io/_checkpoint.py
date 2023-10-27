@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional, NamedTuple
+from typing import Any, Optional, NamedTuple, TypeVar
 import os
 
 import h5py
@@ -7,12 +7,10 @@ import numpy as np
 import torch
 
 from qimpy import log, rc
-#from . import CheckpointOverrideException, InvalidInputException
-from ._error import CheckpointOverrideException, InvalidInputException
-from typing import Generic, Union, TypeVar
-from dataclasses import dataclass
+from . import Default, WithDefault, cast_default, CheckpointOverrideException
 
 T = TypeVar("T")
+
 
 class Checkpoint(h5py.File):
     """Helper for checkpoint load/save from HDF5 files."""
@@ -165,18 +163,19 @@ class CheckpointPath(NamedTuple):
             checkpoint.create_group(path)
         return checkpoint[path].attrs
 
-    def override(self, var_name: str, var: WithDefault[T], overridable: Bool = False) -> T:
-        "Override quantities in checkpoint with YAML"
-        checkpoint, path = self
-        if checkpoint is not None:
-            if not isinstance(var, Default) and not overridable:
-                raise CheckpointOverrideException(var_name)
-            if not isinstance(var, Default) and overridable:
-                return cast_default(var)
-            else:
-                return self.attrs[var_name]
+    def override(
+        self, var_name: str, var: WithDefault[T], overridable: bool = False
+    ) -> T:
+        """Read `var_name` from checkpoint, optionally overridden by `var`.
+        If not `overrideable`, raise error if `var` is not a default."""
+        if self.checkpoint is None:
+            return cast_default(var)  # No checkpoint, use var (or default)
+        if isinstance(var, Default):
+            return self.attrs[var_name]  # Use checkpoint and ignore default value
+        if overridable:
+            return cast_default(var)  # Use explicitly specified value when allowed
         else:
-            return cast_default(var)
+            raise CheckpointOverrideException(var_name)  # and raise, when not allowed
 
     def write(self, name: str, data: torch.Tensor) -> str:
         """Write `data` available on all processes to `name` within current path.

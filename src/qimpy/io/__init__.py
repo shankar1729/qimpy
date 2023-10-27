@@ -14,12 +14,12 @@ __all__ = (
     "Unit",
     "UnitOrFloat",
     "CheckpointOverrideException",
-    "InvalidInputException"
+    "InvalidInputException",
 )
 
 from ._log_config import log_config, fmt
 from ._default import Default, WithDefault, cast_default
+from ._error import CheckpointOverrideException, InvalidInputException
 from ._unit import Unit, UnitOrFloat
 from . import dict, yaml
 from ._checkpoint import Checkpoint, CheckpointPath, CheckpointContext
-from ._error import CheckpointOverrideException, InvalidInputException
