@@ -8,6 +8,10 @@ import torch
 
 from qimpy import log, rc
 
+from typing import Generic, Union, TypeVar
+from dataclasses import dataclass
+
+T = TypeVar("T")
 
 class Checkpoint(h5py.File):
     """Helper for checkpoint load/save from HDF5 files."""
@@ -159,6 +163,19 @@ class CheckpointPath(NamedTuple):
         if (path not in checkpoint) and checkpoint.writable:
             checkpoint.create_group(path)
         return checkpoint[path].attrs
+
+    def override(self, var_name: str, var: WithDefault[T], overridable: Bool = False) -> T:
+        "Override quantities in checkpoint with YAML"
+        checkpoint, path = self
+        if checkpoint is not None:
+            if not isinstance(var, Default) and not overridable:
+                raise CheckpointOverrideException(var_name)
+            if not isinstance(var, Default) and overridable:
+                return cast_default(var)
+            else:
+                return self.attrs[var_name]
+        else:
+            return cast_default(var)
 
     def write(self, name: str, data: torch.Tensor) -> str:
         """Write `data` available on all processes to `name` within current path.
