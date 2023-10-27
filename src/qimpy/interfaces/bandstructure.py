@@ -15,6 +15,7 @@ Options:
   -o FILE, --output-file FILE
                         output plot in matplotlib supported format (based on extension)
 """
+from typing import Optional
 import argparse
 import ast
 
@@ -22,22 +23,19 @@ import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+
 from qimpy.io import Unit
-from typing import Optional
 
 
 def plot(
-    checkpoint_files: str,
+    checkpoint_files: list[str],
     output_file: str,
-    plot_labels: Optional[str],
+    plot_labels: Optional[list[str]],
     units: str,
-    **kwargs
 ) -> None:
     """Plot band structure from HDF5 checkpoint name `checkpoint_file`.
     Save plot to `output_file` in a matplotlib supported format (based on extension).
     """
-    checkpoint_files = checkpoint_files.split()
-    plot_labels = None if plot_labels is None else plot_labels.split()
     if plot_labels is not None:
         assert len(plot_labels) == len(checkpoint_files)
     eigs = []  # list of eigenvalues for each checkpoint
@@ -187,13 +185,14 @@ def plot(
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="python -m qimpy.interfaces.bandstructure",
-        description="Plot band structure from HDF5 checkpoint file",
+        description="Plot band structure from one or more HDF5 checkpoint file(s)",
     )
     parser.add_argument(
         "-c",
         "--checkpoint-file",
         metavar="FILE",
-        help="checkpoint file in HDF5 format",
+        nargs="+",
+        help="checkpoint file(s) in HDF5 format",
         required=True,
     )
     parser.add_argument(
@@ -215,6 +214,7 @@ def main() -> None:
         "-l",
         "--labels",
         metavar="Labels",
+        nargs="+",
         help="labels for band structure plots",
     )
     args = parser.parse_args()
