@@ -13,6 +13,8 @@ __all__ = (
     "CheckpointContext",
     "Unit",
     "UnitOrFloat",
+    "CheckpointOverrideException",
+    "InvalidInputException"
 )
 
 from ._log_config import log_config, fmt

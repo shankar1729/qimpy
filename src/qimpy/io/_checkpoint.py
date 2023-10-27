@@ -7,7 +7,8 @@ import numpy as np
 import torch
 
 from qimpy import log, rc
-
+#from . import CheckpointOverrideException, InvalidInputException
+from ._error import CheckpointOverrideException, InvalidInputException
 from typing import Generic, Union, TypeVar
 from dataclasses import dataclass
 
