@@ -1,12 +1,73 @@
 from __future__ import annotations
 import argparse
 from xml.dom import minidom
+from typing import Sequence
 
 import torch
 import numpy as np
 from svg.path import parse_path, CubicBezier, Line, Close
 
 from qimpy import rc
+
+
+class SplineEdge:
+    spline_params: torch.Tensor  # 4 x 2 tensor
+    neighbor_edge: SplineEdge
+
+    def __init__(self, spline_params, neighbor_edge=None):
+        self.spline_params = spline_params
+        self.neighbor_edge = None
+
+    def __repr__(self):
+        numpy_spline = self.spline_params.numpy()
+        return f"{numpy_spline[0, :]} -> {numpy_spline[-1, :]}"
+
+
+# Stealing BicubicPatch from test_advect for the time being
+class BicubicPatch:
+    """Transformation based on cubic spline edges."""
+
+    control_points: torch.Tensor  #: Control point coordinates (4 x 4 x 2)
+
+    def __init__(self, edges: Sequence[SplineEdge]):
+        """Initialize from 12 x 2 coordinates of control points on perimeter."""
+        self.edges = edges
+        boundary = torch.cat([spline.spline_params[:-1] for spline in self.edges])
+        control_points = torch.empty((4, 4, 2), device=rc.device)
+        # Set boundary control points:
+        control_points[:, 0] = boundary[:4]
+        control_points[-1, 1:] = boundary[4:7]
+        control_points[:-1, -1] = boundary[7:10].flipud()
+        control_points[0, 1:-1] = boundary[10:12].flipud()
+
+        # Set internal control points based on parallelogram completion:
+        def complete_parallelogram(
+            v: torch.Tensor, i0: int, j0: int, i1: int, j1: int
+        ) -> None:
+            v[i1, j1] = v[i0, j1] + v[i1, j0] - v[i0, j0]
+
+        complete_parallelogram(control_points, 0, 0, 1, 1)
+        complete_parallelogram(control_points, 3, 0, 2, 1)
+        complete_parallelogram(control_points, 0, 3, 1, 2)
+        complete_parallelogram(control_points, 3, 3, 2, 2)
+        self.control_points = control_points
+
+    def __call__(self, Qfrac: torch.Tensor) -> torch.Tensor:
+        """Define mapping from fractional mesh to Cartesian coordinates."""
+        return torch.einsum(
+            "uvi, u..., v... -> ...i",
+            self.control_points,
+            cubic_bernstein(Qfrac[..., 0]),
+            cubic_bernstein(Qfrac[..., 1]),
+        )
+
+
+def cubic_bernstein(t: torch.Tensor) -> torch.Tensor:
+    """Return basis of cubic Bernstein polynomials."""
+    t_bar = 1.0 - t
+    return torch.stack(
+        (t_bar**3, 3.0 * (t_bar**2) * t, 3.0 * t_bar * (t**2), t**3)
+    )
 
 
 def weld_points(coords: torch.Tensor, tol: float) -> tuple[torch.Tensor, torch.Tensor]:
@@ -69,25 +130,46 @@ def get_splines(svg_file: str) -> torch.Tensor:
     )
 
 
+def edge_sequence(cycle):
+    return list(zip(cycle[:-1], cycle[1:])) + [(cycle[-1], cycle[0])]
+
+
 class SVGParser:
     def __init__(self, svg_file, epsilon=0.005):
         self.splines = get_splines(svg_file)
         self.vertices, self.edges = weld_points(self.splines[:, (0, -1)], tol=epsilon)
+        self.edges_lookup = {
+            (edge[0], edge[1]): ind for ind, edge in enumerate(self.edges.tolist())
+        }
 
         self.cycles = []
         self.find_cycles()
 
         self.patches = []
+
+        # Now build the patches, ensuring each spline goes along
+        # the direction of the cycle
         for cycle in self.cycles:
-            self.patches.append([self.splines[i] for i in cycle])
+            patch_splines = []
+            for edge in edge_sequence(cycle):
+                # Edges lookup reflects the original ordering of the edges
+                # if an edge's order doesn't appear in here, it needs to be flipped
+                if edge not in self.edges_lookup:
+                    new_spline = SplineEdge(
+                        torch.flip(
+                            self.splines[self.edges_lookup[edge[::-1]]], dims=[0]
+                        )
+                    )
+                else:
+                    new_spline = SplineEdge(self.splines[self.edges_lookup[edge]])
+                patch_splines.append(new_spline)
+            self.patches.append(BicubicPatch(patch_splines))
 
     # Determine whether a cycle goes clockwise or anticlockwise
     # (Return 1 or -1 respectively)
     def cycle_handedness(self, cycle):
         cycle_vertices = [self.vertices[j] for j in cycle]
-        edges = list(zip(cycle_vertices[:-1], cycle_vertices[1:])) + [
-            (cycle_vertices[-1], cycle_vertices[0])
-        ]
+        edges = edge_sequence(cycle_vertices)
         handed_sum = 0.0
         for v1, v2 in edges:
             handed_sum += (v2[0] - v1[0]) / (v2[1] + v1[1])
@@ -119,7 +201,7 @@ class SVGParser:
             start_vertex = cycle[-1]
             for edge in self.edges:
                 if start_vertex in edge:
-                    next_vertex = edge[1] if edge[0] == start_vertex else edge[0]
+                    next_vertex = int(edge[1] if edge[0] == start_vertex else edge[0])
                     if next_vertex not in cycle:
                         cycle_search(cycle + [next_vertex], depth=depth + 1)
                     elif len(cycle) > 2 and next_vertex == cycle[0]:
@@ -164,8 +246,10 @@ def main():
     patches = SVGParser(args.input_svg)
 
     print(f"Found {len(patches.patches)} patches:")
-    for cycle in patches.cycles:
-        print([patches.vertices[j] for j in cycle])
+    for i, edges in enumerate([patch.edges for patch in patches.patches]):
+        print(f"Patch {i+1}:")
+        for edge in edges:
+            print(edge)
 
     plt.figure()
     ax = plt.gca()
