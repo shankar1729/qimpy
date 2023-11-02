@@ -30,52 +30,6 @@ def weld_points(coords: torch.Tensor, tol: float) -> tuple[torch.Tensor, torch.T
 PATCH_SIDES: int = 4  #: Support only quad-patches (implicitly required throughout)
 
 
-class Patches:
-    def __init__(self, splines, epsilon=0.005):
-        self.vertices, self.edges = weld_points(splines[:, (0, -1)], tol=epsilon)
-
-        self.cycles = []
-        self.find_cycles()
-
-        self.patches = []
-        for cycle in self.cycles:
-            self.patches.append([splines[i] for i in cycle])
-
-    def add_cycle(self, cycle):
-        # Add a cycle if it is unique
-
-        def unique(path):
-            return path not in self.cycles
-
-        def normalize_cycle_order(cycle):
-            min_index = cycle.index(min(cycle))
-            return cycle[min_index:] + cycle[:min_index]
-
-        new_cycle = normalize_cycle_order(cycle)
-        # Check both directions
-        if unique(new_cycle) and unique(normalize_cycle_order(new_cycle[::-1])):
-            self.cycles.append(new_cycle)
-
-    def find_cycles(self):
-        # Graph traversal using recursion
-        def cycle_search(cycle, depth=1):
-            # Don't look for cycles that exceed a single patch (limit recursion depth)
-            if depth > PATCH_SIDES:
-                return
-            start_vertex = cycle[-1]
-            for edge in self.edges:
-                if start_vertex in edge:
-                    next_vertex = edge[1] if edge[0] == start_vertex else edge[0]
-                    if next_vertex not in cycle:
-                        cycle_search(cycle + [next_vertex], depth=depth + 1)
-                    elif len(cycle) > 2 and next_vertex == cycle[0]:
-                        self.add_cycle(cycle)
-
-        # Search for cycles from each starting vertex
-        for first_vertex in range(len(self.vertices)):
-            cycle_search([first_vertex])
-
-
 def get_splines(svg_file: str) -> torch.Tensor:
     doc = minidom.parse(svg_file)
     svg_elements = []
@@ -115,6 +69,73 @@ def get_splines(svg_file: str) -> torch.Tensor:
     )
 
 
+class SVGParser:
+    def __init__(self, svg_file, epsilon=0.005):
+        self.splines = get_splines(svg_file)
+        self.vertices, self.edges = weld_points(self.splines[:, (0, -1)], tol=epsilon)
+
+        self.cycles = []
+        self.find_cycles()
+
+        self.patches = []
+        for cycle in self.cycles:
+            self.patches.append([self.splines[i] for i in cycle])
+
+    # Determine whether a cycle goes clockwise or anticlockwise
+    # (Return 1 or -1 respectively)
+    def cycle_handedness(self, cycle):
+        cycle_vertices = [self.vertices[j] for j in cycle]
+        edges = list(zip(cycle_vertices[:-1], cycle_vertices[1:])) + [
+            (cycle_vertices[-1], cycle_vertices[0])
+        ]
+        handed_sum = 0.0
+        for v1, v2 in edges:
+            handed_sum += (v2[0] - v1[0]) / (v2[1] + v1[1])
+        # NOTE: We need to add a negative here due to the inverted y-axis
+        # (SVG uses a left-handed coordinate system)
+        return -np.sign(handed_sum)
+
+    def add_cycle(self, cycle):
+        # Add a cycle if it is unique
+
+        def unique(path):
+            return path not in self.cycles
+
+        def normalize_cycle_order(cycle):
+            min_index = cycle.index(min(cycle))
+            return cycle[min_index:] + cycle[:min_index]
+
+        new_cycle = normalize_cycle_order(cycle)
+        # Check both directions
+        if unique(new_cycle) and unique(normalize_cycle_order(new_cycle[::-1])):
+            self.cycles.append(new_cycle)
+
+    def find_cycles(self):
+        # Graph traversal using recursion
+        def cycle_search(cycle, depth=1):
+            # Don't look for cycles that exceed a single patch (limit recursion depth)
+            if depth > PATCH_SIDES:
+                return
+            start_vertex = cycle[-1]
+            for edge in self.edges:
+                if start_vertex in edge:
+                    next_vertex = edge[1] if edge[0] == start_vertex else edge[0]
+                    if next_vertex not in cycle:
+                        cycle_search(cycle + [next_vertex], depth=depth + 1)
+                    elif len(cycle) > 2 and next_vertex == cycle[0]:
+                        self.add_cycle(cycle)
+
+        # Search for cycles from each starting vertex
+        for first_vertex in range(len(self.vertices)):
+            cycle_search([first_vertex])
+
+        # Make sure each cycle goes clockwise
+        self.cycles = [
+            cycle if self.cycle_handedness(cycle) > 0 else cycle[::-1]
+            for cycle in self.cycles
+        ]
+
+
 def plot_spline(ax, spline: torch.Tensor, n_points: int = 64) -> None:
     assert len(spline) == 4
     t = np.linspace(0.0, 1.0, n_points + 1)[:, None]
@@ -139,10 +160,8 @@ def main():
     parser.add_argument("input_svg", help="Input patch (SVG file)", type=str)
     args = parser.parse_args()
 
-    splines = get_splines(args.input_svg)
-
     # Find each patch and print its respective vertices
-    patches = Patches(splines)
+    patches = SVGParser(args.input_svg)
 
     print(f"Found {len(patches.patches)} patches:")
     for cycle in patches.cycles:
@@ -151,7 +170,7 @@ def main():
     plt.figure()
     ax = plt.gca()
     ax.set_aspect("equal")
-    for spline in splines:
+    for spline in patches.splines:
         plot_spline(ax, spline)
     plt.show()
 
