@@ -130,11 +130,9 @@ class Lattice(TreeNode):
         """
         super().__init__()
         log.info("\n--- Initializing Lattice ---")
+        self.periodic = tuple[bool](checkpoint_in.override("periodic", periodic, False))
         if checkpoint_in:
             attrs = checkpoint_in.attrs
-            self.periodic = tuple[bool](attrs["periodic"])
-            if not isinstance(periodic, Default):
-                raise CheckpointOverrideException("periodic")
             if not isinstance(center, Default):
                 raise CheckpointOverrideException("center")
             self.center = checkpoint_in.read("center")
@@ -145,7 +143,6 @@ class Lattice(TreeNode):
             self.Rbasis = checkpoint_in.read("Rbasis")
             stress = checkpoint_in.read_optional("stress")  # converted to grad below
         else:
-            self.periodic = cast_default(periodic)
             self.center = torch.tensor(cast_default(center), device=rc.device)
             self.compute_stress = False
             self.movable = False
