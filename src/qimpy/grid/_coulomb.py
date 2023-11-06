@@ -198,6 +198,14 @@ class Coulomb_Slab:
         #Gplane = torch.where(Gplane <= 0, 0, torch.sqrt(Gplane))
         return (4*np.pi) * (1 - torch.exp(-Gplane*hlfL)) #* torch.cos(np.pi*iG[iDir]))/Gsq 
 
+    def __call__() -> None:
+        pass
+
+    def ewald() -> None:
+        pass
+
+    def stress() -> None:
+        pass
 
 # Compute Ewald real and reciprocal meshes:
 def get_mesh(
