@@ -131,21 +131,19 @@ class Lattice(TreeNode):
         super().__init__()
         log.info("\n--- Initializing Lattice ---")
         self.periodic = tuple[bool](checkpoint_in.override("periodic", periodic, False))
+        self.movable = checkpoint_in.override("movable", movable, True)
+        self.compute_stress = checkpoint_in.override("compute_stress", compute_stress, True) or self.movable 
         if checkpoint_in:
             attrs = checkpoint_in.attrs
             if not isinstance(center, Default):
                 raise CheckpointOverrideException("center")
             self.center = checkpoint_in.read("center")
-            self.compute_stress = attrs["compute_stress"]
-            self.movable = attrs["movable"]
             self.move_scale = checkpoint_in.read("move_scale")
             self.strain_rate = checkpoint_in.read_optional("strain_rate")
             self.Rbasis = checkpoint_in.read("Rbasis")
             stress = checkpoint_in.read_optional("stress")  # converted to grad below
         else:
             self.center = torch.tensor(cast_default(center), device=rc.device)
-            self.compute_stress = False
-            self.movable = False
             self.move_scale = torch.ones(3, device=rc.device)
             self.strain_rate = None
             stress = None
@@ -184,11 +182,6 @@ class Lattice(TreeNode):
             self.grad = self.volume * stress
 
         # Optionally override optimization / constraints settings:
-        if not isinstance(movable, Default):
-            self.movable = movable
-            self.compute_stress = self.compute_stress or movable
-        if not isinstance(compute_stress, Default):
-            self.compute_stress = compute_stress or self.movable
         if not isinstance(move_scale, Default):
             self.move_scale = torch.tensor(move_scale, device=rc.device)
             assert self.move_scale.shape == (3,)
