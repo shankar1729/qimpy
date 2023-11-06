@@ -20,7 +20,7 @@ class SplineEdge:
 
     def __repr__(self):
         numpy_spline = self.spline_params.numpy()
-        return f"{numpy_spline[0, :]} -> {numpy_spline[-1, :]}"
+        return f"{numpy_spline[0, :]} -> {numpy_spline[-1, :]} (neighbor: {self.neighbor_edge is not None})"
 
 
 # Stealing BicubicPatch from test_advect for the time being
@@ -147,6 +147,8 @@ class SVGParser:
 
         self.patches = []
 
+        patch_edges = {}
+
         # Now build the patches, ensuring each spline goes along
         # the direction of the cycle
         for cycle in self.cycles:
@@ -162,8 +164,13 @@ class SVGParser:
                     )
                 else:
                     new_spline = SplineEdge(self.splines[self.edges_lookup[edge]])
+                patch_edges[edge] = new_spline
                 patch_splines.append(new_spline)
             self.patches.append(BicubicPatch(patch_splines))
+
+        for edge, spline in patch_edges.items():
+            if edge[::-1] in patch_edges:
+                patch_edges[edge[::-1]].neighbor_edge = spline
 
     # Determine whether a cycle goes clockwise or anticlockwise
     # (Return 1 or -1 respectively)

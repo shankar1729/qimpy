@@ -132,7 +132,10 @@ class Lattice(TreeNode):
         log.info("\n--- Initializing Lattice ---")
         self.periodic = tuple[bool](checkpoint_in.override("periodic", periodic, False))
         self.movable = checkpoint_in.override("movable", movable, True)
-        self.compute_stress = checkpoint_in.override("compute_stress", compute_stress, True) or self.movable 
+        self.compute_stress = (
+            checkpoint_in.override("compute_stress", compute_stress, True)
+            or self.movable
+        )
         if checkpoint_in:
             attrs = checkpoint_in.attrs
             if not isinstance(center, Default):
