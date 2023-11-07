@@ -172,7 +172,7 @@ class SVGParser:
             if edge[::-1] in patch_edges:
                 patch_edges[edge[::-1]].neighbor_edge = spline
 
-    # Determine whether a cycle goes clockwise or anticlockwise
+    # Determine whether a cycle goes counter-clockwise or clockwise
     # (Return 1 or -1 respectively)
     def cycle_handedness(self, cycle):
         cycle_vertices = [self.vertices[j] for j in cycle]
@@ -180,9 +180,8 @@ class SVGParser:
         handed_sum = 0.0
         for v1, v2 in edges:
             handed_sum += (v2[0] - v1[0]) / (v2[1] + v1[1])
-        # NOTE: We need to add a negative here due to the inverted y-axis
-        # (SVG uses a left-handed coordinate system)
-        return -np.sign(handed_sum)
+        # NOTE: SVG uses a left-handed coordinate system
+        return np.sign(handed_sum)
 
     def add_cycle(self, cycle):
         # Add a cycle if it is unique
@@ -218,7 +217,7 @@ class SVGParser:
         for first_vertex in range(len(self.vertices)):
             cycle_search([first_vertex])
 
-        # Make sure each cycle goes clockwise
+        # Make sure each cycle goes counter-clockwise
         self.cycles = [
             cycle if self.cycle_handedness(cycle) > 0 else cycle[::-1]
             for cycle in self.cycles
