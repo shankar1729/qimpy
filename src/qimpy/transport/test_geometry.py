@@ -1,13 +1,18 @@
+import argparse
+
 from . import Geometry
 import matplotlib.pyplot as plt
 import torch
 
 
-def test_geometry():
-    geometry = Geometry(svg_file="/home/cyanodox/RPI/dft/qimpy-dev/workspace/test_spline/curved-tile-split.svg")
+def test_geometry(input_svg):
+    geometry = Geometry(svg_file=input_svg)
 
 
 
 if __name__ == "__main__":
-    test_geometry()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input_svg", help="Input patch (SVG file)", type=str)
+    args = parser.parse_args()
+    test_geometry(args.input_svg)
     plt.show()
