@@ -235,10 +235,11 @@ class SVGParser:
             for cycle in self.cycles
         ]
 
+
 class Geometry(TreeNode):
     """Geometry specification."""
 
-    edges: list[BicubicPatch] # Patch objects
+    edges: list[BicubicPatch]  # Patch objects
 
     def __init__(
         self,
@@ -253,13 +254,11 @@ class Geometry(TreeNode):
         ----------
         svg_file
             :yaml:`Path to an SVG file containing the input geometry.
-            :yaml:`Indices of edges in each quad (n_quads x 4).`
         """
         super().__init__()
 
         svg_parser = SVGParser(svg_file)
         self.patches = svg_parser.patches
-
 
 
 def _make_check_tensor(
