@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Sequence, Union, Any, Optional
+from collections import namedtuple
 
 import numpy as np
 import torch
@@ -8,6 +9,9 @@ from svg.path import parse_path, CubicBezier, Line, Close
 
 from qimpy import TreeNode, rc
 from qimpy.io import CheckpointPath
+
+
+PatchSet = namedtuple("PatchSet", ["vertices", "edges", "quads", "adjacency"])
 
 
 class CubicSpline:
@@ -159,30 +163,49 @@ class SVGParser:
 
         self.patches = []
 
-        patch_edges = {}
+        verts = self.vertices.clone().detach()
+        edges = torch.tensor([])
+        quads = torch.tensor([])
+
+        control_pt_lookup = {}
 
         # Now build the patches, ensuring each spline goes along
         # the direction of the cycle
         for cycle in self.cycles:
-            patch_splines = []
+            cur_quad = []
             for edge in edge_sequence(cycle):
                 # Edges lookup reflects the original ordering of the edges
                 # if an edge's order doesn't appear in here, it needs to be flipped
                 if edge not in self.edges_lookup:
-                    new_spline = CubicSpline(
-                        torch.flip(
-                            self.splines[self.edges_lookup[edge[::-1]]], dims=[0]
-                        )
+                    spline = torch.flip(
+                        self.splines[self.edges_lookup[edge[::-1]]], dims=[0]
                     )
                 else:
-                    new_spline = CubicSpline(self.splines[self.edges_lookup[edge]])
-                patch_edges[edge] = new_spline
-                patch_splines.append(new_spline)
-            self.patches.append(BicubicPatch(patch_splines))
-
-        for edge, spline in patch_edges.items():
-            if edge[::-1] in patch_edges:
-                patch_edges[edge[::-1]].neighbor_edge = spline
+                    spline = self.splines[self.edges_lookup[edge]]
+                cp1 = tuple(spline[1].tolist())
+                cp2 = tuple(spline[2].tolist())
+                if cp1 not in control_pt_lookup:
+                    verts = torch.cat((verts, spline[1:3]), 0)
+                    control_pt_lookup[cp1] = verts.shape[0] - 2
+                    control_pt_lookup[cp2] = verts.shape[0] - 1
+                edges = torch.cat(
+                    (
+                        edges,
+                        torch.tensor(
+                            [
+                                [
+                                    edge[0],
+                                    control_pt_lookup[cp1],
+                                    control_pt_lookup[cp2],
+                                    edge[1],
+                                ]
+                            ]
+                        ),
+                    ),
+                    0,
+                )
+                cur_quad.append(edges.shape[0] - 1)
+            quads = torch.cat((quads, torch.tensor([cur_quad])), 0)
 
     # Determine whether a cycle goes counter-clockwise or clockwise
     # (Return 1 or -1 respectively)
