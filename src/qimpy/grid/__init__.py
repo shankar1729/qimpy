@@ -17,7 +17,8 @@ __all__ = (
 from ._grid import Grid
 from ._field import FieldType, Field, FieldR, FieldC, FieldH, FieldG
 from ._field_symmetrizer import FieldSymmetrizer
-from ._coulomb import Coulomb, Coulomb_Slab
+from ._coulomb import Coulomb
+from ._coulombslab import Coulomb_Slab
 import numpy as np
 
 N_SIGMAS_PER_WIDTH: float = 1.0 + np.sqrt(-2.0 * np.log(np.finfo(float).eps))
