@@ -20,10 +20,12 @@ class Coulomb_Slab:
         Rsq = (self.grid.lattice.Rbasis).square().sum(dim=0)
         hlfL = torch.sqrt(Rsq[self.iDir])
         iG = grid.get_mesh("H").to(torch.double)
-        Gsqi = (iG @ grid.lattice.Gbasis.T).square()
+        Gi = (iG @ grid.lattice.Gbasis.T)
+        Gsqi = Gi.square()
         Gsq = Gsqi.sum(dim=-1)
         Gplane = torch.sqrt(Gsq - Gsqi[..., iDir])
-        self._kernel = torch.where(Gsq == 0.0, -0.5*hlfL**2, (4*np.pi) * (1 - torch.exp(-Gplane*hlfL) * torch.cos(np.pi*iG[..., iDir]))/Gsq)
+        Gperp = Gi[..., iDir] 
+        self._kernel = torch.where(Gsq == 0.0, -0.5*hlfL**2, (4*np.pi) * (1 - torch.exp(-Gplane*hlfL) * torch.cos(np.pi*Gperp))/Gsq)
 
     def __call__() -> None:
         pass
