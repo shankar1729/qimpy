@@ -186,30 +186,6 @@ class Coulomb:
         return E
 
 
-class Coulomb_Slab:
-    def __init__(self, grid: Grid, n_ions: int, iDir: int) -> None:
-        self.iDir = iDir
-        self.grid = grid
-
-    def update_lattice_dependent(self, n_ions: int) -> None:
-        hlfL = 1
-        Gsq = (iG @ grid.lattice.Gbasis.T).square().sum(dim=-1)
-        Gplane = Gsq  # - GGT(iDir,iDir) * iG[iDir]*iG[iDir]; //G along the non-truncated directions
-        # Gplane = torch.where(Gplane <= 0, 0, torch.sqrt(Gplane))
-        return (4 * np.pi) * (
-            1 - torch.exp(-Gplane * hlfL)
-        )  # * torch.cos(np.pi*iG[iDir]))/Gsq
-
-    def __call__() -> None:
-        pass
-
-    def ewald() -> None:
-        pass
-
-    def stress() -> None:
-        pass
-
-
 # Compute Ewald real and reciprocal meshes:
 def get_mesh(
     sigma: float,
