@@ -5,10 +5,8 @@ from . import Geometry
 
 def test_geometry(input_svg):
     geometry = Geometry(svg_file=input_svg)
-    for i, patch in enumerate(geometry.patches):
-        print(f"Patch {i}")
-        for edge in patch.edges:
-            print(edge)
+    for i, tensor in enumerate(geometry.patch_set):
+        print(tensor)
 
 
 if __name__ == "__main__":

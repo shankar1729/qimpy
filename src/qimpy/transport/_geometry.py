@@ -163,9 +163,9 @@ class SVGParser:
 
         self.patches = []
 
-        verts = self.vertices.clone().detach()
-        edges = torch.tensor([])
-        quads = torch.tensor([])
+        verts = self.vertices.clone().detach().to(device=rc.device)
+        edges = torch.tensor([], device=rc.device)
+        quads = torch.tensor([], device=rc.device)
 
         control_pt_lookup = {}
         quad_edges = {}
@@ -208,7 +208,7 @@ class SVGParser:
                 cur_quad.append(edges.shape[0] - 1)
                 quad_edges[edge] = (int(quads.shape[0]), int(len(cur_quad) - 1))
             quads = torch.cat((quads, torch.tensor([cur_quad])), 0)
-        adjacency = -1 * torch.ones([len(quads), PATCH_SIDES, 2])
+        adjacency = -1 * torch.ones([len(quads), PATCH_SIDES, 2], device=rc.device)
         for edge, adj in quad_edges.items():
             if edge[::-1] in quad_edges:
                 quad, edge_ind = adj
