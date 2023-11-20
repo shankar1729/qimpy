@@ -8,7 +8,7 @@ from qimpy.io import CheckpointPath
 from qimpy.mpi import BufferView
 from qimpy.math import eighg, dagger
 from qimpy.algorithms import Minimize, MinimizeState, MatrixArray
-from qimpy.grid import FieldH
+from qimpy.grid import FieldH, FieldR, Grid
 
 
 class LCAO(Minimize[MatrixArray]):
@@ -59,7 +59,7 @@ class LCAO(Minimize[MatrixArray]):
                 system.grid, el.fillings.n_electrons, el.fillings.M
             )
             if el.xc.need_tau:
-                el.tau_tilde = el.n_tilde.zeros_like()
+                el.tau_tilde = self.tau_tf(n_tilde=el.n_tilde, grid=system.grid)
             else:
                 el.tau_tilde = FieldH(system.grid, shape_batch=(0,))
             el.update_potential(system)
@@ -77,6 +77,12 @@ class LCAO(Minimize[MatrixArray]):
             None, None
         ]
         self.minimize()
+
+    def tau_tf(self, n_tilde: FieldH, grid: Grid) -> FieldH:
+        """Thomas-Fermi kinetic energy density"""
+        prefactor = 0.3 * ((3 * (np.pi**2)) ** (2.0 / 3.0))
+        tau_tilde = ~FieldR(grid, data=(prefactor * ((~n_tilde).data ** (5 / 3))))
+        return tau_tilde
 
     def step(self, direction: MatrixArray, step_size: float) -> None:
         el = self.system.electrons
