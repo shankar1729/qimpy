@@ -168,6 +168,7 @@ class SVGParser:
         quads = torch.tensor([])
 
         control_pt_lookup = {}
+        quad_edges = {}
 
         # Now build the patches, ensuring each spline goes along
         # the direction of the cycle
@@ -205,7 +206,17 @@ class SVGParser:
                     0,
                 )
                 cur_quad.append(edges.shape[0] - 1)
+                quad_edges[edge] = (int(quads.shape[0]), int(len(cur_quad) - 1))
             quads = torch.cat((quads, torch.tensor([cur_quad])), 0)
+        adjacency = -1 * torch.ones([len(quads), PATCH_SIDES, 2])
+        for edge, adj in quad_edges.items():
+            if edge[::-1] in quad_edges:
+                quad, edge_ind = adj
+                adjacency[quad, edge_ind, :] = torch.tensor(
+                    list(quad_edges[edge[::-1]])
+                )
+
+        self.patch_set = PatchSet(verts, edges, quads, adjacency)
 
     # Determine whether a cycle goes counter-clockwise or clockwise
     # (Return 1 or -1 respectively)
@@ -262,7 +273,10 @@ class SVGParser:
 class Geometry(TreeNode):
     """Geometry specification."""
 
-    edges: list[BicubicPatch]  # Patch objects
+    vertices: torch.Tensor
+    edges: torch.Tensor
+    quads: torch.Tensor
+    adjacency: torch.Tensor
 
     def __init__(
         self,
@@ -281,7 +295,8 @@ class Geometry(TreeNode):
         super().__init__()
 
         svg_parser = SVGParser(svg_file)
-        self.patches = svg_parser.patches
+        self.patch_set = svg_parser.patch_set
+        self.vertices, self.edges, self.quads, self.adjacency = self.patch_set
 
 
 def _make_check_tensor(

@@ -40,7 +40,7 @@ class Coulomb_Slab:
         """
         assert self.grid is rho.grid
         result = FieldH(self.grid, data=(self._kernel * rho.data))
-        return result 
+        return result
 
     def ewald() -> None:
         pass
