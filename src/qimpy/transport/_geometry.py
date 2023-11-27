@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Sequence, Union, Any, Optional
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 
 import numpy as np
 import torch
@@ -108,7 +108,10 @@ PATCH_SIDES: int = 4  #: Support only quad-patches (implicitly required througho
 
 
 def parse_style(style_str: str):
-    return {prop: value for prop, value in [cmd.split(":") for cmd in style_str.split(";")]}
+    return {
+        prop: value for prop, value in [cmd.split(":") for cmd in style_str.split(";")]
+    }
+
 
 def get_splines(svg_file: str) -> torch.Tensor:
     doc = minidom.parse(svg_file)
@@ -116,11 +119,11 @@ def get_splines(svg_file: str) -> torch.Tensor:
     styles = []
     svg_paths = doc.getElementsByTagName("path")
 
-    # Concatenate segments from all paths in SVG file
+    # Concatenate segments from all paths in SVG file, and parse associated styles
     for path in svg_paths:
         paths = parse_path(path.getAttribute("d"))
         svg_elements.extend(paths)
-        styles.extend(len(paths)*[parse_style(path.getAttribute("style"))])
+        styles.extend(len(paths) * [parse_style(path.getAttribute("style"))])
 
     def segment_to_tensor(segment):
         if isinstance(segment, CubicBezier):
@@ -177,6 +180,16 @@ class SVGParser:
 
         control_pt_lookup = {}
         quad_edges = {}
+        color_adj = {}
+
+        color_pairs = defaultdict(list)
+        for i, color in enumerate(self.colors):
+            # Ignore black edges
+            if color != "#000000":
+                color_pairs[color].append(i)
+
+        # Only include pairs, exclude all others
+        color_pairs = {key: val for key, val in color_pairs.items() if len(val) == 2}
 
         # Now build the patches, ensuring each spline goes along
         # the direction of the cycle
@@ -189,10 +202,14 @@ class SVGParser:
                     spline = torch.flip(
                         self.splines[self.edges_lookup[edge[::-1]]], dims=[0]
                     )
+                    color = self.colors[self.edges_lookup[edge[::-1]]]
                 else:
                     spline = self.splines[self.edges_lookup[edge]]
+                    color = self.colors[self.edges_lookup[edge]]
                 cp1 = tuple(spline[1].tolist())
                 cp2 = tuple(spline[2].tolist())
+                # Get control points from spline and add to vertices
+                # Ensure that control points are unique by lookup dict
                 if cp1 not in control_pt_lookup:
                     verts = torch.cat((verts, spline[1:3]), 0)
                     control_pt_lookup[cp1] = verts.shape[0] - 2
@@ -215,14 +232,27 @@ class SVGParser:
                 )
                 cur_quad.append(edges.shape[0] - 1)
                 quad_edges[edge] = (int(quads.shape[0]), int(len(cur_quad) - 1))
+                if color in color_pairs:
+                    color_adj[edge] = color
             quads = torch.cat((quads, torch.tensor([cur_quad])), 0)
         adjacency = -1 * torch.ones([len(quads), PATCH_SIDES, 2], device=rc.device)
         for edge, adj in quad_edges.items():
+            quad, edge_ind = adj
+            # Handle inner adjacency
             if edge[::-1] in quad_edges:
-                quad, edge_ind = adj
                 adjacency[quad, edge_ind, :] = torch.tensor(
                     list(quad_edges[edge[::-1]])
                 )
+
+            # Handle color adjacency
+            if edge in color_adj:
+                color = color_adj[edge]
+                # N^2 lookup, fine for now
+                for other_edge, other_color in color_adj.items():
+                    if other_color == color and edge != other_edge:
+                        adjacency[quad, edge_ind, :] = torch.tensor(
+                            list(quad_edges[other_edge])
+                        )
 
         self.patch_set = PatchSet(verts, edges, quads, adjacency)
 
