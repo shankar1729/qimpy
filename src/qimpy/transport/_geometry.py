@@ -107,14 +107,20 @@ def weld_points(coords: torch.Tensor, tol: float) -> tuple[torch.Tensor, torch.T
 PATCH_SIDES: int = 4  #: Support only quad-patches (implicitly required throughout)
 
 
+def parse_style(style_str: str):
+    return {prop: value for prop, value in [cmd.split(":") for cmd in style_str.split(";")]}
+
 def get_splines(svg_file: str) -> torch.Tensor:
     doc = minidom.parse(svg_file)
     svg_elements = []
+    styles = []
     svg_paths = doc.getElementsByTagName("path")
 
     # Concatenate segments from all paths in SVG file
     for path in svg_paths:
-        svg_elements.extend(parse_path(path.getAttribute("d")))
+        paths = parse_path(path.getAttribute("d"))
+        svg_elements.extend(paths)
+        styles.extend(len(paths)*[parse_style(path.getAttribute("style"))])
 
     def segment_to_tensor(segment):
         if isinstance(segment, CubicBezier):
@@ -137,13 +143,15 @@ def get_splines(svg_file: str) -> torch.Tensor:
     # Ignore all elements that are not lines or cubic splines (essentially ignore moves)
     # In the future we may want to throw an error for unsupported segments
     # (e.g. quadratic splines)
-    return torch.stack(
-        [
-            segment_to_tensor(segment)
-            for segment in svg_elements
-            if isinstance(segment, (Line, Close, CubicBezier))
-        ]
-    )
+    splines = []
+    colors = []
+    for i, segment in enumerate(svg_elements):
+        if isinstance(segment, (Line, Close, CubicBezier)):
+            splines.append(segment_to_tensor(segment))
+            colors.append(styles[i]["stroke"])
+    splines = torch.stack(splines)
+
+    return splines, colors
 
 
 def edge_sequence(cycle):
@@ -152,7 +160,7 @@ def edge_sequence(cycle):
 
 class SVGParser:
     def __init__(self, svg_file, epsilon=0.005):
-        self.splines = get_splines(svg_file)
+        self.splines, self.colors = get_splines(svg_file)
         self.vertices, self.edges = weld_points(self.splines[:, (0, -1)], tol=epsilon)
         self.edges_lookup = {
             (edge[0], edge[1]): ind for ind, edge in enumerate(self.edges.tolist())
