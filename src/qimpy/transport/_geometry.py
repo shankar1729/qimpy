@@ -9,6 +9,7 @@ from svg.path import parse_path, CubicBezier, Line, Close
 
 from qimpy import TreeNode, rc
 from qimpy.io import CheckpointPath
+from qimpy.transport.advect._advect import Advect
 
 
 PatchSet = namedtuple("PatchSet", ["vertices", "edges", "quads", "adjacency"])
@@ -45,10 +46,8 @@ class BicubicPatch:
 
     control_points: torch.Tensor  #: Control point coordinates (4 x 4 x 2)
 
-    def __init__(self, edges: Sequence[CubicSpline]):
+    def __init__(self, boundary: torch.Tensor):
         """Initialize from 12 x 2 coordinates of control points on perimeter."""
-        self.edges = edges
-        boundary = torch.cat([spline.spline_params[:-1] for spline in self.edges])
         control_points = torch.empty((4, 4, 2), device=rc.device)
         # Set boundary control points:
         control_points[:, 0] = boundary[:4]
@@ -76,7 +75,6 @@ class BicubicPatch:
             cubic_bernstein(Qfrac[..., 0]),
             cubic_bernstein(Qfrac[..., 1]),
         )
-
 
 def cubic_bernstein(t: torch.Tensor) -> torch.Tensor:
     """Return basis of cubic Bernstein polynomials."""
@@ -175,8 +173,8 @@ class SVGParser:
         self.patches = []
 
         verts = self.vertices.clone().detach().to(device=rc.device)
-        edges = torch.tensor([], device=rc.device)
-        quads = torch.tensor([], device=rc.device)
+        edges = torch.tensor([], dtype=torch.int, device=rc.device)
+        quads = torch.tensor([], dtype=torch.int, device=rc.device)
 
         control_pt_lookup = {}
         quad_edges = {}
@@ -235,7 +233,7 @@ class SVGParser:
                 if color in color_pairs:
                     color_adj[edge] = color
             quads = torch.cat((quads, torch.tensor([cur_quad])), 0)
-        adjacency = -1 * torch.ones([len(quads), PATCH_SIDES, 2], device=rc.device)
+        adjacency = -1 * torch.ones([len(quads), PATCH_SIDES, 2], dtype=torch.int, device=rc.device)
         for edge, adj in quad_edges.items():
             quad, edge_ind = adj
             # Handle inner adjacency
@@ -316,10 +314,16 @@ class Geometry(TreeNode):
     quads: torch.Tensor
     adjacency: torch.Tensor
 
+    # v_F and N_theta should eventually be material paramteters
     def __init__(
         self,
         *,
         svg_file: str,
+        N: tuple[int, int],
+        N_theta: int,
+        v_F: torch.Tensor,
+        # For now, we are testing horizontal or diagonal advection
+        diag: bool,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
         """
@@ -334,7 +338,30 @@ class Geometry(TreeNode):
 
         svg_parser = SVGParser(svg_file)
         self.patch_set = svg_parser.patch_set
-        self.vertices, self.edges, self.quads, self.adjacency = self.patch_set
+        self.patches = []
+        # Build an advect object for each quad
+        for quad in self.patch_set.quads:
+            boundary = []
+            for edge in self.patch_set.edges[quad]:
+                for coord in self.patch_set.vertices[edge][:-1]:
+                    boundary.append(coord.tolist())
+            boundary = torch.tensor(boundary, device=rc.device)
+            transformation = BicubicPatch(boundary=boundary)
+
+            origin = transformation(torch.zeros((1, 2), device=rc.device))
+            Rbasis = (transformation(torch.eye(2, device=rc.device)) - origin).T
+            delta_Qfrac = torch.tensor([1.0, 1.0] if diag else [1.0, 0.0], device=rc.device)
+            delta_q = delta_Qfrac @ Rbasis.T
+
+            # Initialize velocities (eventually should be in Material):
+            init_angle = torch.atan2(delta_q[1], delta_q[0]).item()
+            dtheta = 2 * np.pi / N_theta
+            theta = torch.arange(N_theta, device=rc.device) * dtheta + init_angle
+            v = v_F * torch.stack([theta.cos(), theta.sin()], dim=-1)
+
+            self.patches.append(Advect(transformation=transformation, v=v, N=N))
+        print(self.patches)
+
 
 
 def _make_check_tensor(

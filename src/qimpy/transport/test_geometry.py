@@ -1,12 +1,17 @@
 import argparse
 
+import torch
+
 from . import Geometry
 
 
 def test_geometry(input_svg):
-    geometry = Geometry(svg_file=input_svg)
-    for i, tensor in enumerate(geometry.patch_set):
-        print(tensor)
+    v_F = 200.0
+    N_theta = 1
+    N = (64, 64)
+    diag = True
+
+    geometry = Geometry(svg_file=input_svg, v_F=v_F, N=N, N_theta=N_theta, diag=diag)
 
 
 if __name__ == "__main__":
