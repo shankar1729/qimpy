@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - nodefaults
 dependencies:
-  - python
+  - python=3.11
   - pyyaml
   - pytorch
   - psutil
@@ -11,4 +11,6 @@ dependencies:
   - h5py
   - mpi4py
   - scipy
+  - svg.path
+  - tqdm
   - typing-extensions
