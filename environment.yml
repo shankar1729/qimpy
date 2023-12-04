@@ -14,3 +14,4 @@ dependencies:
   - svg.path
   - tqdm
   - typing-extensions
+  - sphinx_rtd_theme
