@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - nodefaults
 dependencies:
-  - python=3.9
+  - python
   - pyyaml
   - pytorch
   - psutil
@@ -11,5 +11,4 @@ dependencies:
   - h5py
   - mpi4py
   - scipy
-  - pip:
-    - typing-extensions==4.7.1
+  - typing-extensions
