@@ -24,8 +24,8 @@ def test_geometry(input_svg):
 
     geometry = Geometry(svg_file=input_svg, v_F=v_F, N=N, N_theta=N_theta, diag=diag)
 
-    # Initialize initial density
-    sigma = 0.05
+    # Initialize density
+    sigma = 5 
     q = geometry.patches[0].q
     q0 = (
         geometry.patches[0].origin

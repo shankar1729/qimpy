@@ -342,6 +342,7 @@ class Geometry(TreeNode):
         svg_parser = SVGParser(svg_file)
         self.patch_set = svg_parser.patch_set
         self.patches = []
+        print(self.patch_set)
         # Build an advect object for each quad
         for quad in self.patch_set.quads:
             boundary = []
@@ -354,7 +355,7 @@ class Geometry(TreeNode):
             origin = transformation(torch.zeros((1, 2), device=rc.device))
             Rbasis = (transformation(torch.eye(2, device=rc.device)) - origin).T
             delta_Qfrac = torch.tensor(
-                [1.0, 1.0] if diag else [1.0, 0.0], device=rc.device
+                [1.0, -1.0] if diag else [1.0, 0.0], device=rc.device
             )
             delta_q = delta_Qfrac @ Rbasis.T
 
@@ -368,14 +369,52 @@ class Geometry(TreeNode):
             new_patch.origin = origin
             new_patch.Rbasis = Rbasis
             self.patches.append(new_patch)
-        print(self.patches)
+
+    def apply_boundaries(self, patch_ind, patch, rho) -> torch.Tensor:
+        """Apply all boundary conditions to `rho` and produce ghost-padded version."""
+        non_ghost = patch.non_ghost
+        ghost_l = patch.ghost_l
+        ghost_r = patch.ghost_r
+        out = torch.zeros(patch.rho_padded_shape, device=rc.device)
+        out[non_ghost, non_ghost] = rho
+
+        patch_adj = self.patch_set.adjacency[patch_ind]
+
+        # TODO: handle reflecting boundaries
+        # For now they will be sinks
+
+        # The current logic here is not correct and needs to 
+        # account for which edge is communicated
+        if int(patch_adj[0, 0]) == -1:
+            pass
+        else:
+            out[ghost_l, non_ghost] = self.patches[patch_adj[0, 0]].rho_prev[ghost_r]
+
+        if int(patch_adj[1, 0]) == -1:
+            pass
+        else:
+            out[ghost_r, non_ghost] = self.patches[patch_adj[1, 0]].rho_prev[ghost_l]
+
+        if int(patch_adj[2, 0]) == -1:
+            pass
+        else:
+            out[non_ghost, patch.ghost_l] = self.patches[patch_adj[2, 0]].rho_prev[:, ghost_r]
+
+        if int(patch_adj[3, 0]) == -1:
+            pass
+        else:
+            out[non_ghost, patch.ghost_r] = self.patches[patch_adj[3, 0]].rho_prev[:, ghost_l]
+
+        return out
 
     def time_step(self):
         for patch in self.patches:
+            patch.rho_prev = patch.rho.detach().clone()
+        for i, patch in enumerate(self.patches):
             rho_half = patch.rho + patch.drho(
-                0.5 * patch.dt, patch.apply_boundaries(patch.rho)
+                0.5 * patch.dt, self.apply_boundaries(i, patch, patch.rho_prev)
             )
-            patch.rho += patch.drho(patch.dt, patch.apply_boundaries(rho_half))
+            patch.rho += patch.drho(patch.dt, self.apply_boundaries(i, patch, rho_half))
 
 
 def _make_check_tensor(
