@@ -76,6 +76,7 @@ class BicubicPatch:
             cubic_bernstein(Qfrac[..., 1]),
         )
 
+
 def cubic_bernstein(t: torch.Tensor) -> torch.Tensor:
     """Return basis of cubic Bernstein polynomials."""
     t_bar = 1.0 - t
@@ -233,7 +234,9 @@ class SVGParser:
                 if color in color_pairs:
                     color_adj[edge] = color
             quads = torch.cat((quads, torch.tensor([cur_quad])), 0)
-        adjacency = -1 * torch.ones([len(quads), PATCH_SIDES, 2], dtype=torch.int, device=rc.device)
+        adjacency = -1 * torch.ones(
+            [len(quads), PATCH_SIDES, 2], dtype=torch.int, device=rc.device
+        )
         for edge, adj in quad_edges.items():
             quad, edge_ind = adj
             # Handle inner adjacency
@@ -350,7 +353,9 @@ class Geometry(TreeNode):
 
             origin = transformation(torch.zeros((1, 2), device=rc.device))
             Rbasis = (transformation(torch.eye(2, device=rc.device)) - origin).T
-            delta_Qfrac = torch.tensor([1.0, 1.0] if diag else [1.0, 0.0], device=rc.device)
+            delta_Qfrac = torch.tensor(
+                [1.0, 1.0] if diag else [1.0, 0.0], device=rc.device
+            )
             delta_q = delta_Qfrac @ Rbasis.T
 
             # Initialize velocities (eventually should be in Material):
@@ -359,9 +364,18 @@ class Geometry(TreeNode):
             theta = torch.arange(N_theta, device=rc.device) * dtheta + init_angle
             v = v_F * torch.stack([theta.cos(), theta.sin()], dim=-1)
 
-            self.patches.append(Advect(transformation=transformation, v=v, N=N))
+            new_patch = Advect(transformation=transformation, v=v, N=N)
+            new_patch.origin = origin
+            new_patch.Rbasis = Rbasis
+            self.patches.append(new_patch)
         print(self.patches)
 
+    def time_step(self):
+        for patch in self.patches:
+            rho_half = patch.rho + patch.drho(
+                0.5 * patch.dt, patch.apply_boundaries(patch.rho)
+            )
+            patch.rho += patch.drho(patch.dt, patch.apply_boundaries(rho_half))
 
 
 def _make_check_tensor(
