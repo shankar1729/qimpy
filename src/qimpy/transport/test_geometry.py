@@ -1,9 +1,11 @@
 import argparse
 
 import torch
+import numpy as np
 import matplotlib.pyplot as plt
-from qimpy import rc
+from tqdm import tqdm
 
+from qimpy import rc
 from . import Geometry
 
 
@@ -18,38 +20,34 @@ def gaussian_blob(
 def test_geometry(input_svg):
     v_F = 200.0
     N_theta = 1
-    N = (64, 64)
+    N = (32, 32)
     diag = True
-    time_steps = 200
+    time_steps = 100
 
     geometry = Geometry(svg_file=input_svg, v_F=v_F, N=N, N_theta=N_theta, diag=diag)
 
     # Initialize density
-    # (put blob in center of first patch)
     sigma = 5
-    q = geometry.patches[0].q
-    q0 = (
-        geometry.patches[0].origin
-        + torch.tensor([0.5, 0.5], device=rc.device) @ geometry.patches[2].Rbasis.T
-    )
-    geometry.patches[0].rho[..., 0] = gaussian_blob(
-        q, q0, geometry.patches[0].Rbasis, sigma
-    )
+    patch = geometry.patches[0]  # select a patch to put the blob within
+    q = patch.q
+    q0 = patch.origin + torch.tensor([0.5, 0.5], device=rc.device) @ patch.Rbasis.T
+    patch.rho[..., 0] = gaussian_blob(q, q0, patch.Rbasis, sigma)
 
     # Run time steps
-    for time_step in range(time_steps):
+    for time_step in tqdm(range(time_steps)):
         # Plot all patches on single MPL plot
         plt.clf()
         plt.gca().set_aspect("equal")
+        rho_max = max(patch.density.max().item() for patch in geometry.patches)
+        contour_opts = dict(levels=np.linspace(0.0, rho_max, 100))
         for i, patch in enumerate(geometry.patches):
-            patch.plot_streamlines(plt, dict(levels=100), dict(linewidth=1.0))
+            patch.plot_streamlines(plt, contour_opts, dict(linewidth=1.0))
         plt.savefig(
             f"animation/advect_{time_step:04d}.png",
             bbox_inches="tight",
             dpi=200,
         )
         geometry.time_step()
-        print(f"{time_step=}")
 
 
 if __name__ == "__main__":
