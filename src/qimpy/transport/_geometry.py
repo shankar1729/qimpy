@@ -342,7 +342,6 @@ class Geometry(TreeNode):
         svg_parser = SVGParser(svg_file)
         self.patch_set = svg_parser.patch_set
         self.patches = []
-        print(self.patch_set)
         # Build an advect object for each quad
         for quad in self.patch_set.quads:
             boundary = []
@@ -352,10 +351,11 @@ class Geometry(TreeNode):
             boundary = torch.tensor(boundary, device=rc.device)
             transformation = BicubicPatch(boundary=boundary)
 
+            # Initialize velocity and transformation
             origin = transformation(torch.zeros((1, 2), device=rc.device))
             Rbasis = (transformation(torch.eye(2, device=rc.device)) - origin).T
             delta_Qfrac = torch.tensor(
-                [1.0, -1.0] if diag else [1.0, 0.0], device=rc.device
+                [-1.0, -1.0] if diag else [1.0, 0.0], device=rc.device
             )
             delta_q = delta_Qfrac @ Rbasis.T
 
@@ -381,32 +381,99 @@ class Geometry(TreeNode):
         patch_adj = self.patch_set.adjacency[patch_ind]
 
         # TODO: handle reflecting boundaries
-        # For now they will be sinks
+        # For now they will be sinks (hence pass)
 
-        # The current logic here is not correct and needs to 
-        # account for which edge is communicated
+        # This logic is not correct yet (flips/transposes)
+        # Check if each edge is reflecting, otherwise handle
+        # ghost zone communication (16 separate cases)
         if int(patch_adj[0, 0]) == -1:
             pass
         else:
-            out[ghost_l, non_ghost] = self.patches[patch_adj[0, 0]].rho_prev[ghost_r]
+            other_patch_ind, other_edge = patch_adj[0, :].tolist()
+            other_patch = self.patches[other_patch_ind]
+            if other_edge == 0:
+                ghost_area = torch.flip(
+                    other_patch.rho_prev[:, ghost_l],
+                    dims=[
+                        1,
+                    ],
+                )
+            if other_edge == 1:
+                ghost_area = torch.flip(
+                    torch.transpose(other_patch.rho_prev[ghost_r], 0, 1),
+                    dims=[
+                        1,
+                    ],
+                )
+            if other_edge == 2:
+                ghost_area = other_patch.rho_prev[:, ghost_r]
+            if other_edge == 3:
+                ghost_area = torch.flip(
+                    torch.transpose(other_patch.rho_prev[ghost_l], 0, 1),
+                    dims=[
+                        0,
+                    ],
+                )
+            out[non_ghost, ghost_l] = ghost_area
 
         if int(patch_adj[1, 0]) == -1:
             pass
         else:
-            out[ghost_r, non_ghost] = self.patches[patch_adj[1, 0]].rho_prev[ghost_l]
+            other_patch_ind, other_edge = patch_adj[1, :].tolist()
+            other_patch = self.patches[other_patch_ind]
+            if other_edge == 0:
+                ghost_area = torch.transpose(other_patch.rho_prev[:, ghost_l], 0, 1)
+            if other_edge == 1:
+                ghost_area = other_patch.rho_prev[ghost_r]
+            if other_edge == 2:
+                ghost_area = torch.transpose(other_patch.rho_prev[:, ghost_r], 0, 1)
+            if other_edge == 3:
+                ghost_area = other_patch.rho_prev[ghost_l]
+            out[ghost_r, non_ghost] = ghost_area
 
         if int(patch_adj[2, 0]) == -1:
             pass
         else:
-            out[non_ghost, patch.ghost_l] = self.patches[patch_adj[2, 0]].rho_prev[:, ghost_r]
+            other_patch_ind, other_edge = patch_adj[2, :].tolist()
+            other_patch = self.patches[other_patch_ind]
+            if other_edge == 0:
+                ghost_area = other_patch.rho_prev[:, ghost_l]
+            if other_edge == 1:
+                ghost_area = torch.flip(
+                    torch.transpose(other_patch.rho_prev[ghost_r], 0, 1),
+                    dims=[
+                        0,
+                    ],
+                )
+            if other_edge == 2:
+                ghost_area = torch.flip(other_patch.rho_prev[:, ghost_r], dims=[0, 1])
+            if other_edge == 3:
+                ghost_area = torch.flip(
+                    torch.transpose(other_patch.rho_prev[ghost_l], 0, 1),
+                    dims=[
+                        1,
+                    ],
+                )
+            out[non_ghost, ghost_r] = ghost_area
 
         if int(patch_adj[3, 0]) == -1:
             pass
         else:
-            out[non_ghost, patch.ghost_r] = self.patches[patch_adj[3, 0]].rho_prev[:, ghost_l]
+            other_patch_ind, other_edge = patch_adj[3, :].tolist()
+            other_patch = self.patches[other_patch_ind]
+            if other_edge == 0:
+                ghost_area = other_patch.rho_prev[:, ghost_l]
+            if other_edge == 1:
+                ghost_area = other_patch.rho_prev[ghost_r]
+            if other_edge == 2:
+                ghost_area = torch.transpose(other_patch.rho_prev[:, ghost_r], 0, 1)
+            if other_edge == 3:
+                ghost_area = other_patch.rho_prev[ghost_l]
+            out[ghost_l, non_ghost] = ghost_area
 
         return out
 
+    # Geometry level time step
     def time_step(self):
         for patch in self.patches:
             patch.rho_prev = patch.rho.detach().clone()

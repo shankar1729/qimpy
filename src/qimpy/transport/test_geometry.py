@@ -20,31 +20,34 @@ def test_geometry(input_svg):
     N_theta = 1
     N = (64, 64)
     diag = True
-    time_steps = 100
+    time_steps = 200
 
     geometry = Geometry(svg_file=input_svg, v_F=v_F, N=N, N_theta=N_theta, diag=diag)
 
     # Initialize density
-    sigma = 5 
+    # (put blob in center of first patch)
+    sigma = 5
     q = geometry.patches[0].q
     q0 = (
         geometry.patches[0].origin
-        + torch.tensor([0.5, 0.5], device=rc.device) @ geometry.patches[0].Rbasis.T
+        + torch.tensor([0.5, 0.5], device=rc.device) @ geometry.patches[2].Rbasis.T
     )
     geometry.patches[0].rho[..., 0] = gaussian_blob(
         q, q0, geometry.patches[0].Rbasis, sigma
     )
 
+    # Run time steps
     for time_step in range(time_steps):
+        # Plot all patches on single MPL plot
+        plt.clf()
+        plt.gca().set_aspect("equal")
         for i, patch in enumerate(geometry.patches):
-            plt.clf()
             patch.plot_streamlines(plt, dict(levels=100), dict(linewidth=1.0))
-            plt.gca().set_aspect("equal")
-            plt.savefig(
-                f"animation/advect_{time_step:04d}_patch_{i}.png",
-                bbox_inches="tight",
-                dpi=200,
-            )
+        plt.savefig(
+            f"animation/advect_{time_step:04d}.png",
+            bbox_inches="tight",
+            dpi=200,
+        )
         geometry.time_step()
         print(f"{time_step=}")
 
