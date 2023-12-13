@@ -343,7 +343,7 @@ class Geometry(TreeNode):
         self.patch_set = svg_parser.patch_set
         self.patches = []
         # Build an advect object for each quad
-        for quad in self.patch_set.quads:
+        for i_quad, quad in enumerate(self.patch_set.quads):
             boundary = []
             for edge in self.patch_set.edges[quad]:
                 for coord in self.patch_set.vertices[edge][:-1]:
@@ -351,19 +351,20 @@ class Geometry(TreeNode):
             boundary = torch.tensor(boundary, device=rc.device)
             transformation = BicubicPatch(boundary=boundary)
 
-            # Initialize velocity and transformation
-            origin = transformation(torch.zeros((1, 2), device=rc.device))
-            Rbasis = (transformation(torch.eye(2, device=rc.device)) - origin).T
-            delta_Qfrac = torch.tensor(
-                [-1.0, -1.0] if diag else [1.0, 0.0], device=rc.device
-            )
-            delta_q = delta_Qfrac @ Rbasis.T
+            # Initialize velocity and transformation based on first patch:
+            if i_quad == 0:
+                origin = transformation(torch.zeros((1, 2), device=rc.device))
+                Rbasis = (transformation(torch.eye(2, device=rc.device)) - origin).T
+                delta_Qfrac = torch.tensor(
+                    [-1.0, -1.0] if diag else [1.0, 0.0], device=rc.device
+                )
+                delta_q = delta_Qfrac @ Rbasis.T
 
-            # Initialize velocities (eventually should be in Material):
-            init_angle = torch.atan2(delta_q[1], delta_q[0]).item()
-            dtheta = 2 * np.pi / N_theta
-            theta = torch.arange(N_theta, device=rc.device) * dtheta + init_angle
-            v = v_F * torch.stack([theta.cos(), theta.sin()], dim=-1)
+                # Initialize velocities (eventually should be in Material):
+                init_angle = torch.atan2(delta_q[1], delta_q[0]).item()
+                dtheta = 2 * np.pi / N_theta
+                theta = torch.arange(N_theta, device=rc.device) * dtheta + init_angle
+                v = v_F * torch.stack([theta.cos(), theta.sin()], dim=-1)
 
             new_patch = Advect(transformation=transformation, v=v, N=N)
             new_patch.origin = origin
