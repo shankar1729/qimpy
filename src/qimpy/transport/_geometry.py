@@ -400,7 +400,7 @@ class Geometry(TreeNode):
             if other_edge == 1:
                 ghost_area = torch.flip(
                     torch.transpose(other_patch.rho_prev[ghost_r], 0, 1),
-                    dims=(1,),
+                    dims=(0, 1),
                 )
             if other_edge == 2:
                 ghost_area = other_patch.rho_prev[:, ghost_r]
@@ -417,9 +417,12 @@ class Geometry(TreeNode):
             other_patch_ind, other_edge = patch_adj[1, :].tolist()
             other_patch = self.patches[other_patch_ind]
             if other_edge == 0:
-                ghost_area = torch.transpose(other_patch.rho_prev[:, ghost_l], 0, 1)
+                ghost_area = torch.flip(
+                    torch.transpose(other_patch.rho_prev[:, ghost_l], 0, 1),
+                    dims=(1,),
+                )
             if other_edge == 1:
-                ghost_area = other_patch.rho_prev[ghost_r]
+                ghost_area = torch.flip(other_patch.rho_prev[ghost_r], dims=(0, 1))
             if other_edge == 2:
                 ghost_area = torch.transpose(other_patch.rho_prev[:, ghost_r], 0, 1)
             if other_edge == 3:

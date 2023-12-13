@@ -20,9 +20,10 @@ def gaussian_blob(
 def test_geometry(input_svg):
     v_F = 200.0
     N_theta = 1
-    N = (32, 32)
+    N = (64, 64)
     diag = True
-    time_steps = 100
+    time_steps = 400
+    steps_per_plot = 4
 
     geometry = Geometry(svg_file=input_svg, v_F=v_F, N=N, N_theta=N_theta, diag=diag)
 
@@ -34,7 +35,7 @@ def test_geometry(input_svg):
     patch.rho[..., 0] = gaussian_blob(q, q0, patch.Rbasis, sigma)
 
     # Run time steps
-    for time_step in tqdm(range(time_steps)):
+    for plot_step in tqdm(range(time_steps // steps_per_plot)):
         # Plot all patches on single MPL plot
         plt.clf()
         plt.gca().set_aspect("equal")
@@ -43,11 +44,12 @@ def test_geometry(input_svg):
         for i, patch in enumerate(geometry.patches):
             patch.plot_streamlines(plt, contour_opts, dict(linewidth=1.0))
         plt.savefig(
-            f"animation/advect_{time_step:04d}.png",
+            f"animation/advect_{plot_step:04d}.png",
             bbox_inches="tight",
             dpi=200,
         )
-        geometry.time_step()
+        for time_step in range(steps_per_plot):
+            geometry.time_step()
 
 
 if __name__ == "__main__":
