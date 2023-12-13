@@ -76,3 +76,20 @@ def cubic_bernstein(t: torch.Tensor) -> torch.Tensor:
     return torch.stack(
         (t_bar**3, 3.0 * (t_bar**2) * t, 3.0 * t_bar * (t**2), t**3)
     )
+
+
+def plot_spline(ax, spline: torch.Tensor, n_points: int = 64) -> None:
+    assert len(spline) == 4
+    t = np.linspace(0.0, 1.0, n_points + 1)[:, None]
+    t_bar = 1.0 - t
+    # Evaluate cubic spline by De Casteljau's algorithm:
+    control_points = spline.to(rc.cpu).numpy()
+    result = control_points[:, None, :]
+    for i_iter in range(len(spline) - 1):
+        result = result[:-1] * t_bar + result[1:] * t
+    points = result[0]
+    # Plot
+    ax.plot(points[:, 0], points[:, 1], color="k")
+    ax.plot(control_points[:2, 0], control_points[:2, 1], color="r")
+    ax.plot(control_points[2:, 0], control_points[2:, 1], color="r")
+    ax.scatter(control_points[1:3, 0], control_points[1:3, 1], color="r")

@@ -11,10 +11,10 @@ from qimpy import rc
 
 
 class PatchSet(NamedTuple):
-    vertices: torch.Tensor
-    edges: torch.Tensor
-    quads: torch.Tensor
-    adjacency: torch.Tensor
+    vertices: torch.Tensor  #: Nverts x 2 vertex coordinates (including control points)
+    edges: torch.Tensor  #: Nedges x 4 vertex indices for each c-spline edge
+    quads: torch.Tensor  #: Nquads x 4 edge indices within each quad
+    adjacency: torch.Tensor  #: Nquads x 4 x 2: neighbor indices for each (quad, edge)
 
 
 PATCH_SIDES: int = 4  #: Support only quad-patches (implicitly required throughout)
@@ -83,8 +83,6 @@ class SVGParser:
 
         self.cycles = []
         self.find_cycles()
-
-        self.patches = []
 
         verts = self.vertices.clone().detach().to(device=rc.device)
         edges = torch.tensor([], dtype=torch.int, device=rc.device)
