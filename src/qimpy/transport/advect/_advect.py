@@ -51,7 +51,6 @@ class Advect:
         self.V = torch.einsum("ta, ...Ba -> ...tB", v, torch.linalg.inv(jacobian))
         self.dt = 0.5 / self.V.abs().max().item()
         self.dk = dk
-        print(self.v[0], self.V[N[0] // 2, N[1] // 2, 0])
 
         # Initialize distribution function:
         Nk = v.shape[0]

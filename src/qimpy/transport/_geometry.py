@@ -395,25 +395,19 @@ class Geometry(TreeNode):
             if other_edge == 0:
                 ghost_area = torch.flip(
                     other_patch.rho_prev[:, ghost_l],
-                    dims=[
-                        1,
-                    ],
+                    dims=(1,),
                 )
             if other_edge == 1:
                 ghost_area = torch.flip(
                     torch.transpose(other_patch.rho_prev[ghost_r], 0, 1),
-                    dims=[
-                        1,
-                    ],
+                    dims=(1,),
                 )
             if other_edge == 2:
                 ghost_area = other_patch.rho_prev[:, ghost_r]
             if other_edge == 3:
                 ghost_area = torch.flip(
                     torch.transpose(other_patch.rho_prev[ghost_l], 0, 1),
-                    dims=[
-                        0,
-                    ],
+                    dims=(0,),
                 )
             out[non_ghost, ghost_l] = ghost_area
 
@@ -442,18 +436,14 @@ class Geometry(TreeNode):
             if other_edge == 1:
                 ghost_area = torch.flip(
                     torch.transpose(other_patch.rho_prev[ghost_r], 0, 1),
-                    dims=[
-                        0,
-                    ],
+                    dims=(0,),
                 )
             if other_edge == 2:
                 ghost_area = torch.flip(other_patch.rho_prev[:, ghost_r], dims=[0, 1])
             if other_edge == 3:
                 ghost_area = torch.flip(
                     torch.transpose(other_patch.rho_prev[ghost_l], 0, 1),
-                    dims=[
-                        1,
-                    ],
+                    dims=(0,),
                 )
             out[non_ghost, ghost_r] = ghost_area
 
@@ -467,9 +457,12 @@ class Geometry(TreeNode):
             if other_edge == 1:
                 ghost_area = other_patch.rho_prev[ghost_r]
             if other_edge == 2:
-                ghost_area = torch.transpose(other_patch.rho_prev[:, ghost_r], 0, 1)
+                ghost_area = torch.flip(
+                    torch.transpose(other_patch.rho_prev[:, ghost_r], 0, 1),
+                    dims=(0, 1),
+                )
             if other_edge == 3:
-                ghost_area = other_patch.rho_prev[ghost_l]
+                ghost_area = torch.flip(other_patch.rho_prev[ghost_l], dims=(0, 1))
             out[ghost_l, non_ghost] = ghost_area
 
         return out
