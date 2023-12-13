@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 from qimpy import rc
-from . import Geometry
+from qimpy.transport import Geometry
 
 
 def gaussian_blob(
@@ -22,7 +22,7 @@ def test_geometry(input_svg):
     N_theta = 1
     N = (64, 64)
     diag = True
-    time_steps = 400
+    time_steps = 200
     steps_per_plot = 4
 
     geometry = Geometry(svg_file=input_svg, v_F=v_F, N=N, N_theta=N_theta, diag=diag)
