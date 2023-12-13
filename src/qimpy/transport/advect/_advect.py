@@ -51,6 +51,7 @@ class Advect:
         self.V = torch.einsum("ta, ...Ba -> ...tB", v, torch.linalg.inv(jacobian))
         self.dt = 0.5 / self.V.abs().max().item()
         self.dk = dk
+        print(self.v[0], self.V[N[0] // 2, N[1] // 2, 0])
 
         # Initialize distribution function:
         Nk = v.shape[0]
@@ -122,6 +123,13 @@ class Advect:
         plt.contourf(x, y, np.clip(rho, 1e-3, None), **contour_kwargs)
         plt.gca().set_aspect("equal")
         # plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
+
+        # Label edges:
+        NX, NY = x.shape
+        plt.text(*q[NX // 2, 0], "0", ha="center", va="center")
+        plt.text(*q[-1, NY // 2], "1", ha="center", va="center")
+        plt.text(*q[NX // 2, -1], "2", ha="center", va="center")
+        plt.text(*q[0, NY // 2], "3", ha="center", va="center")
 
 
 def to_numpy(f: torch.Tensor) -> np.ndarray:
