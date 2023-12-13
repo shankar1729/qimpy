@@ -17,6 +17,10 @@ class PatchSet(NamedTuple):
     adjacency: torch.Tensor  #: Nquads x 4 x 2: neighbor indices for each (quad, edge)
 
 
+def parse_svg(svg_file: str) -> PatchSet:
+    return SVGParser(svg_file).patch_set
+
+
 PATCH_SIDES: int = 4  #: Support only quad-patches (implicitly required throughout)
 
 
@@ -74,9 +78,9 @@ def edge_sequence(cycle):
 
 
 class SVGParser:
-    def __init__(self, svg_file, epsilon=0.005):
+    def __init__(self, svg_file, tol=0.001):
         self.splines, self.colors = get_splines(svg_file)
-        self.vertices, self.edges = weld_points(self.splines[:, (0, -1)], tol=epsilon)
+        self.vertices, self.edges = weld_points(self.splines[:, (0, -1)], tol=tol)
         self.edges_lookup = {
             (edge[0], edge[1]): ind for ind, edge in enumerate(self.edges.tolist())
         }

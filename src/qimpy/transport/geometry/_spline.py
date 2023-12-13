@@ -1,37 +1,9 @@
 from __future__ import annotations
-from typing import Optional
 
 import numpy as np
 import torch
 
 from qimpy import rc
-
-
-class CubicSpline:
-    spline_params: torch.Tensor  # 4 x 2 tensor
-    neighbor_edge: Optional[CubicSpline]
-    n_points: int
-
-    def __init__(self, spline_params, neighbor_edge=None, n_points=64):
-        self.spline_params = spline_params
-        self.n_points = n_points
-        self.neighbor_edge = None
-
-    def __repr__(self):
-        numpy_spline = self.spline_params.numpy()
-        has_edge = self.neighbor_edge is not None
-        return f"{numpy_spline[0, :]} -> {numpy_spline[-1, :]} (neighbor: {has_edge})"
-
-    def points(self):
-        assert len(self.spline_params) == 4
-        t = np.linspace(0.0, 1.0, self.n_points + 1)[:, None]
-        t_bar = 1.0 - t
-        # Evaluate cubic spline by De Casteljau's algorithm:
-        control_points = self.spline_params.to(rc.cpu).numpy()
-        result = control_points[:, None, :]
-        for i_iter in range(len(self.spline_params) - 1):
-            result = result[:-1] * t_bar + result[1:] * t
-        return result[0]
 
 
 class BicubicPatch:

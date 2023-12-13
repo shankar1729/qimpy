@@ -6,7 +6,7 @@ import torch
 from qimpy import TreeNode, rc
 from qimpy.io import CheckpointPath
 from qimpy.transport.advect import Advect
-from . import BicubicPatch, SVGParser
+from . import BicubicPatch, parse_svg
 
 
 class Geometry(TreeNode):
@@ -38,7 +38,7 @@ class Geometry(TreeNode):
             :yaml:`Path to an SVG file containing the input geometry.
         """
         super().__init__()
-        self.patch_set = SVGParser(svg_file).patch_set
+        self.patch_set = parse_svg(svg_file)
         self.patches = []
         # Build an advect object for each quad
         for i_quad, quad in enumerate(self.patch_set.quads):
