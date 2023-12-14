@@ -74,7 +74,7 @@ def run(*, Nxy, N_theta, q0, v0, svg_file, plot_frames=False) -> float:
     for patch in geometry.patches:
         patch.rho[..., 0] = gaussian_blob(patch.q, q0, Rbasis, sigma)
 
-    plot_interval = round(0.01 * time_steps)
+    plot_interval = round(0.02 * time_steps)
     plot_frame = 0
     for time_step in tqdm(range(time_steps)):
         if plot_frames and (time_step % plot_interval == 0):

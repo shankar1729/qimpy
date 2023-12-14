@@ -105,10 +105,15 @@ class Advect:
 
         # Label edges:
         NX, NY = x.shape
-        plt.text(*q[NX // 2, 0], "0", ha="center", va="center")
-        plt.text(*q[-1, NY // 2], "1", ha="center", va="center")
-        plt.text(*q[NX // 2, -1], "2", ha="center", va="center")
-        plt.text(*q[0, NY // 2], "3", ha="center", va="center")
+        midNX = slice(NX // 2, NX // 2 + 2)
+        midNY = slice(NY // 2, NY // 2 + 2)
+        text_kwargs = dict(ha="center", rotation_mode="anchor")
+        for i_edge, q_mid in enumerate(
+            (q[midNX, 0], q[-1, midNY], q[midNX, -1][::-1], q[0, midNY][::-1])
+        ):
+            dq = np.diff(q_mid, axis=0)[0]
+            angle = np.rad2deg(np.arctan2(dq[1], dq[0]))
+            plt.text(*q_mid[0], f"{i_edge}$\\to$", rotation=angle, **text_kwargs)
 
 
 def to_numpy(f: torch.Tensor) -> np.ndarray:
