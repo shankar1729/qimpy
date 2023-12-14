@@ -51,9 +51,13 @@ def run(*, Nxy, N_theta, q0, v0, svg_file, plot_frames=False) -> float:
     tol = 1e-3
     displacements = geometry.displacements.flatten(0, 1)
     displacements = displacements[torch.where(displacements.norm(dim=-1) > tol)[0]]
-    equivalence = np.logical_or(
-        (displacements[:, None] - displacements[None]).norm(dim=-1) < tol,
-        (displacements[:, None] + displacements[None]).norm(dim=-1) < tol,
+    equivalence = torch.where(
+        torch.logical_or(
+            (displacements[:, None] - displacements[None]).norm(dim=-1) < tol,
+            (displacements[:, None] + displacements[None]).norm(dim=-1) < tol,
+        ),
+        1,
+        0,
     )
     Rbasis = displacements[torch.unique(equivalence.argmax(dim=0))].T
     if Rbasis.shape != (2, 2):

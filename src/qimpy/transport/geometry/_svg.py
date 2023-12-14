@@ -147,7 +147,8 @@ class SVGParser:
                                     control_pt_lookup[cp2],
                                     edge[1],
                                 ]
-                            ]
+                            ],
+                            device=rc.device,
                         ),
                     ),
                     0,
@@ -156,18 +157,14 @@ class SVGParser:
                 quad_edges[edge] = (int(quads.shape[0]), int(len(cur_quad) - 1))
                 if color in color_pairs:
                     color_adj[edge] = color
-            quads = torch.cat((quads, torch.tensor([cur_quad])), 0)
+            quads = torch.cat((quads, torch.tensor([cur_quad], device=rc.device)), 0)
 
-        adjacency = -1 * torch.ones(
-            [len(quads), PATCH_SIDES, 2], dtype=torch.int, device=rc.device
-        )
+        adjacency = -1 * torch.ones([len(quads), PATCH_SIDES, 2], dtype=torch.int)
         for edge, adj in quad_edges.items():
             quad, edge_ind = adj
             # Handle inner adjacency
             if edge[::-1] in quad_edges:
-                adjacency[quad, edge_ind, :] = torch.tensor(
-                    list(quad_edges[edge[::-1]])
-                )
+                adjacency[quad, edge_ind, :] = torch.tensor(quad_edges[edge[::-1]])
 
             # Handle color adjacency
             if edge in color_adj:
@@ -176,10 +173,10 @@ class SVGParser:
                 for other_edge, other_color in color_adj.items():
                     if other_color == color and edge != other_edge:
                         adjacency[quad, edge_ind, :] = torch.tensor(
-                            list(quad_edges[other_edge])
+                            quad_edges[other_edge]
                         )
 
-        self.patch_set = PatchSet(verts, edges, quads, adjacency)
+        self.patch_set = PatchSet(verts, edges, quads, adjacency.to(rc.device))
 
     # Determine whether a cycle goes counter-clockwise or clockwise
     # (Return 1 or -1 respectively)
@@ -188,7 +185,7 @@ class SVGParser:
         edges = edge_sequence(cycle_vertices)
         handed_sum = 0.0
         for v1, v2 in edges:
-            handed_sum += (v2[0] - v1[0]) / (v2[1] + v1[1])
+            handed_sum += ((v2[0] - v1[0]) / (v2[1] + v1[1])).item()
         # NOTE: SVG uses a left-handed coordinate system
         return np.sign(handed_sum)
 
