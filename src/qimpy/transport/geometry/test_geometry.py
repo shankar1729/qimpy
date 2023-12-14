@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 from qimpy import rc
-from qimpy.transport import Geometry
+from . import Geometry
 
 
 def gaussian_blob(

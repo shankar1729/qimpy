@@ -8,7 +8,7 @@ from tqdm import tqdm
 from qimpy import log, rc
 from qimpy.io import log_config
 from qimpy.profiler import StopWatch
-from qimpy.transport.advect._advect import Advect, to_numpy
+from qimpy.transport.geometry._advect import Advect, to_numpy
 from qimpy.transport.geometry.test_svg import get_splines
 
 

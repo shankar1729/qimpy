@@ -5,8 +5,7 @@ import torch
 
 from qimpy import TreeNode, rc
 from qimpy.io import CheckpointPath
-from qimpy.transport.advect import Advect
-from . import BicubicPatch, parse_svg
+from . import Advect, BicubicPatch, parse_svg
 
 
 class Geometry(TreeNode):
@@ -136,6 +135,7 @@ class Geometry(TreeNode):
         ]
 
     def time_step(self) -> None:
+        """Second-order correct time step."""
         rho_list_init = self.rho_list
         rho_list_half = self.next_rho_list(0.5 * self.dt, rho_list_init, rho_list_init)
         self.rho_list = self.next_rho_list(self.dt, rho_list_init, rho_list_half)

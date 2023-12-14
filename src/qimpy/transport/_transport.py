@@ -4,7 +4,8 @@ from qimpy import rc, log, TreeNode
 from qimpy.rc import MPI
 from qimpy.io import CheckpointPath, Checkpoint
 from qimpy.mpi import ProcessGrid
-from . import Geometry, Material
+from .geometry import Geometry
+from . import Material
 
 
 class Transport(TreeNode):
