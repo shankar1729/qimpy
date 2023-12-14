@@ -90,28 +90,9 @@ class Geometry(TreeNode):
             (non_ghost, ghost_r),
             (ghost_l, non_ghost),
         ]
-        BOUNDARY_FLIP_DIMS = {
-            (0, 0): (1,),
-            (0, 1): (0, 1),
-            (0, 2): tuple[int](),
-            (0, 3): (0,),
-            (1, 0): (1,),
-            (1, 1): (0, 1),
-            (1, 2): tuple[int](),
-            (1, 3): tuple[int](),
-            (2, 0): tuple[int](),
-            (2, 1): (0,),
-            (2, 2): (0, 1),
-            (2, 3): (0,),
-            (3, 0): tuple[int](),
-            (3, 1): tuple[int](),
-            (3, 2): (0, 1),
-            (3, 3): (0, 1),
-        }
+        flip_dims = [(0, 1), (0,), None, (1,)]
 
-        # This logic is not correct yet (flips/transposes)
-        # Check if each edge is reflecting, otherwise handle
-        # ghost zone communication (16 separate cases)
+        # Check if each edge is reflecting, otherwise communicate ghost zones:
         for i_edge, (other_patch_ind, other_edge) in enumerate(patch_adj):
             if other_patch_ind < 0:
                 # TODO: handle reflecting boundaries
@@ -121,11 +102,11 @@ class Geometry(TreeNode):
                 # Pass-through boundary:
                 other_patch = self.patches[other_patch_ind]
                 ghost_area = other_patch.rho_prev[in_slices[other_edge]]
-                if (i_edge - other_edge) % 2:
+                delta_edge = other_edge - i_edge
+                if delta_edge % 2:
                     ghost_area = ghost_area.swapaxes(0, 1)
-                flip_dims = BOUNDARY_FLIP_DIMS[(i_edge, other_edge)]
-                if flip_dims:
-                    ghost_area = ghost_area.flip(dims=flip_dims)
+                if flip_dims_cur := flip_dims[delta_edge]:
+                    ghost_area = ghost_area.flip(dims=flip_dims_cur)
                 out[out_slices[i_edge]] = ghost_area
         return out
 
