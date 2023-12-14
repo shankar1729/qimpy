@@ -13,6 +13,7 @@ class Geometry(TreeNode):
 
     patches: list[Advect]  #: Advection for each quad patch
     adjacency: np.ndarray  #: as defined in `PatchSet`
+    displacements: torch.Tensor  #: edge displacements for each adjacency
 
     # Constants for edge data transfer:
     IN_SLICES = [
@@ -37,10 +38,7 @@ class Geometry(TreeNode):
         *,
         svg_file: str,
         N: tuple[int, int],
-        N_theta: int,
-        v_F: torch.Tensor,
-        # For now, we are testing horizontal or diagonal advection
-        diag: bool,
+        v: torch.Tensor,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
         """
@@ -54,33 +52,14 @@ class Geometry(TreeNode):
         super().__init__()
         vertices, edges, quads, adjacency = parse_svg(svg_file)
         self.adjacency = adjacency.to(rc.cpu).numpy()
-        self.patches = []
+        self.displacements = get_displacements(vertices, edges, quads, adjacency)
 
         # Build an advect object for each quad
+        self.patches = []
         for i_quad, quad in enumerate(quads):
             boundary = vertices[edges[quad, :-1].flatten()]
             transformation = BicubicPatch(boundary=boundary)
-
-            # Initialize velocity and transformation based on first patch:
-            if i_quad == 0:
-                origin = transformation(torch.zeros((1, 2), device=rc.device))
-                Rbasis = (transformation(torch.eye(2, device=rc.device)) - origin).T
-                delta_Qfrac = torch.tensor(
-                    [-1.0, -1.0] if diag else [1.0, 0.0], device=rc.device
-                )
-                delta_q = delta_Qfrac @ Rbasis.T
-
-                # Initialize velocities (eventually should be in Material):
-                init_angle = torch.atan2(delta_q[1], delta_q[0]).item()
-                dtheta = 2 * np.pi / N_theta
-                theta = torch.arange(N_theta, device=rc.device) * dtheta + init_angle
-                v = v_F * torch.stack([theta.cos(), theta.sin()], dim=-1)
-
-            patch = Advect(transformation=transformation, v=v, N=N)
-            patch.origin = origin
-            patch.Rbasis = Rbasis
-            self.patches.append(patch)
-
+            self.patches.append(Advect(transformation=transformation, v=v, N=N))
         self.dt = min(patch.dt_max for patch in self.patches)
 
     @property
@@ -139,6 +118,25 @@ class Geometry(TreeNode):
         rho_list_init = self.rho_list
         rho_list_half = self.next_rho_list(0.5 * self.dt, rho_list_init, rho_list_init)
         self.rho_list = self.next_rho_list(self.dt, rho_list_init, rho_list_half)
+
+
+def get_displacements(
+    vertices: torch.Tensor,
+    edges: torch.Tensor,
+    quads: torch.Tensor,
+    adjacency: torch.Tensor,
+    tol: float = 1e-3,
+) -> torch.Tensor:
+    """Check consistency and collect displacements between adjacent edges."""
+    i_quad, i_edge = torch.nonzero(adjacency[..., 0] >= 0).T
+    j_quad, j_edge = adjacency[i_quad, i_edge].T
+    verts_i = vertices[edges[quads[i_quad, i_edge]]]
+    verts_j = vertices[edges[quads[j_quad, j_edge]]].flip(dims=(1,))
+    deltas = verts_i - verts_j
+    assert torch.all(deltas.std(dim=1) < tol).item()
+    displacements = torch.zeros(adjacency.shape, device=rc.device)
+    displacements[i_quad, i_edge] = deltas.mean(dim=1)
+    return displacements
 
 
 def equivalence_classes(pairs: torch.Tensor) -> torch.Tensor:

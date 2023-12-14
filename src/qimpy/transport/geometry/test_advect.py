@@ -8,52 +8,7 @@ from tqdm import tqdm
 from qimpy import log, rc
 from qimpy.io import log_config
 from qimpy.profiler import StopWatch
-from qimpy.transport.geometry._advect import Advect, to_numpy
-from qimpy.transport.geometry.test_svg import get_splines
-
-
-class BicubicPatch:
-    """Transformation based on cubic spline edges."""
-
-    control_points: torch.Tensor  #: Control point coordinates (4 x 4 x 2)
-
-    def __init__(self, boundary: torch.Tensor):
-        """Initialize from 12 x 2 coordinates of control points on perimeter."""
-        control_points = torch.empty((4, 4, 2), device=rc.device)
-        # Set boundary control points:
-        control_points[:, 0] = boundary[:4]
-        control_points[-1, 1:] = boundary[4:7]
-        control_points[:-1, -1] = boundary[7:10].flipud()
-        control_points[0, 1:-1] = boundary[10:12].flipud()
-
-        # Set internal control points based on parallelogram completion:
-        def complete_parallelogram(
-            v: torch.Tensor, i0: int, j0: int, i1: int, j1: int
-        ) -> None:
-            v[i1, j1] = v[i0, j1] + v[i1, j0] - v[i0, j0]
-
-        complete_parallelogram(control_points, 0, 0, 1, 1)
-        complete_parallelogram(control_points, 3, 0, 2, 1)
-        complete_parallelogram(control_points, 0, 3, 1, 2)
-        complete_parallelogram(control_points, 3, 3, 2, 2)
-        self.control_points = control_points
-
-    def __call__(self, Qfrac: torch.Tensor) -> torch.Tensor:
-        """Define mapping from fractional mesh to Cartesian coordinates."""
-        return torch.einsum(
-            "uvi, u..., v... -> ...i",
-            self.control_points,
-            cubic_bernstein(Qfrac[..., 0]),
-            cubic_bernstein(Qfrac[..., 1]),
-        )
-
-
-def cubic_bernstein(t: torch.Tensor) -> torch.Tensor:
-    """Return basis of cubic Bernstein polynomials."""
-    t_bar = 1.0 - t
-    return torch.stack(
-        (t_bar**3, 3.0 * (t_bar**2) * t, 3.0 * t_bar * (t**2), t**3)
-    )
+from . import Geometry
 
 
 def gaussian_blob(
@@ -71,69 +26,80 @@ def gaussian_blob_error(
     q0: torch.Tensor,
     Rbasis: torch.Tensor,
     sigma: float,
-) -> tuple[torch.Tensor, float]:
-    """Compute error profile and MAE of density `rho`."""
+) -> tuple[float, float]:
+    """Compute sum and error-sum of density `rho`."""
     rho_err = rho - gaussian_blob(q, q0, Rbasis, sigma)
-    rho_norm = (g[..., 0] * rho).sum()
-    rho_mae = (g[..., 0] * rho_err.abs()).sum() / rho_norm
-    return rho_err, rho_mae.item()
+    rho_sum = (g[..., 0] * rho).sum().item()
+    rho_err_sum = (g[..., 0] * rho_err.abs()).sum().item()
+    return rho_sum, rho_err_sum
 
 
-def run(*, Nxy, N_theta, diag, transformation, plot_frames=False) -> float:
+def run(*, Nxy, N_theta, q0, v0, svg_file, plot_frames=False) -> float:
     """Run simulation and report error in final density."""
 
-    origin = transformation(torch.zeros((1, 2), device=rc.device))
-    Rbasis = (transformation(torch.eye(2, device=rc.device)) - origin).T
-    delta_Qfrac = torch.tensor([1.0, 1.0] if diag else [1.0, 0.0], device=rc.device)
-    delta_q = delta_Qfrac @ Rbasis.T
-
     # Initialize velocities (eventually should be in Material):
-    v_F = 200.0
-    init_angle = torch.atan2(delta_q[1], delta_q[0]).item()
+    v_F = v0.norm().item()
+    init_angle = torch.atan2(v0[1], v0[0]).item()
     dtheta = 2 * np.pi / N_theta
     theta = torch.arange(N_theta, device=rc.device) * dtheta + init_angle
     v = v_F * torch.stack([theta.cos(), theta.sin()], dim=-1)
 
-    sim = Advect(transformation=transformation, v=v, N=(Nxy, Nxy))
+    # Initialize geometry:
+    geometry = Geometry(svg_file=svg_file, N=(Nxy, Nxy), v=v)
+
+    # Detect periodicity:
+    tol = 1e-3
+    displacements = geometry.displacements.flatten(0, 1)
+    displacements = displacements[torch.where(displacements.norm(dim=-1) > tol)[0]]
+    equivalence = np.logical_or(
+        (displacements[:, None] - displacements[None]).norm(dim=-1) < tol,
+        (displacements[:, None] + displacements[None]).norm(dim=-1) < tol,
+    )
+    Rbasis = displacements[torch.unique(equivalence.argmax(dim=0))].T
+    if Rbasis.shape != (2, 2):
+        log.error("Could not detect two unique lattice vectors for periodicity.")
+        exit(1)
 
     # Set the time for slightly more than one period
-    t_period = delta_q.norm().item() / v_F
-    time_steps = round(1.25 * t_period / sim.dt)
-    t_final = time_steps * sim.dt
+    distance = torch.linalg.det(Rbasis).abs().sqrt().item()  # move ~ one cell
+    time_steps = round(distance / (v_F * geometry.dt))
+    t_final = time_steps * geometry.dt
     log.info(f"\nRunning for {time_steps} steps at {Nxy = }:")
 
     # Initialize initial and expected final density
-    sigma = 0.05
-    q = sim.q
-    g = sim.g
-    q0 = origin + torch.tensor([0.5, 0.5], device=rc.device) @ Rbasis.T
-    sim.rho[..., 0] = gaussian_blob(q, q0, Rbasis, sigma)
+    sigma = 5.0
+    for patch in geometry.patches:
+        patch.rho[..., 0] = gaussian_blob(patch.q, q0, Rbasis, sigma)
 
     plot_interval = round(0.01 * time_steps)
     plot_frame = 0
     for time_step in tqdm(range(time_steps)):
         if plot_frames and (time_step % plot_interval == 0):
             plt.clf()
-            sim.plot_streamlines(plt, dict(levels=100), dict(linewidth=1.0))
+            rho_max = max(patch.density.max().item() for patch in geometry.patches)
+            contour_opts = dict(levels=np.linspace(0.0, rho_max, 100))
+            for i, patch in enumerate(geometry.patches):
+                patch.plot_streamlines(plt, contour_opts, dict(linewidth=1.0))
             plt.gca().set_aspect("equal")
             plt.savefig(
-                f"animation/blob_advect_{plot_frame:04d}.png",
+                f"animation/advect_{plot_frame:04d}.png",
                 bbox_inches="tight",
                 dpi=200,
             )
             plot_frame += 1
-        sim.time_step()
+        geometry.time_step()
 
-    # Plot final density error:
-    plt.clf()
-    q_final = q0 + sim.v[0] * t_final
-    rho = sim.rho[..., 0]
-    rho_err, rho_mae = gaussian_blob_error(g, rho, q, q_final, Rbasis, sigma)
-    q_np = to_numpy(q)
-    plt.contourf(q_np[..., 0], q_np[..., 1], to_numpy(rho_err), levels=100, cmap="bwr")
-    plt.gca().set_aspect("equal")
-    plt.colorbar()
-    plt.savefig(f"density_err_{Nxy}.png", bbox_inches="tight", dpi=200)
+    # Compute final density error:
+    q_final = q0 + v0 * t_final
+    rho_sum_tot = 0.0
+    rho_err_tot = 0.0
+    for patch in geometry.patches:
+        rho_sum, rho_err_sum = gaussian_blob_error(
+            patch.g, patch.rho[..., 0], patch.q, q_final, Rbasis, sigma
+        )
+        rho_sum_tot += rho_sum
+        rho_err_tot += rho_err_sum
+    rho_mae = rho_err_tot / rho_sum_tot
 
     # Return RMS error in density:
     log.info(f"{rho_mae = } for {Nxy = }")
@@ -148,46 +114,19 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--Nxy", help="spatial resolution", type=int, required=True)
     parser.add_argument("--Ntheta", help="angular resolution", type=int, required=True)
-    parser.add_argument("--diag", help="move diagonally", action="store_true")
+    parser.add_argument("--q0", help="origin", nargs=2, type=float, required=True)
+    parser.add_argument("--v0", help="velocity", nargs=2, type=float, required=True)
     parser.add_argument("--Nxy_min", help="start resolution for convergence", type=int)
-    parser.add_argument(
-        "--input_svg", help="Input patch transformation (SVG file)", type=str
-    )
+    parser.add_argument("--svg", help="SVG geometry file", type=str, required=True)
     args = parser.parse_args()
-
-    if args.input_svg is not None:
-        patch_coords = get_splines(args.input_svg)
-        boundary = torch.cat([spline[:-1] for spline in patch_coords])
-        boundary /= 100.0
-        print(boundary)
-    else:
-        boundary = torch.tensor(
-            [
-                [0.0, 0.0],
-                [0.4, 0.0],
-                [0.6, 0.2],
-                [1.0, 0.2],
-                [1.0, 0.5],
-                [1.1, 0.7],
-                [1.1, 1.0],
-                [0.7, 1.0],
-                [0.5, 0.8],
-                [0.1, 0.8],
-                [0.1, 0.5],
-                [0.0, 0.3],
-            ],
-            device=rc.device,
-        )
-
-    # Initialize geometric transformation:
-    transformation = BicubicPatch(boundary=boundary)
 
     if args.Nxy_min is None:
         run(
             Nxy=args.Nxy,
             N_theta=args.Ntheta,
-            diag=args.diag,
-            transformation=transformation,
+            q0=torch.tensor(args.q0, device=rc.device),
+            v0=torch.tensor(args.v0, device=rc.device),
+            svg_file=args.svg,
             plot_frames=True,
         )
     else:
@@ -201,8 +140,9 @@ def main():
             err = run(
                 Nxy=Nxy,
                 N_theta=args.Ntheta,
-                diag=args.diag,
-                transformation=transformation,
+                q0=torch.tensor(args.q0, device=rc.device),
+                v0=torch.tensor(args.v0, device=rc.device),
+                svg_file=args.svg,
                 plot_frames=False,
             )
             Ns.append(Nxy)
