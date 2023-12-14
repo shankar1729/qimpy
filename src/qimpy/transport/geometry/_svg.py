@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import NamedTuple
 from collections import defaultdict
+import os
 
 import torch
 import numpy as np
@@ -88,6 +89,13 @@ class SVGParser:
         self.cycles = []
         self.find_cycles()
 
+        # Randomly permute cycles to test transfer in general case:
+        if "QIMPY_CYCLE_PERMUTE" in os.environ:
+            random = np.random.default_rng()
+            for cycle in self.cycles:
+                roll = random.integers(4)
+                cycle[:] = cycle[roll:] + cycle[:roll]
+
         verts = self.vertices.clone().detach().to(device=rc.device)
         edges = torch.tensor([], dtype=torch.int, device=rc.device)
         quads = torch.tensor([], dtype=torch.int, device=rc.device)
@@ -149,6 +157,7 @@ class SVGParser:
                 if color in color_pairs:
                     color_adj[edge] = color
             quads = torch.cat((quads, torch.tensor([cur_quad])), 0)
+
         adjacency = -1 * torch.ones(
             [len(quads), PATCH_SIDES, 2], dtype=torch.int, device=rc.device
         )
