@@ -12,10 +12,8 @@ from . import BicubicPatch, parse_svg
 class Geometry(TreeNode):
     """Geometry specification."""
 
-    vertices: torch.Tensor
-    edges: torch.Tensor
-    quads: torch.Tensor
-    adjacency: torch.Tensor
+    patches: list[Advect]  #: Advection for each quad patch
+    adjacency: np.ndarray  #: as defined in `PatchSet`
 
     # v_F and N_theta should eventually be material paramteters
     def __init__(
@@ -38,15 +36,13 @@ class Geometry(TreeNode):
             :yaml:`Path to an SVG file containing the input geometry.
         """
         super().__init__()
-        self.patch_set = parse_svg(svg_file)
+        vertices, edges, quads, adjacency = parse_svg(svg_file)
+        self.adjacency = adjacency.to(rc.cpu).numpy()
         self.patches = []
+
         # Build an advect object for each quad
-        for i_quad, quad in enumerate(self.patch_set.quads):
-            boundary = []
-            for edge in self.patch_set.edges[quad]:
-                for coord in self.patch_set.vertices[edge][:-1]:
-                    boundary.append(coord.tolist())
-            boundary = torch.tensor(boundary, device=rc.device)
+        for i_quad, quad in enumerate(quads):
+            boundary = vertices[edges[quad, :-1].flatten()]
             transformation = BicubicPatch(boundary=boundary)
 
             # Initialize velocity and transformation based on first patch:
@@ -71,24 +67,21 @@ class Geometry(TreeNode):
 
     def apply_boundaries(self, patch_ind, patch, rho) -> torch.Tensor:
         """Apply all boundary conditions to `rho` and produce ghost-padded version."""
-        non_ghost = patch.non_ghost
-        ghost_l = patch.ghost_l
-        ghost_r = patch.ghost_r
         out = torch.zeros(patch.rho_padded_shape, device=rc.device)
-        out[non_ghost, non_ghost] = rho
+        out[Advect.NON_GHOST, Advect.NON_GHOST] = rho
 
-        patch_adj = self.patch_set.adjacency[patch_ind].to(rc.cpu).numpy()
+        patch_adj = self.adjacency[patch_ind]
         in_slices = [
-            (slice(None), ghost_l),
-            (ghost_r, slice(None)),
-            (slice(None), ghost_r),
-            (ghost_l, slice(None)),
+            (slice(None), Advect.GHOST_L),
+            (Advect.GHOST_R, slice(None)),
+            (slice(None), Advect.GHOST_R),
+            (Advect.GHOST_L, slice(None)),
         ]
         out_slices = [
-            (non_ghost, ghost_l),
-            (ghost_r, non_ghost),
-            (non_ghost, ghost_r),
-            (ghost_l, non_ghost),
+            (Advect.NON_GHOST, Advect.GHOST_L),
+            (Advect.GHOST_R, Advect.NON_GHOST),
+            (Advect.NON_GHOST, Advect.GHOST_R),
+            (Advect.GHOST_L, Advect.NON_GHOST),
         ]
         flip_dims = [(0, 1), (0,), None, (1,)]
 

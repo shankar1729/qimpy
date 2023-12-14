@@ -9,17 +9,23 @@ from qimpy.profiler import stopwatch
 
 
 class Advect:
+    N_GHOST: int = 2  #: currently a constant, but could depend on slope method later
+
+    # Initialize slices for accessing ghost regions in padded version:
+    # These are also the slices for the boundary region in non-padded version
+    NON_GHOST = slice(N_GHOST, -N_GHOST)
+    GHOST_L = slice(0, N_GHOST)  #: ghost indices on left/bottom
+    GHOST_R = slice(-N_GHOST, None)  #: ghost indices on right/top side
+
     def __init__(
         self,
         *,
         transformation: Callable[[torch.Tensor], torch.Tensor],
         v: torch.Tensor,
         N: tuple[int, ...],
-        N_ghost: int = 2,
         dk: float = 1.0,
     ) -> None:
         self.N = N
-        self.N_ghost = N_ghost
 
         # Initialize mesh:
         grids1d = [(torch.arange(Ni, device=rc.device) + 0.5) for Ni in N]
@@ -54,42 +60,20 @@ class Advect:
 
         # Initialize distribution function:
         Nk = v.shape[0]
+        padding = 2 * Advect.N_GHOST
         self.rho_shape = (N[0], N[1], Nk)
-        self.rho_padded_shape = (N[0] + 2 * N_ghost, N[1] + 2 * N_ghost, Nk)
+        self.rho_padded_shape = (N[0] + padding, N[1] + padding, Nk)
         self.rho = torch.zeros(self.rho_shape, device=rc.device)
-
-        # Initialize slices for accessing ghost regions in padded version:
-        # These are also the slices for the boundary region in non-padded version
-        self.non_ghost = slice(N_ghost, -N_ghost)
-        self.ghost_l = slice(0, N_ghost)  # ghost indices on left/bottom
-        self.ghost_r = slice(-N_ghost, None)  # ghost indices on right/top side
 
         # Initialize v*drho/dx calculator:
         self.v_prime = torch.jit.script(Vprime())
 
-    @stopwatch(name="apply_boundaries")
-    def apply_boundaries(self, rho: torch.Tensor) -> torch.Tensor:
-        """Apply all boundary conditions to `rho` and produce ghost-padded version."""
-        non_ghost = self.non_ghost
-        ghost_l = self.ghost_l
-        ghost_r = self.ghost_r
-        out = torch.zeros(self.rho_padded_shape, device=rc.device)
-        out[non_ghost, non_ghost] = rho
-
-        # Periodic boundary conditions
-        out[ghost_l, non_ghost] = rho[ghost_r]
-        out[ghost_r, non_ghost] = rho[ghost_l]
-        out[non_ghost, self.ghost_l] = rho[:, ghost_r]
-        out[non_ghost, self.ghost_r] = rho[:, ghost_l]
-        return out
-
     @stopwatch(name="drho")
     def drho(self, dt: float, rho: torch.Tensor) -> torch.Tensor:
         """Compute drho for time step dt, given current rho."""
-        non_ghost = self.non_ghost
         return (-dt) * (
-            self.v_prime(rho[:, non_ghost], self.V[..., 0], axis=0)
-            + self.v_prime(rho[non_ghost, :], self.V[..., 1], axis=1)
+            self.v_prime(rho[:, Advect.NON_GHOST], self.V[..., 0], axis=0)
+            + self.v_prime(rho[Advect.NON_GHOST, :], self.V[..., 1], axis=1)
         )
 
     def time_step(self):
