@@ -65,3 +65,12 @@ def plot_spline(ax, spline: torch.Tensor, n_points: int = 64) -> None:
     ax.plot(control_points[:2, 0], control_points[:2, 1], color="r")
     ax.plot(control_points[2:, 0], control_points[2:, 1], color="r")
     ax.scatter(control_points[1:3, 0], control_points[1:3, 1], color="r")
+
+
+def spline_length(spline: torch.Tensor, n_points: int = 64) -> torch.Tensor:
+    """Compute cubic spline lengths, batched over any preceding dimensions.
+    The shape of spline should end in (4, d), where d is the dimension of space.
+    """
+    t = torch.linspace(0.0, 1.0, n_points + 1, device=rc.device)
+    points = torch.einsum("ct, ...ci -> ...ti", cubic_bernstein(t), spline)
+    return points.diff(dim=-2).norm(dim=-1).sum(dim=-1)

@@ -6,7 +6,7 @@ import torch
 from qimpy import TreeNode, rc
 from qimpy.io import CheckpointPath
 from qimpy.transport.material import Material
-from . import Advect, BicubicPatch, parse_svg
+from . import Advect, BicubicPatch, spline_length, parse_svg
 
 
 class Geometry(TreeNode):
@@ -39,7 +39,7 @@ class Geometry(TreeNode):
         *,
         material: Material,
         svg_file: str,
-        N: tuple[int, int],
+        grid_spacing: float,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
         """
@@ -49,11 +49,27 @@ class Geometry(TreeNode):
         ----------
         svg_file
             :yaml:`Path to an SVG file containing the input geometry.
+        grid_spacing
+            :yaml:`Maximum spacing between grid points anywhere in the geometry.`
+            This is used to select the number of grid points in each domain.
         """
         super().__init__()
         vertices, edges, quads, adjacency = parse_svg(svg_file)
         self.adjacency = adjacency.to(rc.cpu).numpy()
-        self.displacements = get_displacements(vertices, edges, quads, adjacency)
+        self.displacements, edge_pairs = get_displacements(
+            vertices, edges, quads, adjacency
+        )
+
+        # Determine edge lengths, equivalence and sampling:
+        lengths = spline_length(vertices[edges])
+        edge_pairs_all = torch.cat((edge_pairs, quads[:, ::2], quads[:, 1::2]), dim=0)
+        equivalent_edge = equivalence_classes(edge_pairs_all)
+        unique_edges = torch.unique(equivalent_edge)  # lowest index in each class
+        n_points = torch.empty(len(lengths), dtype=torch.int, device=rc.device)
+        for edge in unique_edges:
+            sel = torch.where(equivalent_edge == edge)[0]
+            max_length = lengths[sel].max()
+            n_points[sel] = torch.ceil(max_length / grid_spacing).to(torch.int)
 
         # Build an advect object for each quad
         self.patches = []
@@ -61,6 +77,7 @@ class Geometry(TreeNode):
         for i_quad, quad in enumerate(quads):
             boundary = vertices[edges[quad, :-1].flatten()]
             transformation = BicubicPatch(boundary=boundary)
+            N = tuple(n_points[quad[:2]].tolist())
             self.patches.append(Advect(transformation=transformation, v=v, N=N))
         self.dt = min(patch.dt_max for patch in self.patches)
 
@@ -128,17 +145,20 @@ def get_displacements(
     quads: torch.Tensor,
     adjacency: torch.Tensor,
     tol: float = 1e-3,
-) -> torch.Tensor:
-    """Check consistency and collect displacements between adjacent edges."""
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Check consistency and collect displacements between adjacent edges.
+    Also return Npairs x 2 indices of edges corresponding to the dispalcements."""
     i_quad, i_edge = torch.nonzero(adjacency[..., 0] >= 0).T
     j_quad, j_edge = adjacency[i_quad, i_edge].T
-    verts_i = vertices[edges[quads[i_quad, i_edge]]]
-    verts_j = vertices[edges[quads[j_quad, j_edge]]].flip(dims=(1,))
+    edge_index_i = quads[i_quad, i_edge]
+    edge_index_j = quads[j_quad, j_edge]
+    verts_i = vertices[edges[edge_index_i]]
+    verts_j = vertices[edges[edge_index_j]].flip(dims=(1,))
     deltas = verts_i - verts_j
     assert torch.all(deltas.std(dim=1) < tol).item()
     displacements = torch.zeros(adjacency.shape, device=rc.device)
     displacements[i_quad, i_edge] = deltas.mean(dim=1)
-    return displacements
+    return displacements, torch.stack((edge_index_i, edge_index_j)).T
 
 
 def equivalence_classes(pairs: torch.Tensor) -> torch.Tensor:

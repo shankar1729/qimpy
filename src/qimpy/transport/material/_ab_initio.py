@@ -14,7 +14,7 @@ class AbInitio(Material):
         self,
         *,
         fname: str,
-        rotation: Sequence[Sequence[float]] = ((1, 0, 0), (0, 1, 0, (0, 0, 1))),
+        rotation: Sequence[Sequence[float]] = ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
         """
