@@ -15,6 +15,23 @@ class Geometry(TreeNode):
     patches: list[Advect]  #: Advection for each quad patch
     adjacency: np.ndarray  #: as defined in `PatchSet`
 
+    # Constants for edge data transfer:
+    IN_SLICES = [
+        (slice(None), Advect.GHOST_L),
+        (Advect.GHOST_R, slice(None)),
+        (slice(None), Advect.GHOST_R),
+        (Advect.GHOST_L, slice(None)),
+    ]  #: input slice for each edge orientation during edge communication
+
+    OUT_SLICES = [
+        (Advect.NON_GHOST, Advect.GHOST_L),
+        (Advect.GHOST_R, Advect.NON_GHOST),
+        (Advect.NON_GHOST, Advect.GHOST_R),
+        (Advect.GHOST_L, Advect.NON_GHOST),
+    ]  #: output slice for each edge orientation during edge communication
+
+    FLIP_DIMS = [(0, 1), (0,), None, (1,)]  #: which dims to flip during edge transfer
+
     # v_F and N_theta should eventually be material paramteters
     def __init__(
         self,
@@ -60,58 +77,68 @@ class Geometry(TreeNode):
                 theta = torch.arange(N_theta, device=rc.device) * dtheta + init_angle
                 v = v_F * torch.stack([theta.cos(), theta.sin()], dim=-1)
 
-            new_patch = Advect(transformation=transformation, v=v, N=N)
-            new_patch.origin = origin
-            new_patch.Rbasis = Rbasis
-            self.patches.append(new_patch)
+            patch = Advect(transformation=transformation, v=v, N=N)
+            patch.origin = origin
+            patch.Rbasis = Rbasis
+            self.patches.append(patch)
 
-    def apply_boundaries(self, patch_ind, patch, rho) -> torch.Tensor:
-        """Apply all boundary conditions to `rho` and produce ghost-padded version."""
-        out = torch.zeros(patch.rho_padded_shape, device=rc.device)
-        out[Advect.NON_GHOST, Advect.NON_GHOST] = rho
+        self.dt = min(patch.dt_max for patch in self.patches)
 
-        patch_adj = self.adjacency[patch_ind]
-        in_slices = [
-            (slice(None), Advect.GHOST_L),
-            (Advect.GHOST_R, slice(None)),
-            (slice(None), Advect.GHOST_R),
-            (Advect.GHOST_L, slice(None)),
-        ]
-        out_slices = [
-            (Advect.NON_GHOST, Advect.GHOST_L),
-            (Advect.GHOST_R, Advect.NON_GHOST),
-            (Advect.NON_GHOST, Advect.GHOST_R),
-            (Advect.GHOST_L, Advect.NON_GHOST),
-        ]
-        flip_dims = [(0, 1), (0,), None, (1,)]
+    @property
+    def rho_list(self) -> list[torch.Tensor]:
+        return [patch.rho for patch in self.patches]
 
-        # Check if each edge is reflecting, otherwise communicate ghost zones:
-        for i_edge, (other_patch_ind, other_edge) in enumerate(patch_adj):
-            if other_patch_ind < 0:
-                # TODO: handle reflecting boundaries
-                # For now they will be sinks (hence pass)
-                pass
-            else:
-                # Pass-through boundary:
-                other_patch = self.patches[other_patch_ind]
-                ghost_area = other_patch.rho_prev[in_slices[other_edge]]
-                delta_edge = other_edge - i_edge
-                if delta_edge % 2:
-                    ghost_area = ghost_area.swapaxes(0, 1)
-                if flip_dims_cur := flip_dims[delta_edge]:
-                    ghost_area = ghost_area.flip(dims=flip_dims_cur)
-                out[out_slices[i_edge]] = ghost_area
-        return out
+    @rho_list.setter
+    def rho_list(self, rho_list_new) -> None:
+        for patch, rho_new in zip(self.patches, rho_list_new):
+            patch.rho = rho_new
 
-    # Geometry level time step
-    def time_step(self):
-        for patch in self.patches:
-            patch.rho_prev = patch.rho.detach().clone()
-        for i, patch in enumerate(self.patches):
-            rho_half = patch.rho + patch.drho(
-                0.5 * patch.dt, self.apply_boundaries(i, patch, patch.rho_prev)
+    def apply_boundaries(self, rho_list: list[torch.Tensor]) -> list[torch.Tensor]:
+        """Apply all boundary conditions to `rho` and produce ghost-padded version.
+        The list contains the data for each patch."""
+        # Create padded version for all patches:
+        out_list = []
+        for patch, rho in zip(self.patches, rho_list):
+            out = torch.zeros(patch.rho_padded_shape, device=rc.device)
+            out[Advect.NON_GHOST, Advect.NON_GHOST] = rho
+            out_list.append(out)
+
+        # Populate ghost zones across patches where needed:
+        for i_patch, (out, adjacency) in enumerate(zip(out_list, self.adjacency)):
+            for i_edge, (other_patch, other_edge) in enumerate(adjacency):
+                if other_patch < 0:
+                    # TODO: handle reflecting boundaries
+                    # For now they will be sinks (hence pass)
+                    pass
+                else:
+                    # Pass-through boundary:
+                    ghost_data = rho_list[other_patch][Geometry.IN_SLICES[other_edge]]
+                    delta_edge = other_edge - i_edge
+                    if delta_edge % 2:
+                        ghost_data = ghost_data.swapaxes(0, 1)
+                    if flip_dims := Geometry.FLIP_DIMS[delta_edge]:
+                        ghost_data = ghost_data.flip(dims=flip_dims)
+                    out[Geometry.OUT_SLICES[i_edge]] = ghost_data
+        return out_list
+
+    def next_rho_list(
+        self,
+        dt: float,
+        rho_list_initial: list[torch.Tensor],
+        rho_list_eval: list[torch.Tensor],
+    ) -> list[torch.Tensor]:
+        """Ingredient of time step: compute rho_initial + dt * f(rho_eval)."""
+        return [
+            (rho_initial + patch.drho(dt, rho_eval))
+            for rho_initial, rho_eval, patch in zip(
+                rho_list_initial, self.apply_boundaries(rho_list_eval), self.patches
             )
-            patch.rho += patch.drho(patch.dt, self.apply_boundaries(i, patch, rho_half))
+        ]
+
+    def time_step(self) -> None:
+        rho_list_init = self.rho_list
+        rho_list_half = self.next_rho_list(0.5 * self.dt, rho_list_init, rho_list_init)
+        self.rho_list = self.next_rho_list(self.dt, rho_list_init, rho_list_half)
 
 
 def equivalence_classes(pairs: torch.Tensor) -> torch.Tensor:

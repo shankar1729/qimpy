@@ -55,7 +55,7 @@ class Advect:
         # Initialize velocities:
         self.v = v
         self.V = torch.einsum("ta, ...Ba -> ...tB", v, torch.linalg.inv(jacobian))
-        self.dt = 0.5 / self.V.abs().max().item()
+        self.dt_max = 0.5 / self.V.abs().max().item()
         self.dk = dk
 
         # Initialize distribution function:
@@ -75,10 +75,6 @@ class Advect:
             self.v_prime(rho[:, Advect.NON_GHOST], self.V[..., 0], axis=0)
             + self.v_prime(rho[Advect.NON_GHOST, :], self.V[..., 1], axis=1)
         )
-
-    def time_step(self):
-        rho_half = self.rho + self.drho(0.5 * self.dt, self.apply_boundaries(self.rho))
-        self.rho += self.drho(self.dt, self.apply_boundaries(rho_half))
 
     @property
     def density(self):
