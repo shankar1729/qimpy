@@ -77,95 +77,56 @@ class Geometry(TreeNode):
         out = torch.zeros(patch.rho_padded_shape, device=rc.device)
         out[non_ghost, non_ghost] = rho
 
-        patch_adj = self.patch_set.adjacency[patch_ind]
-
-        # TODO: handle reflecting boundaries
-        # For now they will be sinks (hence pass)
+        patch_adj = self.patch_set.adjacency[patch_ind].to(rc.cpu).numpy()
+        in_slices = [
+            (slice(None), ghost_l),
+            (ghost_r, slice(None)),
+            (slice(None), ghost_r),
+            (ghost_l, slice(None)),
+        ]
+        out_slices = [
+            (non_ghost, ghost_l),
+            (ghost_r, non_ghost),
+            (non_ghost, ghost_r),
+            (ghost_l, non_ghost),
+        ]
+        BOUNDARY_FLIP_DIMS = {
+            (0, 0): (1,),
+            (0, 1): (0, 1),
+            (0, 2): tuple[int](),
+            (0, 3): (0,),
+            (1, 0): (1,),
+            (1, 1): (0, 1),
+            (1, 2): tuple[int](),
+            (1, 3): tuple[int](),
+            (2, 0): tuple[int](),
+            (2, 1): (0,),
+            (2, 2): (0, 1),
+            (2, 3): (0,),
+            (3, 0): tuple[int](),
+            (3, 1): tuple[int](),
+            (3, 2): (0, 1),
+            (3, 3): (0, 1),
+        }
 
         # This logic is not correct yet (flips/transposes)
         # Check if each edge is reflecting, otherwise handle
         # ghost zone communication (16 separate cases)
-        if int(patch_adj[0, 0]) == -1:
-            pass
-        else:
-            other_patch_ind, other_edge = patch_adj[0, :].tolist()
-            other_patch = self.patches[other_patch_ind]
-            if other_edge == 0:
-                ghost_area = torch.flip(
-                    other_patch.rho_prev[:, ghost_l],
-                    dims=(1,),
-                )
-            if other_edge == 1:
-                ghost_area = torch.flip(
-                    torch.transpose(other_patch.rho_prev[ghost_r], 0, 1),
-                    dims=(0, 1),
-                )
-            if other_edge == 2:
-                ghost_area = other_patch.rho_prev[:, ghost_r]
-            if other_edge == 3:
-                ghost_area = torch.flip(
-                    torch.transpose(other_patch.rho_prev[ghost_l], 0, 1),
-                    dims=(0,),
-                )
-            out[non_ghost, ghost_l] = ghost_area
-
-        if int(patch_adj[1, 0]) == -1:
-            pass
-        else:
-            other_patch_ind, other_edge = patch_adj[1, :].tolist()
-            other_patch = self.patches[other_patch_ind]
-            if other_edge == 0:
-                ghost_area = torch.flip(
-                    torch.transpose(other_patch.rho_prev[:, ghost_l], 0, 1),
-                    dims=(1,),
-                )
-            if other_edge == 1:
-                ghost_area = torch.flip(other_patch.rho_prev[ghost_r], dims=(0, 1))
-            if other_edge == 2:
-                ghost_area = torch.transpose(other_patch.rho_prev[:, ghost_r], 0, 1)
-            if other_edge == 3:
-                ghost_area = other_patch.rho_prev[ghost_l]
-            out[ghost_r, non_ghost] = ghost_area
-
-        if int(patch_adj[2, 0]) == -1:
-            pass
-        else:
-            other_patch_ind, other_edge = patch_adj[2, :].tolist()
-            other_patch = self.patches[other_patch_ind]
-            if other_edge == 0:
-                ghost_area = other_patch.rho_prev[:, ghost_l]
-            if other_edge == 1:
-                ghost_area = torch.flip(
-                    torch.transpose(other_patch.rho_prev[ghost_r], 0, 1),
-                    dims=(0,),
-                )
-            if other_edge == 2:
-                ghost_area = torch.flip(other_patch.rho_prev[:, ghost_r], dims=[0, 1])
-            if other_edge == 3:
-                ghost_area = torch.flip(
-                    torch.transpose(other_patch.rho_prev[ghost_l], 0, 1),
-                    dims=(0,),
-                )
-            out[non_ghost, ghost_r] = ghost_area
-
-        if int(patch_adj[3, 0]) == -1:
-            pass
-        else:
-            other_patch_ind, other_edge = patch_adj[3, :].tolist()
-            other_patch = self.patches[other_patch_ind]
-            if other_edge == 0:
-                ghost_area = other_patch.rho_prev[:, ghost_l]
-            if other_edge == 1:
-                ghost_area = other_patch.rho_prev[ghost_r]
-            if other_edge == 2:
-                ghost_area = torch.flip(
-                    torch.transpose(other_patch.rho_prev[:, ghost_r], 0, 1),
-                    dims=(0, 1),
-                )
-            if other_edge == 3:
-                ghost_area = torch.flip(other_patch.rho_prev[ghost_l], dims=(0, 1))
-            out[ghost_l, non_ghost] = ghost_area
-
+        for i_edge, (other_patch_ind, other_edge) in enumerate(patch_adj):
+            if other_patch_ind < 0:
+                # TODO: handle reflecting boundaries
+                # For now they will be sinks (hence pass)
+                pass
+            else:
+                # Pass-through boundary:
+                other_patch = self.patches[other_patch_ind]
+                ghost_area = other_patch.rho_prev[in_slices[other_edge]]
+                if (i_edge - other_edge) % 2:
+                    ghost_area = ghost_area.swapaxes(0, 1)
+                flip_dims = BOUNDARY_FLIP_DIMS[(i_edge, other_edge)]
+                if flip_dims:
+                    ghost_area = ghost_area.flip(dims=flip_dims)
+                out[out_slices[i_edge]] = ghost_area
         return out
 
     # Geometry level time step
