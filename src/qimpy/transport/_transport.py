@@ -5,15 +5,19 @@ from qimpy.rc import MPI
 from qimpy.io import CheckpointPath, Checkpoint
 from qimpy.mpi import ProcessGrid
 from .geometry import Geometry
-from . import Material
+from .material import Material, AbInitio, FermiCircle
 
 
 class Transport(TreeNode):
+    material: Material
+    geometry: Geometry
+
     def __init__(
         self,
         *,
         geometry: Union[Geometry, dict],
-        material: Union[Material, dict],
+        ab_initio: Optional[Union[AbInitio, dict]] = None,
+        fermi_circle: Optional[Union[FermiCircle, dict]] = None,
         checkpoint: Optional[str] = None,
         checkpoint_out: Optional[str] = None,
         comm: Optional[MPI.Comm] = None,
@@ -25,10 +29,14 @@ class Transport(TreeNode):
 
         Parameters
         ----------
+        ab_initio
+            :yaml:`Ab-initio material.`
+            Exactly one supported material type must be specified.
+        fermi_circle
+            :yaml:`Fermi-circle material for graphene/2DEG.`
+            Exactly one supported material type must be specified.
         geometry
             :yaml:`Geometry specification.`
-        material
-            :yaml:`Material specification.`
         checkpoint
             :yaml:`Checkpoint file to read at start-up.`
         checkpoint_out
@@ -54,8 +62,16 @@ class Transport(TreeNode):
                 log.info(f"Cannot load checkpoint file '{checkpoint}'")
         self.checkpoint_out = checkpoint if checkpoint_out is None else checkpoint_out
 
-        self.add_child("geometry", Geometry, geometry, checkpoint_in)
-        self.add_child("material", Material, material, checkpoint_in)
+        self.add_child_one_of(
+            "material",
+            checkpoint_in,
+            TreeNode.ChildOptions("ab-initio", AbInitio, ab_initio),
+            TreeNode.ChildOptions("fermi-circle", FermiCircle, fermi_circle),
+            have_default=False,
+        )
+        self.add_child(
+            "geometry", Geometry, geometry, checkpoint_in, material=self.material
+        )
 
     def run(self):
         pass

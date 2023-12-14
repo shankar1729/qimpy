@@ -8,6 +8,7 @@ from tqdm import tqdm
 from qimpy import log, rc
 from qimpy.io import log_config
 from qimpy.profiler import StopWatch
+from qimpy.transport.material import FermiCircle
 from . import Geometry
 
 
@@ -37,15 +38,13 @@ def gaussian_blob_error(
 def run(*, Nxy, N_theta, q0, v0, svg_file, plot_frames=False) -> float:
     """Run simulation and report error in final density."""
 
-    # Initialize velocities (eventually should be in Material):
-    v_F = v0.norm().item()
+    # Initialize material:
+    vF = v0.norm().item()
     init_angle = torch.atan2(v0[1], v0[0]).item()
-    dtheta = 2 * np.pi / N_theta
-    theta = torch.arange(N_theta, device=rc.device) * dtheta + init_angle
-    v = v_F * torch.stack([theta.cos(), theta.sin()], dim=-1)
+    material = FermiCircle(kF=1.0, vF=vF, N_theta=N_theta, theta0=init_angle)
 
     # Initialize geometry:
-    geometry = Geometry(svg_file=svg_file, N=(Nxy, Nxy), v=v)
+    geometry = Geometry(svg_file=svg_file, N=(Nxy, Nxy), material=material)
 
     # Detect periodicity:
     tol = 1e-3
@@ -66,7 +65,7 @@ def run(*, Nxy, N_theta, q0, v0, svg_file, plot_frames=False) -> float:
 
     # Set the time for slightly more than one period
     distance = torch.linalg.det(Rbasis).abs().sqrt().item()  # move ~ one cell
-    time_steps = round(distance / (v_F * geometry.dt))
+    time_steps = round(distance / (vF * geometry.dt))
     t_final = time_steps * geometry.dt
     log.info(f"\nRunning for {time_steps} steps at {Nxy = }:")
 

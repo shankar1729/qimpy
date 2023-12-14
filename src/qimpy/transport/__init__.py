@@ -1,5 +1,6 @@
-__all__ = ["Material", "Transport", "main"]
+__all__ = ["material", "geometry", "Transport", "main"]
 
-from ._material import Material
+from . import material
+from . import geometry
 from ._transport import Transport
 from ._main import main

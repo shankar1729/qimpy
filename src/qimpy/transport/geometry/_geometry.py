@@ -5,6 +5,7 @@ import torch
 
 from qimpy import TreeNode, rc
 from qimpy.io import CheckpointPath
+from qimpy.transport.material import Material
 from . import Advect, BicubicPatch, parse_svg
 
 
@@ -36,9 +37,9 @@ class Geometry(TreeNode):
     def __init__(
         self,
         *,
+        material: Material,
         svg_file: str,
         N: tuple[int, int],
-        v: torch.Tensor,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
         """
@@ -56,6 +57,7 @@ class Geometry(TreeNode):
 
         # Build an advect object for each quad
         self.patches = []
+        v = material.transport_velocity
         for i_quad, quad in enumerate(quads):
             boundary = vertices[edges[quad, :-1].flatten()]
             transformation = BicubicPatch(boundary=boundary)

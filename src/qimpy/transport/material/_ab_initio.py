@@ -1,11 +1,14 @@
+from __future__ import annotations
 from typing import Sequence
 
-from qimpy import TreeNode
+import torch
+
 from qimpy.io import CheckpointPath
+from . import Material
 
 
-class Material(TreeNode):
-    """Material specification."""
+class AbInitio(Material):
+    """Ab initio material specification."""
 
     def __init__(
         self,
@@ -15,7 +18,7 @@ class Material(TreeNode):
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
         """
-        Initialize material parameters.
+        Initialize ab initio material.
 
         Parameters
         ----------
@@ -24,4 +27,12 @@ class Material(TreeNode):
         rotation
             :yaml:`3 x 3 rotation matrix from material to simulation frame.`
         """
-        super().__init__()
+        # TODO: read data from FeynWann file
+        nk_tot = 100
+        wk = 1.0 / nk_tot
+        nk = 1
+        n_bands = 1
+        k = torch.zeros((nk, 3))
+        E = torch.zeros((nk, n_bands))
+        v = torch.zeros((nk, n_bands, 3))
+        super().__init__(k=k, wk=wk, E=E, v=v, checkpoint_in=checkpoint_in)
