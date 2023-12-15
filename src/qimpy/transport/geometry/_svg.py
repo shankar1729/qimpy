@@ -3,19 +3,16 @@ from typing import NamedTuple
 from collections import defaultdict
 import os
 
-import torch
 import numpy as np
 from svg.path import parse_path, CubicBezier, Line, Close
 from xml.dom import minidom
 
-from qimpy import rc
-
 
 class PatchSet(NamedTuple):
-    vertices: torch.Tensor  #: Nverts x 2 vertex coordinates (including control points)
-    edges: torch.Tensor  #: Nedges x 4 vertex indices for each c-spline edge
-    quads: torch.Tensor  #: Nquads x 4 edge indices within each quad
-    adjacency: torch.Tensor  #: Nquads x 4 x 2: neighbor indices for each (quad, edge)
+    vertices: np.ndarray  #: Nverts x 2 vertex coordinates (including control points)
+    edges: np.ndarray  #: Nedges x 4 vertex indices for each c-spline edge
+    quads: np.ndarray  #: Nquads x 4 edge indices within each quad
+    adjacency: np.ndarray  #: Nquads x 4 x 2: neighbor indices for each (quad, edge)
 
 
 def parse_svg(svg_file: str) -> PatchSet:
@@ -31,7 +28,7 @@ def parse_style(style_str: str):
     }
 
 
-def get_splines(svg_file: str) -> tuple[torch.Tensor, list]:
+def get_splines(svg_file: str) -> tuple[np.ndarray, list]:
     svg_paths = minidom.parse(svg_file).getElementsByTagName("path")
 
     # Concatenate segments from all paths in SVG file, and parse associated styles
@@ -49,13 +46,15 @@ def get_splines(svg_file: str) -> tuple[torch.Tensor, list]:
     colors = []
     for segment, style in zip(segments, styles):
         if isinstance(segment, (Line, Close, CubicBezier)):
-            splines.append(segment_to_tensor(segment))
+            splines.append(ensure_cubic_spline(segment))
             colors.append(style["stroke"])
-    splines = torch.stack(splines)
+    splines = np.array(splines)
+    splines = np.stack((splines.real, splines.imag), axis=-1)  # to real array
     return splines, colors
 
 
-def segment_to_tensor(segment):
+def ensure_cubic_spline(segment) -> list[complex]:
+    """Convert supported segments to cubic splines."""
     if isinstance(segment, CubicBezier):
         control1, control2 = segment.control1, segment.control2
     # Both Line and Close can produce linear segments
@@ -66,12 +65,7 @@ def segment_to_tensor(segment):
         control2 = segment.start + 2 * disp_third
     else:
         raise ValueError("All segments must be cubic splines or lines")
-    return torch.view_as_real(
-        torch.tensor(
-            [segment.start, control1, control2, segment.end],
-            device=rc.device,
-        )
-    )
+    return [segment.start, control1, control2, segment.end]
 
 
 def edge_sequence(cycle):
@@ -83,7 +77,7 @@ class SVGParser:
         self.splines, self.colors = get_splines(svg_file)
         self.vertices, self.edges = weld_points(self.splines[:, (0, -1)], tol=tol)
         self.edges_lookup = {
-            (edge[0], edge[1]): ind for ind, edge in enumerate(self.edges.tolist())
+            (edge[0], edge[1]): ind for ind, edge in enumerate(self.edges)
         }
 
         self.cycles = []
@@ -96,9 +90,9 @@ class SVGParser:
                 roll = random.integers(4)
                 cycle[:] = cycle[roll:] + cycle[:roll]
 
-        verts = self.vertices.clone().detach().to(device=rc.device)
-        edges = torch.tensor([], dtype=torch.int, device=rc.device)
-        quads = torch.tensor([], dtype=torch.int, device=rc.device)
+        verts = np.copy(self.vertices)
+        edges = []
+        quads = []
 
         control_pt_lookup = {}
         quad_edges = {}
@@ -121,9 +115,7 @@ class SVGParser:
                 # Edges lookup reflects the original ordering of the edges
                 # if an edge's order doesn't appear in here, it needs to be flipped
                 if edge not in self.edges_lookup:
-                    spline = torch.flip(
-                        self.splines[self.edges_lookup[edge[::-1]]], dims=[0]
-                    )
+                    spline = self.splines[self.edges_lookup[edge[::-1]]][::-1]
                     color = self.colors[self.edges_lookup[edge[::-1]]]
                 else:
                     spline = self.splines[self.edges_lookup[edge]]
@@ -133,38 +125,24 @@ class SVGParser:
                 # Get control points from spline and add to vertices
                 # Ensure that control points are unique by lookup dict
                 if cp1 not in control_pt_lookup:
-                    verts = torch.cat((verts, spline[1:3]), 0)
+                    verts = np.concatenate((verts, spline[1:3]), 0)
                     control_pt_lookup[cp1] = verts.shape[0] - 2
                     control_pt_lookup[cp2] = verts.shape[0] - 1
-                edges = torch.cat(
-                    (
-                        edges,
-                        torch.tensor(
-                            [
-                                [
-                                    edge[0],
-                                    control_pt_lookup[cp1],
-                                    control_pt_lookup[cp2],
-                                    edge[1],
-                                ]
-                            ],
-                            device=rc.device,
-                        ),
-                    ),
-                    0,
+                edges.append(
+                    [edge[0], control_pt_lookup[cp1], control_pt_lookup[cp2], edge[1]]
                 )
-                cur_quad.append(edges.shape[0] - 1)
-                quad_edges[edge] = (int(quads.shape[0]), int(len(cur_quad) - 1))
+                cur_quad.append(len(edges) - 1)
+                quad_edges[edge] = (len(quads), len(cur_quad) - 1)
                 if color in color_pairs:
                     color_adj[edge] = color
-            quads = torch.cat((quads, torch.tensor([cur_quad], device=rc.device)), 0)
+            quads.append(cur_quad)
 
-        adjacency = -1 * torch.ones([len(quads), PATCH_SIDES, 2], dtype=torch.int)
+        adjacency = np.full((len(quads), PATCH_SIDES, 2), -1)
         for edge, adj in quad_edges.items():
             quad, edge_ind = adj
             # Handle inner adjacency
             if edge[::-1] in quad_edges:
-                adjacency[quad, edge_ind, :] = torch.tensor(quad_edges[edge[::-1]])
+                adjacency[quad, edge_ind, :] = quad_edges[edge[::-1]]
 
             # Handle color adjacency
             if edge in color_adj:
@@ -172,11 +150,9 @@ class SVGParser:
                 # N^2 lookup, fine for now
                 for other_edge, other_color in color_adj.items():
                     if other_color == color and edge != other_edge:
-                        adjacency[quad, edge_ind, :] = torch.tensor(
-                            quad_edges[other_edge]
-                        )
+                        adjacency[quad, edge_ind, :] = quad_edges[other_edge]
 
-        self.patch_set = PatchSet(verts, edges, quads, adjacency.to(rc.device))
+        self.patch_set = PatchSet(verts, np.array(edges), np.array(quads), adjacency)
 
     # Determine whether a cycle goes counter-clockwise or clockwise
     # (Return 1 or -1 respectively)
@@ -230,19 +206,17 @@ class SVGParser:
         ]
 
 
-def weld_points(coords: torch.Tensor, tol: float) -> tuple[torch.Tensor, torch.Tensor]:
+def weld_points(coords: np.ndarray, tol: float) -> tuple[np.ndarray, np.ndarray]:
     """Weld `coords` within tolerance `tol`, returning indices and unique coordinates.
     Here, coords has dimensions (..., d), where d is the dimension of space.
     The first output is a flat list of unique welded vertices of shape (N_uniq, d).
     The second output contains indices into this unique list of dimensions (...)."""
-    coords_flat = coords.flatten(end_dim=-2)
-    distances = (coords_flat[:, None] - coords_flat[None]).norm(dim=-1)
-    equiv_index = torch.where(distances < tol, 1, 0).argmax(dim=1)
-    _, inverse, counts = torch.unique(
-        equiv_index, return_inverse=True, return_counts=True
-    )
+    coords_flat = coords.reshape(-1, 2)
+    distances = np.linalg.norm(coords_flat[:, None] - coords_flat[None], axis=-1)
+    equiv_index = np.where(distances < tol, 1, 0).argmax(axis=1)
+    _, inverse, counts = np.unique(equiv_index, return_inverse=True, return_counts=True)
     # Compute the centroid of each set of equivalent vertices:
-    coords_uniq = torch.zeros((len(counts), coords_flat.shape[-1]), device=rc.device)
-    coords_uniq.index_add_(0, inverse, coords_flat)  # sum equivalent coordinates
+    coords_uniq = np.zeros((len(counts), coords_flat.shape[-1]))
+    np.add.at(coords_uniq, inverse, coords_flat)  # sum equivalent coordinates
     coords_uniq *= (1.0 / counts)[:, None]  # convert to mean
-    return coords_uniq, inverse.view(coords.shape[:-1])
+    return coords_uniq, inverse.reshape(coords.shape[:-1])

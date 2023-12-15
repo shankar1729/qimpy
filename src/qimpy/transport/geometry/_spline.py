@@ -50,27 +50,26 @@ def cubic_bernstein(t: torch.Tensor) -> torch.Tensor:
     )
 
 
-def plot_spline(ax, spline: torch.Tensor, n_points: int = 64) -> None:
+def plot_spline(ax, spline: np.ndarray, n_points: int = 64) -> None:
     assert len(spline) == 4
     t = np.linspace(0.0, 1.0, n_points + 1)[:, None]
     t_bar = 1.0 - t
     # Evaluate cubic spline by De Casteljau's algorithm:
-    control_points = spline.to(rc.cpu).numpy()
-    result = control_points[:, None, :]
+    result = spline[:, None, :]
     for i_iter in range(len(spline) - 1):
         result = result[:-1] * t_bar + result[1:] * t
     points = result[0]
     # Plot
     ax.plot(points[:, 0], points[:, 1], color="k")
-    ax.plot(control_points[:2, 0], control_points[:2, 1], color="r")
-    ax.plot(control_points[2:, 0], control_points[2:, 1], color="r")
-    ax.scatter(control_points[1:3, 0], control_points[1:3, 1], color="r")
+    ax.plot(spline[:2, 0], spline[:2, 1], color="r")
+    ax.plot(spline[2:, 0], spline[2:, 1], color="r")
+    ax.scatter(spline[1:3, 0], spline[1:3, 1], color="r")
 
 
-def spline_length(spline: torch.Tensor, n_points: int = 64) -> torch.Tensor:
+def spline_length(spline: np.ndarray, n_points: int = 64) -> np.ndarray:
     """Compute cubic spline lengths, batched over any preceding dimensions.
     The shape of spline should end in (4, d), where d is the dimension of space.
     """
-    t = torch.linspace(0.0, 1.0, n_points + 1, device=rc.device)
-    points = torch.einsum("ct, ...ci -> ...ti", cubic_bernstein(t), spline)
-    return points.diff(dim=-2).norm(dim=-1).sum(dim=-1)
+    basis = cubic_bernstein(torch.linspace(0.0, 1.0, n_points + 1)).numpy()
+    points = np.einsum("ct, ...ci -> ...ti", basis, spline)
+    return np.linalg.norm(np.diff(points, axis=-2), axis=-1).sum(axis=-1)

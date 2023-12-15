@@ -1,7 +1,6 @@
 from __future__ import annotations
 import argparse
 
-from qimpy import rc
 from . import parse_svg, plot_spline
 
 
@@ -20,8 +19,8 @@ def main():
         print(f"Quad {i_quad}:")
         for i_edge, edge_index in enumerate(quad):
             i_verts = edges[edge_index, [0, -1]]
-            v_start, v_stop = vertices[i_verts].to(rc.cpu).numpy()
-            neigh_patch, neigh_edge = adjacency[i_edge].to(rc.cpu).numpy()
+            v_start, v_stop = vertices[i_verts]
+            neigh_patch, neigh_edge = adjacency[i_edge]
             if neigh_patch >= 0:
                 neigh_str = f" (Neighbor: quad {neigh_patch} edge {neigh_edge})"
             else:

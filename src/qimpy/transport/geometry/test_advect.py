@@ -48,7 +48,7 @@ def run(*, grid_spacing, N_theta, q0, v0, svg_file, plot_frames=False) -> float:
 
     # Detect periodicity:
     tol = 1e-3
-    displacements = geometry.displacements.flatten(0, 1)
+    displacements = torch.from_numpy(geometry.displacements).flatten(0, 1).to(rc.device)
     displacements = displacements[torch.where(displacements.norm(dim=-1) > tol)[0]]
     equivalence = torch.where(
         torch.logical_or(
