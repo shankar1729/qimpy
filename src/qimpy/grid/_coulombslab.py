@@ -3,7 +3,6 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from qimpy import log, rc, grid
 from . import Grid, FieldH
 
 
@@ -42,8 +41,8 @@ class Coulomb_Slab:
         result = FieldH(self.grid, data=(self._kernel * rho.data))
         return result
 
-    def ewald() -> None:
+    def ewald(self) -> None:
         pass
 
-    def stress() -> None:
+    def stress(self) -> None:
         pass

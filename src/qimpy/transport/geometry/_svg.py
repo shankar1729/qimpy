@@ -56,7 +56,7 @@ def parse_svg(svg_file: str, grid_spacing: float, tol: float = 1e-3) -> QuadSet:
     }
 
     # Build quads, ensuring each spline goes along the direction of the cycle
-    edges_new = []  # New edges with corrected directions of traversal
+    edges_new: list[np.ndarray] = []  # New edges with corrected directions of traversal
     quads = np.empty((len(cycles), 4), dtype=int)
     quad_edges = {}  # map edge (vertex index pair) to quad, edge-within indices
     color_edges = defaultdict(list)  # list of edges (vert index pair) by color
@@ -109,10 +109,10 @@ def parse_svg(svg_file: str, grid_spacing: float, tol: float = 1e-3) -> QuadSet:
         sel = np.where(equivalent_edge == edge)[0]
         max_length = lengths[sel].max()
         n_points[sel] = int(np.ceil(max_length / grid_spacing))
-    grid_spacing = n_points[quads[:, :2]]
+    grid_size = n_points[quads[:, :2]]
 
     return QuadSet(
-        vertices, edges, quads, adjacency, displacements, equivalent_edge, grid_spacing
+        vertices, edges, quads, adjacency, displacements, equivalent_edge, grid_size
     )
 
 
@@ -137,13 +137,13 @@ def get_splines(svg_file: str) -> tuple[np.ndarray, list]:
     # Ignore all elements that are not lines or cubic splines (essentially ignore moves)
     # In the future we may want to throw an error for unsupported segments
     # (e.g. quadratic splines)
-    splines = []
+    splines_complex = []  # coordinates as complex numbers from svg.path library
     colors = []
     for segment, style in zip(segments, styles):
         if isinstance(segment, (Line, Close, CubicBezier)):
-            splines.append(ensure_cubic_spline(segment))
+            splines_complex.append(ensure_cubic_spline(segment))
             colors.append(style["stroke"])
-    splines = np.array(splines)
+    splines = np.array(splines_complex)
     splines = np.stack((splines.real, splines.imag), axis=-1)  # to real array
     return splines, colors
 
@@ -195,7 +195,7 @@ def find_cycles(edges: np.ndarray, vertices: np.ndarray) -> list[list[int]]:
             cycle = cycle[::-1]
 
         # Normalize vertex order in cycle:
-        min_index = np.argmin(cycle)
+        min_index = int(np.argmin(cycle))
         cycle = cycle[min_index:] + cycle[:min_index]
 
         if cycle not in cycles:

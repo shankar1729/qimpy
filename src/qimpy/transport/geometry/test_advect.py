@@ -17,7 +17,7 @@ def gaussian_blob(
 ) -> torch.Tensor:
     dq = q - q0
     dq -= torch.floor(0.5 + dq @ torch.linalg.inv(Rbasis.T)) @ Rbasis.T
-    return torch.exp(-dq.square().sum(axis=-1) / sigma**2).detach()
+    return torch.exp(-dq.square().sum(dim=-1) / sigma**2).detach()
 
 
 def gaussian_blob_error(
