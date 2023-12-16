@@ -15,8 +15,9 @@ class PatchSet(NamedTuple):
     adjacency: np.ndarray  #: Nquads x 4 x 2: neighbor indices for each (quad, edge)
 
 
-def parse_svg(svg_file: str) -> PatchSet:
-    return SVGParser(svg_file).patch_set
+def parse_svg(svg_file: str, tol: float = 1e-3) -> PatchSet:
+    """Parse SVG file into PatchSet, with vertices identified with tolerance `tol`."""
+    return SVGParser(svg_file, tol).patch_set
 
 
 PATCH_SIDES: int = 4  #: Support only quad-patches (implicitly required throughout)
@@ -29,6 +30,7 @@ def parse_style(style_str: str):
 
 
 def get_splines(svg_file: str) -> tuple[np.ndarray, list]:
+    """Get spline geometries and colors from SVG file."""
     svg_paths = minidom.parse(svg_file).getElementsByTagName("path")
 
     # Concatenate segments from all paths in SVG file, and parse associated styles
@@ -74,11 +76,16 @@ def edge_sequence(cycle):
 
 class SVGParser:
     def __init__(self, svg_file, tol=0.001):
-        self.splines, self.colors = get_splines(svg_file)
-        self.vertices, self.edges = weld_points(self.splines[:, (0, -1)], tol=tol)
-        self.edges_lookup = {
-            (edge[0], edge[1]): ind for ind, edge in enumerate(self.edges)
+        splines, colors = get_splines(svg_file)
+        self.vertices, self.edges = weld_points(splines[:, (0, -1)], tol=tol)
+
+        # Look-up table for edges by end-points:
+        edges_lookup = {
+            (edge[0], edge[1]): (ind, 1) for ind, edge in enumerate(self.edges)
         }
+        edges_lookup.update(
+            {(edge[1], edge[0]): (ind, -1) for ind, edge in enumerate(self.edges)}
+        )  # include reversed direction
 
         self.cycles = []
         self.find_cycles()
@@ -99,7 +106,7 @@ class SVGParser:
         color_adj = {}
 
         color_pairs = defaultdict(list)
-        for i, color in enumerate(self.colors):
+        for i, color in enumerate(colors):
             # Ignore black edges
             if color != "#000000":
                 color_pairs[color].append(i)
@@ -114,12 +121,9 @@ class SVGParser:
             for edge in edge_sequence(cycle):
                 # Edges lookup reflects the original ordering of the edges
                 # if an edge's order doesn't appear in here, it needs to be flipped
-                if edge not in self.edges_lookup:
-                    spline = self.splines[self.edges_lookup[edge[::-1]]][::-1]
-                    color = self.colors[self.edges_lookup[edge[::-1]]]
-                else:
-                    spline = self.splines[self.edges_lookup[edge]]
-                    color = self.colors[self.edges_lookup[edge]]
+                i_spline, direction = edges_lookup[edge]
+                spline = splines[i_spline][::direction]
+                color = colors[i_spline]
                 cp1 = tuple(spline[1].tolist())
                 cp2 = tuple(spline[2].tolist())
                 # Get control points from spline and add to vertices
