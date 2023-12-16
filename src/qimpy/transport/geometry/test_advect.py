@@ -50,15 +50,11 @@ def run(*, grid_spacing, N_theta, q0, v0, svg_file, plot_frames=False) -> float:
     tol = 1e-3
     displacements = torch.from_numpy(geometry.displacements).flatten(0, 1).to(rc.device)
     displacements = displacements[torch.where(displacements.norm(dim=-1) > tol)[0]]
-    equivalence = torch.where(
-        torch.logical_or(
-            (displacements[:, None] - displacements[None]).norm(dim=-1) < tol,
-            (displacements[:, None] + displacements[None]).norm(dim=-1) < tol,
-        ),
-        1,
-        0,
+    is_equal = torch.logical_or(
+        (displacements[:, None] - displacements[None]).norm(dim=-1) < tol,
+        (displacements[:, None] + displacements[None]).norm(dim=-1) < tol,
     )
-    Rbasis = displacements[torch.unique(equivalence.argmax(dim=0))].T
+    Rbasis = displacements[torch.unique(torch.where(is_equal, 1, 0).argmax(dim=0))].T
     if Rbasis.shape != (2, 2):
         log.error("Could not detect two unique lattice vectors for periodicity.")
         exit(1)
@@ -78,17 +74,19 @@ def run(*, grid_spacing, N_theta, q0, v0, svg_file, plot_frames=False) -> float:
     plot_frame = 0
     for time_step in tqdm(range(time_steps)):
         if plot_frames and (time_step % plot_interval == 0):
+            watch = StopWatch("plot")
             plt.clf()
             rho_max = max(patch.density.max().item() for patch in geometry.patches)
-            contour_opts = dict(levels=np.linspace(0.0, rho_max, 100))
+            contour_opts = dict(levels=np.linspace(-1e-3, rho_max, 20))
             for i, patch in enumerate(geometry.patches):
-                patch.plot_streamlines(plt, contour_opts, dict(linewidth=1.0))
+                patch.plot(plt, contour_opts, {})
             plt.gca().set_aspect("equal")
             plt.savefig(
                 f"animation/advect_{plot_frame:04d}.png",
                 bbox_inches="tight",
                 dpi=200,
             )
+            watch.stop()
             plot_frame += 1
         geometry.time_step()
 

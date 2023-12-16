@@ -86,22 +86,22 @@ class Advect:
         """Average velocity at each point (integrate over momenta)."""
         return (self.rho @ self.v) * self.dk
 
-    @stopwatch(name="plot_streamlines")
-    def plot_streamlines(self, plt, contour_kwargs, stream_kwargs):
+    def plot(self, plt, contour_kwargs, stream_kwargs, streamlines=False):
         contour_kwargs.setdefault("levels", 100)
         contour_kwargs.setdefault("cmap", "bwr")
-        stream_kwargs.setdefault("density", 2.0)
-        stream_kwargs.setdefault("linewidth", 1.0)
-        stream_kwargs.setdefault("color", "k")
-        stream_kwargs.setdefault("arrowsize", 1.0)
         q = to_numpy(self.q)
         x = q[:, :, 0]
         y = q[:, :, 1]
-        # v = to_numpy(self.velocity)
         rho = to_numpy(self.density)
-        plt.contourf(x, y, np.clip(rho, 1e-3, None), **contour_kwargs)
-        plt.gca().set_aspect("equal")
-        # plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
+        plt.contourf(x, y, rho, **contour_kwargs)
+
+        if streamlines:
+            stream_kwargs.setdefault("density", 2.0)
+            stream_kwargs.setdefault("linewidth", 1.0)
+            stream_kwargs.setdefault("color", "k")
+            stream_kwargs.setdefault("arrowsize", 1.0)
+            v = to_numpy(self.velocity)
+            plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
 
         # Label edges:
         NX, NY = x.shape

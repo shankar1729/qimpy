@@ -5,6 +5,7 @@ import torch
 
 from qimpy import TreeNode, rc
 from qimpy.io import CheckpointPath
+from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
 from . import Advect, BicubicPatch, spline_length, parse_svg
 
@@ -94,6 +95,7 @@ class Geometry(TreeNode):
         for patch, rho_new in zip(self.patches, rho_list_new):
             patch.rho = rho_new
 
+    @stopwatch
     def apply_boundaries(self, rho_list: list[torch.Tensor]) -> list[torch.Tensor]:
         """Apply all boundary conditions to `rho` and produce ghost-padded version.
         The list contains the data for each patch."""
