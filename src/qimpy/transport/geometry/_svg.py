@@ -78,6 +78,14 @@ class SVGParser:
     def __init__(self, svg_file, tol=0.001):
         splines, colors = get_splines(svg_file)
         self.vertices, self.edges = weld_points(splines[:, (0, -1)], tol=tol)
+        cycles = find_cycles(self.edges, self.vertices)
+
+        # Randomly permute cycles to test transfer in general case:
+        if "QIMPY_CYCLE_PERMUTE" in os.environ:
+            random = np.random.default_rng()
+            for cycle in cycles:
+                roll = random.integers(4)
+                cycle[:] = cycle[roll:] + cycle[:roll]
 
         # Look-up table for edges by end-points:
         edges_lookup = {
@@ -86,16 +94,6 @@ class SVGParser:
         edges_lookup.update(
             {(edge[1], edge[0]): (ind, -1) for ind, edge in enumerate(self.edges)}
         )  # include reversed direction
-
-        self.cycles = []
-        self.find_cycles()
-
-        # Randomly permute cycles to test transfer in general case:
-        if "QIMPY_CYCLE_PERMUTE" in os.environ:
-            random = np.random.default_rng()
-            for cycle in self.cycles:
-                roll = random.integers(4)
-                cycle[:] = cycle[roll:] + cycle[:roll]
 
         verts = np.copy(self.vertices)
         edges = []
@@ -116,7 +114,7 @@ class SVGParser:
 
         # Now build the patches, ensuring each spline goes along
         # the direction of the cycle
-        for cycle in self.cycles:
+        for cycle in cycles:
             cur_quad = []
             for edge in edge_sequence(cycle):
                 # Edges lookup reflects the original ordering of the edges
@@ -158,56 +156,49 @@ class SVGParser:
 
         self.patch_set = PatchSet(verts, np.array(edges), np.array(quads), adjacency)
 
-    # Determine whether a cycle goes counter-clockwise or clockwise
-    # (Return 1 or -1 respectively)
-    def cycle_handedness(self, cycle):
-        cycle_vertices = [self.vertices[j] for j in cycle]
-        edges = edge_sequence(cycle_vertices)
-        handed_sum = 0.0
-        for v1, v2 in edges:
-            handed_sum += ((v2[0] - v1[0]) / (v2[1] + v1[1])).item()
-        # NOTE: SVG uses a left-handed coordinate system
-        return np.sign(handed_sum)
 
-    def add_cycle(self, cycle):
-        # Add a cycle if it is unique
+def find_cycles(edges: np.ndarray, vertices: np.ndarray) -> list[list[int]]:
+    """Find length-4 cycles within `edges`.
+    Only the initial and final vertex indices of edges are used.
+    Any intermediate control points within edges are ignored.
+    This uses `vertices` to ensure counter-clockwise traversal direction.
+    """
+    cycles = []
 
-        def unique(path):
-            return path not in self.cycles
+    def cycle_search(cycle: list[int], depth: int = 1) -> None:
+        """Find and add 4-cycles by graph traversal using recursion."""
+        start_vertex = cycle[-1]
+        for edge in edges:
+            if start_vertex == edge[0]:
+                next_vertex = edge[-1]
+            elif start_vertex == edge[-1]:
+                next_vertex = edge[0]
+            else:
+                continue
+            if (depth < PATCH_SIDES) and (next_vertex not in cycle):
+                cycle_search(cycle + [next_vertex], depth=depth + 1)
+            elif (depth == PATCH_SIDES) and (next_vertex == cycle[0]):
+                add_cycle(cycle)
 
-        def normalize_cycle_order(cycle):
-            min_index = cycle.index(min(cycle))
-            return cycle[min_index:] + cycle[:min_index]
+    def add_cycle(cycle: list[int]) -> None:
+        """Add a cycle with normalized vertex order and handedness, if unique."""
+        # Ensure cycle is counter-clockwise:
+        dv = vertices[cycle[1:]] - vertices[cycle[0]]
+        area = np.cross(dv[0], dv[1]) + np.cross(dv[1], dv[2])
+        if area < 0.0:
+            cycle = cycle[::-1]
 
-        new_cycle = normalize_cycle_order(cycle)
-        # Check both directions
-        if unique(new_cycle) and unique(normalize_cycle_order(new_cycle[::-1])):
-            self.cycles.append(new_cycle)
+        # Normalize vertex order in cycle:
+        min_index = np.argmin(cycle)
+        cycle = cycle[min_index:] + cycle[:min_index]
 
-    def find_cycles(self):
-        # Graph traversal using recursion
-        def cycle_search(cycle, depth=1):
-            # Don't look for cycles that exceed a single patch (limit recursion depth)
-            if depth > PATCH_SIDES:
-                return
-            start_vertex = cycle[-1]
-            for edge in self.edges:
-                if start_vertex in edge:
-                    next_vertex = int(edge[1] if edge[0] == start_vertex else edge[0])
-                    if next_vertex not in cycle:
-                        cycle_search(cycle + [next_vertex], depth=depth + 1)
-                    elif len(cycle) > 2 and next_vertex == cycle[0]:
-                        self.add_cycle(cycle)
+        if cycle not in cycles:
+            cycles.append(cycle)
 
-        # Search for cycles from each starting vertex
-        for first_vertex in range(len(self.vertices)):
-            cycle_search([first_vertex])
-
-        # Make sure each cycle goes counter-clockwise
-        self.cycles = [
-            cycle if self.cycle_handedness(cycle) > 0 else cycle[::-1]
-            for cycle in self.cycles
-        ]
+    # Search for cycles from each starting vertex
+    for first_vertex in range(len(vertices)):
+        cycle_search([first_vertex])
+    return cycles
 
 
 def weld_points(coords: np.ndarray, tol: float) -> tuple[np.ndarray, np.ndarray]:
