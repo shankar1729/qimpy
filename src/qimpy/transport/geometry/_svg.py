@@ -18,19 +18,17 @@ class QuadSet:
     """Set of quads, defining simulation geometry."""
 
     vertices: np.ndarray  #: Nverts x 2 vertex coordinates (including control points)
-    edges: np.ndarray  #: Nedges x 4 vertex indices for each c-spline edge
-    quads: np.ndarray  #: Nquads x 4 edge indices within each quad
+    quads: np.ndarray  #: Nquads x 4 x 4 vertex indices for each quad and edge within
     adjacency: np.ndarray  #: Nquads x 4 x 2: neighbor indices for each (quad, edge)
     displacements: np.ndarray  #: Nquads x 4 x 2 edge displacements for each adjacency
-    equivalent_edge: np.ndarray  #: Lowest edge index with same sampling as each edge
+    equivalent: np.ndarray  #: Nquads x 2 x 2 lowest quad, direction with same sampling
     grid_size: np.ndarray  #: Nquads x 2 grid dimensions for each quad
 
     def get_boundary(self, i_quad: int) -> np.ndarray:
         """Get sequence of boundary points (12 x 2) defining a specified quad.
         Suitable for initializing a `BicubicPatch`."""
-        quad = self.quads[i_quad]
-        indices = self.edges[quad, :-1].flatten()  # drop redundant points in each edge
-        return self.vertices[indices]
+        indices = self.quads[i_quad, :, :-1]  # drop last redundant point in each edge
+        return self.vertices[indices.flatten()]
 
 
 def parse_svg(svg_file: str, grid_spacing: float, tol: float = 1e-3) -> QuadSet:
@@ -56,33 +54,29 @@ def parse_svg(svg_file: str, grid_spacing: float, tol: float = 1e-3) -> QuadSet:
     }
 
     # Build quads, ensuring each spline goes along the direction of the cycle
-    edges_new: list[np.ndarray] = []  # New edges with corrected directions of traversal
-    quads = np.empty((len(cycles), 4), dtype=int)
+    quads = np.empty((len(cycles), 4, 4), dtype=int)
     quad_edges = {}  # map edge (vertex index pair) to quad, edge-within indices
     color_edges = defaultdict(list)  # list of edges (vert index pair) by color
     edge_colors = {}  # map edges to colors (only for non-black edges)
     for i_quad, cycle in enumerate(cycles):
         cycle_next = cycle[1:] + [cycle[0]]  # next entry for each in cycle
-        for edge_ind, edge in enumerate(zip(cycle, cycle_next)):
+        for i_edge, edge in enumerate(zip(cycle, cycle_next)):
             i_spline, direction = edges_lookup[edge]
             color = colors[i_spline]
             # Add edge in appropriate direction to new list:
-            quads[i_quad, edge_ind] = len(edges_new)
-            edges_new.append(edges[i_spline][::direction])
+            quads[i_quad, i_edge] = edges[i_spline][::direction]
             # Update edge look-ups:
-            quad_edges[edge] = (i_quad, edge_ind)
+            quad_edges[edge] = (i_quad, i_edge)
             if color != "#000000":  # only use non-black colors for adjacency
                 color_edges[color].append(edge)
                 edge_colors[edge] = color
-    edges = np.stack(edges_new)
 
     # Compute adjacency:
     adjacency = np.full((len(quads), QUAD_N_SIDES, 2), -1)
-    for edge, adj in quad_edges.items():
-        quad, edge_ind = adj
+    for edge, i_quad_edge in quad_edges.items():
         # Handle inner adjacency
         if edge[::-1] in quad_edges:
-            adjacency[quad, edge_ind] = quad_edges[edge[::-1]]
+            adjacency[i_quad_edge] = quad_edges[edge[::-1]]
             assert edge not in edge_colors
             continue
 
@@ -92,27 +86,27 @@ def parse_svg(svg_file: str, grid_spacing: float, tol: float = 1e-3) -> QuadSet:
             assert len(similar_edges) == 2
             for other_edge in similar_edges:
                 if other_edge != edge:
-                    adjacency[quad, edge_ind] = quad_edges[other_edge]
+                    adjacency[i_quad_edge] = quad_edges[other_edge]
 
     # Determine edge displacements and equivalence:
-    displacements, edge_pairs = get_displacements(
-        vertices, edges, quads, adjacency, tol
-    )
-    edge_pairs_all = np.concatenate((edge_pairs, quads[:, ::2], quads[:, 1::2]), axis=0)
-    equivalent_edge = equivalence_classes(edge_pairs_all)
-    unique_edges = np.unique(equivalent_edge)  # lowest index in each class
+    displacements, ij_quad, ij_edge = get_displacements(vertices, quads, adjacency, tol)
+    ij_quad_edge = 2 * ij_quad + (ij_edge % 2)  # flattened, only 2 indep. edges/quad
+    equivalent_edge = equivalence_classes(ij_quad_edge)  # using above flattened index
+    unique_edges = np.unique(equivalent_edge)  # lowest flattened index in each class
 
     # Determine sample counts based on maximum edge length in each class:
-    lengths = spline_length(vertices[edges])
+    lengths = spline_length(vertices[quads])
+    lengths = lengths.reshape(-1, 2, 2).max(axis=1)  # max over equiv edges in each quad
+    lengths = lengths.flatten()  # now corresponds to flattened index used above
     n_points = np.empty(len(lengths), dtype=int)
     for edge in unique_edges:
         sel = np.where(equivalent_edge == edge)[0]
         max_length = lengths[sel].max()
         n_points[sel] = int(np.ceil(max_length / grid_spacing))
-    grid_size = n_points[quads[:, :2]]
+    grid_size = n_points.reshape(-1, 2)  # now n_quads x 2 grid dimensions
 
     return QuadSet(
-        vertices, edges, quads, adjacency, displacements, equivalent_edge, grid_size
+        vertices, quads, adjacency, displacements, equivalent_edge, grid_size
     )
 
 
@@ -224,25 +218,19 @@ def weld_points(coords: np.ndarray, tol: float) -> tuple[np.ndarray, np.ndarray]
 
 
 def get_displacements(
-    vertices: np.ndarray,
-    edges: np.ndarray,
-    quads: np.ndarray,
-    adjacency: np.ndarray,
-    tol: float,
-) -> tuple[np.ndarray, np.ndarray]:
+    vertices: np.ndarray, quads: np.ndarray, adjacency: np.ndarray, tol: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Check consistency and collect displacements between adjacent edges.
-    Also return Npairs x 2 indices of edges corresponding to the displacements."""
-    i_quad, i_edge = np.argwhere(adjacency[..., 0] >= 0).T
+    Also return ij_quad and ij_edge pairs for eaqch displacement (each Npairs x 2)."""
+    i_quad, i_edge = np.where(adjacency[..., 0] >= 0)
     j_quad, j_edge = adjacency[i_quad, i_edge].T
-    edge_index_i = quads[i_quad, i_edge]
-    edge_index_j = quads[j_quad, j_edge]
-    verts_i = vertices[edges[edge_index_i]]
-    verts_j = vertices[edges[edge_index_j]][:, ::-1]
+    verts_i = vertices[quads[i_quad, i_edge]]
+    verts_j = vertices[quads[j_quad, j_edge]][:, ::-1]
     deltas = verts_i - verts_j
     assert np.all(deltas.std(axis=1) < tol).item()
     displacements = np.zeros(adjacency.shape)
     displacements[i_quad, i_edge] = deltas.mean(axis=1)
-    return displacements, np.stack((edge_index_i, edge_index_j)).T
+    return displacements, np.stack((i_quad, j_quad)).T, np.stack((i_edge, j_edge)).T
 
 
 def equivalence_classes(pairs: np.ndarray) -> np.ndarray:
