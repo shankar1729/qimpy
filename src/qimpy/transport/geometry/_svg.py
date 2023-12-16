@@ -90,10 +90,6 @@ class SVGParser:
             {(edge[-1], edge[0]): (ind, -1) for ind, edge in enumerate(edges)}
         )  # include reversed direction
 
-        quads = []
-        quad_edges = {}  # map global edge index to quad, edge-within indices
-        color_adj = {}
-
         color_pairs = defaultdict(list)
         for i, color in enumerate(colors):
             # Ignore black edges
@@ -105,20 +101,21 @@ class SVGParser:
 
         # Build quads, ensuring each spline goes along the direction of the cycle
         edges_new = []  # New edges with corrected directions of traversal
-        for cycle in cycles:
-            cur_quad = []
+        quads = np.empty((len(cycles), 4), dtype=int)
+        quad_edges = {}  # map global edge index to quad, edge-within indices
+        color_adj = {}
+        for i_quad, cycle in enumerate(cycles):
             cycle_next = cycle[1:] + [cycle[0]]  # next entry for each in cycle
-            for edge in zip(cycle, cycle_next):
+            for edge_ind, edge in enumerate(zip(cycle, cycle_next)):
                 i_spline, direction = edges_lookup[edge]
                 color = colors[i_spline]
                 # Add edge in appropriate direction to new list:
-                i_edge = len(edges_new)
+                quads[i_quad, edge_ind] = len(edges_new)
                 edges_new.append(edges[i_spline][::direction])
-                cur_quad.append(i_edge)
-                quad_edges[edge] = (len(quads), len(cur_quad) - 1)
+                # Update edge look-ups:
+                quad_edges[edge] = (i_quad, edge_ind)
                 if color in color_pairs:
                     color_adj[edge] = color
-            quads.append(cur_quad)
         edges = np.stack(edges_new)
 
         # Compute adjacency:
@@ -127,7 +124,7 @@ class SVGParser:
             quad, edge_ind = adj
             # Handle inner adjacency
             if edge[::-1] in quad_edges:
-                adjacency[quad, edge_ind, :] = quad_edges[edge[::-1]]
+                adjacency[quad, edge_ind] = quad_edges[edge[::-1]]
 
             # Handle color adjacency
             if edge in color_adj:
@@ -135,9 +132,9 @@ class SVGParser:
                 # N^2 lookup, fine for now
                 for other_edge, other_color in color_adj.items():
                     if other_color == color and edge != other_edge:
-                        adjacency[quad, edge_ind, :] = quad_edges[other_edge]
+                        adjacency[quad, edge_ind] = quad_edges[other_edge]
 
-        self.patch_set = PatchSet(vertices, np.array(edges), np.array(quads), adjacency)
+        self.patch_set = PatchSet(vertices, edges, quads, adjacency)
 
 
 def find_cycles(edges: np.ndarray, vertices: np.ndarray) -> list[list[int]]:
