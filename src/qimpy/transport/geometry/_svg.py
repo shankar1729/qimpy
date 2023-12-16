@@ -15,12 +15,70 @@ class PatchSet(NamedTuple):
     adjacency: np.ndarray  #: Nquads x 4 x 2: neighbor indices for each (quad, edge)
 
 
+PATCH_SIDES: int = 4  #: Support only quad-patches (implicitly required throughout)
+
+
 def parse_svg(svg_file: str, tol: float = 1e-3) -> PatchSet:
     """Parse SVG file into PatchSet, with vertices identified with tolerance `tol`."""
-    return SVGParser(svg_file, tol).patch_set
+    splines, colors = get_splines(svg_file)
+    vertices, edges = weld_points(splines, tol=tol)
+    cycles = find_cycles(edges, vertices)
 
+    # Randomly permute cycles to test transfer in general case:
+    if "QIMPY_CYCLE_PERMUTE" in os.environ:
+        random = np.random.default_rng()
+        for cycle in cycles:
+            roll = random.integers(4)
+            cycle[:] = cycle[roll:] + cycle[:roll]
 
-PATCH_SIDES: int = 4  #: Support only quad-patches (implicitly required throughout)
+    # Look-up table for edges by end-point vertex indices:
+    # Second index is +1 for edges in forward direction and -1 for reverse
+    edges_lookup = {
+        tuple(edge[::direction]): (i_spline, direction)
+        for i_spline, edge in enumerate(edges[:, [0, -1]])
+        for direction in (+1, -1)
+    }
+
+    # Build quads, ensuring each spline goes along the direction of the cycle
+    edges_new = []  # New edges with corrected directions of traversal
+    quads = np.empty((len(cycles), 4), dtype=int)
+    quad_edges = {}  # map edge (vertex index pair) to quad, edge-within indices
+    color_edges = defaultdict(list)  # list of edges (vert index pair) by color
+    edge_colors = {}  # map edges to colors (only for non-black edges)
+    for i_quad, cycle in enumerate(cycles):
+        cycle_next = cycle[1:] + [cycle[0]]  # next entry for each in cycle
+        for edge_ind, edge in enumerate(zip(cycle, cycle_next)):
+            i_spline, direction = edges_lookup[edge]
+            color = colors[i_spline]
+            # Add edge in appropriate direction to new list:
+            quads[i_quad, edge_ind] = len(edges_new)
+            edges_new.append(edges[i_spline][::direction])
+            # Update edge look-ups:
+            quad_edges[edge] = (i_quad, edge_ind)
+            if color != "#000000":  # only use non-black colors for adjacency
+                color_edges[color].append(edge)
+                edge_colors[edge] = color
+    edges = np.stack(edges_new)
+
+    # Compute adjacency:
+    adjacency = np.full((len(quads), PATCH_SIDES, 2), -1)
+    for edge, adj in quad_edges.items():
+        quad, edge_ind = adj
+        # Handle inner adjacency
+        if edge[::-1] in quad_edges:
+            adjacency[quad, edge_ind] = quad_edges[edge[::-1]]
+            assert edge not in edge_colors
+            continue
+
+        # Handle color adjacency
+        if edge in edge_colors:
+            similar_edges = color_edges[edge_colors[edge]]
+            assert len(similar_edges) == 2
+            for other_edge in similar_edges:
+                if other_edge != edge:
+                    adjacency[quad, edge_ind] = quad_edges[other_edge]
+
+    return PatchSet(vertices, edges, quads, adjacency)
 
 
 def parse_style(style_str: str):
@@ -68,68 +126,6 @@ def ensure_cubic_spline(segment) -> list[complex]:
     else:
         raise ValueError("All segments must be cubic splines or lines")
     return [segment.start, control1, control2, segment.end]
-
-
-class SVGParser:
-    def __init__(self, svg_file, tol=0.001):
-        splines, colors = get_splines(svg_file)
-        vertices, edges = weld_points(splines, tol=tol)
-        cycles = find_cycles(edges, vertices)
-
-        # Randomly permute cycles to test transfer in general case:
-        if "QIMPY_CYCLE_PERMUTE" in os.environ:
-            random = np.random.default_rng()
-            for cycle in cycles:
-                roll = random.integers(4)
-                cycle[:] = cycle[roll:] + cycle[:roll]
-
-        # Look-up table for edges by end-point vertex indices:
-        # Second index is +1 for edges in forward direction and -1 for reverse
-        edges_lookup = {(edge[0], edge[-1]): (ind, 1) for ind, edge in enumerate(edges)}
-        edges_lookup.update(
-            {(edge[-1], edge[0]): (ind, -1) for ind, edge in enumerate(edges)}
-        )  # include reversed direction
-
-        # Build quads, ensuring each spline goes along the direction of the cycle
-        edges_new = []  # New edges with corrected directions of traversal
-        quads = np.empty((len(cycles), 4), dtype=int)
-        quad_edges = {}  # map edge (vertex index pair) to quad, edge-within indices
-        color_edges = defaultdict(list)  # list of edges (vert index pair) by color
-        edge_colors = {}  # map edges to colors (only for non-black edges)
-        for i_quad, cycle in enumerate(cycles):
-            cycle_next = cycle[1:] + [cycle[0]]  # next entry for each in cycle
-            for edge_ind, edge in enumerate(zip(cycle, cycle_next)):
-                i_spline, direction = edges_lookup[edge]
-                color = colors[i_spline]
-                # Add edge in appropriate direction to new list:
-                quads[i_quad, edge_ind] = len(edges_new)
-                edges_new.append(edges[i_spline][::direction])
-                # Update edge look-ups:
-                quad_edges[edge] = (i_quad, edge_ind)
-                if color != "#000000":  # only use non-black colors for adjacency
-                    color_edges[color].append(edge)
-                    edge_colors[edge] = color
-        edges = np.stack(edges_new)
-
-        # Compute adjacency:
-        adjacency = np.full((len(quads), PATCH_SIDES, 2), -1)
-        for edge, adj in quad_edges.items():
-            quad, edge_ind = adj
-            # Handle inner adjacency
-            if edge[::-1] in quad_edges:
-                adjacency[quad, edge_ind] = quad_edges[edge[::-1]]
-                assert edge not in edge_colors
-                continue
-
-            # Handle color adjacency
-            if edge in edge_colors:
-                similar_edges = color_edges[edge_colors[edge]]
-                assert len(similar_edges) == 2
-                for other_edge in similar_edges:
-                    if other_edge != edge:
-                        adjacency[quad, edge_ind] = quad_edges[other_edge]
-
-        self.patch_set = PatchSet(vertices, edges, quads, adjacency)
 
 
 def find_cycles(edges: np.ndarray, vertices: np.ndarray) -> list[list[int]]:
