@@ -1,21 +1,19 @@
 from __future__ import annotations
 
-import numpy as np
 import torch
 
 from qimpy import TreeNode, rc
 from qimpy.io import CheckpointPath
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
-from . import Advect, BicubicPatch, spline_length, parse_svg
+from . import Advect, BicubicPatch, parse_svg, QuadSet
 
 
 class Geometry(TreeNode):
     """Geometry specification."""
 
+    quad_set: QuadSet  #: Original geometry specification from SVG
     patches: list[Advect]  #: Advection for each quad patch
-    adjacency: np.ndarray  #: as defined in `PatchSet`
-    displacements: np.ndarray  #: edge displacements for each adjacency
 
     # Constants for edge data transfer:
     IN_SLICES = [
@@ -55,34 +53,15 @@ class Geometry(TreeNode):
             This is used to select the number of grid points in each domain.
         """
         super().__init__()
-        vertices, edges, quads, adjacency = parse_svg(svg_file)
-        self.adjacency = adjacency
-        self.displacements, edge_pairs = get_displacements(
-            vertices, edges, quads, adjacency
-        )
-
-        # Determine edge lengths, equivalence and sampling:
-        lengths = spline_length(vertices[edges])
-        edge_pairs_all = np.concatenate(
-            (edge_pairs, quads[:, ::2], quads[:, 1::2]), axis=0
-        )
-        equivalent_edge = equivalence_classes(edge_pairs_all)
-        unique_edges = np.unique(equivalent_edge)  # lowest index in each class
-        n_points = np.empty(len(lengths), dtype=int)
-        for edge in unique_edges:
-            sel = np.where(equivalent_edge == edge)[0]
-            max_length = lengths[sel].max()
-            n_points[sel] = int(np.ceil(max_length / grid_spacing))
+        self.quad_set = parse_svg(svg_file, grid_spacing)
 
         # Build an advect object for each quad
         self.patches = []
         v = material.transport_velocity
-        for i_quad, quad in enumerate(quads):
-            boundary = vertices[edges[quad, :-1].flatten()]
-            transformation = BicubicPatch(
-                boundary=torch.from_numpy(boundary).to(rc.device)
-            )
-            N = tuple(n_points[quad[:2]])
+        for i_quad in range(len(self.quad_set.quads)):
+            boundary = torch.from_numpy(self.quad_set.get_boundary(i_quad))
+            transformation = BicubicPatch(boundary=boundary.to(rc.device))
+            N = tuple(self.quad_set.grid_size[i_quad])
             self.patches.append(Advect(transformation=transformation, v=v, N=N))
         self.dt = min(patch.dt_max for patch in self.patches)
 
@@ -107,7 +86,9 @@ class Geometry(TreeNode):
             out_list.append(out)
 
         # Populate ghost zones across patches where needed:
-        for i_patch, (out, adjacency) in enumerate(zip(out_list, self.adjacency)):
+        for i_patch, (out, adjacency) in enumerate(
+            zip(out_list, self.quad_set.adjacency)
+        ):
             for i_edge, (other_patch, other_edge) in enumerate(adjacency):
                 if other_patch < 0:
                     # TODO: handle reflecting boundaries
@@ -143,53 +124,3 @@ class Geometry(TreeNode):
         rho_list_init = self.rho_list
         rho_list_half = self.next_rho_list(0.5 * self.dt, rho_list_init, rho_list_init)
         self.rho_list = self.next_rho_list(self.dt, rho_list_init, rho_list_half)
-
-
-def get_displacements(
-    vertices: np.ndarray,
-    edges: np.ndarray,
-    quads: np.ndarray,
-    adjacency: np.ndarray,
-    tol: float = 1e-3,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Check consistency and collect displacements between adjacent edges.
-    Also return Npairs x 2 indices of edges corresponding to the dispalcements."""
-    i_quad, i_edge = np.argwhere(adjacency[..., 0] >= 0).T
-    j_quad, j_edge = adjacency[i_quad, i_edge].T
-    edge_index_i = quads[i_quad, i_edge]
-    edge_index_j = quads[j_quad, j_edge]
-    verts_i = vertices[edges[edge_index_i]]
-    verts_j = vertices[edges[edge_index_j]][:, ::-1]
-    deltas = verts_i - verts_j
-    assert np.all(deltas.std(axis=1) < tol).item()
-    displacements = np.zeros(adjacency.shape)
-    displacements[i_quad, i_edge] = deltas.mean(axis=1)
-    return displacements, np.stack((edge_index_i, edge_index_j)).T
-
-
-def equivalence_classes(pairs: np.ndarray) -> np.ndarray:
-    """Given Npair x 2 array of index pairs that are equivalent,
-    compute equivalence class numbers for each original index."""
-    # Construct adjacency matrix:
-    N = pairs.max() + 1
-    i_pair, j_pair = pairs.T
-    adjacency_matrix = np.eye(N)
-    adjacency_matrix[i_pair, j_pair] = 1.0
-    adjacency_matrix[j_pair, i_pair] = 1.0
-
-    # Expand to indirect neighbors by repeated multiplication:
-    n_non_zero_prev = np.count_nonzero(adjacency_matrix)
-    for i_mult in range(N):
-        adjacency_matrix = adjacency_matrix @ adjacency_matrix
-        n_non_zero = np.count_nonzero(adjacency_matrix)
-        if n_non_zero == n_non_zero_prev:
-            break  # highest-degree connection reached
-        n_non_zero_prev = n_non_zero
-
-    # Find first non-zero entry of above (i.e. first equivalent index):
-    is_first = np.logical_and(
-        adjacency_matrix.cumsum(axis=1) == adjacency_matrix, adjacency_matrix != 0.0
-    )
-    first_index = np.where(is_first)[1]
-    assert len(first_index) == N
-    return np.unique(first_index, return_inverse=True)[1]  # minimal class indices

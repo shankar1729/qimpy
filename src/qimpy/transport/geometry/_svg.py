@@ -1,25 +1,41 @@
 from __future__ import annotations
-from typing import NamedTuple
 from collections import defaultdict
+from dataclasses import dataclass
 import os
 
 import numpy as np
 from svg.path import parse_path, CubicBezier, Line, Close
 from xml.dom import minidom
 
+from . import spline_length
 
-class PatchSet(NamedTuple):
+
+QUAD_N_SIDES: int = 4  #: Support only quads (implicitly required throughout)
+
+
+@dataclass
+class QuadSet:
+    """Set of quads, defining simulation geometry."""
+
     vertices: np.ndarray  #: Nverts x 2 vertex coordinates (including control points)
     edges: np.ndarray  #: Nedges x 4 vertex indices for each c-spline edge
     quads: np.ndarray  #: Nquads x 4 edge indices within each quad
     adjacency: np.ndarray  #: Nquads x 4 x 2: neighbor indices for each (quad, edge)
+    displacements: np.ndarray  #: Nquads x 4 x 2 edge displacements for each adjacency
+    equivalent_edge: np.ndarray  #: Lowest edge index with same sampling as each edge
+    grid_size: np.ndarray  #: Nquads x 2 grid dimensions for each quad
+
+    def get_boundary(self, i_quad: int) -> np.ndarray:
+        """Get sequence of boundary points (12 x 2) defining a specified quad.
+        Suitable for initializing a `BicubicPatch`."""
+        quad = self.quads[i_quad]
+        indices = self.edges[quad, :-1].flatten()  # drop redundant points in each edge
+        return self.vertices[indices]
 
 
-PATCH_SIDES: int = 4  #: Support only quad-patches (implicitly required throughout)
-
-
-def parse_svg(svg_file: str, tol: float = 1e-3) -> PatchSet:
-    """Parse SVG file into PatchSet, with vertices identified with tolerance `tol`."""
+def parse_svg(svg_file: str, grid_spacing: float, tol: float = 1e-3) -> QuadSet:
+    """Parse SVG file into QuadSet, sampled with `grid_spacing`,
+    and with vertex equivalence determined with tolerance `tol`."""
     splines, colors = get_splines(svg_file)
     vertices, edges = weld_points(splines, tol=tol)
     cycles = find_cycles(edges, vertices)
@@ -61,7 +77,7 @@ def parse_svg(svg_file: str, tol: float = 1e-3) -> PatchSet:
     edges = np.stack(edges_new)
 
     # Compute adjacency:
-    adjacency = np.full((len(quads), PATCH_SIDES, 2), -1)
+    adjacency = np.full((len(quads), QUAD_N_SIDES, 2), -1)
     for edge, adj in quad_edges.items():
         quad, edge_ind = adj
         # Handle inner adjacency
@@ -78,7 +94,26 @@ def parse_svg(svg_file: str, tol: float = 1e-3) -> PatchSet:
                 if other_edge != edge:
                     adjacency[quad, edge_ind] = quad_edges[other_edge]
 
-    return PatchSet(vertices, edges, quads, adjacency)
+    # Determine edge displacements and equivalence:
+    displacements, edge_pairs = get_displacements(
+        vertices, edges, quads, adjacency, tol
+    )
+    edge_pairs_all = np.concatenate((edge_pairs, quads[:, ::2], quads[:, 1::2]), axis=0)
+    equivalent_edge = equivalence_classes(edge_pairs_all)
+    unique_edges = np.unique(equivalent_edge)  # lowest index in each class
+
+    # Determine sample counts based on maximum edge length in each class:
+    lengths = spline_length(vertices[edges])
+    n_points = np.empty(len(lengths), dtype=int)
+    for edge in unique_edges:
+        sel = np.where(equivalent_edge == edge)[0]
+        max_length = lengths[sel].max()
+        n_points[sel] = int(np.ceil(max_length / grid_spacing))
+    grid_spacing = n_points[quads[:, :2]]
+
+    return QuadSet(
+        vertices, edges, quads, adjacency, displacements, equivalent_edge, grid_spacing
+    )
 
 
 def parse_style(style_str: str):
@@ -146,9 +181,9 @@ def find_cycles(edges: np.ndarray, vertices: np.ndarray) -> list[list[int]]:
                 next_vertex = edge[0]
             else:
                 continue
-            if (depth < PATCH_SIDES) and (next_vertex not in cycle):
+            if (depth < QUAD_N_SIDES) and (next_vertex not in cycle):
                 cycle_search(cycle + [next_vertex], depth=depth + 1)
-            elif (depth == PATCH_SIDES) and (next_vertex == cycle[0]):
+            elif (depth == QUAD_N_SIDES) and (next_vertex == cycle[0]):
                 add_cycle(cycle)
 
     def add_cycle(cycle: list[int]) -> None:
@@ -186,3 +221,53 @@ def weld_points(coords: np.ndarray, tol: float) -> tuple[np.ndarray, np.ndarray]
     np.add.at(coords_uniq, inverse, coords_flat)  # sum equivalent coordinates
     coords_uniq *= (1.0 / counts)[:, None]  # convert to mean
     return coords_uniq, inverse.reshape(coords.shape[:-1])
+
+
+def get_displacements(
+    vertices: np.ndarray,
+    edges: np.ndarray,
+    quads: np.ndarray,
+    adjacency: np.ndarray,
+    tol: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Check consistency and collect displacements between adjacent edges.
+    Also return Npairs x 2 indices of edges corresponding to the displacements."""
+    i_quad, i_edge = np.argwhere(adjacency[..., 0] >= 0).T
+    j_quad, j_edge = adjacency[i_quad, i_edge].T
+    edge_index_i = quads[i_quad, i_edge]
+    edge_index_j = quads[j_quad, j_edge]
+    verts_i = vertices[edges[edge_index_i]]
+    verts_j = vertices[edges[edge_index_j]][:, ::-1]
+    deltas = verts_i - verts_j
+    assert np.all(deltas.std(axis=1) < tol).item()
+    displacements = np.zeros(adjacency.shape)
+    displacements[i_quad, i_edge] = deltas.mean(axis=1)
+    return displacements, np.stack((edge_index_i, edge_index_j)).T
+
+
+def equivalence_classes(pairs: np.ndarray) -> np.ndarray:
+    """Given Npair x 2 array of index pairs that are equivalent,
+    compute equivalence class numbers for each original index."""
+    # Construct adjacency matrix:
+    N = pairs.max() + 1
+    i_pair, j_pair = pairs.T
+    adjacency_matrix = np.eye(N)
+    adjacency_matrix[i_pair, j_pair] = 1.0
+    adjacency_matrix[j_pair, i_pair] = 1.0
+
+    # Expand to indirect neighbors by repeated multiplication:
+    n_non_zero_prev = np.count_nonzero(adjacency_matrix)
+    for i_mult in range(N):
+        adjacency_matrix = adjacency_matrix @ adjacency_matrix
+        n_non_zero = np.count_nonzero(adjacency_matrix)
+        if n_non_zero == n_non_zero_prev:
+            break  # highest-degree connection reached
+        n_non_zero_prev = n_non_zero
+
+    # Find first non-zero entry of above (i.e. first equivalent index):
+    is_first = np.logical_and(
+        adjacency_matrix.cumsum(axis=1) == adjacency_matrix, adjacency_matrix != 0.0
+    )
+    first_index = np.where(is_first)[1]
+    assert len(first_index) == N
+    return np.unique(first_index, return_inverse=True)[1]  # minimal class indices
