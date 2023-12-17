@@ -118,12 +118,29 @@ def subdivide(quad_set: QuadSet, grid_size_max: int) -> SubQuadSet:
         grid_splits0 = np.concatenate(([0], np.cumsum(div0)))
         grid_splits1 = np.concatenate(([0], np.cumsum(div1)))
         grid_splits = np.stack(
-            np.meshgrid(grid_splits0, grid_splits1, indexing="ij")
-        ).transpose(1, 2, 0)
+            np.meshgrid(grid_splits0, grid_splits1, indexing="ij"), axis=2
+        )
         grid_start[cur_slice] = grid_splits[:-1, :-1].reshape(-1, 2)
         grid_stop[cur_slice] = grid_splits[1:, 1:].reshape(-1, 2)
+
         # Adjacency within current quad:
         adjacency_slice = np.full((len(div0), len(div1), 4, 2), -1)
+        i_sub_quad_within = np.arange(cur_slice.start, cur_slice.stop).reshape(
+            len(div0), len(div1)
+        )
+        # --- 0-edges connect to 2-edges of sub-quads below:
+        adjacency_slice[:, 1:, 0, 0] = i_sub_quad_within[:, :-1]
+        adjacency_slice[:, 1:, 0, 1] = 2
+        # --- 1-edges connect to 3-edges of sub-quads to the right:
+        adjacency_slice[:-1, :, 1, 0] = i_sub_quad_within[1:, :]
+        adjacency_slice[:-1, :, 1, 1] = 3
+        # --- 2-edges connect to 0-edges of sub-quads above:
+        adjacency_slice[:, :-1, 2, 0] = i_sub_quad_within[:, 1:]
+        adjacency_slice[:, :-1, 2, 1] = 0
+        # --- 3-edges connect to 1-edges of sub-quads to the left:
+        adjacency_slice[1:, :, 3, 0] = i_sub_quad_within[:-1, :]
+        adjacency_slice[1:, :, 3, 1] = 1
+
         adjacency[cur_slice] = adjacency_slice.reshape(-1, 4, 2)
 
     return SubQuadSet(quad_index, grid_start, grid_stop, adjacency)

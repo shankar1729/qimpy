@@ -2,6 +2,7 @@ from __future__ import annotations
 import argparse
 
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 
 from qimpy import log, rc
@@ -52,10 +53,12 @@ def main():
         )
         for i_quad in range(len(quad_set.quads))
     ]
+
+    # Show subdivided quads:
     plt.figure()
     ax = plt.gca()
     ax.set_aspect("equal")
-    midpoints = []  # collect (near-)midpoints for indicating adjacency below
+    midpoints = []  # collect midpoints for indicating adjacency below
     for i_quad, grid_start, grid_stop in zip(
         sub_quad_set.quad_index, sub_quad_set.grid_start, sub_quad_set.grid_stop
     ):
@@ -73,12 +76,18 @@ def main():
         ):
             coords = patch(Qfrac).to(rc.cpu).numpy()
             plt.plot(*coords.T, lw=1, color="k")
-            # Store near-midpoint for showing adjacency below
-            i_center = len(coords) // 2
-            di_center = len(coords) // 4  # off-center to show two connections
-            i_mid = i_center + di_center * (-1 if (i_edge < 2) else +1)
-            midpoints.append(coords[i_mid])
+            midpoints.append(coords[len(coords) // 2])
 
+    # Annotate adjacency
+    midpoints = np.stack(midpoints)  # (n_sub_quads * 4) x 2: flattened quad-edge
+    adjacency = (sub_quad_set.adjacency @ np.array((4, 1))).flatten()  # in same index
+    i_quad_edges = np.where(adjacency >= 0)[0]
+    j_quad_edges = adjacency[i_quad_edges]
+    if len(i_quad_edges):
+        i_segments = np.stack((i_quad_edges, j_quad_edges), axis=1)
+        segments = midpoints[i_segments].swapaxes(-2, -1)  # Cartesian axis to center
+        for x_segment, y_segment in segments:
+            plt.plot(x_segment, y_segment, "r--")
     rc.report_end()
     plt.show()
 
