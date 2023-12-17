@@ -2,10 +2,11 @@ from __future__ import annotations
 import argparse
 
 import matplotlib.pyplot as plt
+import torch
 
 from qimpy import log, rc
 from qimpy.io import log_config
-from . import parse_svg, plot_spline
+from . import parse_svg, plot_spline, BicubicPatch
 from ._subdivide import select_division, subdivide
 
 
@@ -45,7 +46,38 @@ def main():
     # Test subdivision:
     grid_size_max = select_division(quad_set, args.n_processes)
     sub_quad_set = subdivide(quad_set, grid_size_max)
-    log.info(sub_quad_set)
+    patches = [
+        BicubicPatch(
+            boundary=torch.from_numpy(quad_set.get_boundary(i_quad)).to(rc.device)
+        )
+        for i_quad in range(len(quad_set.quads))
+    ]
+    plt.figure()
+    ax = plt.gca()
+    ax.set_aspect("equal")
+    midpoints = []  # collect (near-)midpoints for indicating adjacency below
+    for i_quad, grid_start, grid_stop in zip(
+        sub_quad_set.quad_index, sub_quad_set.grid_start, sub_quad_set.grid_stop
+    ):
+        patch = patches[i_quad]
+        N0, N1 = quad_set.grid_size[i_quad]
+        t0 = torch.arange(grid_start[0] + 0.5, grid_stop[0], device=rc.device) / N0
+        t1 = torch.arange(grid_start[1] + 0.5, grid_stop[1], device=rc.device) / N1
+        for i_edge, Qfrac in enumerate(
+            (
+                torch.stack((t0, t1[:1].expand(len(t0))), dim=1),
+                torch.stack((t0[-1:].expand(len(t1)), t1), dim=1),
+                torch.stack((t0, t1[-1:].expand(len(t0))), dim=1),  # flipped direction
+                torch.stack((t0[:1].expand(len(t1)), t1), dim=1),  # flipped direction
+            )
+        ):
+            coords = patch(Qfrac).to(rc.cpu).numpy()
+            plt.plot(*coords.T, lw=1, color="k")
+            # Store near-midpoint for showing adjacency below
+            i_center = len(coords) // 2
+            di_center = len(coords) // 4  # off-center to show two connections
+            i_mid = i_center + di_center * (-1 if (i_edge < 2) else +1)
+            midpoints.append(coords[i_mid])
 
     rc.report_end()
     plt.show()

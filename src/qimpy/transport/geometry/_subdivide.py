@@ -110,9 +110,11 @@ def subdivide(quad_set: QuadSet, grid_size_max: int) -> SubQuadSet:
     quad_index = np.empty(n_sub_quads_tot, dtype=int)
     grid_start = np.empty((n_sub_quads_tot, 2), dtype=int)
     grid_stop = np.empty((n_sub_quads_tot, 2), dtype=int)
+    adjacency = np.empty((n_sub_quads_tot, 4, 2), dtype=int)
     for i_quad, (div0, div1) in enumerate(divisions):
         cur_slice = slice(n_sub_quads_prev[i_quad], n_sub_quads_prev[i_quad + 1])
         quad_index[cur_slice] = i_quad
+        # Grid ranges within quad
         grid_splits0 = np.concatenate(([0], np.cumsum(div0)))
         grid_splits1 = np.concatenate(([0], np.cumsum(div1)))
         grid_splits = np.stack(
@@ -120,8 +122,11 @@ def subdivide(quad_set: QuadSet, grid_size_max: int) -> SubQuadSet:
         ).transpose(1, 2, 0)
         grid_start[cur_slice] = grid_splits[:-1, :-1].reshape(-1, 2)
         grid_stop[cur_slice] = grid_splits[1:, 1:].reshape(-1, 2)
-    print(quad_index, grid_start, grid_stop)
-    return NotImplemented
+        # Adjacency within current quad:
+        adjacency_slice = np.full((len(div0), len(div1), 4, 2), -1)
+        adjacency[cur_slice] = adjacency_slice.reshape(-1, 4, 2)
+
+    return SubQuadSet(quad_index, grid_start, grid_stop, adjacency)
 
 
 def split_evenly(n_tasks: int, max_tasks: int) -> np.ndarray:
