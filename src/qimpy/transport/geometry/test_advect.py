@@ -44,7 +44,12 @@ def run(*, grid_spacing, N_theta, q0, v0, svg_file, plot_frames=False) -> float:
     material = FermiCircle(kF=1.0, vF=vF, N_theta=N_theta, theta0=init_angle)
 
     # Initialize geometry:
-    geometry = Geometry(svg_file=svg_file, grid_spacing=grid_spacing, material=material)
+    geometry = Geometry(
+        svg_file=svg_file,
+        grid_spacing=grid_spacing,
+        grid_size_max=42,
+        material=material,
+    )
 
     # Detect periodicity:
     tol = 1e-3

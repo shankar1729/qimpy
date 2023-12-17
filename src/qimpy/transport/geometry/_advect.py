@@ -21,32 +21,39 @@ class Advect:
         self,
         *,
         transformation: Callable[[torch.Tensor], torch.Tensor],
+        grid_size_tot: tuple[int, ...],
+        grid_start: tuple[int, ...],
+        grid_stop: tuple[int, ...],
         v: torch.Tensor,
-        N: tuple[int, ...],
         dk: float = 1.0,
     ) -> None:
-        self.N = N
-
         # Initialize mesh:
-        grids1d = [(torch.arange(Ni, device=rc.device) + 0.5) for Ni in N]
-        self.Q = torch.stack(torch.meshgrid(*grids1d, indexing="ij"), dim=-1)
+        grids1d = [
+            (torch.arange(grid_start_i, grid_stop_i, device=rc.device) + 0.5)
+            for grid_start_i, grid_stop_i in zip(grid_start, grid_stop)
+        ]
+        Q = torch.stack(torch.meshgrid(*grids1d, indexing="ij"), dim=-1)
 
         # Initialize transformed coordinates and jacobian using auto-grad
+        N = tuple(
+            (grid_stop_i - grid_start_i)
+            for grid_start_i, grid_stop_i in zip(grid_start, grid_stop)
+        )
         grad_q = torch.tile(
             torch.eye(2, device=rc.device)[:, None, None], (1,) + N + (1,)
         )
-        self.Q.requires_grad = True
-        Qfrac = self.Q / torch.tensor(N, device=rc.device)
+        Q.requires_grad = True
+        Qfrac = Q / torch.tensor(grid_size_tot, device=rc.device)
         self.q = transformation(Qfrac)
         jacobian = torch.autograd.grad(
             self.q,
-            self.Q,
+            Q,
             grad_outputs=grad_q,
             is_grads_batched=True,
             retain_graph=False,
         )[0]
         jacobian = torch.permute(jacobian, (1, 2, 0, 3))
-        self.Q.requires_grad = False
+        Q.requires_grad = False
 
         # Initialize metric:
         metric = torch.einsum("...aB, ...aC -> ...BC", jacobian, jacobian)

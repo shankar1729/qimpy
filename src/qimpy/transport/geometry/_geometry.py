@@ -6,13 +6,22 @@ from qimpy import TreeNode, rc
 from qimpy.io import CheckpointPath
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
-from . import Advect, BicubicPatch, parse_svg, QuadSet
+from . import (
+    Advect,
+    BicubicPatch,
+    parse_svg,
+    QuadSet,
+    SubQuadSet,
+    subdivide,
+    select_division,
+)
 
 
 class Geometry(TreeNode):
     """Geometry specification."""
 
     quad_set: QuadSet  #: Original geometry specification from SVG
+    sub_quad_set: SubQuadSet  #: Division into smaller quads for tuning parallelization
     patches: list[Advect]  #: Advection for each quad patch
 
     # Constants for edge data transfer:
@@ -39,6 +48,7 @@ class Geometry(TreeNode):
         material: Material,
         svg_file: str,
         grid_spacing: float,
+        grid_size_max: int = 0,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
         """
@@ -51,18 +61,41 @@ class Geometry(TreeNode):
         grid_spacing
             :yaml:`Maximum spacing between grid points anywhere in the geometry.`
             This is used to select the number of grid points in each domain.
+        grid_size_max
+            :yaml:`Maximum grid points per dimension after quad subdvision.`
+            If 0, will be determined automatically from number of processes.
+            Note that this only affects parallelization and performance by
+            changing how data is divided into patches, and does not affect
+            the accuracy of format of the output.
         """
         super().__init__()
         self.quad_set = parse_svg(svg_file, grid_spacing)
 
+        # Subdivide:
+        if not grid_size_max:
+            # TODO: select appropriate dimension of process grid, once implemented
+            grid_size_max = select_division(self.quad_set, rc.n_procs)
+        self.sub_quad_set = subdivide(self.quad_set, grid_size_max)
+
         # Build an advect object for each quad
         self.patches = []
         v = material.transport_velocity
-        for i_quad in range(len(self.quad_set.quads)):
+        for i_quad, grid_start, grid_stop in zip(
+            self.sub_quad_set.quad_index,
+            self.sub_quad_set.grid_start,
+            self.sub_quad_set.grid_stop,
+        ):
             boundary = torch.from_numpy(self.quad_set.get_boundary(i_quad))
             transformation = BicubicPatch(boundary=boundary.to(rc.device))
-            N = tuple(self.quad_set.grid_size[i_quad])
-            self.patches.append(Advect(transformation=transformation, v=v, N=N))
+            self.patches.append(
+                Advect(
+                    transformation=transformation,
+                    grid_size_tot=tuple(self.quad_set.grid_size[i_quad]),
+                    grid_start=grid_start,
+                    grid_stop=grid_stop,
+                    v=v,
+                )
+            )
         self.dt = min(patch.dt_max for patch in self.patches)
 
     @property
@@ -87,7 +120,7 @@ class Geometry(TreeNode):
 
         # Populate ghost zones across patches where needed:
         for i_patch, (out, adjacency) in enumerate(
-            zip(out_list, self.quad_set.adjacency)
+            zip(out_list, self.sub_quad_set.adjacency)
         ):
             for i_edge, (other_patch, other_edge) in enumerate(adjacency):
                 if other_patch < 0:
