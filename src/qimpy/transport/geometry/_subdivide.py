@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Optional
 from dataclasses import dataclass
 
 import numpy as np
@@ -74,9 +75,40 @@ def select_division(quad_set: QuadSet, n_processes: int) -> int:
 
 def subdivide(quad_set: QuadSet, grid_size_max: int) -> SubQuadSet:
     """Subdividide `quad_set` till all grid dimensions are below `grid_size_max`."""
-    # Divide lowest dimension (Nquads x 2 flattened) in each equivalence class first:
-    dim_divisions: list[list[int]] = [[]] * len(quad_set.equivalent)
-    for i_edge, equivalent_edge in enumerate(quad_set.equivalent):
-        if i_edge == equivalent_edge:
-            dim_divisions[i_edge] = []  # TODO
+    # Divide edges and propagate using adjacency:
+    divisions: list[list[Optional[np.ndarray]]] = [
+        [None, None] for _ in range(len(quad_set.quads))
+    ]
+
+    def propagate_division(i_quad: int, i_edge: int, division: np.ndarray) -> None:
+        """Propagate division to all unknown dimensions using adjacency recursively."""
+        # Set specified quad, edge:
+        division_flipped = division[::-1]
+        divisions[i_quad][i_edge % 2] = division if (i_edge < 2) else division_flipped
+        print(i_quad, i_edge, divisions)
+        # Propagate by adjacency (on both edges along this dimension):
+        # Note that the division is flipped for the adjacent edge in the other quad
+        for i_edge_equiv, division_equiv in (
+            (i_edge, division_flipped),
+            ((i_edge + 2) % 4, division),
+        ):
+            j_quad, j_edge = quad_set.adjacency[i_quad, i_edge_equiv]
+            if j_quad >= 0 and divisions[j_quad][j_edge % 2] is None:
+                propagate_division(j_quad, j_edge, division_equiv)
+
+    for i_quad_cur, quad_divisions in enumerate(divisions):
+        for i_edge_cur in range(2):
+            if quad_divisions[i_edge_cur] is None:
+                # Not yet divided: determine and propagate division:
+                grid_size_cur = quad_set.grid_size[i_quad_cur, i_edge_cur]
+                division_cur = split_evenly(grid_size_cur, grid_size_max)
+                propagate_division(i_quad_cur, i_edge_cur, division_cur)
+
     return NotImplemented
+
+
+def split_evenly(n_tasks: int, max_tasks: int) -> np.ndarray:
+    """Split `n_tasks` as close to evenly with `max_tasks` per bins."""
+    n_split = ceildiv(n_tasks, max_tasks)
+    split_points = (np.arange(n_split + 1) * n_tasks) // n_split
+    return np.diff(split_points)

@@ -21,7 +21,6 @@ class QuadSet:
     quads: np.ndarray  #: Nquads x 4 x 4 vertex indices for each quad and edge within
     adjacency: np.ndarray  #: Nquads x 4 x 2: neighbor indices for each (quad, edge)
     displacements: np.ndarray  #: Nquads x 4 x 2 edge displacements for each adjacency
-    equivalent: np.ndarray  #: Nquads x 2 x 2 lowest quad, direction with same sampling
     grid_size: np.ndarray  #: Nquads x 2 grid dimensions for each quad
 
     def get_boundary(self, i_quad: int) -> np.ndarray:
@@ -91,23 +90,20 @@ def parse_svg(svg_file: str, grid_spacing: float, tol: float = 1e-3) -> QuadSet:
     # Determine edge displacements and equivalence:
     displacements, ij_quad, ij_edge = get_displacements(vertices, quads, adjacency, tol)
     ij_quad_edge = 2 * ij_quad + (ij_edge % 2)  # flattened, only 2 indep. edges/quad
-    equivalent_edge = equivalence_classes(ij_quad_edge)  # using above flattened index
-    unique_edges = np.unique(equivalent_edge)  # lowest flattened index in each class
+    edge_classes = equivalence_classes(ij_quad_edge, 2 * len(quads))  # flattened index
 
     # Determine sample counts based on maximum edge length in each class:
     lengths = spline_length(vertices[quads])
     lengths = lengths.reshape(-1, 2, 2).max(axis=1)  # max over equiv edges in each quad
     lengths = lengths.flatten()  # now corresponds to flattened index used above
     n_points = np.empty(len(lengths), dtype=int)
-    for edge in unique_edges:
-        sel = np.where(equivalent_edge == edge)[0]
+    for edge_class in range(edge_classes.max() + 1):
+        sel = np.where(edge_class == edge_classes)[0]
         max_length = lengths[sel].max()
         n_points[sel] = int(np.ceil(max_length / grid_spacing))
     grid_size = n_points.reshape(-1, 2)  # now n_quads x 2 grid dimensions
 
-    return QuadSet(
-        vertices, quads, adjacency, displacements, equivalent_edge, grid_size
-    )
+    return QuadSet(vertices, quads, adjacency, displacements, grid_size)
 
 
 def parse_style(style_str: str):
@@ -233,11 +229,10 @@ def get_displacements(
     return displacements, np.stack((i_quad, j_quad)).T, np.stack((i_edge, j_edge)).T
 
 
-def equivalence_classes(pairs: np.ndarray) -> np.ndarray:
-    """Given Npair x 2 array of index pairs that are equivalent,
-    compute equivalence class numbers for each original index."""
+def equivalence_classes(pairs: np.ndarray, N: int) -> np.ndarray:
+    """Given Npair x 2 array of index pairs (into a sequence of length N) that
+    are equivalent, compute equivalence class numbers for each original index."""
     # Construct adjacency matrix:
-    N = pairs.max() + 1
     i_pair, j_pair = pairs.T
     adjacency_matrix = np.eye(N)
     adjacency_matrix[i_pair, j_pair] = 1.0
