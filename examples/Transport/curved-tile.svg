@@ -24,7 +24,7 @@
      inkscape:document-units="px"
      showgrid="false"
      inkscape:zoom="0.96717741"
-     inkscape:cx="-5.1696823"
+     inkscape:cx="-4.6527141"
      inkscape:cy="158.70925"
      inkscape:window-width="1920"
      inkscape:window-height="1013"
@@ -40,9 +40,20 @@
      inkscape:groupmode="layer"
      id="layer1">
     <path
-       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.264583;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="M 0,100 C 40,100 60,80 100,80 100,50 110,30 110,0 70,0 50,20 10,20 10,50 0,70 0,100 Z"
-       id="path881"
-       sodipodi:nodetypes="ccccc" />
+       style="fill:none;fill-rule:evenodd;stroke:#f10000;stroke-width:0.264583;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="M 10,20 C 10,50 0,70 0,100"
+       id="path1026" />
+    <path
+       style="fill:none;fill-rule:evenodd;stroke:#0001fc;stroke-width:0.264583;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="M 110,0 C 70,0 50,20 10,20"
+       id="path1024" />
+    <path
+       style="fill:none;fill-rule:evenodd;stroke:#f10000;stroke-width:0.264583;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="M 100,80 C 100,50 110,30 110,0"
+       id="path1022" />
+    <path
+       style="fill:none;fill-rule:evenodd;stroke:#0001fc;stroke-width:0.264583;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="M 0,100 C 40,100 60,80 100,80"
+       id="path881" />
   </g>
 </svg>
