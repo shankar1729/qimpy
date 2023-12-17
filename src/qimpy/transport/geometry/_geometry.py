@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import torch
 
-from qimpy import TreeNode, rc
+from qimpy import TreeNode, MPI, rc
 from qimpy.io import CheckpointPath
+from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
 from . import (
@@ -20,26 +21,10 @@ from . import (
 class Geometry(TreeNode):
     """Geometry specification."""
 
+    comm: MPI.Comm  #: Communicator for real-space split over patches
     quad_set: QuadSet  #: Original geometry specification from SVG
     sub_quad_set: SubQuadSet  #: Division into smaller quads for tuning parallelization
     patches: list[Advect]  #: Advection for each quad patch
-
-    # Constants for edge data transfer:
-    IN_SLICES = [
-        (slice(None), Advect.GHOST_L),
-        (Advect.GHOST_R, slice(None)),
-        (slice(None), Advect.GHOST_R),
-        (Advect.GHOST_L, slice(None)),
-    ]  #: input slice for each edge orientation during edge communication
-
-    OUT_SLICES = [
-        (Advect.NON_GHOST, Advect.GHOST_L),
-        (Advect.GHOST_R, Advect.NON_GHOST),
-        (Advect.NON_GHOST, Advect.GHOST_R),
-        (Advect.GHOST_L, Advect.NON_GHOST),
-    ]  #: output slice for each edge orientation during edge communication
-
-    FLIP_DIMS = [(0, 1), (0,), None, (1,)]  #: which dims to flip during edge transfer
 
     # v_F and N_theta should eventually be material paramteters
     def __init__(
@@ -49,6 +34,7 @@ class Geometry(TreeNode):
         svg_file: str,
         grid_spacing: float,
         grid_size_max: int = 0,
+        process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
         """
@@ -69,12 +55,12 @@ class Geometry(TreeNode):
             the accuracy of format of the output.
         """
         super().__init__()
+        self.comm = process_grid.get_comm("r")
         self.quad_set = parse_svg(svg_file, grid_spacing)
 
         # Subdivide:
         if not grid_size_max:
-            # TODO: select appropriate dimension of process grid, once implemented
-            grid_size_max = select_division(self.quad_set, rc.n_procs)
+            grid_size_max = select_division(self.quad_set, self.comm.size)
         self.sub_quad_set = subdivide(self.quad_set, grid_size_max)
 
         # Build an advect object for each quad
@@ -129,13 +115,13 @@ class Geometry(TreeNode):
                     pass
                 else:
                     # Pass-through boundary:
-                    ghost_data = rho_list[other_patch][Geometry.IN_SLICES[other_edge]]
+                    ghost_data = rho_list[other_patch][IN_SLICES[other_edge]]
                     delta_edge = other_edge - i_edge
                     if delta_edge % 2:
                         ghost_data = ghost_data.swapaxes(0, 1)
-                    if flip_dims := Geometry.FLIP_DIMS[delta_edge]:
+                    if flip_dims := FLIP_DIMS[delta_edge]:
                         ghost_data = ghost_data.flip(dims=flip_dims)
-                    out[Geometry.OUT_SLICES[i_edge]] = ghost_data
+                    out[OUT_SLICES[i_edge]] = ghost_data
         return out_list
 
     def next_rho_list(
@@ -157,3 +143,21 @@ class Geometry(TreeNode):
         rho_list_init = self.rho_list
         rho_list_half = self.next_rho_list(0.5 * self.dt, rho_list_init, rho_list_init)
         self.rho_list = self.next_rho_list(self.dt, rho_list_init, rho_list_half)
+
+
+# Constants for edge data transfer:
+IN_SLICES = [
+    (slice(None), Advect.GHOST_L),
+    (Advect.GHOST_R, slice(None)),
+    (slice(None), Advect.GHOST_R),
+    (Advect.GHOST_L, slice(None)),
+]  #: input slice for each edge orientation during edge communication
+
+OUT_SLICES = [
+    (Advect.NON_GHOST, Advect.GHOST_L),
+    (Advect.GHOST_R, Advect.NON_GHOST),
+    (Advect.NON_GHOST, Advect.GHOST_R),
+    (Advect.GHOST_L, Advect.NON_GHOST),
+]  #: output slice for each edge orientation during edge communication
+
+FLIP_DIMS = [(0, 1), (0,), None, (1,)]  #: which dims to flip during edge transfer

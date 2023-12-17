@@ -4,6 +4,7 @@ from typing import Sequence
 import torch
 
 from qimpy.io import CheckpointPath
+from qimpy.mpi import ProcessGrid
 from . import Material
 
 
@@ -15,6 +16,7 @@ class AbInitio(Material):
         *,
         fname: str,
         rotation: Sequence[Sequence[float]] = ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
+        process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
         """
@@ -35,4 +37,6 @@ class AbInitio(Material):
         k = torch.zeros((nk, 3))
         E = torch.zeros((nk, n_bands))
         v = torch.zeros((nk, n_bands, 3))
-        super().__init__(k=k, wk=wk, E=E, v=v, checkpoint_in=checkpoint_in)
+        super().__init__(
+            k=k, wk=wk, E=E, v=v, checkpoint_in=checkpoint_in, process_grid=process_grid
+        )

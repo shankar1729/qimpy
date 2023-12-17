@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import torch
 
-from qimpy import TreeNode
+from qimpy import TreeNode, MPI
+from qimpy.mpi import ProcessGrid
 from qimpy.io import CheckpointPath
 
 
 class Material(TreeNode):
     """Base class / interface for material specifications."""
 
+    comm: MPI.Comm  #: Communicator for reciprocal-space split over k (TODO)
     n_bands: int  #: number of bands at each k
     wk: float  #: Brillouin zone integration weight
     k: torch.Tensor  #: Nk x (2 or 3) wave vectors
@@ -22,10 +24,12 @@ class Material(TreeNode):
         k: torch.Tensor,
         E: torch.Tensor,
         v: torch.Tensor,
+        process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
         """Initialize material parameters, typically used from a derived class."""
         super().__init__()
+        self.comm = process_grid.get_comm("k")
         self.n_bands = E.shape[-1]
         self.wk = wk
         self.k = k

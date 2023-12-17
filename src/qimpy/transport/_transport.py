@@ -53,6 +53,7 @@ class Transport(TreeNode):
         self.process_grid = ProcessGrid(
             comm if comm else rc.comm, "rk", process_grid_shape
         )
+        self.process_grid.provide_n_tasks("k", 1)  # prefer r-split if unspecified
         # Set in and out checkpoints:
         checkpoint_in = CheckpointPath()
         if checkpoint is not None:
@@ -65,12 +66,24 @@ class Transport(TreeNode):
         self.add_child_one_of(
             "material",
             checkpoint_in,
-            TreeNode.ChildOptions("ab-initio", AbInitio, ab_initio),
-            TreeNode.ChildOptions("fermi-circle", FermiCircle, fermi_circle),
+            TreeNode.ChildOptions(
+                "ab-initio", AbInitio, ab_initio, process_grid=self.process_grid
+            ),
+            TreeNode.ChildOptions(
+                "fermi-circle",
+                FermiCircle,
+                fermi_circle,
+                process_grid=self.process_grid,
+            ),
             have_default=False,
         )
         self.add_child(
-            "geometry", Geometry, geometry, checkpoint_in, material=self.material
+            "geometry",
+            Geometry,
+            geometry,
+            checkpoint_in,
+            material=self.material,
+            process_grid=self.process_grid,
         )
 
     def run(self):

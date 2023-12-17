@@ -3,13 +3,11 @@ import argparse
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from tqdm import tqdm
 
 from qimpy import log, rc
 from qimpy.io import log_config
 from qimpy.profiler import StopWatch
-from qimpy.transport.material import FermiCircle
-from . import Geometry
+from .. import Transport
 
 
 def gaussian_blob(
@@ -38,18 +36,14 @@ def gaussian_blob_error(
 def run(*, grid_spacing, N_theta, q0, v0, svg_file, plot_frames=False) -> float:
     """Run simulation and report error in final density."""
 
-    # Initialize material:
+    # Initialize transport system:
     vF = v0.norm().item()
     init_angle = torch.atan2(v0[1], v0[0]).item()
-    material = FermiCircle(kF=1.0, vF=vF, N_theta=N_theta, theta0=init_angle)
-
-    # Initialize geometry:
-    geometry = Geometry(
-        svg_file=svg_file,
-        grid_spacing=grid_spacing,
-        grid_size_max=42,
-        material=material,
+    transport = Transport(
+        fermi_circle=dict(kF=1.0, vF=vF, N_theta=N_theta, theta0=init_angle),
+        geometry=dict(svg_file=svg_file, grid_spacing=grid_spacing),
     )
+    geometry = transport.geometry
 
     # Detect periodicity:
     tol = 1e-3
@@ -82,7 +76,7 @@ def run(*, grid_spacing, N_theta, q0, v0, svg_file, plot_frames=False) -> float:
 
     plot_interval = round(0.02 * time_steps)
     plot_frame = 0
-    for time_step in tqdm(range(time_steps)):
+    for time_step in range(time_steps):
         if plot_frames and (time_step % plot_interval == 0):
             watch = StopWatch("plot")
             plt.clf()
@@ -98,6 +92,7 @@ def run(*, grid_spacing, N_theta, q0, v0, svg_file, plot_frames=False) -> float:
             )
             watch.stop()
             plot_frame += 1
+            log.info(f"Completed step {time_step} at t[s]: {rc.clock():.2f}")
         geometry.time_step()
 
     # Compute final density error:
@@ -120,7 +115,6 @@ def run(*, grid_spacing, N_theta, q0, v0, svg_file, plot_frames=False) -> float:
 def main():
     log_config()
     rc.init()
-    assert rc.n_procs == 1  # MPI not yet supported
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--h", help="grid spacing", type=float, required=True)

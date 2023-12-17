@@ -4,6 +4,7 @@ import numpy as np
 import torch
 
 from qimpy import rc
+from qimpy.mpi import ProcessGrid
 from qimpy.io import CheckpointPath
 from . import Material
 
@@ -21,6 +22,7 @@ class FermiCircle(Material):
         vF: float,
         N_theta: int,
         theta0: float = 0.0,
+        process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
         """
@@ -48,4 +50,6 @@ class FermiCircle(Material):
         v = k_hat[:, None] * vF
         E = torch.zeros((N_theta, 1))
         wk = 1.0 / N_theta
-        super().__init__(k=k, wk=wk, E=E, v=v, checkpoint_in=checkpoint_in)
+        super().__init__(
+            k=k, wk=wk, E=E, v=v, checkpoint_in=checkpoint_in, process_grid=process_grid
+        )
