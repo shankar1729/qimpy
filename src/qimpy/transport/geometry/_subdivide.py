@@ -85,7 +85,6 @@ def subdivide(quad_set: QuadSet, grid_size_max: int) -> SubQuadSet:
         # Set specified quad, edge:
         division_flipped = division[::-1]
         divisions[i_quad][i_edge % 2] = division if (i_edge < 2) else division_flipped
-        print(i_quad, i_edge, divisions)
         # Propagate by adjacency (on both edges along this dimension):
         # Note that the division is flipped for the adjacent edge in the other quad
         for i_edge_equiv, division_equiv in (
@@ -104,6 +103,24 @@ def subdivide(quad_set: QuadSet, grid_size_max: int) -> SubQuadSet:
                 division_cur = split_evenly(grid_size_cur, grid_size_max)
                 propagate_division(i_quad_cur, i_edge_cur, division_cur)
 
+    # Divide quads
+    n_sub_quads = np.array([len(div0) * len(div1) for div0, div1 in divisions])
+    n_sub_quads_prev = np.concatenate(([0], np.cumsum(n_sub_quads)))
+    n_sub_quads_tot = n_sub_quads_prev[-1]
+    quad_index = np.empty(n_sub_quads_tot, dtype=int)
+    grid_start = np.empty((n_sub_quads_tot, 2), dtype=int)
+    grid_stop = np.empty((n_sub_quads_tot, 2), dtype=int)
+    for i_quad, (div0, div1) in enumerate(divisions):
+        cur_slice = slice(n_sub_quads_prev[i_quad], n_sub_quads_prev[i_quad + 1])
+        quad_index[cur_slice] = i_quad
+        grid_splits0 = np.concatenate(([0], np.cumsum(div0)))
+        grid_splits1 = np.concatenate(([0], np.cumsum(div1)))
+        grid_splits = np.stack(
+            np.meshgrid(grid_splits0, grid_splits1, indexing="ij")
+        ).transpose(1, 2, 0)
+        grid_start[cur_slice] = grid_splits[:-1, :-1].reshape(-1, 2)
+        grid_stop[cur_slice] = grid_splits[1:, 1:].reshape(-1, 2)
+    print(quad_index, grid_start, grid_stop)
     return NotImplemented
 
 
