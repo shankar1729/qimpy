@@ -128,19 +128,15 @@ def subdivide(quad_set: QuadSet, grid_size_max: int) -> SubQuadSet:
         i_sub_quad_within = np.arange(cur_slice.start, cur_slice.stop).reshape(
             len(div0), len(div1)
         )
-        # --- 0-edges connect to 2-edges of sub-quads below:
-        adjacency_slice[:, 1:, 0, 0] = i_sub_quad_within[:, :-1]
-        adjacency_slice[:, 1:, 0, 1] = 2
-        # --- 1-edges connect to 3-edges of sub-quads to the right:
-        adjacency_slice[:-1, :, 1, 0] = i_sub_quad_within[1:, :]
-        adjacency_slice[:-1, :, 1, 1] = 3
-        # --- 2-edges connect to 0-edges of sub-quads above:
-        adjacency_slice[:, :-1, 2, 0] = i_sub_quad_within[:, 1:]
-        adjacency_slice[:, :-1, 2, 1] = 0
-        # --- 3-edges connect to 1-edges of sub-quads to the left:
-        adjacency_slice[1:, :, 3, 0] = i_sub_quad_within[:-1, :]
-        adjacency_slice[1:, :, 3, 1] = 1
+        for i_edge, i_slice in enumerate(INTERIOR_SLICES):
+            j_edge = (i_edge + 2) % 4  # 0-edges connect to 2-edges etc.
+            j_slice = INTERIOR_SLICES[j_edge]
+            adjacency_slice[i_slice + (i_edge, 0)] = i_sub_quad_within[j_slice]
+            adjacency_slice[i_slice + (i_edge, 1)] = j_edge
 
+        # Adjacency between quads:
+        for i_edge, (j_quad, j_edge) in enumerate(quad_set.adjacency[i_quad]):
+            pass
         adjacency[cur_slice] = adjacency_slice.reshape(-1, 4, 2)
 
     return SubQuadSet(quad_index, grid_start, grid_stop, adjacency)
@@ -151,3 +147,21 @@ def split_evenly(n_tasks: int, max_tasks: int) -> np.ndarray:
     n_split = ceildiv(n_tasks, max_tasks)
     split_points = (np.arange(n_split + 1) * n_tasks) // n_split
     return np.diff(split_points)
+
+
+# Slice all but boundary for each edge orientation:
+INTERIOR_SLICES = (
+    (slice(None), slice(1, None)),
+    (slice(0, -1), slice(None)),
+    (slice(None), slice(0, -1)),
+    (slice(1, None), slice(None)),
+)
+
+
+# Slice boundary only for each edge orientation:
+BOUNDARY_SLICES = (
+    (slice(None), 0),
+    (-1, slice(None)),
+    (slice(None), -1),
+    (0, slice(None)),
+)
