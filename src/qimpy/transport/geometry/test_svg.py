@@ -21,7 +21,8 @@ def main():
     parser.add_argument("n_processes", help="# processes to test division", type=int)
     args = parser.parse_args()
 
-    quad_set = parse_svg(args.input_svg, grid_spacing=1.0)
+    grid_spacing = 1.0
+    quad_set = parse_svg(args.input_svg, grid_spacing)
 
     log.info(f"Found {len(quad_set.quads)} quads:")
     for i_quad, (quad, adjacency, grid_size) in enumerate(
@@ -86,8 +87,9 @@ def main():
     if len(i_quad_edges):
         i_segments = np.stack((i_quad_edges, j_quad_edges), axis=1)
         segments = midpoints[i_segments].swapaxes(-2, -1)  # Cartesian axis to center
-        for x_segment, y_segment in segments:
-            plt.plot(x_segment, y_segment, "r--")
+        for segment in segments:
+            is_long = np.linalg.norm(np.diff(segment, axis=1)) > 2 * grid_spacing
+            plt.plot(*segment, "r", ls=("dotted" if is_long else "solid"))
     rc.report_end()
     plt.show()
 

@@ -104,7 +104,8 @@ def subdivide(quad_set: QuadSet, grid_size_max: int) -> SubQuadSet:
                 propagate_division(i_quad_cur, i_edge_cur, division_cur)
 
     # Divide quads
-    n_sub_quads = np.array([len(div0) * len(div1) for div0, div1 in divisions])
+    quad_divisions = np.array([(len(div0), len(div1)) for div0, div1 in divisions])
+    n_sub_quads = np.prod(quad_divisions, axis=1)
     n_sub_quads_prev = np.concatenate(([0], np.cumsum(n_sub_quads)))
     n_sub_quads_tot = n_sub_quads_prev[-1]
     quad_index = np.empty(n_sub_quads_tot, dtype=int)
@@ -125,18 +126,25 @@ def subdivide(quad_set: QuadSet, grid_size_max: int) -> SubQuadSet:
 
         # Adjacency within current quad:
         adjacency_slice = np.full((len(div0), len(div1), 4, 2), -1)
-        i_sub_quad_within = np.arange(cur_slice.start, cur_slice.stop).reshape(
-            len(div0), len(div1)
+        i_sub_quads = np.arange(cur_slice.start, cur_slice.stop).reshape(
+            *quad_divisions[i_quad]
         )
         for i_edge, i_slice in enumerate(INTERIOR_SLICES):
             j_edge = (i_edge + 2) % 4  # 0-edges connect to 2-edges etc.
             j_slice = INTERIOR_SLICES[j_edge]
-            adjacency_slice[i_slice + (i_edge, 0)] = i_sub_quad_within[j_slice]
+            adjacency_slice[i_slice + (i_edge, 0)] = i_sub_quads[j_slice]
             adjacency_slice[i_slice + (i_edge, 1)] = j_edge
 
         # Adjacency between quads:
         for i_edge, (j_quad, j_edge) in enumerate(quad_set.adjacency[i_quad]):
-            pass
+            if j_quad >= 0:
+                i_slice = BOUNDARY_SLICES[i_edge]
+                j_slice = BOUNDARY_SLICES[j_edge]
+                j_sub_quads = np.arange(
+                    n_sub_quads_prev[j_quad], n_sub_quads_prev[j_quad + 1]
+                ).reshape(*quad_divisions[j_quad])
+                adjacency_slice[i_slice + (i_edge, 0)] = j_sub_quads[j_slice][::-1]
+                adjacency_slice[i_slice + (i_edge, 1)] = j_edge
         adjacency[cur_slice] = adjacency_slice.reshape(-1, 4, 2)
 
     return SubQuadSet(quad_index, grid_start, grid_stop, adjacency)
@@ -149,7 +157,9 @@ def split_evenly(n_tasks: int, max_tasks: int) -> np.ndarray:
     return np.diff(split_points)
 
 
-# Slice all but boundary for each edge orientation:
+# Slice all but boundary for each edge orientation
+# This is always used in known combinations where reversed slicing
+# is factored out analytically (2- and 3-edges are traversed oppositely)
 INTERIOR_SLICES = (
     (slice(None), slice(1, None)),
     (slice(0, -1), slice(None)),
@@ -158,10 +168,12 @@ INTERIOR_SLICES = (
 )
 
 
-# Slice boundary only for each edge orientation:
+# Slice boundary only for each edge orientation
+# This accounts for the correct order of traversal of 2- and 3-edges,
+# as it is used in arbitrary adjacency cases
 BOUNDARY_SLICES = (
     (slice(None), 0),
     (-1, slice(None)),
-    (slice(None), -1),
-    (0, slice(None)),
+    (slice(-1, None, -1), -1),
+    (0, slice(-1, None, -1)),
 )
