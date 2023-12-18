@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import torch
+import numpy as np
 
 from qimpy import TreeNode, MPI, rc
-from qimpy.io import CheckpointPath
+from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
@@ -143,6 +144,37 @@ class Geometry(TreeNode):
         rho_list_init = self.rho_list
         rho_list_half = self.next_rho_list(0.5 * self.dt, rho_list_init, rho_list_init)
         self.rho_list = self.next_rho_list(self.dt, rho_list_init, rho_list_half)
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        saved_list = [
+            cp_path.write("vertices", torch.from_numpy(self.quad_set.vertices)),
+            cp_path.write("quads", torch.from_numpy(self.quad_set.quads)),
+            cp_path.write(
+                "displacements", torch.from_numpy(self.quad_set.displacements)
+            ),
+            cp_path.write("adjacency", torch.from_numpy(self.quad_set.adjacency)),
+            cp_path.write("grid_size", torch.from_numpy(self.quad_set.grid_size)),
+            "q",
+            "rho",
+            "v",
+        ]
+        # MPI-split data:
+        checkpoint, path = cp_path
+        for i_quad, grid_size_np in enumerate(self.quad_set.grid_size):
+            prefix = f"{path}/quad{i_quad}"
+            grid_size = tuple(grid_size_np)
+            dset_q = checkpoint.create_dataset_real(f"{prefix}/q", grid_size + (2,))
+            dset_rho = checkpoint.create_dataset_real(f"{prefix}/rho", grid_size)
+            dset_v = checkpoint.create_dataset_real(f"{prefix}/v", grid_size + (2,))
+            for i_patch in np.where(self.sub_quad_set.quad_index == i_quad)[0]:
+                patch = self.patches[i_patch]
+                offset = tuple(self.sub_quad_set.grid_start[i_patch])
+                checkpoint.write_slice(dset_q, offset + (0,), patch.q)
+                checkpoint.write_slice(dset_rho, offset, patch.density)
+                checkpoint.write_slice(dset_v, offset + (0,), patch.velocity)
+        return saved_list
 
 
 # Constants for edge data transfer:

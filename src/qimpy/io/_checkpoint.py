@@ -159,6 +159,8 @@ class CheckpointPath(NamedTuple):
         """Access attributes at `path` within `checkpoint`."""
         checkpoint, path = self
         assert checkpoint is not None
+        if not path:
+            return checkpoint.attrs
         if (path not in checkpoint) and checkpoint.writable:
             checkpoint.create_group(path)
         return checkpoint[path].attrs

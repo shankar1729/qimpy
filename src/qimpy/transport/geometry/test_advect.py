@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from qimpy import log, rc
-from qimpy.io import log_config
+from qimpy.io import log_config, Checkpoint, CheckpointPath, CheckpointContext
 from qimpy.profiler import StopWatch
 from .. import Transport
 
@@ -33,7 +33,7 @@ def gaussian_blob_error(
     return rho_sum, rho_err_sum
 
 
-def run(*, grid_spacing, N_theta, q0, v0, svg_file, plot_frames=False) -> float:
+def run(*, grid_spacing, N_theta, q0, v0, svg_file, save_frames=False) -> float:
     """Run simulation and report error in final density."""
 
     # Initialize transport system:
@@ -67,7 +67,10 @@ def run(*, grid_spacing, N_theta, q0, v0, svg_file, plot_frames=False) -> float:
     distance = torch.linalg.det(Rbasis).abs().sqrt().item()  # move ~ one cell
     time_steps = round(distance / (vF * geometry.dt))
     t_final = time_steps * geometry.dt
-    log.info(f"\nRunning for {time_steps} steps at {grid_spacing = :g}:")
+    log.info(
+        f"\nStarting {time_steps}-step run for {grid_spacing = :g}"
+        f" at t[s]: {rc.clock():.2f}"
+    )
 
     # Initialize initial and expected final density
     sigma = 5.0
@@ -75,24 +78,17 @@ def run(*, grid_spacing, N_theta, q0, v0, svg_file, plot_frames=False) -> float:
         patch.rho[..., 0] = gaussian_blob(patch.q, q0, Rbasis, sigma)
 
     plot_interval = round(0.02 * time_steps)
-    plot_frame = 0
+    save_frame = 0
     for time_step in range(time_steps):
-        if plot_frames and (time_step % plot_interval == 0):
-            watch = StopWatch("plot")
-            plt.clf()
-            rho_max = max(patch.density.max().item() for patch in geometry.patches)
-            contour_opts = dict(levels=np.linspace(-1e-3, rho_max, 20))
-            for i, patch in enumerate(geometry.patches):
-                patch.plot(plt, contour_opts, {})
-            plt.gca().set_aspect("equal")
-            plt.savefig(
-                f"animation/advect_{plot_frame:04d}.png",
-                bbox_inches="tight",
-                dpi=200,
-            )
+        log.info(f"Step {time_step} at t[s]: {rc.clock():.2f}")
+        if save_frames and (time_step % plot_interval == 0):
+            watch = StopWatch("save_frame")
+            with Checkpoint(
+                f"animation/advect_{save_frame:04d}.h5", writable=True
+            ) as cp:
+                transport.save_checkpoint(CheckpointPath(cp), CheckpointContext(""))
             watch.stop()
-            plot_frame += 1
-            log.info(f"Completed step {time_step} at t[s]: {rc.clock():.2f}")
+            save_frame += 1
         geometry.time_step()
 
     # Compute final density error:
@@ -108,7 +104,10 @@ def run(*, grid_spacing, N_theta, q0, v0, svg_file, plot_frames=False) -> float:
     rho_mae = rho_err_tot / rho_sum_tot
 
     # Return RMS error in density:
-    log.info(f"{rho_mae = } for {grid_spacing = :g}")
+    log.info(
+        f"Done with {rho_mae = :.6f} for {grid_spacing = :g}"
+        f" at t[s]: {rc.clock():.2f}\n"
+    )
     return rho_mae
 
 
@@ -132,7 +131,7 @@ def main():
             q0=torch.tensor(args.q0, device=rc.device),
             v0=torch.tensor(args.v0, device=rc.device),
             svg_file=args.svg,
-            plot_frames=True,
+            save_frames=True,
         )
     else:
         # Convergence test:
@@ -148,7 +147,7 @@ def main():
                 q0=torch.tensor(args.q0, device=rc.device),
                 v0=torch.tensor(args.v0, device=rc.device),
                 svg_file=args.svg,
-                plot_frames=False,
+                save_frames=False,
             )
             h_list.append(h)
             err_list.append(err)
@@ -159,28 +158,29 @@ def main():
         for h, err in zip(h_list, err_list):
             log.info(f"{h:4g} {err:.6f}")
 
-        # Plot
-        plt.figure()
-        plt.scatter(h_list, err_list, marker="+", label="Observed Errors")
-        # Add scaling guides:
-        x_scale = np.array([0.5 * h_list[0], 2 * h_list[-1]])
-        for exponent, ls in zip((1, 2), ("dashed", "dotted")):
-            plt.plot(
-                x_scale,
-                err_list[-1] * (x_scale / h_list[-1]) ** exponent,
-                color="k",
-                ls=ls,
-                lw=1,
-                label=r"$h^{" + str(exponent) + r"}$ scaling",
-            )
-        plt.xscale("log")
-        plt.yscale("log")
-        plt.xlabel(r"Grid spacing, $h$")
-        plt.ylabel(r"MAE($\rho$)")
-        plt.xlim(*x_scale)
-        plt.ylim(0.5 * min(err_list), 2 * max(err_list))
-        plt.legend()
-        plt.savefig("convergence.pdf", bbox_inches="tight")
+        if rc.is_head:
+            # Plot
+            plt.figure()
+            plt.scatter(h_list, err_list, marker="+", label="Observed Errors")
+            # Add scaling guides:
+            x_scale = np.array([0.5 * h_list[0], 2 * h_list[-1]])
+            for exponent, ls in zip((1, 2), ("dashed", "dotted")):
+                plt.plot(
+                    x_scale,
+                    err_list[-1] * (x_scale / h_list[-1]) ** exponent,
+                    color="k",
+                    ls=ls,
+                    lw=1,
+                    label=r"$h^{" + str(exponent) + r"}$ scaling",
+                )
+            plt.xscale("log")
+            plt.yscale("log")
+            plt.xlabel(r"Grid spacing, $h$")
+            plt.ylabel(r"MAE($\rho$)")
+            plt.xlim(*x_scale)
+            plt.ylim(0.5 * min(err_list), 2 * max(err_list))
+            plt.legend()
+            plt.savefig("convergence.pdf", bbox_inches="tight")
 
     rc.report_end()
     StopWatch.print_stats()

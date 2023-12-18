@@ -44,16 +44,13 @@ class Advect:
         )
         Q.requires_grad = True
         Qfrac = Q / torch.tensor(grid_size_tot, device=rc.device)
-        self.q = transformation(Qfrac)
+        q = transformation(Qfrac)
         jacobian = torch.autograd.grad(
-            self.q,
-            Q,
-            grad_outputs=grad_q,
-            is_grads_batched=True,
-            retain_graph=False,
+            q, Q, grad_outputs=grad_q, is_grads_batched=True, retain_graph=False
         )[0]
-        jacobian = torch.permute(jacobian, (1, 2, 0, 3))
+        jacobian = torch.permute(jacobian, (1, 2, 0, 3)).detach()
         Q.requires_grad = False
+        self.q = q.detach()
 
         # Initialize metric:
         metric = torch.einsum("...aB, ...aC -> ...BC", jacobian, jacobian)
@@ -92,35 +89,6 @@ class Advect:
     def velocity(self):
         """Average velocity at each point (integrate over momenta)."""
         return (self.rho @ self.v) * self.dk
-
-    def plot(self, plt, contour_kwargs, stream_kwargs, streamlines=False):
-        contour_kwargs.setdefault("levels", 100)
-        contour_kwargs.setdefault("cmap", "bwr")
-        q = to_numpy(self.q)
-        x = q[:, :, 0]
-        y = q[:, :, 1]
-        rho = to_numpy(self.density)
-        plt.contourf(x, y, rho, **contour_kwargs)
-
-        if streamlines:
-            stream_kwargs.setdefault("density", 2.0)
-            stream_kwargs.setdefault("linewidth", 1.0)
-            stream_kwargs.setdefault("color", "k")
-            stream_kwargs.setdefault("arrowsize", 1.0)
-            v = to_numpy(self.velocity)
-            plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
-
-        # Label edges:
-        NX, NY = x.shape
-        midNX = slice(NX // 2, NX // 2 + 2)
-        midNY = slice(NY // 2, NY // 2 + 2)
-        text_kwargs = dict(ha="center", rotation_mode="anchor")
-        for i_edge, q_mid in enumerate(
-            (q[midNX, 0], q[-1, midNY], q[midNX, -1][::-1], q[0, midNY][::-1])
-        ):
-            dq = np.diff(q_mid, axis=0)[0]
-            angle = np.rad2deg(np.arctan2(dq[1], dq[0]))
-            plt.text(*q_mid[0], f"{i_edge}$\\to$", rotation=angle, **text_kwargs)
 
 
 def to_numpy(f: torch.Tensor) -> np.ndarray:
