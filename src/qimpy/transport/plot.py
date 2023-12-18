@@ -40,13 +40,15 @@ def main() -> None:
 
         plt.clf()
         rho_max = max(np.max(rho) for rho in rho_list)
-        contour_kwargs = dict(levels=np.linspace(-1e-3, rho_max, 20), cmap="bwr")
+        contour_kwargs = dict(
+            levels=np.linspace(-1e-3 * rho_max, rho_max, 20), cmap="bwr"
+        )
         stream_kwargs = dict(density=2.0, linewidth=1.0, color="k", arrowsize=1.0)
 
         for q, rho, v in zip(q_list, rho_list, v_list):
             x = q[:, :, 0]
             y = q[:, :, 1]
-            plt.contourf(x, y, rho, **contour_kwargs)
+            contour = plt.contourf(x, y, rho, **contour_kwargs)
 
             if args.streamlines:
                 plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
@@ -64,6 +66,7 @@ def main() -> None:
                 plt.text(*q_mid[0], f"{i_edge}$\\to$", rotation=angle, **text_kwargs)
 
         plt.gca().set_aspect("equal")
+        plt.colorbar(contour)
         plt.savefig(plot_file, bbox_inches="tight", dpi=200)
         log.info(f"Saved {plot_file}")
 

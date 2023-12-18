@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 import argparse
 
 import torch
@@ -46,22 +48,13 @@ def run(*, grid_spacing, N_theta, q0, v0, svg_file, save_frames=False) -> float:
     geometry = transport.geometry
 
     # Detect periodicity:
-    tol = 1e-3
-    displacements = (
-        torch.from_numpy(geometry.quad_set.displacements).flatten(0, 1).to(rc.device)
-    )
-    displacements = displacements[torch.where(displacements.norm(dim=-1) > tol)[0]]
-    if not len(displacements):
-        log.error("No non-zero displacements to find lattice vectors for periodicity.")
-        exit(1)
-    is_equal = torch.logical_or(
-        (displacements[:, None] - displacements[None]).norm(dim=-1) < tol,
-        (displacements[:, None] + displacements[None]).norm(dim=-1) < tol,
-    )
-    Rbasis = displacements[torch.unique(torch.where(is_equal, 1, 0).argmax(dim=0))].T
-    if Rbasis.shape != (2, 2):
-        log.error("Could not detect two unique lattice vectors for periodicity.")
-        exit(1)
+    displacements = torch.from_numpy(geometry.quad_set.displacements).flatten(0, 1)
+    Rbasis = detect_lattice_vectors(displacements.to(rc.device))
+    if Rbasis is None:
+        log.info("Lattice vectors set to bounding box: IGNORE reported rho_mae.")
+        vertices = geometry.quad_set.vertices
+        bbox_size = np.max(vertices, axis=0) - np.min(vertices, axis=0)
+        Rbasis = torch.diag(torch.from_numpy(bbox_size)).to(rc.device)
 
     # Set the time for slightly more than one period
     distance = torch.linalg.det(Rbasis).abs().sqrt().item()  # move ~ one cell
@@ -111,6 +104,25 @@ def run(*, grid_spacing, N_theta, q0, v0, svg_file, save_frames=False) -> float:
         f" at t[s]: {rc.clock():.2f}\n"
     )
     return rho_mae
+
+
+def detect_lattice_vectors(
+    displacements: torch.Tensor, tol=1e-3
+) -> Optional[torch.Tensor]:
+    """Detect periodicity from edge-equivalence displacements."""
+    displacements = displacements[torch.where(displacements.norm(dim=-1) > tol)[0]]
+    if not len(displacements):
+        log.info("No displacements to find lattice vectors for periodicity.")
+        return None
+    is_equal = torch.logical_or(
+        (displacements[:, None] - displacements[None]).norm(dim=-1) < tol,
+        (displacements[:, None] + displacements[None]).norm(dim=-1) < tol,
+    )
+    Rbasis = displacements[torch.unique(torch.where(is_equal, 1, 0).argmax(dim=0))].T
+    if Rbasis.shape != (2, 2):
+        log.info("Could not detect two unique lattice vectors for periodicity.")
+        return None
+    return Rbasis
 
 
 def main():
