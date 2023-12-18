@@ -72,12 +72,12 @@ class Geometry(TreeNode):
 
         # Build an advect object for each sub-quad local to this process:
         self.patches = []
-        v = material.transport_velocity
         mine = slice(self.patch_division.i_start, self.patch_division.i_stop)
-        for i_quad, grid_start, grid_stop in zip(
+        for i_quad, grid_start, grid_stop, adjacency in zip(
             self.sub_quad_set.quad_index[mine],
             self.sub_quad_set.grid_start[mine],
             self.sub_quad_set.grid_stop[mine],
+            self.sub_quad_set.adjacency[mine],
         ):
             boundary = torch.from_numpy(self.quad_set.get_boundary(i_quad))
             transformation = BicubicPatch(boundary=boundary.to(rc.device))
@@ -87,7 +87,8 @@ class Geometry(TreeNode):
                     grid_size_tot=tuple(self.quad_set.grid_size[i_quad]),
                     grid_start=grid_start,
                     grid_stop=grid_stop,
-                    v=v,
+                    material=material,
+                    need_reflector=(adjacency[:, 0] == -1),
                 )
             )
         self.dt = self.comm.allreduce(
@@ -121,9 +122,22 @@ class Geometry(TreeNode):
         for i_patch, adjacency in enumerate(self.sub_quad_set.adjacency):
             for i_edge, (other_patch, other_edge) in enumerate(adjacency):
                 if other_patch < 0:
-                    # TODO: handle reflecting boundaries
-                    # For now they will be sinks (hence pass)
-                    pass
+                    # Reflection (always local)
+                    if self.patch_division.is_mine(i_patch):
+                        i_patch_mine = i_patch - self.patch_division.i_start
+                        reflector = self.patches[i_patch_mine].reflectors[i_edge]
+                        assert reflector is not None
+                        # Fetch the data in appropriate orientation:
+                        ghost_data = rho_list[i_patch_mine][IN_SLICES[i_edge]]
+                        if i_edge % 2:
+                            ghost_data = ghost_data.swapaxes(0, 1)  # long axis first
+                        # Reflect:
+                        ghost_data = reflector(ghost_data)  # reciprocal space changes
+                        ghost_data = ghost_data.flip(dims=(1,))  # flip short axis
+                        # Store back:
+                        if i_edge % 2:
+                            ghost_data = ghost_data.swapaxes(0, 1)  # restore axis order
+                        out_list[i_patch_mine][OUT_SLICES[i_edge]] = ghost_data
                 else:
                     # Pass-through boundary:
                     read_mine = self.patch_division.is_mine(other_patch)

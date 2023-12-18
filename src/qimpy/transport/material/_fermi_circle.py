@@ -1,9 +1,10 @@
 from __future__ import annotations
+from typing import Callable
 
 import numpy as np
 import torch
 
-from qimpy import rc
+from qimpy import rc, MPI
 from qimpy.mpi import ProcessGrid
 from qimpy.io import CheckpointPath
 from . import Material
@@ -53,3 +54,17 @@ class FermiCircle(Material):
         super().__init__(
             k=k, wk=wk, E=E, v=v, checkpoint_in=checkpoint_in, process_grid=process_grid
         )
+
+    def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
+        return SpecularReflector(n, self.v, self.comm)
+
+
+class SpecularReflector:
+    """Reflect velocities specularly i.e. with reflection angle = incidence angle."""
+
+    def __init__(self, n: torch.Tensor, v: torch.Tensor, comm: MPI.Comm) -> None:
+        assert comm.size == 1  # TODO: implement k-point split
+        pass
+
+    def __call__(self, rho: torch.Tensor) -> torch.Tensor:
+        return NotImplemented

@@ -1,4 +1,6 @@
 from __future__ import annotations
+from typing import Callable
+from abc import abstractmethod
 
 import torch
 
@@ -43,3 +45,10 @@ class Material(TreeNode):
         v_plane = self.v[..., :2]  # ignore out-of-plane component if present
         v_dm = 0.5 * (v_plane[:, :, None] + v_plane[:, None])  # for density matrix
         return v_dm.flatten(0, 2)  # flatten k and both band dimensions
+
+    @abstractmethod
+    def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
+        """Return a function (or callable object) to calculate reflections for
+        a sequence of surface points with normals (Nsurf x 2). This function will
+        be called with a Nghost x Nsurf x Nk tensor, and the reflection should be
+        calculated pointwise in real-space with output of the same dimensions."""

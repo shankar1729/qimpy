@@ -1,14 +1,31 @@
 from __future__ import annotations
-from typing import Callable
+from typing import Callable, Optional
 
 import numpy as np
 import torch
 
 from qimpy import rc
 from qimpy.profiler import stopwatch
+from qimpy.transport.material import Material
 
 
 class Advect:
+    """Real-space advection on a quad-patch with an arbitrary transformation."""
+
+    q: torch.Tensor  #: Nx x Ny x 2 Cartesian coordinates
+    g: torch.Tensor  #: Nx x Ny x 1 sqrt(metric), with extra dimensipm for broadcasting
+    v: torch.tensor  #: Nkbb x 2 Cartesian velocities (where Nkbb is flattened k, b, b')
+    V: torch.Tensor  #: Nx x Ny x Nkbb x 2 mesh coordinate velocities
+    dt_max: float  #: Maximum stable time step
+    wk: float  #: Integration weight for the flattened density matrix dimensions
+    rho_shape: tuple[int, ...]  #: Shape of density matrix on patch
+    rho_padded_shape: tuple[int, ...]  #: Shape of density matrix with ghost padding
+    rho: torch.Tensor  #: current density matrix on this patch
+    v_prime: torch.jit.ScriptModule  #: Underlying advection logic
+    reflectors: list[
+        Optional[Callable[[torch.Tensor], torch.Tensor]]
+    ]  #: Material-dependent reflector for each edge that needs one
+
     N_GHOST: int = 2  #: currently a constant, but could depend on slope method later
 
     # Initialize slices for accessing ghost regions in padded version:
@@ -24,8 +41,8 @@ class Advect:
         grid_size_tot: tuple[int, ...],
         grid_start: tuple[int, ...],
         grid_stop: tuple[int, ...],
-        v: torch.Tensor,
-        dk: float = 1.0,
+        need_reflector: np.ndarray,
+        material: Material,
     ) -> None:
         # Initialize mesh:
         grids1d = [
@@ -39,11 +56,12 @@ class Advect:
             (grid_stop_i - grid_start_i)
             for grid_start_i, grid_stop_i in zip(grid_start, grid_stop)
         )
+        N_tot = torch.tensor(grid_size_tot, device=rc.device)
         grad_q = torch.tile(
             torch.eye(2, device=rc.device)[:, None, None], (1,) + N + (1,)
         )
         Q.requires_grad = True
-        Qfrac = Q / torch.tensor(grid_size_tot, device=rc.device)
+        Qfrac = Q / N_tot
         q = transformation(Qfrac)
         jacobian = torch.autograd.grad(
             q, Q, grad_outputs=grad_q, is_grads_batched=True, retain_graph=False
@@ -57,13 +75,13 @@ class Advect:
         self.g = torch.linalg.det(metric).sqrt()[:, :, None]
 
         # Initialize velocities:
-        self.v = v
-        self.V = torch.einsum("ta, ...Ba -> ...tB", v, torch.linalg.inv(jacobian))
+        self.v = material.transport_velocity
+        self.V = torch.einsum("ka, ...Ba -> ...kB", self.v, torch.linalg.inv(jacobian))
         self.dt_max = 0.5 / self.V.abs().max().item()
-        self.dk = dk
+        self.wk = material.wk
 
         # Initialize distribution function:
-        Nk = v.shape[0]
+        Nk = self.v.shape[0]
         padding = 2 * Advect.N_GHOST
         self.rho_shape = (N[0], N[1], Nk)
         self.rho_padded_shape = (N[0] + padding, N[1] + padding, Nk)
@@ -71,6 +89,37 @@ class Advect:
 
         # Initialize v*drho/dx calculator:
         self.v_prime = torch.jit.script(Vprime())
+
+        # Initialize reflectors if needed:
+        self.reflectors = [None] * 4
+        print(need_reflector)
+        for i_edge in np.where(need_reflector)[0]:
+            i_dim = i_edge % 2  # long direction of edge
+            j_dim = 1 - i_dim  # other direction
+            # Compute tangent direction:
+            Q_edge = torch.empty((N[i_dim], 2), device=rc.device)
+            Q_edge[:, i_dim] = grids1d[i_dim]
+            Q_edge[:, j_dim] = (grid_start if (i_edge in {0, 3}) else grid_stop)[j_dim]
+            Q_edge_frac = Q_edge / N_tot
+            Q_edge_frac.requires_grad = True
+            q_edge = transformation(Q_edge_frac)
+            grad_q_edge = torch.tile(
+                torch.eye(2, device=rc.device)[:, None], (1, N[i_dim], 1)
+            )
+            jacobian_edge = torch.autograd.grad(
+                q_edge,
+                Q_edge_frac,
+                grad_outputs=grad_q_edge,
+                is_grads_batched=True,
+                retain_graph=False,
+            )[0]
+            jacobian_edge = torch.permute(jacobian_edge, (1, 0, 2)).detach()
+            tangent = jacobian_edge[..., i_dim]  # derivative along edge
+            if i_edge >= 2:
+                tangent *= -1  # so that it follows the counter-clockwise diretcion
+            normal = torch.stack((tangent[..., 1], -tangent[..., 0]), dim=-1)
+            normal *= (1.0 / normal.norm(dim=-1))[..., None]  # unit outward normal
+            self.reflectors[i_edge] = material.get_reflector(normal)
 
     @stopwatch(name="drho")
     def drho(self, dt: float, rho: torch.Tensor) -> torch.Tensor:
@@ -83,12 +132,12 @@ class Advect:
     @property
     def density(self):
         """Density at each point (integrate over momenta)."""
-        return self.rho.sum(dim=2) * self.dk
+        return self.rho.sum(dim=2) * self.wk
 
     @property
     def velocity(self):
         """Average velocity at each point (integrate over momenta)."""
-        return (self.rho @ self.v) * self.dk
+        return (self.rho @ self.v) * self.wk
 
 
 def to_numpy(f: torch.Tensor) -> np.ndarray:

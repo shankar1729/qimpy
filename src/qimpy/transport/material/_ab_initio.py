@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Sequence
+from typing import Sequence, Callable
 
 import torch
 
@@ -40,3 +40,6 @@ class AbInitio(Material):
         super().__init__(
             k=k, wk=wk, E=E, v=v, checkpoint_in=checkpoint_in, process_grid=process_grid
         )
+
+    def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
+        return NotImplemented
