@@ -7,6 +7,7 @@ import numpy as np
 from svg.path import parse_path, CubicBezier, Line, Close
 from xml.dom import minidom
 
+from qimpy import rc
 from . import spline_length
 
 
@@ -39,7 +40,7 @@ def parse_svg(svg_file: str, grid_spacing: float, tol: float = 1e-3) -> QuadSet:
 
     # Randomly permute cycles to test transfer in general case:
     if "QIMPY_CYCLE_PERMUTE" in os.environ:
-        random = np.random.default_rng()
+        random = rc.comm.bcast(np.random.default_rng())
         for cycle in cycles:
             roll = random.integers(4)
             cycle[:] = cycle[roll:] + cycle[:roll]

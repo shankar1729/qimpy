@@ -5,7 +5,7 @@ import numpy as np
 
 from qimpy import TreeNode, MPI, rc
 from qimpy.io import CheckpointPath, CheckpointContext
-from qimpy.mpi import ProcessGrid
+from qimpy.mpi import ProcessGrid, TaskDivision, BufferView
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
 from . import (
@@ -25,7 +25,8 @@ class Geometry(TreeNode):
     comm: MPI.Comm  #: Communicator for real-space split over patches
     quad_set: QuadSet  #: Original geometry specification from SVG
     sub_quad_set: SubQuadSet  #: Division into smaller quads for tuning parallelization
-    patches: list[Advect]  #: Advection for each quad patch
+    patches: list[Advect]  #: Advection for each quad patch local to this process
+    patch_division: TaskDivision  #: Division of patches over `comm`
 
     # v_F and N_theta should eventually be material paramteters
     def __init__(
@@ -63,14 +64,20 @@ class Geometry(TreeNode):
         if not grid_size_max:
             grid_size_max = select_division(self.quad_set, self.comm.size)
         self.sub_quad_set = subdivide(self.quad_set, grid_size_max)
+        self.patch_division = TaskDivision(
+            n_tot=len(self.sub_quad_set.quad_index),
+            n_procs=self.comm.size,
+            i_proc=self.comm.rank,
+        )
 
-        # Build an advect object for each quad
+        # Build an advect object for each sub-quad local to this process:
         self.patches = []
         v = material.transport_velocity
+        mine = slice(self.patch_division.i_start, self.patch_division.i_stop)
         for i_quad, grid_start, grid_stop in zip(
-            self.sub_quad_set.quad_index,
-            self.sub_quad_set.grid_start,
-            self.sub_quad_set.grid_stop,
+            self.sub_quad_set.quad_index[mine],
+            self.sub_quad_set.grid_start[mine],
+            self.sub_quad_set.grid_stop[mine],
         ):
             boundary = torch.from_numpy(self.quad_set.get_boundary(i_quad))
             transformation = BicubicPatch(boundary=boundary.to(rc.device))
@@ -83,7 +90,9 @@ class Geometry(TreeNode):
                     v=v,
                 )
             )
-        self.dt = min(patch.dt_max for patch in self.patches)
+        self.dt = self.comm.allreduce(
+            min(patch.dt_max for patch in self.patches), op=MPI.MIN
+        )
 
     @property
     def rho_list(self) -> list[torch.Tensor]:
@@ -106,9 +115,10 @@ class Geometry(TreeNode):
             out_list.append(out)
 
         # Populate ghost zones across patches where needed:
-        for i_patch, (out, adjacency) in enumerate(
-            zip(out_list, self.sub_quad_set.adjacency)
-        ):
+        requests = []
+        pending_reads = []  # keep reference to data so that it doesn't deallocate
+        pending_writes = []  # keep plans for writes till transfers complete
+        for i_patch, adjacency in enumerate(self.sub_quad_set.adjacency):
             for i_edge, (other_patch, other_edge) in enumerate(adjacency):
                 if other_patch < 0:
                     # TODO: handle reflecting boundaries
@@ -116,13 +126,47 @@ class Geometry(TreeNode):
                     pass
                 else:
                     # Pass-through boundary:
-                    ghost_data = rho_list[other_patch][IN_SLICES[other_edge]]
-                    delta_edge = other_edge - i_edge
-                    if delta_edge % 2:
-                        ghost_data = ghost_data.swapaxes(0, 1)
-                    if flip_dims := FLIP_DIMS[delta_edge]:
-                        ghost_data = ghost_data.flip(dims=flip_dims)
-                    out[OUT_SLICES[i_edge]] = ghost_data
+                    read_mine = self.patch_division.is_mine(other_patch)
+                    write_mine = self.patch_division.is_mine(i_patch)
+                    tag = 4 * i_patch + i_edge  # unique for each message
+                    if read_mine:
+                        rho = rho_list[other_patch - self.patch_division.i_start]
+                        ghost_data = rho[IN_SLICES[other_edge]]
+                        delta_edge = other_edge - i_edge
+                        if delta_edge % 2:
+                            ghost_data = ghost_data.swapaxes(0, 1)
+                        if flip_dims := FLIP_DIMS[delta_edge]:
+                            ghost_data = ghost_data.flip(dims=flip_dims)
+                        if not write_mine:
+                            write_whose = self.patch_division.whose(i_patch)
+                            ghost_data = ghost_data.contiguous()
+                            pending_reads.append(ghost_data)  # hold till transfers done
+                            requests.append(
+                                self.comm.Isend(
+                                    BufferView(ghost_data), write_whose, tag
+                                )
+                            )
+                    if write_mine:
+                        i_patch_mine = i_patch - self.patch_division.i_start
+                        if read_mine:
+                            out_list[i_patch_mine][OUT_SLICES[i_edge]] = ghost_data
+                        else:
+                            read_whose = self.patch_division.whose(other_patch)
+                            ghost_data = torch.empty_like(
+                                out_list[i_patch_mine][OUT_SLICES[i_edge]]
+                            )
+                            requests.append(
+                                self.comm.Irecv(BufferView(ghost_data), read_whose, tag)
+                            )
+                            pending_writes.append(
+                                [i_patch_mine, OUT_SLICES[i_edge], ghost_data]
+                            )
+
+        # Finish pending data transfers and writes:
+        if requests:
+            MPI.Request.Waitall(requests)
+            for i_patch_mine, out_slice, ghost_data in pending_writes:
+                out_list[i_patch_mine][out_slice] = ghost_data
         return out_list
 
     def next_rho_list(
@@ -169,11 +213,12 @@ class Geometry(TreeNode):
             dset_rho = checkpoint.create_dataset_real(f"{prefix}/rho", grid_size)
             dset_v = checkpoint.create_dataset_real(f"{prefix}/v", grid_size + (2,))
             for i_patch in np.where(self.sub_quad_set.quad_index == i_quad)[0]:
-                patch = self.patches[i_patch]
-                offset = tuple(self.sub_quad_set.grid_start[i_patch])
-                checkpoint.write_slice(dset_q, offset + (0,), patch.q)
-                checkpoint.write_slice(dset_rho, offset, patch.density)
-                checkpoint.write_slice(dset_v, offset + (0,), patch.velocity)
+                if self.patch_division.is_mine(i_patch):
+                    patch = self.patches[i_patch - self.patch_division.i_start]
+                    offset = tuple(self.sub_quad_set.grid_start[i_patch])
+                    checkpoint.write_slice(dset_q, offset + (0,), patch.q)
+                    checkpoint.write_slice(dset_rho, offset, patch.density)
+                    checkpoint.write_slice(dset_v, offset + (0,), patch.velocity)
         return saved_list
 
 

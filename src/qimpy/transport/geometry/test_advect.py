@@ -84,7 +84,7 @@ def run(*, grid_spacing, N_theta, q0, v0, svg_file, save_frames=False) -> float:
         if save_frames and (time_step % plot_interval == 0):
             watch = StopWatch("save_frame")
             with Checkpoint(
-                f"animation/advect_{save_frame:04d}.h5", writable=True
+                f"animation/advect_{save_frame:04d}.h5", writable=True, rotate=False
             ) as cp:
                 transport.save_checkpoint(CheckpointPath(cp), CheckpointContext(""))
             watch.stop()
@@ -101,6 +101,8 @@ def run(*, grid_spacing, N_theta, q0, v0, svg_file, save_frames=False) -> float:
         )
         rho_sum_tot += rho_sum
         rho_err_tot += rho_err_sum
+    rho_sum_tot = rc.comm.allreduce(rho_sum_tot)
+    rho_err_tot = rc.comm.allreduce(rho_err_tot)
     rho_mae = rho_err_tot / rho_sum_tot
 
     # Return RMS error in density:
