@@ -1,18 +1,20 @@
 from __future__ import annotations
 import argparse
 import glob
+import logging
 
 import matplotlib.pyplot as plt
 import numpy as np
+import h5py
 
 from qimpy import rc, log
-from qimpy.io import log_config, Checkpoint
+from qimpy.mpi import TaskDivision
+from qimpy.io import log_config
 
 
 def main() -> None:
     log_config()
     rc.init()
-    assert rc.n_procs == 1  # Plot in serial mode only
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -23,11 +25,17 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    for checkpoint_file in sorted(glob.glob(args.checkpoints)):
+    # Distirbute tasks over MPI:
+    file_list = rc.comm.bcast(sorted(glob.glob(args.checkpoints)))
+    division = TaskDivision(n_tot=len(file_list), n_procs=rc.n_procs, i_proc=rc.i_proc)
+
+    orig_log_level = log.getEffectiveLevel()
+    log.setLevel(logging.INFO)  # Capture output from all processes
+    for checkpoint_file in file_list[division.i_start : division.i_stop]:
         plot_file = checkpoint_file.replace(".h5", ".png")
 
         # Load data from checkpoint:
-        with Checkpoint(checkpoint_file) as cp:
+        with h5py.File(checkpoint_file, "r") as cp:
             n_quads = cp["/geometry/quads"].shape[0]
             q_list = []
             rho_list = []
@@ -69,6 +77,10 @@ def main() -> None:
         plt.colorbar(contour)
         plt.savefig(plot_file, bbox_inches="tight", dpi=200)
         log.info(f"Saved {plot_file}")
+
+    log.setLevel(orig_log_level)  # Switch log back to single process
+    rc.comm.Barrier()
+    rc.report_end()
 
 
 if __name__ == "__main__":
