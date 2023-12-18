@@ -92,7 +92,6 @@ class Advect:
 
         # Initialize reflectors if needed:
         self.reflectors = [None] * 4
-        print(need_reflector)
         for i_edge in np.where(need_reflector)[0]:
             i_dim = i_edge % 2  # long direction of edge
             j_dim = 1 - i_dim  # other direction

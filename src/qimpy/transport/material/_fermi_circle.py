@@ -64,7 +64,16 @@ class SpecularReflector:
 
     def __init__(self, n: torch.Tensor, v: torch.Tensor, comm: MPI.Comm) -> None:
         assert comm.size == 1  # TODO: implement k-point split
-        pass
+        assert v.shape[1] == 1  # only for single-band case
+        v_normal = torch.einsum(
+            "ri, rk -> rki", n, torch.einsum("ri, ki -> rk", n, v[:, 0])
+        )
+        v_reflected = v[None, :, 0] - 2 * v_normal
+        v_diff = (v_reflected[:, :, None] - v[None, None, :, 0]).norm(dim=-1)
+        self.i_reflected = v_diff.argmin(dim=2)
 
     def __call__(self, rho: torch.Tensor) -> torch.Tensor:
-        return NotImplemented
+        out = torch.zeros_like(rho)
+        for ik, index in enumerate(self.i_reflected):
+            out[ik] = rho[ik, :, index]
+        return out
