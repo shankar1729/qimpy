@@ -120,7 +120,7 @@ class Advect:
             normal *= (1.0 / normal.norm(dim=-1))[..., None]  # unit outward normal
             self.reflectors[i_edge] = material.get_reflector(normal)
 
-    @stopwatch(name="drho")
+    @stopwatch
     def drho(self, dt: float, rho: torch.Tensor) -> torch.Tensor:
         """Compute drho for time step dt, given current rho."""
         return (-dt) * (

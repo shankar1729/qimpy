@@ -129,13 +129,13 @@ class Geometry(TreeNode):
                         assert reflector is not None
                         # Fetch the data in appropriate orientation:
                         ghost_data = rho_list[i_patch_mine][IN_SLICES[i_edge]]
-                        if i_edge % 2:
-                            ghost_data = ghost_data.swapaxes(0, 1)  # long axis first
+                        if i_edge % 2 == 0:
+                            ghost_data = ghost_data.swapaxes(0, 1)  # short axis first
                         # Reflect:
                         ghost_data = reflector(ghost_data)  # reciprocal space changes
-                        ghost_data = ghost_data.flip(dims=(1,))  # flip short axis
+                        ghost_data = ghost_data.flip(dims=(0,))  # flip short axis
                         # Store back:
-                        if i_edge % 2:
+                        if i_edge % 2 == 0:
                             ghost_data = ghost_data.swapaxes(0, 1)  # restore axis order
                         out_list[i_patch_mine][OUT_SLICES[i_edge]] = ghost_data
                 else:

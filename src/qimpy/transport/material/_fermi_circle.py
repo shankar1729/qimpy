@@ -70,10 +70,14 @@ class SpecularReflector:
         )
         v_reflected = v[None, :, 0] - 2 * v_normal
         v_diff = (v_reflected[:, :, None] - v[None, None, :, 0]).norm(dim=-1)
-        self.i_reflected = v_diff.argmin(dim=2)
+        i_reflected = v_diff.argmin(dim=2)
+
+        # Compute flattened index on Nr x Nk for efficient indexing
+        self.i_reflected_flat = (
+            i_reflected + torch.arange(len(n), device=rc.device)[:, None] * len(v)
+        ).flatten()
 
     def __call__(self, rho: torch.Tensor) -> torch.Tensor:
-        out = torch.zeros_like(rho)
-        for ik, index in enumerate(self.i_reflected):
-            out[ik] = rho[ik, :, index]
-        return out
+        rho_flat = rho.flatten(1, 2)  # flatten r and k indices
+        out_flat = rho_flat[:, self.i_reflected_flat]
+        return out_flat.unflatten(1, rho.shape[1:])  # restore r and k
