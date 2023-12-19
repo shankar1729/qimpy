@@ -35,7 +35,16 @@ def gaussian_blob_error(
     return rho_sum, rho_err_sum
 
 
-def run(*, grid_spacing, N_theta, q0, v0, svg_file, save_frames=False) -> float:
+def run(
+    *,
+    grid_spacing: float,
+    N_theta: int,
+    sigma: float,
+    q0: torch.Tensor,
+    v0: torch.Tensor,
+    svg_file: str,
+    save_frames: bool = False,
+) -> float:
     """Run simulation and report error in final density."""
 
     # Initialize transport system:
@@ -66,7 +75,6 @@ def run(*, grid_spacing, N_theta, q0, v0, svg_file, save_frames=False) -> float:
     )
 
     # Initialize initial and expected final density
-    sigma = 5.0
     for patch in geometry.patches:
         patch.rho[..., 0] = gaussian_blob(patch.q, q0, Rbasis, sigma)
 
@@ -132,6 +140,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--h", help="grid spacing", type=float, required=True)
     parser.add_argument("--Ntheta", help="angular resolution", type=int, required=True)
+    parser.add_argument("--sigma", help="gaussian width", type=float, required=True)
     parser.add_argument("--q0", help="origin", nargs=2, type=float, required=True)
     parser.add_argument("--v0", help="velocity", nargs=2, type=float, required=True)
     parser.add_argument("--h_max", help="max spacing for convergence test", type=float)
@@ -142,6 +151,7 @@ def main():
         run(
             grid_spacing=args.h,
             N_theta=args.Ntheta,
+            sigma=args.sigma,
             q0=torch.tensor(args.q0, device=rc.device),
             v0=torch.tensor(args.v0, device=rc.device),
             svg_file=args.svg,
@@ -158,6 +168,7 @@ def main():
             err = run(
                 grid_spacing=h,
                 N_theta=args.Ntheta,
+                sigma=args.sigma,
                 q0=torch.tensor(args.q0, device=rc.device),
                 v0=torch.tensor(args.v0, device=rc.device),
                 svg_file=args.svg,
