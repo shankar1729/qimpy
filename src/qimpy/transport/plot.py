@@ -4,11 +4,12 @@ import glob
 import logging
 
 import matplotlib.pyplot as plt
+import matplotlib.tri as mtri
 import numpy as np
 import h5py
 
 from qimpy import rc, log
-from qimpy.mpi import TaskDivision
+from qimpy.profiler import stopwatch, StopWatch
 from qimpy.io import log_config
 
 
@@ -24,63 +25,124 @@ def main() -> None:
         "--streamlines", help="Whether to draw streamlines", type=bool, default=False
     )
     args = parser.parse_args()
+    stream_kwargs = dict(linewidth=1.0, color="k", arrowsize=1.0)
 
     # Distirbute tasks over MPI:
     file_list = rc.comm.bcast(sorted(glob.glob(args.checkpoints)))
-    division = TaskDivision(n_tot=len(file_list), n_procs=rc.n_procs, i_proc=rc.i_proc)
-
+    geom = PlotGeometry(file_list[0])
     orig_log_level = log.getEffectiveLevel()
     log.setLevel(logging.INFO)  # Capture output from all processes
-    for checkpoint_file in file_list[division.i_start : division.i_stop]:
+    for checkpoint_file in file_list[rc.i_proc :: rc.n_procs]:
         plot_file = checkpoint_file.replace(".h5", ".png")
 
         # Load data from checkpoint:
+        rho_list = []
+        vx_list = []
+        vy_list = []
         with h5py.File(checkpoint_file, "r") as cp:
             n_quads = cp["/geometry/quads"].shape[0]
-            q_list = []
-            rho_list = []
-            v_list = []
             for i_quad in range(n_quads):
                 prefix = f"/geometry/quad{i_quad}"
-                q_list.append(np.array(cp[f"{prefix}/q"]))
                 rho_list.append(np.array(cp[f"{prefix}/rho"]))
-                v_list.append(np.array(cp[f"{prefix}/v"]))
+                if args.streamlines:
+                    v = np.array(cp[f"{prefix}/v"])
+                    vx_list.append(v[..., 0])
+                    vy_list.append(v[..., 1])
 
+        # Density:
         plt.clf()
-        rho_max = max(np.max(rho) for rho in rho_list)
-        contour_kwargs = dict(
-            levels=np.linspace(-1e-3 * rho_max, rho_max, 20), cmap="bwr"
+        rho_max_abs = max(np.max(np.abs(rho)) for rho in rho_list)
+        img = plt.imshow(
+            geom.interpolate(rho_list),
+            extent=geom.extents,
+            origin="lower",
+            cmap="bwr",
+            interpolation="bilinear",
+            vmin=-rho_max_abs,
+            vmax=+rho_max_abs,
         )
-        stream_kwargs = dict(density=2.0, linewidth=1.0, color="k", arrowsize=1.0)
 
-        for q, rho, v in zip(q_list, rho_list, v_list):
-            x = q[:, :, 0]
-            y = q[:, :, 1]
-            contour = plt.contourf(x, y, rho, **contour_kwargs)
-
-            if args.streamlines:
-                plt.streamplot(x, y, v[..., 0].T, v[..., 1].T, **stream_kwargs)
-
-            # Label edges:
-            NX, NY = x.shape
-            midNX = slice(NX // 2, NX // 2 + 2)
-            midNY = slice(NY // 2, NY // 2 + 2)
-            text_kwargs = dict(ha="center", rotation_mode="anchor")
-            for i_edge, q_mid in enumerate(
-                (q[midNX, 0], q[-1, midNY], q[midNX, -1][::-1], q[0, midNY][::-1])
-            ):
-                dq = np.diff(q_mid, axis=0)[0]
-                angle = np.rad2deg(np.arctan2(dq[1], dq[0]))
-                plt.text(*q_mid[0], f"{i_edge}$\\to$", rotation=angle, **text_kwargs)
+        # Optional streamlines:
+        if args.streamlines:
+            plt.streamplot(
+                geom.x_grid,
+                geom.y_grid,
+                geom.interpolate(vx_list),
+                geom.interpolate(vy_list),
+                **stream_kwargs,
+            )
 
         plt.gca().set_aspect("equal")
-        plt.colorbar(contour)
+        rho_max_str = r"|\rho|_{\mathrm{max}}"
+        cbar = plt.colorbar(
+            img,
+            ticks=[-rho_max_abs, 0, +rho_max_abs],
+            label=f"Density (${rho_max_str}$ = {rho_max_abs:6.2e})",
+        )
+        cbar.ax.set_yticklabels([rf"$-{rho_max_str}$", "0", rf"$+{rho_max_str}$"])
         plt.savefig(plot_file, bbox_inches="tight", dpi=200)
         log.info(f"Saved {plot_file}")
 
     log.setLevel(orig_log_level)  # Switch log back to single process
     rc.comm.Barrier()
     rc.report_end()
+    StopWatch.print_stats()
+
+
+class PlotGeometry:
+    """Load geometry and cache quantities to accelerate plotting from checkpoint."""
+
+    @stopwatch(name="PlotGeometry.init")
+    def __init__(self, checkpoint_file: str):
+        # Load geometry:
+        q_list = []
+        triangles = []
+        with h5py.File(checkpoint_file, "r") as cp:
+            grid_spacing = float(cp["/geometry"].attrs["grid_spacing"])
+            n_quads = cp["/geometry/quads"].shape[0]
+            n_points_prev = 0
+            for i_quad in range(n_quads):
+                prefix = f"/geometry/quad{i_quad}"
+                q_list.append(np.array(cp[f"{prefix}/q"]))
+                grid_size = q_list[-1].shape[:-1]
+                n_points = np.prod(grid_size)
+                indices = n_points_prev + np.arange(n_points).reshape(grid_size)
+                triangles.append(
+                    np.stack(
+                        (
+                            indices[:-1, :-1],
+                            indices[1:, :-1],
+                            indices[1:, 1:],
+                            indices[:-1, :-1],
+                            indices[1:, 1:],
+                            indices[:-1, 1:],
+                        ),
+                        axis=-1,
+                    ).reshape(-1, 3)
+                )
+                n_points_prev += n_points
+
+        # Comnstruct triangulation:
+        triangles = np.concatenate(triangles, axis=0)
+        q_all = np.concatenate([q.reshape(-1, 2) for q in q_list])
+        self.triangulation = mtri.Triangulation(*q_all.T, triangles)
+
+        # Construct target grid for interpolation
+        x_min, y_min = q_all.min(axis=0)
+        x_max, y_max = q_all.max(axis=0)
+        self.extents = (x_min, x_max, y_min, y_max)
+        Nx = 1 + int(np.round((x_max - x_min) / grid_spacing))
+        Ny = 1 + int(np.round((y_max - y_min) / grid_spacing))
+        x_grid_1d = np.linspace(x_min, x_max, Nx)
+        y_grid_1d = np.linspace(y_min, y_max, Ny)
+        self.x_grid, self.y_grid = np.meshgrid(x_grid_1d, y_grid_1d)
+
+    @stopwatch
+    def interpolate(self, values_list: list[np.ndarray]) -> np.ndarray:
+        """Interpolate from geometry to bounding-box grid."""
+        values_all = np.concatenate([values.flatten() for values in values_list])
+        interpolator = mtri.LinearTriInterpolator(self.triangulation, values_all)
+        return interpolator(self.x_grid, self.y_grid)
 
 
 if __name__ == "__main__":

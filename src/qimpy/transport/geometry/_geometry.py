@@ -23,6 +23,7 @@ class Geometry(TreeNode):
     """Geometry specification."""
 
     comm: MPI.Comm  #: Communicator for real-space split over patches
+    grid_spacing: float  #: Grid spacing used for discretization
     quad_set: QuadSet  #: Original geometry specification from SVG
     sub_quad_set: SubQuadSet  #: Division into smaller quads for tuning parallelization
     patches: list[Advect]  #: Advection for each quad patch local to this process
@@ -58,6 +59,7 @@ class Geometry(TreeNode):
         """
         super().__init__()
         self.comm = process_grid.get_comm("r")
+        self.grid_spacing = grid_spacing
         self.quad_set = parse_svg(svg_file, grid_spacing)
 
         # Subdivide:
@@ -218,6 +220,7 @@ class Geometry(TreeNode):
             "rho",
             "v",
         ]
+        cp_path.attrs["grid_spacing"] = self.grid_spacing
         # MPI-split data:
         checkpoint, path = cp_path
         for i_quad, grid_size_np in enumerate(self.quad_set.grid_size):
