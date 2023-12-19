@@ -152,7 +152,12 @@ class PlotGeometry:
         self.exterior_splines = []
         for i_quad, adjacency_quad in enumerate(adjacency):
             for i_edge, (j_quad, j_edge) in enumerate(adjacency_quad):
-                if j_quad >= 0:
+                is_exterior = (j_quad < 0) or (
+                    displacement_magnitudes[i_quad, i_edge] > tol
+                )
+                if is_exterior:
+                    self.exterior_splines.append(vertices[quads[i_quad, i_edge]])
+                else:
                     indices_i = edge_indices[i_quad][i_edge]
                     indices_j = edge_indices[j_quad][j_edge][::-1]
                     triangles.append(
@@ -160,12 +165,6 @@ class PlotGeometry:
                             (indices_i[:-1], indices_j[:-1], indices_j[1:]), axis=-1
                         ).reshape(-1, 3)
                     )
-                    is_exterior = displacement_magnitudes[i_quad, i_edge] > tol
-                else:
-                    is_exterior = True
-
-                if is_exterior:
-                    self.exterior_splines.append(vertices[quads[i_quad, i_edge]])
 
         # Comnstruct triangulation:
         triangles = np.concatenate(triangles, axis=0)
