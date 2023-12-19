@@ -5,6 +5,7 @@ import logging
 
 import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
+from matplotlib.colors import ListedColormap
 import numpy as np
 import h5py
 
@@ -26,7 +27,6 @@ def main() -> None:
         "--streamlines", help="Whether to draw streamlines", type=bool, default=False
     )
     args = parser.parse_args()
-    stream_kwargs = dict(linewidth=1.0, color="k", arrowsize=0.7)
 
     # Distirbute tasks over MPI:
     file_list = rc.comm.bcast(sorted(glob.glob(args.checkpoints)))
@@ -65,12 +65,15 @@ def main() -> None:
 
         # Optional streamlines:
         if args.streamlines:
+            vx = geom.interpolate(vx_list)
+            vy = geom.interpolate(vy_list)
+            v_mag = np.hypot(vx, vy).filled(0.0)
+            v_rel = v_mag / v_mag.max()
+            colors = np.zeros((256, 4))
+            colors[:, -1] = np.linspace(v_rel.min(), 1.0, len(colors))
+            alpha_cmap = ListedColormap(colors)
             plt.streamplot(
-                geom.x_grid,
-                geom.y_grid,
-                geom.interpolate(vx_list),
-                geom.interpolate(vy_list),
-                **stream_kwargs,
+                geom.x_grid, geom.y_grid, vx, vy, color=v_rel, cmap=alpha_cmap
             )
 
         # Draw domain boundaries:
