@@ -1,6 +1,7 @@
 from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import List
 import os
 
 import numpy as np
@@ -23,6 +24,8 @@ class QuadSet:
     adjacency: np.ndarray  #: Nquads x 4 x 2: neighbor indices for each (quad, edge)
     displacements: np.ndarray  #: Nquads x 4 x 2 edge displacements for each adjacency
     grid_size: np.ndarray  #: Nquads x 2 grid dimensions for each quad
+    contacts: np.ndarray  #: Ncontacts x 3 (x, y coordinate of center and radius of each circle)
+    contact_names: List[str]  # Ncontacts
 
     def get_boundary(self, i_quad: int) -> np.ndarray:
         """Get sequence of boundary points (12 x 2) defining a specified quad.
@@ -35,6 +38,7 @@ def parse_svg(svg_file: str, grid_spacing: float, tol: float = 1e-3) -> QuadSet:
     """Parse SVG file into QuadSet, sampled with `grid_spacing`,
     and with vertex equivalence determined with tolerance `tol`."""
     splines, colors = get_splines(svg_file)
+    contacts, contact_names = get_circles(svg_file)
     vertices, edges = weld_points(splines, tol=tol)
     cycles = find_cycles(edges, vertices)
 
@@ -104,7 +108,9 @@ def parse_svg(svg_file: str, grid_spacing: float, tol: float = 1e-3) -> QuadSet:
         n_points[sel] = int(np.ceil(max_length / grid_spacing))
     grid_size = n_points.reshape(-1, 2)  # now n_quads x 2 grid dimensions
 
-    return QuadSet(vertices, quads, adjacency, displacements, grid_size)
+    return QuadSet(
+        vertices, quads, adjacency, displacements, grid_size, contacts, contact_names
+    )
 
 
 def parse_style(style_str: str):
@@ -137,6 +143,24 @@ def get_splines(svg_file: str) -> tuple[np.ndarray, list]:
     splines = np.array(splines_complex)
     splines = np.stack((splines.real, splines.imag), axis=-1)  # to real array
     return splines, colors
+
+
+def get_circles(svg_file: str) -> tuple[np.ndarray, list]:
+    """Get all circle parameters from SVG file."""
+    svg_circles = minidom.parse(svg_file).getElementsByTagName("circle")
+
+    # Gather parameters from all circles in SVG file
+    params = []
+    ids = []
+    for circle in svg_circles:
+        cx = float(circle.getAttribute("cx"))
+        cy = float(circle.getAttribute("cy"))
+        r = float(circle.getAttribute("r"))
+        circle_id = str(circle.getAttribute("id"))
+        params.append([cx, cy, r])
+        ids.append(circle_id)
+
+    return np.array(params), ids
 
 
 def ensure_cubic_spline(segment) -> list[complex]:
