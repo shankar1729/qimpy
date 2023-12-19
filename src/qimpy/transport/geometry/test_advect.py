@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from qimpy import log, rc
-from qimpy.io import log_config, Checkpoint, CheckpointPath, CheckpointContext
+from qimpy.io import log_config
 from qimpy.profiler import StopWatch
 from .. import Transport
 
@@ -42,6 +42,7 @@ def run(
     sigma: float,
     q0: torch.Tensor,
     v0: torch.Tensor,
+    t_max: float,
     svg_file: str,
     save_frames: bool = False,
 ) -> float:
@@ -50,9 +51,12 @@ def run(
     # Initialize transport system:
     vF = v0.norm().item()
     init_angle = torch.atan2(v0[1], v0[0]).item()
+    dt_save = (0.01 if save_frames else 2) * t_max
     transport = Transport(
         fermi_circle=dict(kF=1.0, vF=vF, N_theta=N_theta, theta0=init_angle),
         geometry=dict(svg_file=svg_file, grid_spacing=grid_spacing),
+        time_evolution=dict(t_max=t_max, dt_save=dt_save),
+        checkpoint_out="animation/advect_{:4d}.h5",
     )
     geometry = transport.geometry
 
@@ -65,35 +69,14 @@ def run(
         bbox_size = np.max(vertices, axis=0) - np.min(vertices, axis=0)
         Rbasis = torch.diag(torch.from_numpy(bbox_size)).to(rc.device)
 
-    # Set the time for slightly more than one period
-    distance = torch.linalg.det(Rbasis).abs().sqrt().item()  # move ~ one cell
-    time_steps = round(distance / (vF * geometry.dt))
-    t_final = time_steps * geometry.dt
-    log.info(
-        f"\nStarting {time_steps}-step run for {grid_spacing = :g}"
-        f" at t[s]: {rc.clock():.2f}"
-    )
-
-    # Initialize initial and expected final density
+    # Initialize density
     for patch in geometry.patches:
         patch.rho[..., 0] = gaussian_blob(patch.q, q0, Rbasis, sigma)
 
-    plot_interval = int(np.ceil(0.01 * time_steps))
-    save_frame = 0
-    for time_step in range(time_steps):
-        log.info(f"Step {time_step} at t[s]: {rc.clock():.2f}")
-        if save_frames and (time_step % plot_interval == 0):
-            watch = StopWatch("save_frame")
-            with Checkpoint(
-                f"animation/advect_{save_frame:04d}.h5", writable=True, rotate=False
-            ) as cp:
-                transport.save_checkpoint(CheckpointPath(cp), CheckpointContext(""))
-            watch.stop()
-            save_frame += 1
-        geometry.time_step()
+    transport.run()
 
     # Compute final density error:
-    q_final = q0 + v0 * t_final
+    q_final = q0 + v0 * transport.time_evolution.t
     rho_sum_tot = 0.0
     rho_err_tot = 0.0
     for patch in geometry.patches:
@@ -143,20 +126,21 @@ def main():
     parser.add_argument("--sigma", help="gaussian width", type=float, required=True)
     parser.add_argument("--q0", help="origin", nargs=2, type=float, required=True)
     parser.add_argument("--v0", help="velocity", nargs=2, type=float, required=True)
+    parser.add_argument("--t_max", help="stopping time", type=float, required=True)
     parser.add_argument("--h_max", help="max spacing for convergence test", type=float)
     parser.add_argument("--svg", help="SVG geometry file", type=str, required=True)
     args = parser.parse_args()
 
+    run_args = dict(
+        N_theta=args.Ntheta,
+        sigma=args.sigma,
+        q0=torch.tensor(args.q0, device=rc.device),
+        v0=torch.tensor(args.v0, device=rc.device),
+        t_max=args.t_max,
+        svg_file=args.svg,
+    )
     if args.h_max is None:
-        run(
-            grid_spacing=args.h,
-            N_theta=args.Ntheta,
-            sigma=args.sigma,
-            q0=torch.tensor(args.q0, device=rc.device),
-            v0=torch.tensor(args.v0, device=rc.device),
-            svg_file=args.svg,
-            save_frames=True,
-        )
+        run(grid_spacing=args.h, save_frames=True, **run_args)
     else:
         # Convergence test:
         assert isinstance(args.h_max, float)
@@ -165,15 +149,7 @@ def main():
         err_list = []
         h = args.h
         while h <= args.h_max:
-            err = run(
-                grid_spacing=h,
-                N_theta=args.Ntheta,
-                sigma=args.sigma,
-                q0=torch.tensor(args.q0, device=rc.device),
-                v0=torch.tensor(args.v0, device=rc.device),
-                svg_file=args.svg,
-                save_frames=False,
-            )
+            err = run(grid_spacing=h, save_frames=False, **run_args)
             h_list.append(h)
             err_list.append(err)
             h *= 2

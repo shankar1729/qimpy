@@ -28,6 +28,7 @@ class Geometry(TreeNode):
     sub_quad_set: SubQuadSet  #: Division into smaller quads for tuning parallelization
     patches: list[Advect]  #: Advection for each quad patch local to this process
     patch_division: TaskDivision  #: Division of patches over `comm`
+    dt_max: float  #: Maximum stable time step
 
     # v_F and N_theta should eventually be material paramteters
     def __init__(
@@ -93,7 +94,7 @@ class Geometry(TreeNode):
                     need_reflector=(adjacency[:, 0] == -1),
                 )
             )
-        self.dt = self.comm.allreduce(
+        self.dt_max = self.comm.allreduce(
             min(patch.dt_max for patch in self.patches), op=MPI.MIN
         )
 
@@ -199,11 +200,11 @@ class Geometry(TreeNode):
             )
         ]
 
-    def time_step(self) -> None:
+    def time_step(self, dt: float) -> None:
         """Second-order correct time step."""
         rho_list_init = self.rho_list
-        rho_list_half = self.next_rho_list(0.5 * self.dt, rho_list_init, rho_list_init)
-        self.rho_list = self.next_rho_list(self.dt, rho_list_init, rho_list_half)
+        rho_list_half = self.next_rho_list(0.5 * dt, rho_list_init, rho_list_init)
+        self.rho_list = self.next_rho_list(dt, rho_list_init, rho_list_half)
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
