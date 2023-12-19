@@ -70,7 +70,7 @@ def run(*, grid_spacing, N_theta, q0, v0, svg_file, save_frames=False) -> float:
     for patch in geometry.patches:
         patch.rho[..., 0] = gaussian_blob(patch.q, q0, Rbasis, sigma)
 
-    plot_interval = round(0.02 * time_steps)
+    plot_interval = int(np.ceil(0.01 * time_steps))
     save_frame = 0
     for time_step in range(time_steps):
         log.info(f"Step {time_step} at t[s]: {rc.clock():.2f}")
