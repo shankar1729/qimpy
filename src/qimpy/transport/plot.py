@@ -26,6 +26,9 @@ def main() -> None:
     parser.add_argument(
         "--streamlines", help="Whether to draw streamlines", type=bool, default=False
     )
+    parser.add_argument(
+        "--transparency", help="Transparency in streamlines", type=bool, default=False
+    )
     args = parser.parse_args()
 
     # Distirbute tasks over MPI:
@@ -67,14 +70,15 @@ def main() -> None:
         if args.streamlines:
             vx = geom.interpolate(vx_list)
             vy = geom.interpolate(vy_list)
-            v_mag = np.hypot(vx, vy).filled(0.0)
-            v_rel = v_mag / v_mag.max()
-            colors = np.zeros((256, 4))
-            colors[:, -1] = np.linspace(v_rel.min(), 1.0, len(colors))
-            alpha_cmap = ListedColormap(colors)
-            plt.streamplot(
-                geom.x_grid, geom.y_grid, vx, vy, color=v_rel, cmap=alpha_cmap
-            )
+            stream_kwargs = dict(color="k", linewidth=1, arrowsize=0.7)
+            if args.transparency:
+                v_mag = np.hypot(vx, vy).filled(0.0)
+                v_rel = v_mag / v_mag.max()
+                colors = np.zeros((256, 4))
+                colors[:, -1] = np.linspace(v_rel.min(), 1.0, len(colors))
+                alpha_cmap = ListedColormap(colors)
+                stream_kwargs.update(dict(color=v_rel, cmap=alpha_cmap))
+            plt.streamplot(geom.x_grid, geom.y_grid, vx, vy, **stream_kwargs)
 
         # Draw domain boundaries:
         for spline in geom.exterior_splines:
@@ -88,6 +92,9 @@ def main() -> None:
             label=f"Density (${rho_max_str}$ = {rho_max_abs:6.2e})",
         )
         cbar.ax.set_yticklabels([rf"$-{rho_max_str}$", "0", rf"$+{rho_max_str}$"])
+        spines = plt.gca().spines
+        spines["top"].set_visible(False)
+        spines["right"].set_visible(False)
         plt.savefig(plot_file, bbox_inches="tight", dpi=200)
         log.info(f"Saved {plot_file}")
 
