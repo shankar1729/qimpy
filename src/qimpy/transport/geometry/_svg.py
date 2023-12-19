@@ -1,7 +1,6 @@
 from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import List
 import os
 
 import numpy as np
@@ -24,8 +23,8 @@ class QuadSet:
     adjacency: np.ndarray  #: Nquads x 4 x 2: neighbor indices for each (quad, edge)
     displacements: np.ndarray  #: Nquads x 4 x 2 edge displacements for each adjacency
     grid_size: np.ndarray  #: Nquads x 2 grid dimensions for each quad
-    contacts: np.ndarray  #: Ncontacts x 3 (x, y coordinate of center and radius of each circle)
-    contact_names: List[str]  # Ncontacts
+    contacts: np.ndarray  #: Ncontacts x 3: center x, y  and radius of each circle
+    contact_names: list[str]  # Ncontacts names of contacts usable in input file
 
     def get_boundary(self, i_quad: int) -> np.ndarray:
         """Get sequence of boundary points (12 x 2) defining a specified quad.
@@ -37,8 +36,9 @@ class QuadSet:
 def parse_svg(svg_file: str, grid_spacing: float, tol: float = 1e-3) -> QuadSet:
     """Parse SVG file into QuadSet, sampled with `grid_spacing`,
     and with vertex equivalence determined with tolerance `tol`."""
-    splines, colors = get_splines(svg_file)
-    contacts, contact_names = get_circles(svg_file)
+    svg_xml = minidom.parse(svg_file)
+    splines, colors = get_splines(svg_xml)
+    contacts, contact_names = get_circles(svg_xml)
     vertices, edges = weld_points(splines, tol=tol)
     cycles = find_cycles(edges, vertices)
 
@@ -119,9 +119,9 @@ def parse_style(style_str: str):
     }
 
 
-def get_splines(svg_file: str) -> tuple[np.ndarray, list]:
+def get_splines(svg_xml: minidom.Document) -> tuple[np.ndarray, list]:
     """Get spline geometries and colors from SVG file."""
-    svg_paths = minidom.parse(svg_file).getElementsByTagName("path")
+    svg_paths = svg_xml.getElementsByTagName("path")
 
     # Concatenate segments from all paths in SVG file, and parse associated styles
     segments = []
@@ -145,9 +145,9 @@ def get_splines(svg_file: str) -> tuple[np.ndarray, list]:
     return splines, colors
 
 
-def get_circles(svg_file: str) -> tuple[np.ndarray, list]:
+def get_circles(svg_xml: minidom.Document) -> tuple[np.ndarray, list]:
     """Get all circle parameters from SVG file."""
-    svg_circles = minidom.parse(svg_file).getElementsByTagName("circle")
+    svg_circles = svg_xml.getElementsByTagName("circle")
 
     # Gather parameters from all circles in SVG file
     params = []
