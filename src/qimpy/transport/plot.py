@@ -11,6 +11,7 @@ import h5py
 from qimpy import rc, log
 from qimpy.profiler import stopwatch, StopWatch
 from qimpy.io import log_config
+from .geometry import BOUNDARY_SLICES
 
 
 def main() -> None:
@@ -97,9 +98,11 @@ class PlotGeometry:
         # Load geometry:
         q_list = []
         triangles = []
+        edge_indices = []
         with h5py.File(checkpoint_file, "r") as cp:
             grid_spacing = float(cp["/geometry"].attrs["grid_spacing"])
-            n_quads = cp["/geometry/quads"].shape[0]
+            adjacency = np.array(cp["/geometry/adjacency"])
+            n_quads = len(adjacency)
             n_points_prev = 0
             for i_quad in range(n_quads):
                 prefix = f"/geometry/quad{i_quad}"
@@ -121,6 +124,21 @@ class PlotGeometry:
                     ).reshape(-1, 3)
                 )
                 n_points_prev += n_points
+
+                # Store edge indices for triangulating between patches:
+                edge_indices.append([indices[boundary] for boundary in BOUNDARY_SLICES])
+
+        # Add triangles between adjacent segments:
+        for i_quad, adjacency_quad in enumerate(adjacency):
+            for i_edge, (j_quad, j_edge) in enumerate(adjacency_quad):
+                if j_quad >= 0:
+                    indices_i = edge_indices[i_quad][i_edge]
+                    indices_j = edge_indices[j_quad][j_edge][::-1]
+                    triangles.append(
+                        np.stack(
+                            (indices_i[:-1], indices_j[:-1], indices_j[1:]), axis=-1
+                        ).reshape(-1, 3)
+                    )
 
         # Comnstruct triangulation:
         triangles = np.concatenate(triangles, axis=0)
