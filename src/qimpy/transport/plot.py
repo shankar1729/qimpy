@@ -11,7 +11,7 @@ import h5py
 from qimpy import rc, log
 from qimpy.profiler import stopwatch, StopWatch
 from qimpy.io import log_config
-from .geometry import BOUNDARY_SLICES
+from .geometry import BOUNDARY_SLICES, plot_spline
 
 
 def main() -> None:
@@ -26,7 +26,7 @@ def main() -> None:
         "--streamlines", help="Whether to draw streamlines", type=bool, default=False
     )
     args = parser.parse_args()
-    stream_kwargs = dict(linewidth=1.0, color="k", arrowsize=1.0)
+    stream_kwargs = dict(linewidth=1.0, color="k", arrowsize=0.7)
 
     # Distirbute tasks over MPI:
     file_list = rc.comm.bcast(sorted(glob.glob(args.checkpoints)))
@@ -73,6 +73,10 @@ def main() -> None:
                 **stream_kwargs,
             )
 
+        # Draw domain boundaries:
+        for spline in geom.exterior_splines:
+            plot_spline(plt.gca(), spline)
+
         plt.gca().set_aspect("equal")
         rho_max_str = r"|\rho|_{\mathrm{max}}"
         cbar = plt.colorbar(
@@ -101,8 +105,13 @@ class PlotGeometry:
         edge_indices = []
         with h5py.File(checkpoint_file, "r") as cp:
             grid_spacing = float(cp["/geometry"].attrs["grid_spacing"])
+            vertices = np.array(cp["/geometry/vertices"])
+            quads = np.array(cp["/geometry/quads"])
             adjacency = np.array(cp["/geometry/adjacency"])
-            n_quads = len(adjacency)
+            displacement_magnitudes = np.linalg.norm(
+                np.array(cp["/geometry/displacements"]), axis=-1
+            )
+            n_quads = len(quads)
             n_points_prev = 0
             for i_quad in range(n_quads):
                 prefix = f"/geometry/quad{i_quad}"
@@ -128,7 +137,9 @@ class PlotGeometry:
                 # Store edge indices for triangulating between patches:
                 edge_indices.append([indices[boundary] for boundary in BOUNDARY_SLICES])
 
-        # Add triangles between adjacent segments:
+        # Add triangles between adjacent segments and collect exterior splines:
+        tol = 1e-3
+        self.exterior_splines = []
         for i_quad, adjacency_quad in enumerate(adjacency):
             for i_edge, (j_quad, j_edge) in enumerate(adjacency_quad):
                 if j_quad >= 0:
@@ -139,6 +150,12 @@ class PlotGeometry:
                             (indices_i[:-1], indices_j[:-1], indices_j[1:]), axis=-1
                         ).reshape(-1, 3)
                     )
+                    is_exterior = displacement_magnitudes[i_quad, i_edge] > tol
+                else:
+                    is_exterior = True
+
+                if is_exterior:
+                    self.exterior_splines.append(vertices[quads[i_quad, i_edge]])
 
         # Comnstruct triangulation:
         triangles = np.concatenate(triangles, axis=0)

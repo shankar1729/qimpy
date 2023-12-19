@@ -50,7 +50,9 @@ def cubic_bernstein(t: torch.Tensor) -> torch.Tensor:
     )
 
 
-def plot_spline(ax, spline: np.ndarray, n_points: int = 64) -> None:
+def plot_spline(
+    ax, spline: np.ndarray, n_points: int = 64, show_handles: bool = False
+) -> None:
     assert len(spline) == 4
     t = np.linspace(0.0, 1.0, n_points + 1)[:, None]
     t_bar = 1.0 - t
@@ -61,9 +63,11 @@ def plot_spline(ax, spline: np.ndarray, n_points: int = 64) -> None:
     points = result[0]
     # Plot
     ax.plot(points[:, 0], points[:, 1], color="k")
-    ax.plot(spline[:2, 0], spline[:2, 1], color="r")
-    ax.plot(spline[2:, 0], spline[2:, 1], color="r")
-    ax.scatter(spline[1:3, 0], spline[1:3, 1], color="r")
+    # Optional handles:
+    if show_handles:
+        ax.plot(spline[:2, 0], spline[:2, 1], color="r")
+        ax.plot(spline[2:, 0], spline[2:, 1], color="r")
+        ax.scatter(spline[1:3, 0], spline[1:3, 1], color="r")
 
 
 def spline_length(spline: np.ndarray, n_points: int = 64) -> np.ndarray:

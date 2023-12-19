@@ -43,7 +43,7 @@ def main():
     ax = plt.gca()
     ax.set_aspect("equal")
     for edge in quad_set.quads.reshape(-1, 4):
-        plot_spline(ax, quad_set.vertices[edge])
+        plot_spline(ax, quad_set.vertices[edge], show_handles=True)
 
     # Test subdivision:
     grid_size_max = select_division(quad_set, args.n_processes)
