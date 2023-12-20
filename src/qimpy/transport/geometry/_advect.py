@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Callable, Optional
+from typing import Callable, Optional, NamedTuple
 
 import numpy as np
 import torch
@@ -7,6 +7,13 @@ import torch
 from qimpy import rc
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
+
+
+class Contact(NamedTuple):
+    """Definition of a contact."""
+
+    selection: slice  #: Slice of edge's data that are within the contact
+    rho: torch.Tensor  #: Corresponding distribution values
 
 
 class Advect:
@@ -22,9 +29,11 @@ class Advect:
     rho_padded_shape: tuple[int, ...]  #: Shape of density matrix with ghost padding
     rho: torch.Tensor  #: current density matrix on this patch
     v_prime: torch.jit.ScriptModule  #: Underlying advection logic
+
     reflectors: list[
         Optional[Callable[[torch.Tensor], torch.Tensor]]
     ]  #: Material-dependent reflector for each edge that needs one
+    contacts: list[list[Contact]]  #: Contacts (multiple possibly) by edge
 
     N_GHOST: int = 2  #: currently a constant, but could depend on slope method later
 
@@ -41,7 +50,9 @@ class Advect:
         grid_size_tot: tuple[int, ...],
         grid_start: tuple[int, ...],
         grid_stop: tuple[int, ...],
-        need_reflector: np.ndarray,
+        is_reflective: np.ndarray,
+        contact_circles: torch.Tensor,
+        contact_params: list[dict],
         material: Material,
     ) -> None:
         # Initialize mesh:
@@ -92,7 +103,8 @@ class Advect:
 
         # Initialize reflectors if needed:
         self.reflectors = [None] * 4
-        for i_edge in np.where(need_reflector)[0]:
+        self.contacts = [[] for _ in range(4)]  # Note: [[]]*N makes N refs to one []!
+        for i_edge in np.where(is_reflective)[0]:
             i_dim = i_edge % 2  # long direction of edge
             j_dim = 1 - i_dim  # other direction
             # Compute tangent direction:
@@ -119,6 +131,24 @@ class Advect:
             normal = torch.stack((tangent[..., 1], -tangent[..., 0]), dim=-1)
             normal *= (1.0 / normal.norm(dim=-1))[..., None]  # unit outward normal
             self.reflectors[i_edge] = material.get_reflector(normal)
+
+            # Check for any contacts:
+            centers = contact_circles[:, :2]
+            radii = contact_circles[:, 2]
+            distances = (q_edge.detach()[None] - centers[:, None]).norm(dim=-1)
+            within = distances <= radii[:, None]
+            for i_contact, contact_params_i in enumerate(contact_params):
+                if len(selection := torch.argwhere(within[i_contact])):
+                    selection_start = selection.min().item()
+                    selection_stop = selection.max().item() + 1
+                    assert (selection_stop - selection_start) == len(selection)
+                    # Assume each edge intersection with contact is contiguous
+                    # Using this reduce selection to a slice (more convenient):
+                    contact_slice = slice(selection_start, selection_stop)
+                    contact_rho = material.get_contact_distribution(
+                        normal[contact_slice], **contact_params_i
+                    )
+                    self.contacts[i_edge].append(Contact(contact_slice, contact_rho))
 
     @stopwatch
     def drho(self, dt: float, rho: torch.Tensor) -> torch.Tensor:

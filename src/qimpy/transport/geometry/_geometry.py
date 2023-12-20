@@ -24,6 +24,7 @@ class Geometry(TreeNode):
 
     comm: MPI.Comm  #: Communicator for real-space split over patches
     grid_spacing: float  #: Grid spacing used for discretization
+    contact_names: list[str]  #: Names of contacts used in SVG specification and plots
     quad_set: QuadSet  #: Original geometry specification from SVG
     sub_quad_set: SubQuadSet  #: Division into smaller quads for tuning parallelization
     patches: list[Advect]  #: Advection for each quad patch local to this process
@@ -37,6 +38,7 @@ class Geometry(TreeNode):
         material: Material,
         svg_file: str,
         grid_spacing: float,
+        contacts: dict[str, dict],
         grid_size_max: int = 0,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
@@ -61,7 +63,10 @@ class Geometry(TreeNode):
         super().__init__()
         self.comm = process_grid.get_comm("r")
         self.grid_spacing = grid_spacing
-        self.quad_set = parse_svg(svg_file, grid_spacing)
+        self.contact_names = list(contacts.keys())
+        self.quad_set = parse_svg(svg_file, grid_spacing, self.contact_names)
+        contact_circles = torch.from_numpy(self.quad_set.contacts).to(rc.device)
+        contact_params = list(contacts.values())
 
         # Subdivide:
         if not grid_size_max:
@@ -91,7 +96,9 @@ class Geometry(TreeNode):
                     grid_start=grid_start,
                     grid_stop=grid_stop,
                     material=material,
-                    need_reflector=(adjacency[:, 0] == -1),
+                    is_reflective=(adjacency[:, 0] == -1),
+                    contact_circles=contact_circles,
+                    contact_params=contact_params,
                 )
             )
         self.dt_max = self.comm.allreduce(
@@ -128,7 +135,8 @@ class Geometry(TreeNode):
                     # Reflection (always local)
                     if self.patch_division.is_mine(i_patch):
                         i_patch_mine = i_patch - self.patch_division.i_start
-                        reflector = self.patches[i_patch_mine].reflectors[i_edge]
+                        patch = self.patches[i_patch_mine]
+                        reflector = patch.reflectors[i_edge]
                         assert reflector is not None
                         # Fetch the data in appropriate orientation:
                         ghost_data = rho_list[i_patch_mine][IN_SLICES[i_edge]]
@@ -137,6 +145,9 @@ class Geometry(TreeNode):
                         # Reflect:
                         ghost_data = reflector(ghost_data)  # reciprocal space changes
                         ghost_data = ghost_data.flip(dims=(0,))  # flip short axis
+                        # Apply contacts, if any:
+                        for contact_slice, contact_rho in patch.contacts[i_edge]:
+                            ghost_data[:, contact_slice] = contact_rho[None]
                         # Store back:
                         if i_edge % 2 == 0:
                             ghost_data = ghost_data.swapaxes(0, 1)  # restore axis order

@@ -50,5 +50,11 @@ class Material(TreeNode):
     def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
         """Return a function (or callable object) to calculate reflections for a
         sequence of surface points with unit normals (Nsurf x 2). This function will
-        be called with a Nghost x Nsurf x Nk tensor, and the reflection should be
+        be called with a Nghost x Nsurf x Nkbb tensor, and the reflection should be
         calculated pointwise in real-space with output of the same dimensions."""
+
+    @abstractmethod
+    def get_contact_distribution(self, n: torch.Tensor, **kwargs) -> torch.Tensor:
+        """Return the distribution function at a contact with orientation `n`
+        and specified keyword arguments. For an Nsurf x 2 tensor n, the
+        output should be the corresponding Nsurf x Nkbb distribution function."""

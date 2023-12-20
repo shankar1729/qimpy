@@ -1,0 +1,20 @@
+fermi_circle:
+  kF: 1.0
+  vF: 1.5
+  N-theta: 256
+
+geometry:
+  svg_file: semicircle.svg
+  grid_spacing: 1.0
+
+  contacts:
+    source:
+      dmu: +0.1
+    drain:
+      dmu: -0.1
+
+time_evolution:
+  t_max: 400.0
+  dt_save: 2.0
+
+checkpoint_out: animation/advect_{:04d}.h5

@@ -55,6 +55,15 @@ class FermiCircle(Material):
             k=k, wk=wk, E=E, v=v, checkpoint_in=checkpoint_in, process_grid=process_grid
         )
 
+    def get_contact_distribution(
+        self, n: torch.Tensor, *, dmu: float = 0.0, vD: float = 0.0
+    ) -> torch.Tensor:
+        """Return contact distribution function for specified chemical potential
+        shift and drift velocity. Note that positive vD corresponds to current
+        flowing into the device (along -n), while negative vD flows out (along +n)."""
+        v_hat = self.transport_velocity / self.vF
+        return dmu - (n @ v_hat.T) * (vD / self.vF)  # TODO: check
+
     def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
         return SpecularReflector(n, self.v, self.comm)
 

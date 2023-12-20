@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Iterable
 from collections import defaultdict
 from dataclasses import dataclass
 import os
@@ -8,6 +9,7 @@ from svg.path import parse_path, CubicBezier, Line, Close
 from xml.dom import minidom
 
 from qimpy import rc
+from qimpy.io import InvalidInputException
 from . import spline_length
 
 
@@ -24,7 +26,6 @@ class QuadSet:
     displacements: np.ndarray  #: Nquads x 4 x 2 edge displacements for each adjacency
     grid_size: np.ndarray  #: Nquads x 2 grid dimensions for each quad
     contacts: np.ndarray  #: Ncontacts x 3: center x, y  and radius of each circle
-    contact_names: list[str]  # Ncontacts names of contacts usable in input file
 
     def get_boundary(self, i_quad: int) -> np.ndarray:
         """Get sequence of boundary points (12 x 2) defining a specified quad.
@@ -33,12 +34,28 @@ class QuadSet:
         return self.vertices[indices.flatten()]
 
 
-def parse_svg(svg_file: str, grid_spacing: float, tol: float = 1e-3) -> QuadSet:
+def parse_svg(
+    svg_file: str, grid_spacing: float, contact_names: Iterable[str], tol: float = 1e-3
+) -> QuadSet:
     """Parse SVG file into QuadSet, sampled with `grid_spacing`,
     and with vertex equivalence determined with tolerance `tol`."""
     svg_xml = minidom.parse(svg_file)
     splines, colors = get_splines(svg_xml)
-    contacts, contact_names = get_circles(svg_xml)
+    circles, circle_names = get_circles(svg_xml)
+
+    # Check contact specification:
+    contact_indices = []
+    for contact_name in contact_names:
+        try:
+            contact_indices.append(circle_names.index(contact_name))
+        except ValueError:
+            raise InvalidInputException(
+                f"Contact '{contact_name}' not found in {svg_file}."
+                " (Each contact name must match the id of a circle in the svg.)"
+            )
+    contacts = circles[contact_indices]
+
+    # Process mess geometry:
     vertices, edges = weld_points(splines, tol=tol)
     cycles = find_cycles(edges, vertices)
 
@@ -108,9 +125,7 @@ def parse_svg(svg_file: str, grid_spacing: float, tol: float = 1e-3) -> QuadSet:
         n_points[sel] = int(np.ceil(max_length / grid_spacing))
     grid_size = n_points.reshape(-1, 2)  # now n_quads x 2 grid dimensions
 
-    return QuadSet(
-        vertices, quads, adjacency, displacements, grid_size, contacts, contact_names
-    )
+    return QuadSet(vertices, quads, adjacency, displacements, grid_size, contacts)
 
 
 def parse_style(style_str: str):

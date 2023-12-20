@@ -23,9 +23,9 @@
      inkscape:pagecheckerboard="0"
      inkscape:document-units="px"
      showgrid="false"
-     inkscape:zoom="0.48358871"
-     inkscape:cx="-352.57233"
-     inkscape:cy="298.80764"
+     inkscape:zoom="0.96717742"
+     inkscape:cx="158.70925"
+     inkscape:cy="384.1074"
      inkscape:window-width="1920"
      inkscape:window-height="1013"
      inkscape:window-x="0"
@@ -57,5 +57,17 @@
        style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
        d="m 35.355339,135.35534 35.355339,35.35534"
        id="path1867" />
+    <circle
+       style="fill:#f40000;fill-opacity:0.490807;stroke:none;stroke-width:0.944882;stop-color:#000000"
+       id="source"
+       cx="0"
+       cy="175"
+       r="10" />
+    <circle
+       style="fill:#0001f4;fill-opacity:0.49080715;stroke:none;stroke-width:0.944882;stop-color:#000000"
+       id="drain"
+       cx="0"
+       cy="25"
+       r="10" />
   </g>
 </svg>
