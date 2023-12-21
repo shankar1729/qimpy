@@ -30,6 +30,7 @@ class Advect:
     rho: torch.Tensor  #: current density matrix on this patch
     v_prime: torch.jit.ScriptModule  #: Underlying advection logic
 
+    material: Material
     reflectors: list[
         Optional[Callable[[torch.Tensor], torch.Tensor]]
     ]  #: Material-dependent reflector for each edge that needs one
@@ -102,6 +103,7 @@ class Advect:
         self.v_prime = torch.jit.script(Vprime())
 
         # Initialize reflectors if needed:
+        self.material = material
         self.reflectors = [None] * 4
         self.contacts = [[] for _ in range(4)]  # Note: [[]]*N makes N refs to one []!
         for i_edge in np.where(is_reflective)[0]:
@@ -153,9 +155,10 @@ class Advect:
     @stopwatch
     def drho(self, dt: float, rho: torch.Tensor) -> torch.Tensor:
         """Compute drho for time step dt, given current rho."""
-        return (-dt) * (
-            self.v_prime(rho[:, Advect.NON_GHOST], self.V[..., 0], axis=0)
-            + self.v_prime(rho[Advect.NON_GHOST, :], self.V[..., 1], axis=1)
+        return dt * (
+            self.material.rho_dot_scatter(rho[Advect.NON_GHOST, Advect.NON_GHOST])
+            - self.v_prime(rho[:, Advect.NON_GHOST], self.V[..., 0], axis=0)
+            - self.v_prime(rho[Advect.NON_GHOST, :], self.V[..., 1], axis=1)
         )
 
     @property

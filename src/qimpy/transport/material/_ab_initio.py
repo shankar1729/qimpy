@@ -43,3 +43,9 @@ class AbInitio(Material):
 
     def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
         return NotImplemented
+
+    def get_contact_distribution(self, n: torch.Tensor, **kwargs) -> torch.Tensor:
+        return NotImplemented
+
+    def rho_dot_scatter(self, rho: torch.Tensor) -> torch.Tensor:
+        return NotImplemented

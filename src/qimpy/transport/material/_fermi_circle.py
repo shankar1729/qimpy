@@ -15,6 +15,8 @@ class FermiCircle(Material):
 
     kF: float  #: Fermi wave-vector
     vF: float  #: Fermi velocity
+    tau_p: float  #: Momentum relaxation time
+    tau_ee: float  #: Electron internal scattering time (momentum-conserving)
 
     def __init__(
         self,
@@ -22,6 +24,8 @@ class FermiCircle(Material):
         kF: float,
         vF: float,
         N_theta: int,
+        tau_p: float,
+        tau_ee: float,
         theta0: float = 0.0,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
@@ -42,6 +46,8 @@ class FermiCircle(Material):
         """
         self.kF = kF
         self.vF = vF
+        self.tau_p = tau_p
+        self.tau_ee = tau_ee
 
         # Create theta grid on Fermi circle:
         dtheta = 2 * np.pi / N_theta
@@ -66,6 +72,18 @@ class FermiCircle(Material):
 
     def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
         return SpecularReflector(n, self.v, self.comm)
+
+    def rho_dot_scatter(self, rho: torch.Tensor) -> torch.Tensor:
+        # Compute stationary and moving equlibrium carrier densities:
+        v = self.transport_velocity
+        rho_0 = rho.mean(dim=-1)[..., None]
+        rho_v = (
+            torch.einsum(
+                "...i, ki -> ...k", torch.einsum("...k, ki -> ...i", rho, v), v
+            )
+            / v.square().sum()
+        )
+        return -(rho - rho_0) / self.tau_p - (rho - rho_0 - rho_v) / self.tau_ee
 
 
 class SpecularReflector:

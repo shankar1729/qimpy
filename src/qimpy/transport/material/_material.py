@@ -58,3 +58,7 @@ class Material(TreeNode):
         """Return the distribution function at a contact with orientation `n`
         and specified keyword arguments. For an Nsurf x 2 tensor n, the
         output should be the corresponding Nsurf x Nkbb distribution function."""
+
+    @abstractmethod
+    def rho_dot_scatter(self, rho: torch.Tensor) -> torch.Tensor:
+        """Return drho/dt due to scattering at current rho."""
