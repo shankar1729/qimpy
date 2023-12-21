@@ -82,9 +82,32 @@ def main() -> None:
 
         # Draw domain boundaries:
         for spline in geom.exterior_splines:
-            plot_spline(plt.gca(), spline)
+            points = plot_spline(plt.gca(), spline)
 
-        plt.gca().set_aspect("equal")
+            # Mark contacts if any:
+            for i_contact, contact in enumerate(geom.contacts):
+                center = contact[:2]
+                radius = contact[2]
+                distances = np.linalg.norm(points - center, axis=1)
+                selection = np.where(distances <= radius)[0]
+                if len(selection):
+                    contact_points = points[selection]
+                    plt.plot(contact_points[:, 0], contact_points[:, 1], "w")
+                    i_mid = len(selection) // 2
+                    dq = np.diff(contact_points[i_mid : (i_mid + 2)], axis=0)[0]
+                    angle = np.rad2deg(np.arctan2(dq[1], dq[0]))
+                    plt.text(
+                        *contact_points[i_mid],
+                        geom.contact_names[i_contact],
+                        rotation=angle,
+                        ha="center",
+                        va="top",
+                        rotation_mode="anchor",
+                    )
+
+        ax = plt.gca()
+        ax.set_aspect("equal")
+        ax.margins(0.1)
         rho_max_str = r"|\rho|_{\mathrm{max}}"
         cbar = plt.colorbar(
             img,
@@ -115,6 +138,8 @@ class PlotGeometry:
         edge_indices = []
         with h5py.File(checkpoint_file, "r") as cp:
             grid_spacing = float(cp["/geometry"].attrs["grid_spacing"])
+            self.contact_names = str(cp["/geometry"].attrs["contact_names"]).split(",")
+            self.contacts = np.array(cp["/geometry/contacts"])
             vertices = np.array(cp["/geometry/vertices"])
             quads = np.array(cp["/geometry/quads"])
             adjacency = np.array(cp["/geometry/adjacency"])

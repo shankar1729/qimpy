@@ -228,11 +228,13 @@ class Geometry(TreeNode):
             ),
             cp_path.write("adjacency", torch.from_numpy(self.quad_set.adjacency)),
             cp_path.write("grid_size", torch.from_numpy(self.quad_set.grid_size)),
+            cp_path.write("contacts", torch.from_numpy(self.quad_set.contacts)),
             "q",
             "rho",
             "v",
         ]
         cp_path.attrs["grid_spacing"] = self.grid_spacing
+        cp_path.attrs["contact_names"] = ",".join(self.contact_names)
         # MPI-split data:
         checkpoint, path = cp_path
         for i_quad, grid_size_np in enumerate(self.quad_set.grid_size):
