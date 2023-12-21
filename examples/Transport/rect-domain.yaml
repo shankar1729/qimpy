@@ -1,0 +1,22 @@
+fermi_circle:
+  kF: 1.0
+  vF: 1.5
+  tau-p: .inf
+  tau-ee: .inf
+  N-theta: 256
+
+geometry:
+  svg_file: rect-domain.svg
+  grid_spacing: 1.0
+
+  contacts:
+    source:
+      dmu: +0.1
+    drain:
+      dmu: -0.1
+
+time_evolution:
+  t_max: 1000.0
+  dt_save: 5.0
+
+checkpoint_out: animation/advect_{:04d}.h5

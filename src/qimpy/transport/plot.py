@@ -73,7 +73,7 @@ def main() -> None:
             stream_kwargs = dict(color="k", linewidth=1, arrowsize=0.7)
             if args.transparency:
                 v_mag = np.hypot(vx, vy).filled(0.0)
-                v_rel = v_mag / v_mag.max()
+                v_rel = np.sqrt(v_mag / v_mag.max())  # suppress low v, but not too much
                 colors = np.zeros((256, 4))
                 colors[:, -1] = np.linspace(v_rel.min(), 1.0, len(colors))
                 alpha_cmap = ListedColormap(colors)
