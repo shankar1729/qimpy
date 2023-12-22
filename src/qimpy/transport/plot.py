@@ -6,6 +6,7 @@ import logging
 import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
 from matplotlib.colors import ListedColormap
+from matplotlib.patches import FancyArrowPatch
 import numpy as np
 import h5py
 
@@ -39,9 +40,10 @@ def main() -> None:
     # Distribute tasks over MPI:
     file_list = rc.comm.bcast(sorted(glob.glob(args.checkpoints)))
     mine = slice(rc.i_proc, None, rc.n_procs)  # divide frames within each file
-    geom = PlotGeometry(file_list[0])
+    pg = PlotGeometry(file_list[0])
     orig_log_level = log.getEffectiveLevel()
     log.setLevel(logging.INFO)  # Capture output from all processes
+    streams = None
     for checkpoint_file in file_list:
         # Load data from checkpoint:
         rho_list = []
@@ -64,24 +66,23 @@ def main() -> None:
         for i_frame_mine, (i_step, t) in enumerate(zip(i_step_list, t_list)):
             plot_file = args.output.format(i_step)
             # Density:
-            plt.clf()
-            plt.title(f"$t$ = {t:.4g}")
-            rho = geom.interpolate(rho_list, i_frame_mine)
+            pg.title.set_text(f"$t$ = {t:.4g}")
+            rho = pg.interpolate(rho_list, i_frame_mine)
             rho_max_abs = np.max(np.abs(rho))
-            img = plt.imshow(
-                rho,
-                extent=geom.extents,
-                origin="lower",
-                cmap="bwr",
-                interpolation="bilinear",
-                vmin=-rho_max_abs,
-                vmax=+rho_max_abs,
-            )
+            pg.img.set_data(rho)
+            pg.img.set_clim(-rho_max_abs, +rho_max_abs)
+            pg.cbar.set_label(f"Density (${pg.rho_max_str}$ = {rho_max_abs:6.2e})")
 
             # Optional streamlines:
             if args.streamlines:
-                vx = geom.interpolate(vx_list, i_frame_mine)
-                vy = geom.interpolate(vy_list, i_frame_mine)
+                if streams:
+                    # Remove previous streamlines:
+                    streams.lines.remove()
+                    for art in plt.gca().get_children():
+                        if isinstance(art, FancyArrowPatch):
+                            art.remove()
+                vx = pg.interpolate(vx_list, i_frame_mine)
+                vy = pg.interpolate(vy_list, i_frame_mine)
                 stream_kwargs = dict(color="k", linewidth=1, arrowsize=0.7)
                 if args.transparency:
                     v_mag = np.hypot(vx, vy).filled(0.0)
@@ -90,46 +91,8 @@ def main() -> None:
                     colors[:, -1] = np.linspace(v_rel.min(), 1.0, len(colors))
                     alpha_cmap = ListedColormap(colors)
                     stream_kwargs.update(dict(color=v_rel, cmap=alpha_cmap))
-                plt.streamplot(geom.x_grid, geom.y_grid, vx, vy, **stream_kwargs)
+                streams = plt.streamplot(pg.x_grid, pg.y_grid, vx, vy, **stream_kwargs)
 
-            # Draw domain boundaries:
-            for spline in geom.exterior_splines:
-                points = plot_spline(plt.gca(), spline)
-
-                # Mark contacts if any:
-                for i_contact, contact in enumerate(geom.contacts):
-                    center = contact[:2]
-                    radius = contact[2]
-                    distances = np.linalg.norm(points - center, axis=1)
-                    selection = np.where(distances <= radius)[0]
-                    if len(selection):
-                        contact_points = points[selection]
-                        plt.plot(contact_points[:, 0], contact_points[:, 1], "w")
-                        i_mid = len(selection) // 2
-                        dq = np.diff(contact_points[i_mid : (i_mid + 2)], axis=0)[0]
-                        angle = np.rad2deg(np.arctan2(dq[1], dq[0]))
-                        plt.text(
-                            *contact_points[i_mid],
-                            geom.contact_names[i_contact],
-                            rotation=angle,
-                            ha="center",
-                            va="top",
-                            rotation_mode="anchor",
-                        )
-
-            ax = plt.gca()
-            ax.set_aspect("equal")
-            ax.margins(0.1)
-            rho_max_str = r"|\rho|_{\mathrm{max}}"
-            cbar = plt.colorbar(
-                img,
-                ticks=[-rho_max_abs, 0, +rho_max_abs],
-                label=f"Density (${rho_max_str}$ = {rho_max_abs:6.2e})",
-            )
-            cbar.ax.set_yticklabels([rf"$-{rho_max_str}$", "0", rf"$+{rho_max_str}$"])
-            spines = plt.gca().spines
-            spines["top"].set_visible(False)
-            spines["right"].set_visible(False)
             plt.savefig(plot_file, bbox_inches="tight", dpi=200)
             log.info(f"Saved {plot_file}")
 
@@ -150,8 +113,8 @@ class PlotGeometry:
         edge_indices = []
         with h5py.File(checkpoint_file, "r") as cp:
             grid_spacing = float(cp["/geometry"].attrs["grid_spacing"])
-            self.contact_names = str(cp["/geometry"].attrs["contact_names"]).split(",")
-            self.contacts = np.array(cp["/geometry/contacts"])
+            contact_names = str(cp["/geometry"].attrs["contact_names"]).split(",")
+            contacts = np.array(cp["/geometry/contacts"])
             vertices = np.array(cp["/geometry/vertices"])
             quads = np.array(cp["/geometry/quads"])
             adjacency = np.array(cp["/geometry/adjacency"])
@@ -186,14 +149,14 @@ class PlotGeometry:
 
         # Add triangles between adjacent segments and collect exterior splines:
         tol = 1e-3
-        self.exterior_splines = []
+        exterior_splines = []
         for i_quad, adjacency_quad in enumerate(adjacency):
             for i_edge, (j_quad, j_edge) in enumerate(adjacency_quad):
                 is_exterior = (j_quad < 0) or (
                     displacement_magnitudes[i_quad, i_edge] > tol
                 )
                 if is_exterior:
-                    self.exterior_splines.append(vertices[quads[i_quad, i_edge]])
+                    exterior_splines.append(vertices[quads[i_quad, i_edge]])
                 else:
                     indices_i = edge_indices[i_quad][i_edge]
                     indices_j = edge_indices[j_quad][j_edge][::-1]
@@ -211,12 +174,59 @@ class PlotGeometry:
         # Construct target grid for interpolation
         x_min, y_min = q_all.min(axis=0)
         x_max, y_max = q_all.max(axis=0)
-        self.extents = (x_min, x_max, y_min, y_max)
         Nx = 1 + int(np.round((x_max - x_min) / grid_spacing))
         Ny = 1 + int(np.round((y_max - y_min) / grid_spacing))
         x_grid_1d = np.linspace(x_min, x_max, Nx)
         y_grid_1d = np.linspace(y_min, y_max, Ny)
         self.x_grid, self.y_grid = np.meshgrid(x_grid_1d, y_grid_1d)
+
+        # Create all plot elements upfront (later only update data):
+        self.title = plt.title("$t$ =")
+        test_rho = (self.x_grid / np.max(self.x_grid)) * 2 - 1
+        self.img = plt.imshow(
+            test_rho,
+            extent=(x_min, x_max, y_min, y_max),
+            origin="lower",
+            cmap="bwr",
+            interpolation="bilinear",
+            vmin=-1,
+            vmax=+1,
+        )
+        # Draw domain boundaries:
+        for spline in exterior_splines:
+            points = plot_spline(plt.gca(), spline)
+
+            # Mark contacts if any:
+            for i_contact, contact in enumerate(contacts):
+                center = contact[:2]
+                radius = contact[2]
+                distances = np.linalg.norm(points - center, axis=1)
+                selection = np.where(distances <= radius)[0]
+                if len(selection):
+                    contact_points = points[selection]
+                    plt.plot(contact_points[:, 0], contact_points[:, 1], "w")
+                    i_mid = len(selection) // 2
+                    dq = np.diff(contact_points[i_mid : (i_mid + 2)], axis=0)[0]
+                    angle = np.rad2deg(np.arctan2(dq[1], dq[0]))
+                    plt.text(
+                        *contact_points[i_mid],
+                        contact_names[i_contact],
+                        rotation=angle,
+                        ha="center",
+                        va="top",
+                        rotation_mode="anchor",
+                    )
+
+        ax = plt.gca()
+        ax.set_aspect("equal")
+        ax.margins(0.1)
+        rho_max_str = r"|\rho|_{\mathrm{max}}"
+        self.cbar = plt.colorbar(self.img, ticks=[-1, 0, +1], label="Temporary")
+        self.cbar.ax.set_yticklabels([rf"$-{rho_max_str}$", "0", rf"$+{rho_max_str}$"])
+        self.rho_max_str = rho_max_str
+        spines = ax.spines
+        spines["top"].set_visible(False)
+        spines["right"].set_visible(False)
 
     @stopwatch
     def interpolate(self, values_list: list[np.ndarray], i_frame: int) -> np.ndarray:
