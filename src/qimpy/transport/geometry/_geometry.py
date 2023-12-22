@@ -240,32 +240,52 @@ class Geometry(TreeNode):
         stash = self.stash
         cp_path.attrs["t"] = np.array(stash.t)
         cp_path.attrs["i_step"] = np.array(stash.i_step)
-        # MPI-split data:
+        # Collect MPI-split data to be written from head (avoids slow h5-mpio):
         checkpoint, path = cp_path
         for i_quad, grid_size_np in enumerate(self.quad_set.grid_size):
-            prefix = f"{path}/quad{i_quad}"
+            cp_quad = CheckpointPath(checkpoint, f"{path}/quad{i_quad}")
+            n_stash = len(stash.t)
             grid_size = tuple(grid_size_np)
-            stashed_size = (len(stash.t),) + grid_size
-            dset_q = checkpoint.create_dataset_real(f"{prefix}/q", grid_size + (2,))
-            dset_rho = checkpoint.create_dataset_real(f"{prefix}/rho", stashed_size)
-            dset_v = checkpoint.create_dataset_real(f"{prefix}/v", stashed_size + (2,))
+            stashed_size = (n_stash,) + grid_size
+            q = torch.empty(grid_size + (2,))
+            rho = torch.empty(stashed_size)
+            v = torch.empty(stashed_size + (2,))
             for i_patch in np.where(self.sub_quad_set.quad_index == i_quad)[0]:
-                if self.patch_division.is_mine(i_patch):
+                tag = 3 * i_patch
+                i_proc = self.comm.rank
+                whose = self.patch_division.whose(i_patch)
+                local = i_proc == whose
+                if local:
                     i_patch_mine = i_patch - self.patch_division.i_start
                     patch = self.patches[i_patch_mine]
-                    offset = tuple(self.sub_quad_set.grid_start[i_patch])
-                    stashed_offset = (0,) + offset
-                    checkpoint.write_slice(dset_q, offset + (0,), patch.q)
-                    checkpoint.write_slice(
-                        dset_rho,
-                        stashed_offset,
-                        torch.stack(stash.rho[i_patch_mine], dim=0),
-                    )
-                    checkpoint.write_slice(
-                        dset_v,
-                        stashed_offset + (0,),
-                        torch.stack(stash.v[i_patch_mine], dim=0),
-                    )
+                    q_cur = patch.q
+                    rho_cur = torch.stack(stash.rho[i_patch_mine], dim=0)
+                    v_cur = torch.stack(stash.v[i_patch_mine], dim=0)
+                    if i_proc:
+                        # Send to head for write:
+                        self.comm.Send(BufferView(q_cur), 0, tag=tag)
+                        self.comm.Send(BufferView(rho_cur), 0, tag=tag + 1)
+                        self.comm.Send(BufferView(v_cur), 0, tag=tag + 2)
+                if not i_proc:
+                    # Receive and write from head:
+                    grid_start = self.sub_quad_set.grid_start[i_patch]
+                    grid_stop = self.sub_quad_set.grid_stop[i_patch]
+                    patch_size = tuple(grid_stop - grid_start)
+                    slice0 = slice(grid_start[0], grid_stop[0])
+                    slice1 = slice(grid_start[1], grid_stop[1])
+                    if not local:
+                        q_cur = torch.empty(patch_size + (2,))
+                        rho_cur = torch.empty((n_stash,) + patch_size)
+                        v_cur = torch.empty((n_stash,) + patch_size + (2,))
+                        self.comm.Recv(BufferView(q_cur), whose, tag=tag)
+                        self.comm.Recv(BufferView(rho_cur), whose, tag=tag + 1)
+                        self.comm.Recv(BufferView(v_cur), whose, tag=tag + 2)
+                    q[slice0, slice1] = q_cur
+                    rho[:, slice0, slice1] = rho_cur
+                    v[:, slice0, slice1] = v_cur
+            cp_quad.write("q", q)
+            cp_quad.write("rho", rho)
+            cp_quad.write("v", v)
         self.stash = ResultStash(len(self.patches))  # Clear stashed history
         return saved_list
 

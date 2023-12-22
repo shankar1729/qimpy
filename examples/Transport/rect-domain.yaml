@@ -18,6 +18,6 @@ geometry:
 time_evolution:
   t_max: 1000.0
   dt_save: 5.0
-  n_collate: 10
+  n_collate: 32
 
 checkpoint_out: animation/advect_{:04d}.h5
