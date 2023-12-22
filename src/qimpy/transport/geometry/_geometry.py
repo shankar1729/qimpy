@@ -30,6 +30,7 @@ class Geometry(TreeNode):
     patches: list[Advect]  #: Advection for each quad patch local to this process
     patch_division: TaskDivision  #: Division of patches over `comm`
     dt_max: float  #: Maximum stable time step
+    stash: ResultStash  #: Saved results for collating into fewer checkpoints
 
     # v_F and N_theta should eventually be material paramteters
     def __init__(
@@ -104,6 +105,7 @@ class Geometry(TreeNode):
         self.dt_max = self.comm.allreduce(
             min(patch.dt_max for patch in self.patches), op=MPI.MIN
         )
+        self.stash = ResultStash(len(self.patches))
 
     @property
     def rho_list(self) -> list[torch.Tensor]:
@@ -235,22 +237,46 @@ class Geometry(TreeNode):
         ]
         cp_path.attrs["grid_spacing"] = self.grid_spacing
         cp_path.attrs["contact_names"] = ",".join(self.contact_names)
+        stash = self.stash
+        cp_path.attrs["t"] = np.array(stash.t)
+        cp_path.attrs["i_step"] = np.array(stash.i_step)
         # MPI-split data:
         checkpoint, path = cp_path
         for i_quad, grid_size_np in enumerate(self.quad_set.grid_size):
             prefix = f"{path}/quad{i_quad}"
             grid_size = tuple(grid_size_np)
+            stashed_size = (len(stash.t),) + grid_size
             dset_q = checkpoint.create_dataset_real(f"{prefix}/q", grid_size + (2,))
-            dset_rho = checkpoint.create_dataset_real(f"{prefix}/rho", grid_size)
-            dset_v = checkpoint.create_dataset_real(f"{prefix}/v", grid_size + (2,))
+            dset_rho = checkpoint.create_dataset_real(f"{prefix}/rho", stashed_size)
+            dset_v = checkpoint.create_dataset_real(f"{prefix}/v", stashed_size + (2,))
             for i_patch in np.where(self.sub_quad_set.quad_index == i_quad)[0]:
                 if self.patch_division.is_mine(i_patch):
-                    patch = self.patches[i_patch - self.patch_division.i_start]
+                    i_patch_mine = i_patch - self.patch_division.i_start
+                    patch = self.patches[i_patch_mine]
                     offset = tuple(self.sub_quad_set.grid_start[i_patch])
+                    stashed_offset = (0,) + offset
                     checkpoint.write_slice(dset_q, offset + (0,), patch.q)
-                    checkpoint.write_slice(dset_rho, offset, patch.density)
-                    checkpoint.write_slice(dset_v, offset + (0,), patch.velocity)
+                    checkpoint.write_slice(
+                        dset_rho,
+                        stashed_offset,
+                        torch.stack(stash.rho[i_patch_mine], dim=0),
+                    )
+                    checkpoint.write_slice(
+                        dset_v,
+                        stashed_offset + (0,),
+                        torch.stack(stash.v[i_patch_mine], dim=0),
+                    )
+        self.stash = ResultStash(len(self.patches))  # Clear stashed history
         return saved_list
+
+    def update_stash(self, i_step: int, t: float) -> None:
+        """Stash results for current step for a future save_checkpoint call."""
+        stash = self.stash
+        stash.i_step.append(i_step)
+        stash.t.append(t)
+        for i_patch_mine, patch in enumerate(self.patches):
+            stash.rho[i_patch_mine].append(patch.density)
+            stash.v[i_patch_mine].append(patch.velocity)
 
 
 # Constants for edge data transfer:
@@ -269,3 +295,18 @@ OUT_SLICES = [
 ]  #: output slice for each edge orientation during edge communication
 
 FLIP_DIMS = [(0, 1), (0,), None, (1,)]  #: which dims to flip during edge transfer
+
+
+class ResultStash:
+    """Stashed results for collating I/O into fewer checkpoints."""
+
+    i_step: list[int]
+    t: list[float]
+    rho: list[list[torch.Tensor]]
+    v: list[list[torch.Tensor]]
+
+    def __init__(self, n_patches_mine: int):
+        self.i_step = []
+        self.t = []
+        self.rho = [[] for _ in range(n_patches_mine)]
+        self.v = [[] for _ in range(n_patches_mine)]

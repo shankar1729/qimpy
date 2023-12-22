@@ -15,8 +15,8 @@ class TimeEvolution(TreeNode):
     dt: float  #: Time step (set automatically if zero)
     i_step: int  #: Current step number
     n_steps: int  #: Number of steps
-    save_interval: int  #: Save checkpoint every so many steps
-    geometry: Geometry
+    save_interval: int  #: Save results every so many steps
+    n_collate: int  #: Collect these many save steps into a single checkpoint
 
     def __init__(
         self,
@@ -24,6 +24,7 @@ class TimeEvolution(TreeNode):
         dt: float = 0.0,
         dt_save: float,
         t_max: float,
+        n_collate: int,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         geometry: Geometry,
     ) -> None:
@@ -36,9 +37,15 @@ class TimeEvolution(TreeNode):
             :yaml:`Time step for evolution.`
             If zero, this is set to the maximum stable time step for advection.
         dt_save
-            :yaml:`Time interval at which to save checkpoints.`
+            :yaml:`Time interval at which to save results.`
             This will be rounded to the nearest multiple of `dt` to ensure
-            that the checkpoints are written at uniform intervals.
+            that the results are written at uniform intervals.
+        n_collate
+            :yaml:`Number of save-steps to collect into each checkpoint file.`
+            Collecting together several saves can substantially improve performance
+            by amortizing the latency associated with disk I/O and GPU transfers.
+            The results in the checkpoint have an additional outermost dimension
+            corresponding to the number of collated steps.
         t_max
             :yaml:`Stop evolution at this time.`
         geometry
@@ -56,15 +63,23 @@ class TimeEvolution(TreeNode):
         self.i_step = 0
         self.n_steps = max(1, int(np.round(t_max / self.dt)))
         self.save_interval = max(1, int(np.round(dt_save / self.dt)))
-        self.geometry = geometry
+        self.n_collate = n_collate
 
     def run(self, transport: qimpy.transport.Transport) -> None:
         """Run time evolution loop, checkpointing at regular intervals."""
+        i_collate = 0
         while self.i_step <= self.n_steps:
             if self.i_step % self.save_interval == 0:
-                transport.save(self.i_step)
+                transport.geometry.update_stash(self.i_step, self.t)
+                i_collate += 1
+                log.info(f"Stashed results of step {self.i_step}")
+                if i_collate == self.n_collate:
+                    transport.save(self.i_step)
+                    i_collate = 0
 
             if self.i_step == self.n_steps:
+                if i_collate:
+                    transport.save(self.i_step)
                 break
 
             transport.geometry.time_step(self.dt)
