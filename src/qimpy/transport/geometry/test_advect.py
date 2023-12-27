@@ -53,9 +53,16 @@ def run(
     init_angle = torch.atan2(v0[1], v0[0]).item()
     dt_save = (0.01 if save_frames else 2) * t_max
     transport = Transport(
-        fermi_circle=dict(kF=1.0, vF=vF, N_theta=N_theta, theta0=init_angle),
+        fermi_circle=dict(
+            kF=1.0,
+            vF=vF,
+            N_theta=N_theta,
+            theta0=init_angle,
+            tau_p=np.inf,
+            tau_ee=np.inf,
+        ),
         geometry=dict(svg_file=svg_file, grid_spacing=grid_spacing, contacts={}),
-        time_evolution=dict(t_max=t_max, dt_save=dt_save),
+        time_evolution=dict(t_max=t_max, dt_save=dt_save, n_collate=10),
         checkpoint_out="animation/advect_{:04d}.h5",
     )
     geometry = transport.geometry
