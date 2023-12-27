@@ -23,6 +23,7 @@ class Geometry(TreeNode):
     """Geometry specification."""
 
     comm: MPI.Comm  #: Communicator for real-space split over patches
+    material: Material  #: Corresponding material
     grid_spacing: float  #: Grid spacing used for discretization
     contact_names: list[str]  #: Names of contacts used in SVG specification and plots
     quad_set: QuadSet  #: Original geometry specification from SVG
@@ -63,6 +64,7 @@ class Geometry(TreeNode):
         """
         super().__init__()
         self.comm = process_grid.get_comm("r")
+        self.material = material
         self.grid_spacing = grid_spacing
         self.contact_names = list(contacts.keys())
         self.quad_set = parse_svg(svg_file, grid_spacing, self.contact_names)
@@ -206,10 +208,12 @@ class Geometry(TreeNode):
         rho_list_eval: list[torch.Tensor],
     ) -> list[torch.Tensor]:
         """Ingredient of time step: compute rho_initial + dt * f(rho_eval)."""
+        material = self.material
+        rho_list_padded = self.apply_boundaries(rho_list_eval)
         return [
-            (rho_initial + patch.drho(dt, rho_eval))
-            for rho_initial, rho_eval, patch in zip(
-                rho_list_initial, self.apply_boundaries(rho_list_eval), self.patches
+            (rho_initial + patch.drho(dt, rho_padded) + dt * material.rho_dot(rho_eval))
+            for rho_initial, rho_padded, rho_eval, patch in zip(
+                rho_list_initial, rho_list_padded, rho_list_eval, self.patches
             )
         ]
 

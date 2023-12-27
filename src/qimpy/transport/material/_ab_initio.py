@@ -31,14 +31,15 @@ class AbInitio(Material):
         """
         # TODO: read data from FeynWann file
         nk_tot = 100
-        wk = 1.0 / nk_tot
         nk = 1
         n_bands = 1
-        k = torch.zeros((nk, 3))
-        E = torch.zeros((nk, n_bands))
-        v = torch.zeros((nk, n_bands, 3))
         super().__init__(
-            k=k, wk=wk, E=E, v=v, checkpoint_in=checkpoint_in, process_grid=process_grid
+            wk=1.0 / nk_tot,
+            nk=nk,
+            n_bands=n_bands,
+            n_dim=3,
+            checkpoint_in=checkpoint_in,
+            process_grid=process_grid,
         )
 
     def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
@@ -47,5 +48,5 @@ class AbInitio(Material):
     def get_contact_distribution(self, n: torch.Tensor, **kwargs) -> torch.Tensor:
         return NotImplemented
 
-    def rho_dot_scatter(self, rho: torch.Tensor) -> torch.Tensor:
+    def rho_dot(self, rho: torch.Tensor) -> torch.Tensor:
         return NotImplemented

@@ -4,7 +4,8 @@ from typing import Callable, Optional, NamedTuple
 import numpy as np
 import torch
 
-from qimpy import rc
+from qimpy import rc, MPI
+from qimpy.mpi import BufferView
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
 
@@ -93,10 +94,10 @@ class Advect:
         self.wk = material.wk
 
         # Initialize distribution function:
-        Nk = self.v.shape[0]
+        Nkbb = self.v.shape[0]  # flattened density-matrix count
         padding = 2 * Advect.N_GHOST
-        self.rho_shape = (N[0], N[1], Nk)
-        self.rho_padded_shape = (N[0] + padding, N[1] + padding, Nk)
+        self.rho_shape = (N[0], N[1], Nkbb)
+        self.rho_padded_shape = (N[0] + padding, N[1] + padding, Nkbb)
         self.rho = torch.zeros(self.rho_shape, device=rc.device)
 
         # Initialize v*drho/dx calculator:
@@ -155,21 +156,26 @@ class Advect:
     @stopwatch
     def drho(self, dt: float, rho: torch.Tensor) -> torch.Tensor:
         """Compute drho for time step dt, given current rho."""
-        return dt * (
-            self.material.rho_dot_scatter(rho[Advect.NON_GHOST, Advect.NON_GHOST])
-            - self.v_prime(rho[:, Advect.NON_GHOST], self.V[..., 0], axis=0)
-            - self.v_prime(rho[Advect.NON_GHOST, :], self.V[..., 1], axis=1)
+        return (-dt) * (
+            self.v_prime(rho[:, Advect.NON_GHOST], self.V[..., 0], axis=0)
+            + self.v_prime(rho[Advect.NON_GHOST, :], self.V[..., 1], axis=1)
         )
 
     @property
     def density(self):
         """Density at each point (integrate over momenta)."""
-        return self.rho.sum(dim=2) * self.wk
+        result = self.rho.sum(dim=2) * self.wk
+        if self.material.comm.size > 1:
+            self.material.comm.Allreduce(MPI.IN_PLACE, BufferView(result))
+        return result
 
     @property
     def velocity(self):
         """Average velocity at each point (integrate over momenta)."""
-        return (self.rho @ self.v) * self.wk
+        result = (self.rho @ self.v) * self.wk
+        if self.material.comm.size > 1:
+            self.material.comm.Allreduce(MPI.IN_PLACE, BufferView(result))
+        return result
 
 
 def to_numpy(f: torch.Tensor) -> np.ndarray:
