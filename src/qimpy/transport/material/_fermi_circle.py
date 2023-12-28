@@ -16,8 +16,8 @@ class FermiCircle(Material):
 
     kF: float  #: Fermi wave-vector
     vF: float  #: Fermi velocity
-    tau_p: float  #: Momentum relaxation time
-    tau_ee: float  #: Electron internal scattering time (momentum-conserving)
+    tau_inv_p: float  #: Momentum relaxation rate
+    tau_inv_ee: float  #: Electron internal scattering rate (momentum-conserving)
 
     def __init__(
         self,
@@ -47,8 +47,8 @@ class FermiCircle(Material):
         """
         self.kF = kF
         self.vF = vF
-        self.tau_p = tau_p
-        self.tau_ee = tau_ee
+        self.tau_inv_p = 1.0 / tau_p
+        self.tau_inv_ee = 1.0 / tau_ee
         super().__init__(
             wk=1.0 / N_theta,
             nk=N_theta,
@@ -83,16 +83,26 @@ class FermiCircle(Material):
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor) -> torch.Tensor:
-        # Compute stationary and moving equlibrium carrier densities:
-        v = self.transport_velocity
+        if not (self.tau_inv_p or self.tau_inv_ee):
+            return torch.zeros_like(rho)  # no scattering
+
+        # Compute stationary carrier density:
         rho_sum = rho.sum(dim=-1)
-        rho_v_sum = torch.einsum("...k, ki -> ...i", rho, v)
         if self.comm.size > 1:
             self.comm.Allreduce(MPI.IN_PLACE, BufferView(rho_sum))
-            self.comm.Allreduce(MPI.IN_PLACE, BufferView(rho_v_sum))
         rho_0 = self.nk_inv * rho_sum[..., None]
-        rho_v = self.v_sq_inv * torch.einsum("...i, ki -> ...k", rho_v_sum, v)
-        return -(rho - rho_0) / self.tau_p - (rho - rho_0 - rho_v) / self.tau_ee
+        result = (rho_0 - rho) * (self.tau_inv_p + self.tau_inv_ee)
+
+        # Compute moving equlibrium carrier density if needed:
+        if self.tau_inv_ee:
+            v = self.transport_velocity
+            rho_v_sum = torch.einsum("...k, ki -> ...i", rho, v)
+            if self.comm.size > 1:
+                self.comm.Allreduce(MPI.IN_PLACE, BufferView(rho_v_sum))
+            rho_v = self.v_sq_inv * torch.einsum("...i, ki -> ...k", rho_v_sum, v)
+            result += rho_v * self.tau_inv_ee  # combines with rho_0 - rho above
+
+        return result
 
 
 class SpecularReflector:
