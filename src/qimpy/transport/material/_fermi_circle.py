@@ -102,34 +102,37 @@ class SpecularReflector:
         self, n: torch.Tensor, v: torch.Tensor, comm: MPI.Comm, k_division: TaskDivision
     ) -> None:
         assert v.shape[1] == 1  # only for single-band case
-        v_normal = torch.einsum(
-            "ri, rk -> rki", n, torch.einsum("ri, ki -> rk", n, v[:, 0])
-        )
-        v_reflected = v[None, :, 0] - 2 * v_normal
-        v_diff = (v_reflected[:, :, None] - v[None, None, :, 0]).norm(dim=-1)
-        i_reflected = v_diff.argmin(dim=2)
+        # Find which theta reflects into the first one:
+        v0_normal = torch.einsum("ri, rj, j -> ri", n, n, v[0, 0])
+        v0_reflected = v[None, 0, 0] - 2 * v0_normal
+        v0_diff = (v0_reflected[:, None] - v[None, :, 0]).norm(dim=-1)
+        i0_reflected = v0_diff.argmin(dim=1)
+        comm.Bcast(BufferView(i0_reflected))  # ensure indices consistent
+        # Map the rest correspondingly:
+        nk = k_division.n_tot
+        i_reflected = (i0_reflected[:, None] - torch.arange(nk, device=rc.device)) % nk
 
         # Compute flattened index on Nr x Nk_mine for efficient indexing
         self.k_division = k_division
         self.comm = comm
         nr = len(n)
+        ir = torch.arange(nr, device=rc.device)[:, None]
         if comm.size == 1:
-            self.i_reflected_flat = (
-                i_reflected + torch.arange(nr, device=rc.device)[:, None] * len(v)
-            ).flatten()
+            self.i_reflected_flat = (ir * nk + i_reflected).flatten()
         else:
-            # Determine process mapping of reflection:
-            self.index_pairs = []
+            # Determine how to receive data:
             i_reflected_cur = i_reflected[:, k_division.i_start : k_division.i_stop]
-            i_reflected_mine = i_reflected_cur % k_division.n_each
-            i_proc_reflected = i_reflected_cur // k_division.n_each
-            nk_proc = np.diff(k_division.n_prev)
-            nk_i = nk_proc[k_division.i_proc]
-            for j_proc, nk_j in enumerate(nk_proc):
-                sel = torch.where(i_proc_reflected == j_proc)
-                sel_i = sel[0] * nk_i + sel[1]  # on process i
-                sel_j = sel[0] * nk_j + i_reflected_mine[sel]  # on process j
-                self.index_pairs.append((sel_i, sel_j))
+            j_proc = i_reflected_cur.flatten() // k_division.n_each
+            self.recv_counts, self.recv_offsets = get_counts_offsets(j_proc, comm.size)
+            self.recv_index = invert_index(j_proc.argsort(stable=True))
+            # Determine how to send data:
+            send_sel = torch.where(i_reflected // k_division.n_each == comm.rank)
+            send_sel_index_mine = send_sel[0] * k_division.n_mine + (
+                i_reflected[send_sel] - k_division.i_start
+            )
+            j_proc = send_sel[1] // k_division.n_each
+            self.send_counts, self.send_offsets = get_counts_offsets(j_proc, comm.size)
+            self.send_index = send_sel_index_mine[j_proc.argsort(stable=True)]
 
     def __call__(self, rho: torch.Tensor) -> torch.Tensor:
         rho_flat = rho.flatten(1, 2)  # flatten r and k indices
@@ -137,32 +140,31 @@ class SpecularReflector:
         if comm.size == 1:
             out_flat = rho_flat[:, self.i_reflected_flat]
         else:
-            out_flat = torch.empty_like(rho_flat)
-            buf = rho_flat
-            k_division = self.k_division
-            n_procs = k_division.n_procs
-            j_proc = k_division.i_proc
-            i_proc_next = (k_division.i_proc + 1) % n_procs
-            i_proc_prev = (k_division.i_proc - 1) % n_procs
             n_ghost, nr, _ = rho.shape  # same on all processes
-            nk_proc = np.diff(k_division.n_prev)  # number of k differs
-            for i_iter in range(n_procs):
-                # Set data from buf which corresponds to slice on j_proc
-                sel_i, sel_j = self.index_pairs[j_proc]
-                out_flat[:, sel_i] = buf[:, sel_j]
-                if i_iter + 1 == n_procs:
-                    break  # only need n - 1 communications
-                # Communication ring: move buf to next process
-                j_next = (j_proc + 1) % n_procs
-                buf_next = torch.empty(
-                    (n_ghost, nr * nk_proc[j_next]), device=rc.device
-                )
-                MPI.Request.Waitall(
-                    [
-                        comm.Irecv(BufferView(buf_next), i_proc_next, tag=j_next),
-                        comm.Isend(BufferView(buf), i_proc_prev, tag=j_proc),
-                    ]
-                )
-                j_proc = j_next
-                buf = buf_next
+            send_buf = rho_flat.T[self.send_index].contiguous()
+            send_counts = self.send_counts * n_ghost
+            send_offsets = self.send_offsets * n_ghost
+            recv_counts = self.recv_counts * n_ghost
+            recv_offsets = self.recv_offsets * n_ghost
+            recv_buf = torch.empty_like(send_buf)
+            mpi_type = rc.mpi_type[rho.dtype]
+            comm.Alltoallv(
+                (BufferView(send_buf), send_counts, send_offsets, mpi_type),
+                (BufferView(recv_buf), recv_counts, recv_offsets, mpi_type),
+            )
+            out_flat = recv_buf[self.recv_index].T
         return out_flat.unflatten(1, rho.shape[1:])  # restore r and k
+
+
+def get_counts_offsets(
+    indices: torch.Tensor, n_bins: int
+) -> tuple[np.ndarray, np.ndarray]:
+    counts = torch.bincount(indices, minlength=n_bins).to(rc.cpu).numpy()
+    offsets = np.concatenate(([0], np.cumsum(counts[:-1])))
+    return counts, offsets
+
+
+def invert_index(indices: torch.Tensor) -> torch.Tensor:
+    inv_indices = torch.empty_like(indices)
+    inv_indices[indices] = torch.arange(len(indices), device=rc.device)
+    return inv_indices

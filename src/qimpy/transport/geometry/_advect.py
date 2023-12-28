@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from qimpy import rc, MPI
-from qimpy.mpi import BufferView
+from qimpy.mpi import BufferView, globalreduce
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
 
@@ -90,7 +90,7 @@ class Advect:
         # Initialize velocities:
         self.v = material.transport_velocity
         self.V = torch.einsum("ka, ...Ba -> ...kB", self.v, torch.linalg.inv(jacobian))
-        self.dt_max = 0.5 / self.V.abs().max().item()
+        self.dt_max = 0.5 / globalreduce.max(self.V.abs(), material.comm)
         self.wk = material.wk
 
         # Initialize distribution function:

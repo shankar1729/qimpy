@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional
+from typing import Optional, Sequence
 import argparse
 
 import torch
@@ -45,6 +45,7 @@ def run(
     t_max: float,
     svg_file: str,
     save_frames: bool = False,
+    process_grid_shape: Optional[Sequence[int]],
 ) -> float:
     """Run simulation and report error in final density."""
 
@@ -64,6 +65,7 @@ def run(
         geometry=dict(svg_file=svg_file, grid_spacing=grid_spacing, contacts={}),
         time_evolution=dict(t_max=t_max, dt_save=dt_save, n_collate=10),
         checkpoint_out="animation/advect_{:04d}.h5",
+        process_grid_shape=process_grid_shape,
     )
     geometry = transport.geometry
 
@@ -78,7 +80,8 @@ def run(
 
     # Initialize density
     for patch in geometry.patches:
-        patch.rho[..., 0] = gaussian_blob(patch.q, q0, Rbasis, sigma)
+        if transport.material.comm.rank == 0:
+            patch.rho[..., 0] = gaussian_blob(patch.q, q0, Rbasis, sigma)
 
     transport.run()
 
@@ -87,11 +90,12 @@ def run(
     rho_sum_tot = 0.0
     rho_err_tot = 0.0
     for patch in geometry.patches:
-        rho_sum, rho_err_sum = gaussian_blob_error(
-            patch.g, patch.rho[..., 0], patch.q, q_final, Rbasis, sigma
-        )
-        rho_sum_tot += rho_sum
-        rho_err_tot += rho_err_sum
+        if transport.material.comm.rank == 0:
+            rho_sum, rho_err_sum = gaussian_blob_error(
+                patch.g, patch.rho[..., 0], patch.q, q_final, Rbasis, sigma
+            )
+            rho_sum_tot += rho_sum
+            rho_err_tot += rho_err_sum
     rho_sum_tot = rc.comm.allreduce(rho_sum_tot)
     rho_err_tot = rc.comm.allreduce(rho_err_tot)
     rho_mae = rho_err_tot / rho_sum_tot
@@ -136,6 +140,14 @@ def main():
     parser.add_argument("--t_max", help="stopping time", type=float, required=True)
     parser.add_argument("--h_max", help="max spacing for convergence test", type=float)
     parser.add_argument("--svg", help="SVG geometry file", type=str, required=True)
+    parser.add_argument(
+        "-p",
+        "--process-grid",
+        type=int,
+        nargs=2,
+        default=[-1, -1],
+        help="dimensions of process grid: real-space x kpoints",
+    )
     args = parser.parse_args()
 
     run_args = dict(
@@ -145,6 +157,7 @@ def main():
         v0=torch.tensor(args.v0, device=rc.device),
         t_max=args.t_max,
         svg_file=args.svg,
+        process_grid_shape=args.process_grid,
     )
     if args.h_max is None:
         run(grid_spacing=args.h, save_frames=True, **run_args)
