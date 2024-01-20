@@ -190,7 +190,6 @@ class PlotGeometry:
                         sel_within = np.where(
                             np.logical_and(within_any[:-1], within_any[1:])
                         )[0]
-                        print(sel_within)
                         new_triangles = new_triangles[sel_within]
 
                     triangles.append(new_triangles)
@@ -203,8 +202,8 @@ class PlotGeometry:
         # Construct target grid for interpolation
         x_min, y_min = q_all.min(axis=0)
         x_max, y_max = q_all.max(axis=0)
-        Nx = 1 + int(np.round((x_max - x_min) / grid_spacing))
-        Ny = 1 + int(np.round((y_max - y_min) / grid_spacing))
+        Nx = 1 + 2 * int(np.round((x_max - x_min) / grid_spacing))
+        Ny = 1 + 2 * int(np.round((y_max - y_min) / grid_spacing))
         x_grid_1d = np.linspace(x_min, x_max, Nx)
         y_grid_1d = np.linspace(y_min, y_max, Ny)
         self.x_grid, self.y_grid = np.meshgrid(x_grid_1d, y_grid_1d)
@@ -251,8 +250,15 @@ class PlotGeometry:
         ax.set_aspect("equal")
         ax.margins(0.1)
         rho_max_str = r"|\rho|_{\mathrm{max}}"
-        self.cbar = plt.colorbar(self.img, ticks=[-1, 0, +1], label="Temporary")
-        self.cbar.ax.set_yticklabels([rf"$-{rho_max_str}$", "0", rf"$+{rho_max_str}$"])
+        cbar_orientation = "horizontal" if (Nx > 1.5 * Ny) else "vertical"
+        self.cbar = plt.colorbar(
+            self.img, ticks=[-1, 0, +1], label="Temporary", orientation=cbar_orientation
+        )
+        cbar_labels = [rf"$-{rho_max_str}$", "0", rf"$+{rho_max_str}$"]
+        if cbar_orientation == "vertical":
+            self.cbar.ax.set_yticklabels(cbar_labels)
+        else:
+            self.cbar.ax.set_xticklabels(cbar_labels)
         self.rho_max_str = rho_max_str
         spines = ax.spines
         spines["top"].set_visible(False)
