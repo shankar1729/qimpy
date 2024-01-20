@@ -152,11 +152,12 @@ class PlotGeometry:
         exterior_splines = []
         for i_quad, adjacency_quad in enumerate(adjacency):
             for i_edge, (j_quad, j_edge) in enumerate(adjacency_quad):
-                is_exterior = (j_quad < 0) or (
-                    displacement_magnitudes[i_quad, i_edge] > tol
-                )
+                is_periodic_bc = displacement_magnitudes[i_quad, i_edge] > tol
+                is_exterior = (j_quad < 0) or is_periodic_bc
                 if is_exterior:
-                    exterior_splines.append(vertices[quads[i_quad, i_edge]])
+                    exterior_splines.append(
+                        (vertices[quads[i_quad, i_edge]], is_periodic_bc)
+                    )
                 else:
                     indices_i = edge_indices[i_quad][i_edge]
                     indices_j = edge_indices[j_quad][j_edge][::-1]
@@ -193,8 +194,9 @@ class PlotGeometry:
             vmax=+1,
         )
         # Draw domain boundaries:
-        for spline in exterior_splines:
-            points = plot_spline(plt.gca(), spline)
+        for spline, is_periodic_bc in exterior_splines:
+            spline_ls = "dashed" if is_periodic_bc else "solid"
+            points = plot_spline(plt.gca(), spline, spline_linestyle=spline_ls)
 
             # Mark contacts if any:
             for i_contact, contact in enumerate(contacts):
