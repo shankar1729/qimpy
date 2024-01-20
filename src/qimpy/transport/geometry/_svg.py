@@ -26,6 +26,7 @@ class QuadSet:
     displacements: np.ndarray  #: Nquads x 4 x 2 edge displacements for each adjacency
     grid_size: np.ndarray  #: Nquads x 2 grid dimensions for each quad
     contacts: np.ndarray  #: Ncontacts x 3: center x, y  and radius of each circle
+    apertures: np.ndarray  #: Napertures x 3: center x, y  and radius of each circle
 
     def get_boundary(self, i_quad: int) -> np.ndarray:
         """Get sequence of boundary points (12 x 2) defining a specified quad.
@@ -44,19 +45,29 @@ def parse_svg(
     circles, circle_names = get_circles(svg_xml)
 
     # Check contact specification:
-    if contact_names:
-        contact_indices = []
-        for contact_name in contact_names:
-            try:
-                contact_indices.append(circle_names.index(contact_name))
-            except ValueError:
-                raise InvalidInputException(
-                    f"Contact '{contact_name}' not found in {svg_file}."
-                    " (Each contact name must match the id of a circle in the svg.)"
-                )
-        contacts = circles[contact_indices]
-    else:
-        contacts = np.zeros((0, 3))
+    contact_indices = []
+    for contact_name in contact_names:
+        if contact_name.startswith("aperture"):
+            raise InvalidInputException(
+                "Contact names cannot start with 'aperture', which is reserved for"
+                " circles in the SVG that control pass-through in internal edges."
+            )
+        try:
+            contact_indices.append(circle_names.index(contact_name))
+        except ValueError:
+            raise InvalidInputException(
+                f"Contact '{contact_name}' not found in {svg_file}."
+                " (Each contact name must match the id of a circle in the svg.)"
+            )
+    contacts = circles[contact_indices] if contact_indices else np.zeros((0, 3))
+
+    # Add apertures:
+    aperture_indices = [
+        i_circle
+        for i_circle, circle_name in enumerate(circle_names)
+        if circle_name.startswith("aperture")
+    ]
+    apertures = circles[aperture_indices] if aperture_indices else np.zeros((0, 3))
 
     # Process mess geometry:
     vertices, edges = weld_points(splines, tol=tol)
@@ -134,7 +145,9 @@ def parse_svg(
         n_points[sel] = int(np.ceil(max_length / grid_spacing))
     grid_size = n_points.reshape(-1, 2)  # now n_quads x 2 grid dimensions
 
-    return QuadSet(vertices, quads, adjacency, displacements, grid_size, contacts)
+    return QuadSet(
+        vertices, quads, adjacency, displacements, grid_size, contacts, apertures
+    )
 
 
 def parse_style(style_str: str):

@@ -90,6 +90,11 @@ def main():
         for segment in segments:
             is_long = np.linalg.norm(np.diff(segment, axis=1)) > 2 * grid_spacing
             plt.plot(*segment, "r", ls=("dotted" if is_long else "solid"))
+
+    # Annotate apertures
+    for center_x, center_y, radius in quad_set.apertures:
+        ax.add_patch(plt.Circle((center_x, center_y), radius, color="gray", alpha=0.5))
+
     rc.report_end()
     plt.show()
 
