@@ -22,7 +22,7 @@ def main():
     args = parser.parse_args()
 
     grid_spacing = 1.0
-    quad_set = parse_svg(args.input_svg, grid_spacing)
+    quad_set = parse_svg(args.input_svg, grid_spacing, contact_names=[])
 
     log.info(f"Found {len(quad_set.quads)} quads:")
     for i_quad, (quad, adjacency, grid_size) in enumerate(

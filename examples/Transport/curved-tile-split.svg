@@ -24,7 +24,7 @@
      inkscape:document-units="px"
      showgrid="false"
      inkscape:zoom="1.4349701"
-     inkscape:cx="256.79978"
+     inkscape:cx="241.46845"
      inkscape:cy="225.44024"
      inkscape:window-width="1920"
      inkscape:window-height="1013"
@@ -74,12 +74,12 @@
        d="m 0,100 c 20,0 35,-5 50,-10"
        id="path881" />
     <path
-       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.264583;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.26458299;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:0.52916598,0.26458299;stroke-opacity:1;stroke-dashoffset:0"
        d="m 5.0000959,59.999973 c 20.0000051,0 35.0000051,-5 50.0000051,-10 15,-5 30,-10 50.000049,-10"
        id="path921"
        sodipodi:nodetypes="csc" />
     <path
-       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.264583;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.26458299;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:0.52916598,0.26458299;stroke-opacity:1;stroke-dashoffset:0"
        d="m 49.999901,89.999928 c 0,-15 2.5,-27.5 5,-40 2.499997,-12.5 4.999997,-25 4.999997,-40.0000008"
        id="path1288"
        sodipodi:nodetypes="csc" />

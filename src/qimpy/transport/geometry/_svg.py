@@ -40,20 +40,23 @@ def parse_svg(
     """Parse SVG file into QuadSet, sampled with `grid_spacing`,
     and with vertex equivalence determined with tolerance `tol`."""
     svg_xml = minidom.parse(svg_file)
-    splines, colors = get_splines(svg_xml)
+    splines, colors, dashed = get_splines(svg_xml)
     circles, circle_names = get_circles(svg_xml)
 
     # Check contact specification:
-    contact_indices = []
-    for contact_name in contact_names:
-        try:
-            contact_indices.append(circle_names.index(contact_name))
-        except ValueError:
-            raise InvalidInputException(
-                f"Contact '{contact_name}' not found in {svg_file}."
-                " (Each contact name must match the id of a circle in the svg.)"
-            )
-    contacts = circles[contact_indices]
+    if contact_names:
+        contact_indices = []
+        for contact_name in contact_names:
+            try:
+                contact_indices.append(circle_names.index(contact_name))
+            except ValueError:
+                raise InvalidInputException(
+                    f"Contact '{contact_name}' not found in {svg_file}."
+                    " (Each contact name must match the id of a circle in the svg.)"
+                )
+        contacts = circles[contact_indices]
+    else:
+        contacts = np.zeros((0, 3))
 
     # Process mess geometry:
     vertices, edges = weld_points(splines, tol=tol)
@@ -79,6 +82,7 @@ def parse_svg(
     quad_edges = {}  # map edge (vertex index pair) to quad, edge-within indices
     color_edges = defaultdict(list)  # list of edges (vert index pair) by color
     edge_colors = {}  # map edges to colors (only for non-black edges)
+    dashed_edges = set()  # only edges that are dashed, to enable adjacency
     for i_quad, cycle in enumerate(cycles):
         cycle_next = cycle[1:] + [cycle[0]]  # next entry for each in cycle
         for i_edge, edge in enumerate(zip(cycle, cycle_next)):
@@ -91,10 +95,15 @@ def parse_svg(
             if color != "#000000":  # only use non-black colors for adjacency
                 color_edges[color].append(edge)
                 edge_colors[edge] = color
+            if dashed[i_spline]:
+                dashed_edges.add(edge)
 
     # Compute adjacency:
     adjacency = np.full((len(quads), QUAD_N_SIDES, 2), -1)
     for edge, i_quad_edge in quad_edges.items():
+        if edge not in dashed_edges:
+            continue  # only dashed edges are allowed to have any adjacency
+
         # Handle inner adjacency
         if edge[::-1] in quad_edges:
             adjacency[i_quad_edge] = quad_edges[edge[::-1]]
@@ -134,7 +143,7 @@ def parse_style(style_str: str):
     }
 
 
-def get_splines(svg_xml: minidom.Document) -> tuple[np.ndarray, list]:
+def get_splines(svg_xml: minidom.Document) -> tuple[np.ndarray, list[str], list[bool]]:
     """Get spline geometries and colors from SVG file."""
     svg_paths = svg_xml.getElementsByTagName("path")
 
@@ -151,13 +160,15 @@ def get_splines(svg_xml: minidom.Document) -> tuple[np.ndarray, list]:
     # (e.g. quadratic splines)
     splines_complex = []  # coordinates as complex numbers from svg.path library
     colors = []
+    dashed = []
     for segment, style in zip(segments, styles):
         if isinstance(segment, (Line, Close, CubicBezier)):
             splines_complex.append(ensure_cubic_spline(segment))
             colors.append(style["stroke"])
+            dashed.append(style.get("stroke-dasharray", "none") != "none")
     splines = np.array(splines_complex)
     splines = np.stack((splines.real, splines.imag), axis=-1)  # to real array
-    return splines, colors
+    return splines, colors, dashed
 
 
 def get_circles(svg_xml: minidom.Document) -> tuple[np.ndarray, list]:

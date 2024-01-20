@@ -24,7 +24,7 @@
      inkscape:document-units="px"
      showgrid="false"
      inkscape:zoom="0.96717742"
-     inkscape:cx="158.70925"
+     inkscape:cx="135.96264"
      inkscape:cy="384.1074"
      inkscape:window-width="1920"
      inkscape:window-height="1013"
@@ -46,15 +46,15 @@
        d="m 0,150 c 13.807118,0 26.307118,-5.59644 35.355339,-14.64466 C 44.403559,126.30712 50,113.80712 50,100 50,86.192881 44.403559,73.692881 35.355339,64.644661 26.307118,55.596441 13.807118,50 0,50 V 0 C 27.614237,0 52.614237,11.192881 70.710678,29.289322 88.807119,47.385762 100,72.385762 100,100 100,127.61423 88.807119,152.61423 70.710678,170.71068 52.614237,188.80712 27.614237,200 0,200 Z"
        sodipodi:nodetypes="csssccssscc" />
     <path
-       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.26458332;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;stroke-miterlimit:4;stroke-dasharray:0.79374995,0.79374995;stroke-dashoffset:2.64583315"
        d="M 35.355339,64.644661 70.710678,29.289322"
        id="path1863" />
     <path
-       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.26458332;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;stroke-miterlimit:4;stroke-dasharray:0.79374995,0.79374995;stroke-dashoffset:2.64583315"
        d="m 50,100 h 50"
        id="path1865" />
     <path
-       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.26458332;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;stroke-miterlimit:4;stroke-dasharray:0.79374995,0.79374995;stroke-dashoffset:2.64583315"
        d="m 35.355339,135.35534 35.355339,35.35534"
        id="path1867" />
     <circle
