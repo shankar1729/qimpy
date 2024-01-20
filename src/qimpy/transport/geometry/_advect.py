@@ -32,6 +32,7 @@ class Advect:
     v_prime: torch.jit.ScriptModule  #: Underlying advection logic
 
     material: Material
+    aperture_selections: list[Optional[torch.Tensor]]  #: Aperture indices for each edge
     reflectors: list[
         Optional[Callable[[torch.Tensor], torch.Tensor]]
     ]  #: Material-dependent reflector for each edge that needs one
@@ -53,6 +54,7 @@ class Advect:
         grid_start: tuple[int, ...],
         grid_stop: tuple[int, ...],
         is_reflective: np.ndarray,
+        aperture_circles: torch.Tensor,
         contact_circles: torch.Tensor,
         contact_params: list[dict],
         material: Material,
@@ -105,18 +107,30 @@ class Advect:
 
         # Initialize reflectors if needed:
         self.material = material
+        self.aperture_selections = [None] * 4
         self.reflectors = [None] * 4
         self.contacts = [[] for _ in range(4)]  # Note: [[]]*N makes N refs to one []!
-        for i_edge in np.where(is_reflective)[0]:
+        for i_edge, is_reflective_i in enumerate(is_reflective):
             i_dim = i_edge % 2  # long direction of edge
             j_dim = 1 - i_dim  # other direction
-            # Compute tangent direction:
+
+            # Compute coordinates along edge:
             Q_edge = torch.empty((N[i_dim], 2), device=rc.device)
             Q_edge[:, i_dim] = grids1d[i_dim]
             Q_edge[:, j_dim] = (grid_start if (i_edge in {0, 3}) else grid_stop)[j_dim]
             Q_edge_frac = Q_edge / N_tot
             Q_edge_frac.requires_grad = True
             q_edge = transformation(Q_edge_frac)
+
+            # Check for partial reflection due to apertures in pass-through edges:
+            if not is_reflective_i:
+                within = within_circles(aperture_circles, q_edge.detach())
+                aperture_selection = torch.where(within.any(dim=0))[0]
+                if not len(aperture_selection):
+                    continue  # no apertures on edge; treat as entirely pass-through
+                self.aperture_selections[i_edge] = aperture_selection
+
+            # Compute tangent direction:
             grad_q_edge = torch.tile(
                 torch.eye(2, device=rc.device)[:, None], (1, N[i_dim], 1)
             )
@@ -136,10 +150,7 @@ class Advect:
             self.reflectors[i_edge] = material.get_reflector(normal)
 
             # Check for any contacts:
-            centers = contact_circles[:, :2]
-            radii = contact_circles[:, 2]
-            distances = (q_edge.detach()[None] - centers[:, None]).norm(dim=-1)
-            within = distances <= radii[:, None]
+            within = within_circles(contact_circles, q_edge.detach())
             for i_contact, contact_params_i in enumerate(contact_params):
                 if len(selection := torch.argwhere(within[i_contact])):
                     selection_start = selection.min().item()
@@ -240,3 +251,12 @@ class Vprime(torch.nn.Module):
         result_plus = (rho_diff + half_slope_diff)[..., :-1]
         delta_rho = torch.where(v < 0.0, result_minus, result_plus)
         return (v * delta_rho).swapaxes(axis, -1)  # original axis order
+
+
+def within_circles(circles: torch.Tensor, points: torch.Tensor) -> torch.Tensor:
+    """Return boolean tensor of which circles (first index of result) contain
+    which points. Circles are specified as N x 3 (center_x, center_y, radius)."""
+    centers = circles[:, :2]
+    radii = circles[:, 2]
+    distances = (points[None] - centers[:, None]).norm(dim=-1)
+    return distances <= radii[:, None]

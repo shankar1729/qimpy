@@ -63,12 +63,7 @@ def plot_spline(
 ) -> np.ndarray:
     assert len(spline) == 4
     t = np.linspace(0.0, 1.0, n_points + 1)[:, None]
-    t_bar = 1.0 - t
-    # Evaluate cubic spline by De Casteljau's algorithm:
-    result = spline[:, None, :]
-    for i_iter in range(len(spline) - 1):
-        result = result[:-1] * t_bar + result[1:] * t
-    points = result[0]
+    points = evaluate_spline(spline, t)
     # Plot
     ax.plot(points[:, 0], points[:, 1], color=spline_color, ls=spline_linestyle)
     # Optional handles:
@@ -77,6 +72,15 @@ def plot_spline(
         ax.plot(spline[2:, 0], spline[2:, 1], color=handle_color, ls=handle_linestyle)
         ax.scatter(spline[1:3, 0], spline[1:3, 1], color=handle_color)
     return points
+
+
+def evaluate_spline(spline: np.ndarray, t: np.ndarray) -> np.ndarray:
+    t_bar = 1.0 - t
+    # Evaluate cubic spline by De Casteljau's algorithm:
+    result = spline[:, None, :]
+    for i_iter in range(len(spline) - 1):
+        result = result[:-1] * t_bar + result[1:] * t
+    return result[0]
 
 
 def spline_length(spline: np.ndarray, n_points: int = 64) -> np.ndarray:

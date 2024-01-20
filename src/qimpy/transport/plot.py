@@ -13,7 +13,7 @@ import h5py
 from qimpy import rc, log
 from qimpy.profiler import stopwatch, StopWatch
 from qimpy.io import log_config
-from .geometry import BOUNDARY_SLICES, plot_spline
+from .geometry import BOUNDARY_SLICES, plot_spline, evaluate_spline
 
 
 def main() -> None:
@@ -115,6 +115,7 @@ class PlotGeometry:
             grid_spacing = float(cp["/geometry"].attrs["grid_spacing"])
             contact_names = str(cp["/geometry"].attrs["contact_names"]).split(",")
             contacts = np.array(cp["/geometry/contacts"])
+            apertures = np.array(cp["/geometry/apertures"])
             vertices = np.array(cp["/geometry/vertices"])
             quads = np.array(cp["/geometry/quads"])
             adjacency = np.array(cp["/geometry/adjacency"])
@@ -154,18 +155,45 @@ class PlotGeometry:
             for i_edge, (j_quad, j_edge) in enumerate(adjacency_quad):
                 is_periodic_bc = displacement_magnitudes[i_quad, i_edge] > tol
                 is_exterior = (j_quad < 0) or is_periodic_bc
+                verts = vertices[quads[i_quad, i_edge]]
                 if is_exterior:
-                    exterior_splines.append(
-                        (vertices[quads[i_quad, i_edge]], is_periodic_bc)
-                    )
+                    exterior_splines.append((verts, is_periodic_bc))
                 else:
                     indices_i = edge_indices[i_quad][i_edge]
                     indices_j = edge_indices[j_quad][j_edge][::-1]
-                    triangles.append(
-                        np.stack(
-                            (indices_i[:-1], indices_j[:-1], indices_j[1:]), axis=-1
-                        ).reshape(-1, 3)
-                    )
+                    new_triangles = np.stack(
+                        (indices_i[:-1], indices_j[:-1], indices_j[1:]), axis=-1
+                    ).reshape(-1, 3)
+
+                    # Check for partial reflection due to apertures:
+                    Npoints = len(indices_i)
+                    t = (np.arange(Npoints)[:, None] + 0.5) / Npoints
+                    points = evaluate_spline(verts, t)
+                    centers = apertures[:, :2]
+                    radii = apertures[:, 2]
+                    distances = np.linalg.norm(points[None] - centers[:, None], axis=-1)
+                    within_any = np.any(distances <= radii[:, None], axis=0)
+                    if np.count_nonzero(within_any):
+                        # Draw interior aperture boundary:
+                        sel_blocked = np.where(np.logical_not(within_any))[0]
+                        i_breaks = np.where(sel_blocked[:-1] + 1 != sel_blocked[1:])[0]
+                        i_starts = np.concatenate(([0], sel_blocked[i_breaks + 1]))
+                        i_stops = np.concatenate(
+                            (sel_blocked[i_breaks] + 2, [Npoints + 1])
+                        )
+                        t = np.arange(Npoints + 1)[:, None] / Npoints
+                        points = evaluate_spline(verts, t)
+                        for i_start, i_stop in zip(i_starts, i_stops):
+                            plt.plot(*points[i_start:i_stop].T, "k")
+
+                        # Only keep triangles within apertures:
+                        sel_within = np.where(
+                            np.logical_and(within_any[:-1], within_any[1:])
+                        )[0]
+                        print(sel_within)
+                        new_triangles = new_triangles[sel_within]
+
+                    triangles.append(new_triangles)
 
         # Comnstruct triangulation:
         triangles = np.concatenate(triangles, axis=0)
