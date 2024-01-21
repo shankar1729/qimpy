@@ -1,5 +1,8 @@
 checkpoints: animation/*.h5
 output: animation/frame{:04d}.png
 
-streamlines: yes
-transparency: no
+streamlines:
+  transparency: no
+  density: 2
+  linewidth: 0.7
+  arrowsize: 0.5

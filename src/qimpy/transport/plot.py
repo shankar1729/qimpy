@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Optional, Any
 import argparse
 import glob
 import logging
@@ -34,8 +35,8 @@ def run(
     *,
     checkpoints: str,
     output: str,
-    streamlines: bool = True,
-    transparency: bool = False,
+    streamlines: Optional[dict] = None,
+    dpi: int = 200,
 ) -> None:
     # Distribute tasks over MPI:
     file_list = rc.comm.bcast(sorted(glob.glob(checkpoints)))
@@ -57,7 +58,7 @@ def run(
             for i_quad in range(n_quads):
                 cp_quad = cp_geom[f"quad{i_quad}"]
                 rho_list.append(np.array(cp_quad["rho"][mine]))
-                if streamlines:
+                if streamlines is not None:
                     v = np.array(cp_quad["v"][mine])
                     vx_list.append(v[..., 0])
                     vy_list.append(v[..., 1])
@@ -74,30 +75,44 @@ def run(
             pg.cbar.set_label(f"Density (${pg.rho_max_str}$ = {rho_max_abs:6.2e})")
 
             # Optional streamlines:
-            if streamlines:
-                if streams:
-                    # Remove previous streamlines:
-                    streams.lines.remove()
-                    for art in plt.gca().get_children():
-                        if isinstance(art, FancyArrowPatch):
-                            art.remove()
-                vx = pg.interpolate(vx_list, i_frame_mine)
-                vy = pg.interpolate(vy_list, i_frame_mine)
-                stream_kwargs = dict(color="k", linewidth=1, arrowsize=0.7)
-                if transparency:
-                    v_mag = np.hypot(vx, vy).filled(0.0)
-                    v_rel = np.sqrt(v_mag / v_mag.max())  # partially suppress low v
-                    colors = np.zeros((256, 4))
-                    colors[:, -1] = np.linspace(v_rel.min(), 1.0, len(colors))
-                    alpha_cmap = ListedColormap(colors)
-                    stream_kwargs.update(dict(color=v_rel, cmap=alpha_cmap))
-                streams = plt.streamplot(pg.x_grid, pg.y_grid, vx, vy, **stream_kwargs)
-
-            plt.savefig(plot_file, bbox_inches="tight", dpi=200)
+            if streamlines is not None:
+                streams = plot_streamlines(
+                    streams, pg, vx_list, vy_list, i_frame_mine, **streamlines
+                )
+            plt.savefig(plot_file, bbox_inches="tight", dpi=dpi)
             log.info(f"Saved {plot_file}")
-
     log.setLevel(orig_log_level)  # Switch log back to single process
     rc.comm.Barrier()
+
+
+def plot_streamlines(
+    streams: Any,
+    pg: PlotGeometry,
+    vx_list: list[np.ndarray],
+    vy_list: list[np.ndarray],
+    i_frame_mine: int,
+    *,
+    transparency: bool = False,
+    **stream_kwargs,
+) -> Any:
+    if streams is not None:
+        # Remove previous streamlines:
+        streams.lines.remove()
+        for art in plt.gca().get_children():
+            if isinstance(art, FancyArrowPatch):
+                art.remove()
+    vx = pg.interpolate(vx_list, i_frame_mine)
+    vy = pg.interpolate(vy_list, i_frame_mine)
+    kwargs = dict(color="k", linewidth=1, arrowsize=0.7)  # defaults
+    kwargs.update(**stream_kwargs)
+    if transparency:
+        v_mag = np.hypot(vx, vy).filled(0.0)
+        v_rel = np.sqrt(v_mag / v_mag.max())  # partially suppress low v
+        colors = np.zeros((256, 4))
+        colors[:, -1] = np.linspace(v_rel.min(), 1.0, len(colors))
+        alpha_cmap = ListedColormap(colors)
+        kwargs.update(dict(color=v_rel, cmap=alpha_cmap))
+    return plt.streamplot(pg.x_grid, pg.y_grid, vx, vy, **kwargs)
 
 
 class PlotGeometry:
@@ -189,7 +204,7 @@ class PlotGeometry:
 
                     triangles.append(new_triangles)
 
-        # Comnstruct triangulation:
+        # Construct triangulation:
         triangles = np.concatenate(triangles, axis=0)
         q_all = np.concatenate([q.reshape(-1, 2) for q in q_list])
         self.triangulation = mtri.Triangulation(*q_all.T, triangles)
