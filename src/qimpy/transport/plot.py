@@ -10,7 +10,7 @@ from matplotlib.patches import FancyArrowPatch
 import numpy as np
 import h5py
 
-from qimpy import rc, log
+from qimpy import rc, log, io
 from qimpy.profiler import stopwatch, StopWatch
 from qimpy.io import log_config
 from .geometry import BOUNDARY_SLICES, plot_spline, evaluate_spline, within_circles_np
@@ -21,24 +21,24 @@ def main() -> None:
     rc.init()
 
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "checkpoints", help="Filename pattern (wildcard) for checkpoints", type=str
-    )
-    parser.add_argument(
-        "output",
-        help="Output filename pattern with integer format string (eg. {:04d})",
-        type=str,
-    )
-    parser.add_argument(
-        "--streamlines", help="Whether to draw streamlines", type=bool, default=False
-    )
-    parser.add_argument(
-        "--transparency", help="Transparency in streamlines", type=bool, default=False
-    )
+    parser.add_argument("input_file", help="YAML input file", type=str)
     args = parser.parse_args()
+    input_dict = io.dict.key_cleanup(io.yaml.load(args.input_file))
+    run(**input_dict)
 
+    rc.report_end()
+    StopWatch.print_stats()
+
+
+def run(
+    *,
+    checkpoints: str,
+    output: str,
+    streamlines: bool = True,
+    transparency: bool = False,
+) -> None:
     # Distribute tasks over MPI:
-    file_list = rc.comm.bcast(sorted(glob.glob(args.checkpoints)))
+    file_list = rc.comm.bcast(sorted(glob.glob(checkpoints)))
     mine = slice(rc.i_proc, None, rc.n_procs)  # divide frames within each file
     pg = PlotGeometry(file_list[0])
     orig_log_level = log.getEffectiveLevel()
@@ -57,14 +57,14 @@ def main() -> None:
             for i_quad in range(n_quads):
                 cp_quad = cp_geom[f"quad{i_quad}"]
                 rho_list.append(np.array(cp_quad["rho"][mine]))
-                if args.streamlines:
+                if streamlines:
                     v = np.array(cp_quad["v"][mine])
                     vx_list.append(v[..., 0])
                     vy_list.append(v[..., 1])
 
         # Plot each frame:
         for i_frame_mine, (i_step, t) in enumerate(zip(i_step_list, t_list)):
-            plot_file = args.output.format(i_step)
+            plot_file = output.format(i_step)
             # Density:
             pg.title.set_text(f"$t$ = {t:.4g}")
             rho = pg.interpolate(rho_list, i_frame_mine)
@@ -74,7 +74,7 @@ def main() -> None:
             pg.cbar.set_label(f"Density (${pg.rho_max_str}$ = {rho_max_abs:6.2e})")
 
             # Optional streamlines:
-            if args.streamlines:
+            if streamlines:
                 if streams:
                     # Remove previous streamlines:
                     streams.lines.remove()
@@ -84,7 +84,7 @@ def main() -> None:
                 vx = pg.interpolate(vx_list, i_frame_mine)
                 vy = pg.interpolate(vy_list, i_frame_mine)
                 stream_kwargs = dict(color="k", linewidth=1, arrowsize=0.7)
-                if args.transparency:
+                if transparency:
                     v_mag = np.hypot(vx, vy).filled(0.0)
                     v_rel = np.sqrt(v_mag / v_mag.max())  # partially suppress low v
                     colors = np.zeros((256, 4))
@@ -98,8 +98,6 @@ def main() -> None:
 
     log.setLevel(orig_log_level)  # Switch log back to single process
     rc.comm.Barrier()
-    rc.report_end()
-    StopWatch.print_stats()
 
 
 class PlotGeometry:
