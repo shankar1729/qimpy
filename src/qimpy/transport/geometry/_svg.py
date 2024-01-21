@@ -10,7 +10,7 @@ from xml.dom import minidom
 
 from qimpy import rc
 from qimpy.io import InvalidInputException
-from . import spline_length
+from . import spline_length, evaluate_spline, within_circles_np
 
 
 QUAD_N_SIDES: int = 4  #: Support only quads (implicitly required throughout)
@@ -27,6 +27,7 @@ class QuadSet:
     grid_size: np.ndarray  #: Nquads x 2 grid dimensions for each quad
     contacts: np.ndarray  #: Ncontacts x 3: center x, y  and radius of each circle
     apertures: np.ndarray  #: Napertures x 3: center x, y  and radius of each circle
+    has_apertures: np.ndarray  #: Nquads x 4: whether each edge has any apertures on it
 
     def get_boundary(self, i_quad: int) -> np.ndarray:
         """Get sequence of boundary points (12 x 2) defining a specified quad.
@@ -69,7 +70,18 @@ def parse_svg(
     ]
     apertures = circles[aperture_indices] if aperture_indices else np.zeros((0, 3))
 
-    # Process mess geometry:
+    # Check non-dashed splines for apertures (then they are partially pass-through):
+    pass_throughs = []
+    for spline, is_dashed in zip(splines, dashed):
+        if is_dashed:
+            pass_throughs.append(True)  # fully-pass through if dashed
+        else:
+            Npoints = 2 * int(np.ceil(spline_length(spline) / grid_spacing))
+            t_spline = (np.arange(Npoints)[:, None] + 0.5) / Npoints
+            points = evaluate_spline(spline, t_spline)
+            pass_throughs.append(np.any(within_circles_np(apertures, points)))
+
+    # Process mesh geometry:
     vertices, edges = weld_points(splines, tol=tol)
     cycles = find_cycles(edges, vertices)
 
@@ -90,29 +102,32 @@ def parse_svg(
 
     # Build quads, ensuring each spline goes along the direction of the cycle
     quads = np.empty((len(cycles), 4, 4), dtype=int)
+    has_apertures = np.empty(quads.shape[:2], dtype=bool)
     quad_edges = {}  # map edge (vertex index pair) to quad, edge-within indices
     color_edges = defaultdict(list)  # list of edges (vert index pair) by color
     edge_colors = {}  # map edges to colors (only for non-black edges)
-    dashed_edges = set()  # only edges that are dashed, to enable adjacency
+    pass_through_edges = set()  # only edges that need adjacency (dashed / apertures)
     for i_quad, cycle in enumerate(cycles):
         cycle_next = cycle[1:] + [cycle[0]]  # next entry for each in cycle
         for i_edge, edge in enumerate(zip(cycle, cycle_next)):
             i_spline, direction = edges_lookup[edge]
             color = colors[i_spline]
+            pass_through = pass_throughs[i_spline]
             # Add edge in appropriate direction to new list:
             quads[i_quad, i_edge] = edges[i_spline][::direction]
+            has_apertures[i_quad, i_edge] = pass_through and (not dashed[i_spline])
             # Update edge look-ups:
             quad_edges[edge] = (i_quad, i_edge)
             if color != "#000000":  # only use non-black colors for adjacency
                 color_edges[color].append(edge)
                 edge_colors[edge] = color
-            if dashed[i_spline]:
-                dashed_edges.add(edge)
+            if pass_through:
+                pass_through_edges.add(edge)
 
     # Compute adjacency:
     adjacency = np.full((len(quads), QUAD_N_SIDES, 2), -1)
     for edge, i_quad_edge in quad_edges.items():
-        if edge not in dashed_edges:
+        if edge not in pass_through_edges:
             continue  # only dashed edges are allowed to have any adjacency
 
         # Handle inner adjacency
@@ -146,7 +161,14 @@ def parse_svg(
     grid_size = n_points.reshape(-1, 2)  # now n_quads x 2 grid dimensions
 
     return QuadSet(
-        vertices, quads, adjacency, displacements, grid_size, contacts, apertures
+        vertices,
+        quads,
+        adjacency,
+        displacements,
+        grid_size,
+        contacts,
+        apertures,
+        has_apertures,
     )
 
 

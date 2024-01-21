@@ -13,7 +13,7 @@ import h5py
 from qimpy import rc, log
 from qimpy.profiler import stopwatch, StopWatch
 from qimpy.io import log_config
-from .geometry import BOUNDARY_SLICES, plot_spline, evaluate_spline
+from .geometry import BOUNDARY_SLICES, plot_spline, evaluate_spline, within_circles_np
 
 
 def main() -> None:
@@ -169,10 +169,7 @@ class PlotGeometry:
                     Npoints = len(indices_i)
                     t = (np.arange(Npoints)[:, None] + 0.5) / Npoints
                     points = evaluate_spline(verts, t)
-                    centers = apertures[:, :2]
-                    radii = apertures[:, 2]
-                    distances = np.linalg.norm(points[None] - centers[:, None], axis=-1)
-                    within_any = np.any(distances <= radii[:, None], axis=0)
+                    within_any = np.any(within_circles_np(apertures, points), axis=0)
                     if np.count_nonzero(within_any):
                         # Draw interior aperture boundary:
                         sel_blocked = np.where(np.logical_not(within_any))[0]

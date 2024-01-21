@@ -90,3 +90,22 @@ def spline_length(spline: np.ndarray, n_points: int = 64) -> np.ndarray:
     basis = cubic_bernstein(torch.linspace(0.0, 1.0, n_points + 1)).numpy()
     points = np.einsum("ct, ...ci -> ...ti", basis, spline)
     return np.linalg.norm(np.diff(points, axis=-2), axis=-1).sum(axis=-1)
+
+
+def within_circles(circles: torch.Tensor, points: torch.Tensor) -> torch.Tensor:
+    """Return boolean tensor of which circles (first index of result) contain
+    which points. Circles are specified as N x 3 (center_x, center_y, radius)."""
+    centers = circles[:, :2]
+    radii = circles[:, 2]
+    distances = (points[None] - centers[:, None]).norm(dim=-1)
+    return distances <= radii[:, None]
+
+
+def within_circles_np(circles: np.ndarray, points: np.ndarray) -> np.ndarray:
+    """Return boolean tensor of which circles (first index of result) contain
+    which points. Circles are specified as N x 3 (center_x, center_y, radius).
+    (NumPy array version for use in initial data, before moving to torch/GPU."""
+    centers = circles[:, :2]
+    radii = circles[:, 2]
+    distances = np.linalg.norm(points[None] - centers[:, None], axis=-1)
+    return distances <= radii[:, None]

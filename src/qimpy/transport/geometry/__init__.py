@@ -4,6 +4,8 @@ __all__ = (
     "plot_spline",
     "evaluate_spline",
     "spline_length",
+    "within_circles",
+    "within_circles_np",
     "parse_svg",
     "QuadSet",
     "SubQuadSet",
@@ -13,7 +15,14 @@ __all__ = (
     "Geometry",
 )
 
-from ._spline import BicubicPatch, plot_spline, evaluate_spline, spline_length
+from ._spline import (
+    BicubicPatch,
+    plot_spline,
+    evaluate_spline,
+    spline_length,
+    within_circles,
+    within_circles_np,
+)
 from ._advect import Advect
 from ._svg import parse_svg, QuadSet
 from ._subdivide import SubQuadSet, subdivide, select_division, BOUNDARY_SLICES

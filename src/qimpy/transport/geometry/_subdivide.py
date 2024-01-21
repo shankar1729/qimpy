@@ -17,6 +17,7 @@ class SubQuadSet:
     grid_start: np.ndarray  #: starting grid index of sub-quad (NsubQuads x 2)
     grid_stop: np.ndarray  #: stopping grid index of sub-quad (NsubQuads x 2)
     adjacency: np.ndarray  #: NsubQuads x 4 x 2, analogous to `QuadSet.adjacency`
+    has_apertures: np.ndarray  #: NsubQuads x 4, analogous to `QuadSet.has_apertures`
 
 
 def divided_count(quad_set: QuadSet, grid_size_max: int) -> tuple[int, float]:
@@ -112,6 +113,7 @@ def subdivide(quad_set: QuadSet, grid_size_max: int) -> SubQuadSet:
     grid_start = np.empty((n_sub_quads_tot, 2), dtype=int)
     grid_stop = np.empty((n_sub_quads_tot, 2), dtype=int)
     adjacency = np.empty((n_sub_quads_tot, 4, 2), dtype=int)
+    has_apertures = np.empty((n_sub_quads_tot, 4), dtype=bool)
     for i_quad, (div0, div1) in enumerate(divisions):
         cur_slice = slice(n_sub_quads_prev[i_quad], n_sub_quads_prev[i_quad + 1])
         quad_index[cur_slice] = i_quad
@@ -126,6 +128,7 @@ def subdivide(quad_set: QuadSet, grid_size_max: int) -> SubQuadSet:
 
         # Adjacency within current quad:
         adjacency_slice = np.full((len(div0), len(div1), 4, 2), -1)
+        has_apertures_slice = np.full(adjacency_slice.shape[:-1], False)
         i_sub_quads = np.arange(cur_slice.start, cur_slice.stop).reshape(
             *quad_divisions[i_quad]
         )
@@ -137,17 +140,19 @@ def subdivide(quad_set: QuadSet, grid_size_max: int) -> SubQuadSet:
 
         # Adjacency between quads:
         for i_edge, (j_quad, j_edge) in enumerate(quad_set.adjacency[i_quad]):
+            i_slice_edge = BOUNDARY_SLICES[i_edge] + (i_edge,)
             if j_quad >= 0:
-                i_slice = BOUNDARY_SLICES[i_edge]
                 j_slice = BOUNDARY_SLICES[j_edge]
                 j_sub_quads = np.arange(
                     n_sub_quads_prev[j_quad], n_sub_quads_prev[j_quad + 1]
                 ).reshape(*quad_divisions[j_quad])
-                adjacency_slice[i_slice + (i_edge, 0)] = j_sub_quads[j_slice][::-1]
-                adjacency_slice[i_slice + (i_edge, 1)] = j_edge
+                adjacency_slice[i_slice_edge + (0,)] = j_sub_quads[j_slice][::-1]
+                adjacency_slice[i_slice_edge + (1,)] = j_edge
+            has_apertures_slice[i_slice_edge] = quad_set.has_apertures[i_quad, i_edge]
         adjacency[cur_slice] = adjacency_slice.reshape(-1, 4, 2)
+        has_apertures[cur_slice] = has_apertures_slice.reshape(-1, 4)
 
-    return SubQuadSet(quad_index, grid_start, grid_stop, adjacency)
+    return SubQuadSet(quad_index, grid_start, grid_stop, adjacency, has_apertures)
 
 
 def split_evenly(n_tasks: int, max_tasks: int) -> np.ndarray:

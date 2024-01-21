@@ -86,11 +86,12 @@ class Geometry(TreeNode):
         # Build an advect object for each sub-quad local to this process:
         self.patches = []
         mine = slice(self.patch_division.i_start, self.patch_division.i_stop)
-        for i_quad, grid_start, grid_stop, adjacency in zip(
+        for i_quad, grid_start, grid_stop, adjacency, has_apertures in zip(
             self.sub_quad_set.quad_index[mine],
             self.sub_quad_set.grid_start[mine],
             self.sub_quad_set.grid_stop[mine],
             self.sub_quad_set.adjacency[mine],
+            self.sub_quad_set.has_apertures[mine],
         ):
             boundary = torch.from_numpy(self.quad_set.get_boundary(i_quad))
             transformation = BicubicPatch(boundary=boundary.to(rc.device))
@@ -102,13 +103,14 @@ class Geometry(TreeNode):
                     grid_stop=grid_stop,
                     material=material,
                     is_reflective=(adjacency[:, 0] == -1),
+                    has_apertures=has_apertures,
                     aperture_circles=aperture_circles,
                     contact_circles=contact_circles,
                     contact_params=contact_params,
                 )
             )
         self.dt_max = self.comm.allreduce(
-            min(patch.dt_max for patch in self.patches), op=MPI.MIN
+            min((patch.dt_max for patch in self.patches), default=np.inf), op=MPI.MIN
         )
         self.stash = ResultStash(len(self.patches))
 

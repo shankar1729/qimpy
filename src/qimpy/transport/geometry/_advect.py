@@ -8,6 +8,7 @@ from qimpy import rc, MPI
 from qimpy.mpi import BufferView, globalreduce
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
+from . import within_circles
 
 
 class Contact(NamedTuple):
@@ -54,6 +55,7 @@ class Advect:
         grid_start: tuple[int, ...],
         grid_stop: tuple[int, ...],
         is_reflective: np.ndarray,
+        has_apertures: np.ndarray,
         aperture_circles: torch.Tensor,
         contact_circles: torch.Tensor,
         contact_params: list[dict],
@@ -110,7 +112,12 @@ class Advect:
         self.aperture_selections = [None] * 4
         self.reflectors = [None] * 4
         self.contacts = [[] for _ in range(4)]  # Note: [[]]*N makes N refs to one []!
-        for i_edge, is_reflective_i in enumerate(is_reflective):
+        for i_edge, (is_reflective_i, has_apertures_i) in enumerate(
+            zip(is_reflective, has_apertures)
+        ):
+            if not (is_reflective_i or has_apertures_i):
+                continue  # Entirely pass-through (neither reflective nor has apertures)
+
             i_dim = i_edge % 2  # long direction of edge
             j_dim = 1 - i_dim  # other direction
 
@@ -121,14 +128,6 @@ class Advect:
             Q_edge_frac = Q_edge / N_tot
             Q_edge_frac.requires_grad = True
             q_edge = transformation(Q_edge_frac)
-
-            # Check for partial reflection due to apertures in pass-through edges:
-            if not is_reflective_i:
-                within = within_circles(aperture_circles, q_edge.detach())
-                aperture_selection = torch.where(within.any(dim=0))[0]
-                if not len(aperture_selection):
-                    continue  # no apertures on edge; treat as entirely pass-through
-                self.aperture_selections[i_edge] = aperture_selection
 
             # Compute tangent direction:
             grad_q_edge = torch.tile(
@@ -148,6 +147,11 @@ class Advect:
             normal = torch.stack((tangent[..., 1], -tangent[..., 0]), dim=-1)
             normal *= (1.0 / normal.norm(dim=-1))[..., None]  # unit outward normal
             self.reflectors[i_edge] = material.get_reflector(normal)
+
+            # Initialize pass-through indices for edges with apertures:
+            if has_apertures_i:
+                within = within_circles(aperture_circles, q_edge.detach())
+                self.aperture_selections[i_edge] = torch.where(within.any(dim=0))[0]
 
             # Check for any contacts:
             within = within_circles(contact_circles, q_edge.detach())
@@ -251,12 +255,3 @@ class Vprime(torch.nn.Module):
         result_plus = (rho_diff + half_slope_diff)[..., :-1]
         delta_rho = torch.where(v < 0.0, result_minus, result_plus)
         return (v * delta_rho).swapaxes(axis, -1)  # original axis order
-
-
-def within_circles(circles: torch.Tensor, points: torch.Tensor) -> torch.Tensor:
-    """Return boolean tensor of which circles (first index of result) contain
-    which points. Circles are specified as N x 3 (center_x, center_y, radius)."""
-    centers = circles[:, :2]
-    radii = circles[:, 2]
-    distances = (points[None] - centers[:, None]).norm(dim=-1)
-    return distances <= radii[:, None]

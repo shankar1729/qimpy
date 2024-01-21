@@ -24,8 +24,8 @@
      inkscape:document-units="px"
      showgrid="false"
      inkscape:zoom="1.301498"
-     inkscape:cx="396.85039"
-     inkscape:cy="113.33094"
+     inkscape:cx="363.0432"
+     inkscape:cy="113.33095"
      inkscape:window-width="1920"
      inkscape:window-height="1013"
      inkscape:window-x="0"
@@ -60,7 +60,7 @@
        cy="17.5"
        r="12.4" />
     <path
-       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.26458298;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;stroke-miterlimit:4;stroke-dasharray:0.52916597,0.52916597;stroke-dashoffset:0"
+       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.26458298;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0"
        d="M 105,5 V 30 55"
        id="lead-passthrough"
        sodipodi:nodetypes="ccc" />
