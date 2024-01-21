@@ -6,7 +6,7 @@ import logging
 
 import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
-from matplotlib.colors import ListedColormap
+from matplotlib.colors import ListedColormap, SymLogNorm
 from matplotlib.patches import FancyArrowPatch
 import numpy as np
 import h5py
@@ -35,13 +35,16 @@ def run(
     *,
     checkpoints: str,
     output: str,
+    density: Optional[dict] = None,
     streamlines: Optional[dict] = None,
     dpi: int = 200,
 ) -> None:
+    if density is None:
+        density = {}
     # Distribute tasks over MPI:
     file_list = rc.comm.bcast(sorted(glob.glob(checkpoints)))
     mine = slice(rc.i_proc, None, rc.n_procs)  # divide frames within each file
-    pg = PlotGeometry(file_list[0])
+    pg = PlotGeometry(file_list[0], **density)
     orig_log_level = log.getEffectiveLevel()
     log.setLevel(logging.INFO)  # Capture output from all processes
     streams = None
@@ -70,9 +73,9 @@ def run(
             pg.title.set_text(f"$t$ = {t:.4g}")
             rho = pg.interpolate(rho_list, i_frame_mine)
             rho_max_abs = np.max(np.abs(rho))
-            pg.img.set_data(rho)
-            pg.img.set_clim(-rho_max_abs, +rho_max_abs)
-            pg.cbar.set_label(f"Density (${pg.rho_max_str}$ = {rho_max_abs:6.2e})")
+            pg.img.set_data(rho / rho_max_abs)
+            rho_max_str = r"$\times|\rho|_{\mathrm{max}}$"
+            pg.cbar.set_label(f"Density ({rho_max_str} = {rho_max_abs:6.2e})")
 
             # Optional streamlines:
             if streamlines is not None:
@@ -119,7 +122,14 @@ class PlotGeometry:
     """Load geometry and cache quantities to accelerate plotting from checkpoint."""
 
     @stopwatch(name="PlotGeometry.init")
-    def __init__(self, checkpoint_file: str):
+    def __init__(
+        self,
+        checkpoint_file: str,
+        *,
+        cmap: str = "bwr",
+        interpolation: str = "bilinear",
+        linthresh: float = 0.1,
+    ):
         # Load geometry:
         q_list = []
         triangles = []
@@ -225,10 +235,9 @@ class PlotGeometry:
             test_rho,
             extent=(x_min, x_max, y_min, y_max),
             origin="lower",
-            cmap="bwr",
-            interpolation="bilinear",
-            vmin=-1,
-            vmax=+1,
+            cmap=cmap,
+            interpolation=interpolation,
+            norm=SymLogNorm(linthresh=linthresh, vmin=-1, vmax=+1),
         )
         # Draw domain boundaries:
         for spline, is_periodic_bc in exterior_splines:
@@ -259,17 +268,8 @@ class PlotGeometry:
         ax = plt.gca()
         ax.set_aspect("equal")
         ax.margins(0.1)
-        rho_max_str = r"|\rho|_{\mathrm{max}}"
         cbar_orientation = "horizontal" if (Nx > 1.5 * Ny) else "vertical"
-        self.cbar = plt.colorbar(
-            self.img, ticks=[-1, 0, +1], label="Temporary", orientation=cbar_orientation
-        )
-        cbar_labels = [rf"$-{rho_max_str}$", "0", rf"$+{rho_max_str}$"]
-        if cbar_orientation == "vertical":
-            self.cbar.ax.set_yticklabels(cbar_labels)
-        else:
-            self.cbar.ax.set_xticklabels(cbar_labels)
-        self.rho_max_str = rho_max_str
+        self.cbar = plt.colorbar(self.img, label="Temp", orientation=cbar_orientation)
         spines = ax.spines
         spines["top"].set_visible(False)
         spines["right"].set_visible(False)

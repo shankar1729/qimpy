@@ -1,6 +1,11 @@
 checkpoints: animation/*.h5
 output: animation/frame{:04d}.png
 
+density:
+  cmap: bwr
+  interpolation: bilinear
+  linthresh: 0.1
+
 streamlines:
   transparency: no
   density: 2
