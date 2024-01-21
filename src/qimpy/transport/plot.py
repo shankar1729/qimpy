@@ -228,7 +228,7 @@ class PlotGeometry:
                 radius = contact[2]
                 distances = np.linalg.norm(points - center, axis=1)
                 selection = np.where(distances <= radius)[0]
-                if len(selection):
+                if len(selection) >= 2:
                     contact_points = points[selection]
                     plt.plot(contact_points[:, 0], contact_points[:, 1], "w")
                     i_mid = len(selection) // 2
