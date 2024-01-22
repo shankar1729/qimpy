@@ -14,7 +14,7 @@ import h5py
 from qimpy import rc, log, io
 from qimpy.profiler import stopwatch, StopWatch
 from qimpy.io import log_config
-from .geometry import BOUNDARY_SLICES, plot_spline, evaluate_spline, within_circles_np
+from .geometry import BOUNDARY_SLICES, evaluate_spline, within_circles_np
 
 
 def main() -> None:
@@ -173,46 +173,69 @@ class PlotGeometry:
 
         # Add triangles between adjacent segments and collect exterior splines:
         tol = 1e-3
-        exterior_splines = []
         for i_quad, adjacency_quad in enumerate(adjacency):
             for i_edge, (j_quad, j_edge) in enumerate(adjacency_quad):
                 is_periodic_bc = displacement_magnitudes[i_quad, i_edge] > tol
+                linestyle = "dashed" if is_periodic_bc else "solid"
                 is_exterior = (j_quad < 0) or is_periodic_bc
                 verts = vertices[quads[i_quad, i_edge]]
-                if is_exterior:
-                    exterior_splines.append((verts, is_periodic_bc))
-                else:
-                    indices_i = edge_indices[i_quad][i_edge]
-                    indices_j = edge_indices[j_quad][j_edge][::-1]
-                    new_triangles = np.stack(
-                        (indices_i[:-1], indices_j[:-1], indices_j[1:]), axis=-1
-                    ).reshape(-1, 3)
 
-                    # Check for partial reflection due to apertures:
-                    Npoints = len(indices_i)
-                    t = (np.arange(Npoints)[:, None] + 0.5) / Npoints
-                    points = evaluate_spline(verts, t)
-                    within_any = np.any(within_circles_np(apertures, points), axis=0)
-                    if np.count_nonzero(within_any):
-                        # Draw interior aperture boundary:
-                        sel_blocked = np.where(np.logical_not(within_any))[0]
+                # Plot exterior/interior boundaries with contacts/apertures
+                indices_i = edge_indices[i_quad][i_edge]
+                Npoints = len(indices_i)
+                t = np.arange(2 * Npoints + 1)[:, None] / (2 * Npoints)
+                points_all = evaluate_spline(verts, t)  # includes vertices & midpoints
+                points = points_all[::2]  # vertices along spline only
+                points_mid = points_all[1::2]  # midpoints of spline segments only
+                tangents_mid = np.diff(points, axis=0)
+                circles = contacts if is_exterior else apertures
+                within_each = within_circles_np(circles, points_mid)
+                within_any = np.any(within_each, axis=0)
+                triangle_selection = slice(None)
+                if np.count_nonzero(within_any):
+                    # Draw partial boundary due to contacts or apertures:
+                    sel_blocked = np.where(np.logical_not(within_any))[0]
+                    if len(sel_blocked):  # otherwise no boundary left to draw
                         i_breaks = np.where(sel_blocked[:-1] + 1 != sel_blocked[1:])[0]
                         i_starts = np.concatenate(([0], sel_blocked[i_breaks + 1]))
                         i_stops = np.concatenate(
                             (sel_blocked[i_breaks] + 2, [Npoints + 1])
                         )
-                        t = np.arange(Npoints + 1)[:, None] / Npoints
-                        points = evaluate_spline(verts, t)
                         for i_start, i_stop in zip(i_starts, i_stops):
-                            plt.plot(*points[i_start:i_stop].T, "k")
+                            plt.plot(*points[i_start:i_stop].T, "k", ls=linestyle)
 
-                        # Only keep triangles within apertures:
-                        sel_within = np.where(
-                            np.logical_and(within_any[:-1], within_any[1:])
-                        )[0]
-                        new_triangles = new_triangles[sel_within]
+                    # For interior case, only keep triangles within apertures:
+                    triangle_selection = np.where(
+                        np.logical_and(within_any[:-1], within_any[1:])
+                    )[0]
 
-                    triangles.append(new_triangles)
+                    # Annotate contacts:
+                    if is_exterior:
+                        text_args = dict(ha="center", va="top", rotation_mode="anchor")
+                        for within_contact, contact_name in zip(
+                            within_each, contact_names
+                        ):
+                            selection = np.where(within_contact)[0]
+                            if len(selection):
+                                i_mid = len(selection) // 2
+                                position = points_mid[i_mid]
+                                dq = tangents_mid[i_mid]
+                                angle = np.rad2deg(np.arctan2(dq[1], dq[0]))
+                                plt.text(
+                                    *position, contact_name, rotation=angle, **text_args
+                                )
+
+                elif is_exterior:
+                    # Draw uninterrupted spline
+                    plt.plot(*points.T, "k", ls=linestyle)
+
+                # Add connecting triangles for interior edges (within apertures):
+                if not is_exterior:
+                    indices_j = edge_indices[j_quad][j_edge][::-1]
+                    new_triangles = np.stack(
+                        (indices_i[:-1], indices_j[:-1], indices_j[1:]), axis=-1
+                    ).reshape(-1, 3)
+                    triangles.append(new_triangles[triangle_selection])
 
         # Construct triangulation:
         triangles = np.concatenate(triangles, axis=0)
@@ -239,32 +262,6 @@ class PlotGeometry:
             interpolation=interpolation,
             norm=SymLogNorm(linthresh=linthresh, vmin=-1, vmax=+1),
         )
-        # Draw domain boundaries:
-        for spline, is_periodic_bc in exterior_splines:
-            spline_ls = "dashed" if is_periodic_bc else "solid"
-            points = plot_spline(plt.gca(), spline, spline_linestyle=spline_ls)
-
-            # Mark contacts if any:
-            for i_contact, contact in enumerate(contacts):
-                center = contact[:2]
-                radius = contact[2]
-                distances = np.linalg.norm(points - center, axis=1)
-                selection = np.where(distances <= radius)[0]
-                if len(selection) >= 2:
-                    contact_points = points[selection]
-                    plt.plot(contact_points[:, 0], contact_points[:, 1], "w")
-                    i_mid = len(selection) // 2
-                    dq = np.diff(contact_points[i_mid : (i_mid + 2)], axis=0)[0]
-                    angle = np.rad2deg(np.arctan2(dq[1], dq[0]))
-                    plt.text(
-                        *contact_points[i_mid],
-                        contact_names[i_contact],
-                        rotation=angle,
-                        ha="center",
-                        va="top",
-                        rotation_mode="anchor",
-                    )
-
         ax = plt.gca()
         ax.set_aspect("equal")
         ax.margins(0.1)
