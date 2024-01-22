@@ -27,6 +27,7 @@ class QuadSet:
     grid_size: np.ndarray  #: Nquads x 2 grid dimensions for each quad
     contacts: np.ndarray  #: Ncontacts x 3: center x, y  and radius of each circle
     apertures: np.ndarray  #: Napertures x 3: center x, y  and radius of each circle
+    aperture_names: list[str]  #: Napertures labels for each aperture in SVG
     has_apertures: np.ndarray  #: Nquads x 4: whether each edge has any apertures on it
 
     def get_boundary(self, i_quad: int) -> np.ndarray:
@@ -69,6 +70,7 @@ def parse_svg(
         if circle_name.startswith("aperture")
     ]
     apertures = circles[aperture_indices] if aperture_indices else np.zeros((0, 3))
+    aperture_names = [circle_names[index] for index in aperture_indices]
 
     # Check non-dashed splines for apertures (then they are partially pass-through):
     pass_throughs = []
@@ -168,6 +170,7 @@ def parse_svg(
         grid_size,
         contacts,
         apertures,
+        aperture_names,
         has_apertures,
     )
 

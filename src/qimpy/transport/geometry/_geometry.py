@@ -245,11 +245,13 @@ class Geometry(TreeNode):
             cp_path.write("contacts", torch.from_numpy(self.quad_set.contacts)),
             cp_path.write("apertures", torch.from_numpy(self.quad_set.apertures)),
             "q",
+            "g",
             "rho",
             "v",
         ]
         cp_path.attrs["grid_spacing"] = self.grid_spacing
         cp_path.attrs["contact_names"] = ",".join(self.contact_names)
+        cp_path.attrs["aperture_names"] = ",".join(self.quad_set.aperture_names)
         stash = self.stash
         cp_path.attrs["t"] = np.array(stash.t)
         cp_path.attrs["i_step"] = np.array(stash.i_step)
@@ -261,6 +263,7 @@ class Geometry(TreeNode):
             grid_size = tuple(grid_size_np)
             stashed_size = (n_stash,) + grid_size
             q = torch.empty(grid_size + (2,))
+            g = torch.empty(grid_size)
             rho = torch.empty(stashed_size)
             v = torch.empty(stashed_size + (2,))
             for i_patch in np.where(self.sub_quad_set.quad_index == i_quad)[0]:
@@ -272,13 +275,15 @@ class Geometry(TreeNode):
                     i_patch_mine = i_patch - self.patch_division.i_start
                     patch = self.patches[i_patch_mine]
                     q_cur = patch.q
+                    g_cur = patch.g[..., 0]
                     rho_cur = torch.stack(stash.rho[i_patch_mine], dim=0)
                     v_cur = torch.stack(stash.v[i_patch_mine], dim=0)
                     if i_proc:
                         # Send to head for write:
                         self.comm.Send(BufferView(q_cur), 0, tag=tag)
-                        self.comm.Send(BufferView(rho_cur), 0, tag=tag + 1)
-                        self.comm.Send(BufferView(v_cur), 0, tag=tag + 2)
+                        self.comm.Send(BufferView(g_cur), 0, tag=tag + 1)
+                        self.comm.Send(BufferView(rho_cur), 0, tag=tag + 2)
+                        self.comm.Send(BufferView(v_cur), 0, tag=tag + 3)
                 if not i_proc:
                     # Receive and write from head:
                     grid_start = self.sub_quad_set.grid_start[i_patch]
@@ -288,15 +293,19 @@ class Geometry(TreeNode):
                     slice1 = slice(grid_start[1], grid_stop[1])
                     if not local:
                         q_cur = torch.empty(patch_size + (2,))
+                        g_cur = torch.empty(patch_size)
                         rho_cur = torch.empty((n_stash,) + patch_size)
                         v_cur = torch.empty((n_stash,) + patch_size + (2,))
                         self.comm.Recv(BufferView(q_cur), whose, tag=tag)
-                        self.comm.Recv(BufferView(rho_cur), whose, tag=tag + 1)
-                        self.comm.Recv(BufferView(v_cur), whose, tag=tag + 2)
+                        self.comm.Recv(BufferView(g_cur), whose, tag=tag + 1)
+                        self.comm.Recv(BufferView(rho_cur), whose, tag=tag + 2)
+                        self.comm.Recv(BufferView(v_cur), whose, tag=tag + 3)
                     q[slice0, slice1] = q_cur
+                    g[slice0, slice1] = g_cur
                     rho[:, slice0, slice1] = rho_cur
                     v[:, slice0, slice1] = v_cur
             cp_quad.write("q", q)
+            cp_quad.write("g", g)
             cp_quad.write("rho", rho)
             cp_quad.write("v", v)
         self.stash = ResultStash(len(self.patches))  # Clear stashed history

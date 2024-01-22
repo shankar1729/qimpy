@@ -2,7 +2,7 @@ fermi_circle:
   kF: 1.0
   vF: 1.5
   tau-p: .inf
-  tau-ee: .inf
+  tau-ee: 10.0
   N-theta: 256
 
 geometry:
