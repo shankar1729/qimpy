@@ -67,7 +67,7 @@ class FermiCircle(Material):
 
         # Cached normalizations for collision intergal
         self.nk_inv = 1.0 / len(self.k)
-        self.v_sq_inv = 1.0 / self.v.square().sum()
+        self.vv_inv = torch.linalg.inv(torch.einsum("...i, ...j -> ij", self.v, self.v))
 
     def get_contact_distribution(
         self, n: torch.Tensor, *, dmu: float = 0.0, vD: float = 0.0
@@ -99,7 +99,7 @@ class FermiCircle(Material):
             rho_v_sum = torch.einsum("...k, ki -> ...i", rho, v)
             if self.comm.size > 1:
                 self.comm.Allreduce(MPI.IN_PLACE, BufferView(rho_v_sum))
-            rho_v = self.v_sq_inv * torch.einsum("...i, ki -> ...k", rho_v_sum, v)
+            rho_v = torch.einsum("...i, ij, kj -> ...k", rho_v_sum, self.vv_inv, v)
             result += rho_v * self.tau_inv_ee  # combines with rho_0 - rho above
 
         return result
