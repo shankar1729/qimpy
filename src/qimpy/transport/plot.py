@@ -57,7 +57,7 @@ def run(
             cp_geom = cp["/geometry"]
             n_quads = cp_geom["quads"].shape[0]
             i_step_list = np.array(cp_geom.attrs["i_step"])[mine]
-            t_list = np.array(cp_geom.attrs["i_step"])[mine]
+            t_list = np.array(cp_geom.attrs["t"])[mine]
             for i_quad in range(n_quads):
                 cp_quad = cp_geom[f"quad{i_quad}"]
                 rho_list.append(np.array(cp_quad["rho"][mine]))
