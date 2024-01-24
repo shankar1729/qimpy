@@ -57,7 +57,7 @@ class TimeEvolution(TreeNode):
         if dt == 0.0:
             dt = dt_max
             log.info(f"Setting time step dt = {dt_max = :.4g}")
-        elif dt < geometry.dt_max:
+        elif dt > geometry.dt_max:
             raise InvalidInputException(f"{dt = } must be smaller than {dt_max = }")
         self.dt = dt
         self.i_step = 0
