@@ -209,27 +209,19 @@ class Geometry(TreeNode):
                 set_ghost_zone(out_list[i_patch_mine], i_edge, ghost_data, mask)
         return out_list
 
-    def next_rho_list(
+    def rho_dot(
         self,
-        dt: float,
-        rho_list_initial: list[torch.Tensor],
         rho_list_eval: list[torch.Tensor],
     ) -> list[torch.Tensor]:
-        """Ingredient of time step: compute rho_initial + dt * f(rho_eval)."""
+        """Compute f(rho_eval), ingredient of time step"""
         material = self.material
         rho_list_padded = self.apply_boundaries(rho_list_eval)
         return [
-            (rho_initial + patch.drho(dt, rho_padded) + dt * material.rho_dot(rho_eval))
-            for rho_initial, rho_padded, rho_eval, patch in zip(
-                rho_list_initial, rho_list_padded, rho_list_eval, self.patches
+            (patch.rho_dot(rho_padded) + material.rho_dot(rho_eval))
+            for rho_padded, rho_eval, patch in zip(
+                rho_list_padded, rho_list_eval, self.patches
             )
         ]
-
-    def time_step(self, dt: float) -> None:
-        """Second-order correct time step."""
-        rho_list_init = self.rho_list
-        rho_list_half = self.next_rho_list(0.5 * dt, rho_list_init, rho_list_init)
-        self.rho_list = self.next_rho_list(dt, rho_list_init, rho_list_half)
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext

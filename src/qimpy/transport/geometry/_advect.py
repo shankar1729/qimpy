@@ -169,9 +169,9 @@ class Advect:
                     self.contacts[i_edge].append(Contact(contact_slice, contact_rho))
 
     @stopwatch
-    def drho(self, dt: float, rho: torch.Tensor) -> torch.Tensor:
-        """Compute drho for time step dt, given current rho."""
-        return (-dt) * (
+    def rho_dot(self, rho: torch.Tensor) -> torch.Tensor:
+        """Compute rho_dot, given current rho."""
+        return -1.0 * (
             self.v_prime(rho[:, Advect.NON_GHOST], self.V[..., 0], axis=0)
             + self.v_prime(rho[Advect.NON_GHOST, :], self.V[..., 1], axis=1)
         )
