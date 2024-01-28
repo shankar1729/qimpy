@@ -1,7 +1,7 @@
-__all__ = ["Geometry", "Material", "Transport", "main"]
+__all__ = ["material", "geometry", "TimeEvolution", "Transport", "main"]
 
-
-from ._geometry import Geometry
-from ._material import Material
+from . import material
+from . import geometry
+from ._time_evolution import TimeEvolution
 from ._transport import Transport
 from ._main import main

@@ -12,6 +12,5 @@ dependencies:
   - mpi4py
   - scipy
   - svg.path
-  - tqdm
   - typing-extensions
   - sphinx_rtd_theme

@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from qimpy import log, rc, TreeNode
-from qimpy.io import InvalidInputException, CheckpointOverrideException
+from qimpy.io import CheckpointOverrideException
 from qimpy.io import (
     CheckpointPath,
     CheckpointContext,
@@ -33,7 +33,7 @@ class Lattice(TreeNode):
     movable: bool  #: Whether lattice can be moved in geometry relaxation / dynamics
     move_scale: torch.Tensor  #: Scale factors to precondition / constrain lattice move
 
-    periodic: tuple[bool, ...]  #: Whether each direction is periodic
+    periodic: tuple[bool, bool, bool]  #: Whether each direction is periodic
     center: torch.Tensor  #: Center (fractional coords) for non-periodic directions
 
     def __init__(
@@ -55,7 +55,7 @@ class Lattice(TreeNode):
         compute_stress: WithDefault[bool] = Default(False),
         movable: WithDefault[bool] = Default(False),
         move_scale: WithDefault[Sequence[float]] = Default((1.0, 1.0, 1.0)),
-        periodic: WithDefault[tuple[bool, ...]] = Default((True, True, True)),
+        periodic: WithDefault[tuple[bool, bool, bool]] = Default((True, True, True)),
         center: WithDefault[Sequence[float]] = Default((0.0, 0.0, 0.0)),
     ) -> None:
         """Initialize from lattice vectors or lengths and angles.
@@ -130,14 +130,13 @@ class Lattice(TreeNode):
         """
         super().__init__()
         log.info("\n--- Initializing Lattice ---")
-        self.periodic = tuple[bool](checkpoint_in.override("periodic", periodic, False))
+        self.periodic = checkpoint_in.override("periodic", periodic, False)
         self.movable = checkpoint_in.override("movable", movable, True)
         self.compute_stress = (
             checkpoint_in.override("compute_stress", compute_stress, True)
             or self.movable
         )
         if checkpoint_in:
-            attrs = checkpoint_in.attrs
             if not isinstance(center, Default):
                 raise CheckpointOverrideException("center")
             self.center = checkpoint_in.read("center")
