@@ -81,6 +81,19 @@ def main():
             plt.plot(*coords.T, lw=1, color="k")
             midpoints.append(coords[len(coords) // 2])
 
+        # Show interior points:
+        coords = (
+            patch(
+                torch.stack(
+                    (t0[:, None].expand(-1, len(t1)), t1[None].expand(len(t0), -1)),
+                    dim=2,
+                ),
+            )
+            .to(rc.cpu)
+            .numpy()
+        )
+        plt.scatter(*coords.reshape(-1, 2).T, color="b", s=1, marker=".")
+
     # Annotate adjacency
     midpoints = np.stack(midpoints)  # (n_sub_quads * 4) x 2: flattened quad-edge
     adjacency = (sub_quad_set.adjacency @ np.array((4, 1))).flatten()  # in same index
