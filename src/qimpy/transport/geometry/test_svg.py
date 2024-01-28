@@ -19,10 +19,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("input_svg", help="Input SVG filename", type=str)
     parser.add_argument("n_processes", help="# processes to test division", type=int)
+    parser.add_argument(
+        "--grid_spacing", help="grid spacing to test", type=float, default=1.0
+    )
     args = parser.parse_args()
 
-    grid_spacing = 1.0
-    quad_set = parse_svg(args.input_svg, grid_spacing, contact_names=[])
+    quad_set = parse_svg(args.input_svg, args.grid_spacing, contact_names=[])
 
     log.info(f"Found {len(quad_set.quads)} quads:")
     for i_quad, (quad, adjacency, grid_size) in enumerate(
@@ -88,7 +90,7 @@ def main():
         i_segments = np.stack((i_quad_edges, j_quad_edges), axis=1)
         segments = midpoints[i_segments].swapaxes(-2, -1)  # Cartesian axis to center
         for segment in segments:
-            is_long = np.linalg.norm(np.diff(segment, axis=1)) > 2 * grid_spacing
+            is_long = np.linalg.norm(np.diff(segment, axis=1)) > 2 * args.grid_spacing
             plt.plot(*segment, "r", ls=("dotted" if is_long else "solid"))
 
     # Annotate apertures
