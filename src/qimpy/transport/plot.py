@@ -37,6 +37,9 @@ def run(
     output: str,
     density: Optional[dict] = None,
     streamlines: Optional[dict] = None,
+    density_prefix: str = "",
+    current_prefix: str = "",
+    apertures: Optional[dict] = None,
     dpi: int = 200,
 ) -> None:
     if density is None:
@@ -44,10 +47,13 @@ def run(
     # Distribute tasks over MPI:
     file_list = rc.comm.bcast(sorted(glob.glob(checkpoints)))
     mine = slice(rc.i_proc, None, rc.n_procs)  # divide frames within each file
-    pg = PlotGeometry(file_list[0], **density)
+    pg = PlotGeometry(
+        file_list[0], **density, plot_apertures=(apertures if apertures else {})
+    )
     orig_log_level = log.getEffectiveLevel()
     log.setLevel(logging.INFO)  # Capture output from all processes
     streams = None
+    frame_data_mine = []
     for checkpoint_file in file_list:
         # Load data from checkpoint:
         rho_list = []
@@ -61,39 +67,96 @@ def run(
             for i_quad in range(n_quads):
                 cp_quad = cp_geom[f"quad{i_quad}"]
                 rho_list.append(np.array(cp_quad["rho"][mine]))
-                if streamlines is not None:
-                    v = np.array(cp_quad["v"][mine])
-                    vx_list.append(v[..., 0])
-                    vy_list.append(v[..., 1])
+                v = np.array(cp_quad["v"][mine])
+                vx_list.append(v[..., 0])
+                vy_list.append(v[..., 1])
 
         # Plot each frame:
         for i_frame_mine, (i_step, t) in enumerate(zip(i_step_list, t_list)):
             plot_file = output.format(i_step)
             # Density:
             pg.title.set_text(f"$t$ = {t:.4g}")
-            rho = pg.interpolate(rho_list, i_frame_mine)
+            rho, rho_flat = pg.interpolate(rho_list, i_frame_mine)
             rho_max_abs = np.max(np.abs(rho))
             pg.img.set_data(rho / rho_max_abs)
             rho_max_str = r"$\times|\rho|_{\mathrm{max}}$"
             pg.cbar.set_label(f"Density ({rho_max_str} = {rho_max_abs:6.2e})")
 
             # Optional streamlines:
+            vx, vx_flat = pg.interpolate(vx_list, i_frame_mine)
+            vy, vy_flat = pg.interpolate(vy_list, i_frame_mine)
             if streamlines is not None:
-                streams = plot_streamlines(
-                    streams, pg, vx_list, vy_list, i_frame_mine, **streamlines
-                )
+                streams = plot_streamlines(streams, pg, vx, vy, **streamlines)
             plt.savefig(plot_file, bbox_inches="tight", dpi=dpi)
             log.info(f"Saved {plot_file}")
+
+            # Collect per-frame density and/or current:
+            if density_prefix or current_prefix:
+                frame_data = [t]  # time, followed by density, current for each location
+                for index, normal in pg.current_props.values():
+                    g_sel = pg.g_flat[index]  # integration weight for selected points
+                    v_sel = np.stack((vx_flat[index], vy_flat[index]), axis=1)
+                    density_avg = (rho_flat[index] @ g_sel) / g_sel.sum()
+                    current_tot = (v_sel * normal).sum()
+                    frame_data.extend((density_avg, current_tot))
+                frame_data_mine.append(frame_data)
+
     log.setLevel(orig_log_level)  # Switch log back to single process
     rc.comm.Barrier()
+
+    # Collect density/current data on head for plotting:
+    if density_prefix or current_prefix:
+        if not rc.is_head:
+            # Send data to head:
+            data_mine = np.array(frame_data_mine)
+            rc.comm.send(len(data_mine), dest=0, tag=0)
+            if len(data_mine):
+                rc.comm.Send(data_mine, dest=0, tag=1)
+        else:
+            # Collect data from all:
+            data_list = [np.array(frame_data_mine)]
+            n_columns = data_list[0].shape[1]
+            for i_proc in range(1, rc.n_procs):
+                len_data_other = rc.comm.recv(None, source=i_proc, tag=0)
+                if len_data_other:
+                    buf = np.zeros((len_data_other, n_columns))
+                    rc.comm.Recv(buf, source=i_proc, tag=1)
+                    data_list.append(buf)
+            data_all = np.concatenate(data_list, axis=0)
+
+            # Sort by time and separate properties:
+            data_all = data_all[data_all[:, 0].argsort()]
+            t = data_all[:, 0]
+            densities = data_all[:, 1::2]
+            currents = data_all[:, 2::2]
+            labels = pg.current_props.keys()
+
+            for quantity_prefix, quantities, ylabel in (
+                (density_prefix, densities, r"Density, $\bar\rho$"),
+                (current_prefix, currents, r"Current, $I$"),
+            ):
+                if quantity_prefix:
+                    plt.figure()
+                    for quantity, label in zip(quantities.T, labels):
+                        plt.plot(t, quantity, label=label)
+                    plt.axhline(0, color="k", ls="dotted", lw=1)
+                    plt.xlim(t[0], t[-1])
+                    plt.xlabel(r"Time, $t$")
+                    plt.ylabel(ylabel)
+                    plt.legend()
+                    plt.savefig(f"{quantity_prefix}.pdf", bbox_inches="tight")
+                    np.savetxt(
+                        f"{quantity_prefix}.dat",
+                        np.hstack((t[:, None], quantities)),
+                        header="t " + " ".join(labels),
+                    )
 
 
 def plot_streamlines(
     streams: Any,
     pg: PlotGeometry,
-    vx_list: list[np.ndarray],
-    vy_list: list[np.ndarray],
-    i_frame_mine: int,
+    vx: np.ndarray,
+    vy: np.ndarray,
     *,
     transparency: bool = False,
     **stream_kwargs,
@@ -104,8 +167,6 @@ def plot_streamlines(
         for art in plt.gca().get_children():
             if isinstance(art, FancyArrowPatch):
                 art.remove()
-    vx = pg.interpolate(vx_list, i_frame_mine)
-    vy = pg.interpolate(vy_list, i_frame_mine)
     kwargs = dict(color="k", linewidth=1, arrowsize=0.7)  # defaults
     kwargs.update(**stream_kwargs)
     if transparency:
@@ -129,6 +190,7 @@ class PlotGeometry:
         cmap: str = "bwr",
         interpolation: str = "bilinear",
         linthresh: float = 0.1,
+        plot_apertures: dict,
     ):
         # Load geometry:
         q_list = []
@@ -137,6 +199,7 @@ class PlotGeometry:
         with h5py.File(checkpoint_file, "r") as cp:
             grid_spacing = float(cp["/geometry"].attrs["grid_spacing"])
             contact_names = str(cp["/geometry"].attrs["contact_names"]).split(",")
+            aperture_names = str(cp["/geometry"].attrs["aperture_names"]).split(",")
             contacts = np.array(cp["/geometry/contacts"])
             apertures = np.array(cp["/geometry/apertures"])
             vertices = np.array(cp["/geometry/vertices"])
@@ -147,8 +210,10 @@ class PlotGeometry:
             )
             n_quads = len(quads)
             n_points_prev = 0
+            g_list_flat = []
             for i_quad in range(n_quads):
                 prefix = f"/geometry/quad{i_quad}"
+                g_list_flat.append(np.array(cp[f"{prefix}/g"]).flatten())
                 q_list.append(np.array(cp[f"{prefix}/q"]))
                 grid_size = q_list[-1].shape[:-1]
                 n_points = np.prod(grid_size)
@@ -170,9 +235,11 @@ class PlotGeometry:
 
                 # Store edge indices for triangulating between patches:
                 edge_indices.append([indices[boundary] for boundary in BOUNDARY_SLICES])
+            self.g_flat = np.concatenate(g_list_flat)
 
         # Add triangles between adjacent segments and collect exterior splines:
         tol = 1e-3
+        current_props: dict[str, tuple[np.ndarray, np.ndarray]] = {}  # index, normals
         for i_quad, adjacency_quad in enumerate(adjacency):
             for i_edge, (j_quad, j_edge) in enumerate(adjacency_quad):
                 is_periodic_bc = displacement_magnitudes[i_quad, i_edge] > tol
@@ -187,8 +254,8 @@ class PlotGeometry:
                 points_all = evaluate_spline(verts, t)  # includes vertices & midpoints
                 points = points_all[::2]  # vertices along spline only
                 points_mid = points_all[1::2]  # midpoints of spline segments only
-                tangents_mid = np.diff(points, axis=0)
                 circles = contacts if is_exterior else apertures
+                circle_names = contact_names if is_exterior else aperture_names
                 within_each = within_circles_np(circles, points_mid)
                 within_any = np.any(within_each, axis=0)
                 triangle_selection = slice(None)
@@ -210,6 +277,7 @@ class PlotGeometry:
                     )[0]
 
                     # Annotate contacts:
+                    tangents_mid = np.diff(points, axis=0)
                     if is_exterior:
                         text_args = dict(ha="center", va="top", rotation_mode="anchor")
                         for within_contact, contact_name in zip(
@@ -224,6 +292,30 @@ class PlotGeometry:
                                 plt.text(
                                     *position, contact_name, rotation=angle, **text_args
                                 )
+
+                    # Collect quantities to calculate current:
+                    normals_mid = np.stack(
+                        (tangents_mid[..., 1], -tangents_mid[..., 0]), axis=-1
+                    )  # outward normals with length = boundary segment length
+                    for i_circle, (within_circle, circle_name) in enumerate(
+                        zip(within_each, circle_names)
+                    ):
+                        sel = np.where(within_circle)[0]
+                        if len(sel):
+                            index_sel = indices_i[sel]
+                            normals_sel = normals_mid[sel]
+                            if circle_name in current_props:
+                                # Combine calculations from both sides of aperture:
+                                index_old, normals_old = current_props[circle_name]
+                                assert len(sel) == len(index_old)
+                                index_net = np.concatenate((index_old, index_sel))
+                                normals_net = (
+                                    np.concatenate((-normals_old, normals_sel), axis=0)
+                                    * 0.5
+                                )  # still count to same total length
+                                current_props[circle_name] = (index_net, normals_net)
+                            else:
+                                current_props[circle_name] = (index_sel, normals_sel)
 
                 elif is_exterior:
                     # Draw uninterrupted spline
@@ -241,6 +333,19 @@ class PlotGeometry:
         triangles = np.concatenate(triangles, axis=0)
         q_all = np.concatenate([q.reshape(-1, 2) for q in q_list])
         self.triangulation = mtri.Triangulation(*q_all.T, triangles)
+
+        # Select current calculators (all contacts and apertures named in input):
+        self.current_props = {
+            contact_name: current_props[contact_name] for contact_name in contact_names
+        }
+        for aperture_label, aperture_props in plot_apertures.items():
+            aperture_name: str = aperture_props["name"]
+            aperture_outward = np.array(aperture_props["outward"])
+            assert aperture_outward.shape == (2,)
+            aperture_index, aperture_normals = current_props[aperture_name]
+            if aperture_normals.mean(axis=0) @ aperture_outward < 0.0:
+                aperture_normals *= -1  # flip to match specified "outward" direction
+            self.current_props[aperture_label] = (aperture_index, aperture_normals)
 
         # Construct target grid for interpolation
         x_min, y_min = q_all.min(axis=0)
@@ -272,13 +377,16 @@ class PlotGeometry:
         spines["right"].set_visible(False)
 
     @stopwatch
-    def interpolate(self, values_list: list[np.ndarray], i_frame: int) -> np.ndarray:
-        """Interpolate from geometry to bounding-box grid."""
+    def interpolate(
+        self, values_list: list[np.ndarray], i_frame: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Interpolate from geometry to bounding-box grid at given frame.
+        Also return the flattened data on original geometry for probe calculations."""
         values_all = np.concatenate(
             [values[i_frame].flatten() for values in values_list]
         )
         interpolator = mtri.LinearTriInterpolator(self.triangulation, values_all)
-        return interpolator(self.x_grid, self.y_grid)
+        return interpolator(self.x_grid, self.y_grid), values_all
 
 
 if __name__ == "__main__":

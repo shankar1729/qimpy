@@ -1,0 +1,13 @@
+include: plot.yaml  # common settings
+
+# Select aperture names to additionally plot (contacts always plotted):
+apertures:
+  sourceA:  # short name to use in plot
+    name: apertureSourceOpening  # name in SVG
+    outward: [0, 1]  # direction to pick "outward" normal
+  drainA:  # short name to use in plot
+    name: apertureDrainOpening  # name in SVG
+    outward: [0, -1]  # direction to pick "outward" normal
+
+density-prefix: rect-with-leads-density
+current-prefix: rect-with-leads-current
