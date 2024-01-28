@@ -95,5 +95,17 @@ class Coulomb_Slab:
 
         return rho1 ^ stress_rho2
 
-    def ewald(self) -> None:
-        pass
+    def ewald(self, positions: torch.Tensor, Z: torch.Tensor) -> float:
+        sigma = self.sigma
+        # sigmaSq = sigma**2
+        eta = np.sqrt(0.5) / sigma
+        # lattice = self.grid.lattice
+
+        # Position independent terms:
+        # Ztot = Z.sum()
+        ZsqTot = (Z**2).sum()
+        # First calculate the self-energy correction:
+
+        E = -ZsqTot * eta * (1 / np.sqrt(np.pi))
+
+        return E
