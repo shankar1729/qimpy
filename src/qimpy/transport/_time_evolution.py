@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import torch
 import numpy as np
 
 import qimpy
@@ -57,13 +58,37 @@ class TimeEvolution(TreeNode):
         if dt == 0.0:
             dt = dt_max
             log.info(f"Setting time step dt = {dt_max = :.4g}")
-        elif dt < geometry.dt_max:
+        elif dt > geometry.dt_max:
             raise InvalidInputException(f"{dt = } must be smaller than {dt_max = }")
         self.dt = dt
         self.i_step = 0
         self.n_steps = max(1, int(np.round(t_max / self.dt)))
         self.save_interval = max(1, int(np.round(dt_save / self.dt)))
         self.n_collate = n_collate
+
+    def next_rho_list(
+        self,
+        dt: float,
+        rho_list_initial: list[torch.Tensor],
+        rho_list_eval: list[torch.Tensor],
+        geometry: Geometry,
+    ) -> list[torch.Tensor]:
+        """Ingredient of time step: compute rho_initial + dt * f(rho_eval)."""
+        rho_dot_list = geometry.rho_dot(rho_list_eval)
+        return [
+            (rho_initial + dt * rho_dot)
+            for rho_initial, rho_dot in zip(rho_list_initial, rho_dot_list)
+        ]
+
+    def time_step(self, geometry: Geometry) -> None:
+        """Second-order correct time step."""
+        rho_list_init = geometry.rho_list
+        rho_list_half = self.next_rho_list(
+            0.5 * self.dt, rho_list_init, rho_list_init, geometry
+        )
+        geometry.rho_list = self.next_rho_list(
+            self.dt, rho_list_init, rho_list_half, geometry
+        )
 
     def run(self, transport: qimpy.transport.Transport) -> None:
         """Run time evolution loop, checkpointing at regular intervals."""
@@ -82,7 +107,7 @@ class TimeEvolution(TreeNode):
                     transport.save(self.i_step)
                 break
 
-            transport.geometry.time_step(self.dt)
+            self.time_step(transport.geometry)
 
             log.info(
                 f"Step {self.i_step} done of {self.n_steps} at t[s]: {rc.clock():.2f}"
