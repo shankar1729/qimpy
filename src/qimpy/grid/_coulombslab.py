@@ -41,8 +41,59 @@ class Coulomb_Slab:
         result = FieldH(self.grid, data=(self._kernel * rho.data))
         return result
 
-    def ewald(self) -> None:
-        pass
+    def stress(self, rho1: FieldH, rho2: FieldH) -> torch.Tensor:
+        grid = self.grid
+        Rsq = (grid.lattice.Rbasis).square().sum(dim=0)
+        hlfL = torch.sqrt(Rsq[self.iDir]) / 2
 
-    def stress(self) -> None:
+        G = grid.get_mesh("H").to(torch.double) @ grid.lattice.Gbasis.T
+        G = G.permute(3, 0, 1, 2)  # Bringing cartesian coordinate to first axis
+        Gplane = G
+        Gplane[self.iDir, ...] = 0  # Set perpendicular direction elements to zero
+        Gplaneabs = (Gplane.square().sum(dim=0)).sqrt()
+        Gperp = G[self.iDir, ...]
+
+        Gsq = G.square().sum(dim=0)
+
+        stress_kernel_plane_1 = torch.where(
+            Gsq == 0.0,
+            0.0,
+            (8 * np.pi)
+            * (1 - torch.exp(-Gplaneabs * hlfL) * torch.cos(Gperp * hlfL))
+            / (Gsq * Gsq)
+            * Gplane[None]
+            * Gplane[:, None],
+        )
+        stress_kernel_plane_2 = torch.where(
+            Gsq == 0.0,
+            0.0,
+            (4 * np.pi)
+            * (-torch.exp(-Gplaneabs * hlfL) * torch.cos(Gperp * hlfL))
+            * hlfL
+            / (Gsq * Gplaneabs)
+            * Gplane[None]
+            * Gplane[:, None],
+        )
+        stress_kernel = stress_kernel_plane_1 + stress_kernel_plane_2
+        stress_kernel[self.iDir, self.iDir, ...] = (
+            8
+            * torch.pi
+            / (Gsq * Gsq)
+            * (1 - torch.exp(-Gplaneabs * hlfL))
+            * Gperp
+            * Gperp
+            + 4
+            * torch.pi
+            / Gsq
+            * torch.exp(-Gplaneabs * hlfL)
+            * torch.cos(Gperp * hlfL)
+            * Gplaneabs
+            * hlfL
+        )
+
+        stress_rho2 = FieldH(self.grid, data=(stress_kernel * rho2.data))
+
+        return rho1 ^ stress_rho2
+
+    def ewald(self) -> None:
         pass
