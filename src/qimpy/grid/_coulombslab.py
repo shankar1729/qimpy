@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import torch
+from qimpy import log, grid, rc
 
 from . import Grid, FieldH
 
@@ -15,9 +16,11 @@ class Coulomb_Slab:
     def update_lattice_dependent(self, n_ions: int) -> None:
         grid = self.grid
         iDir = self.iDir
+        lattice = grid.lattice
 
         Rsq = (self.grid.lattice.Rbasis).square().sum(dim=0)
-        hlfL = torch.sqrt(Rsq[self.iDir])
+        hlfL = torch.sqrt(Rsq[self.iDir]) / 2
+        self.hlfL = hlfL
         iG = grid.get_mesh("H").to(torch.double)
         Gi = iG @ grid.lattice.Gbasis.T
         Gsqi = Gi.square()
@@ -30,6 +33,33 @@ class Coulomb_Slab:
             (4 * np.pi)
             * (1 - torch.exp(-Gplane * hlfL) * torch.cos(np.pi * Gperp))
             / Gsq,
+        )
+
+        # Calculate the Gaussian width for the Ewald sums:
+        self.sigma = (
+            5
+            * lattice.volume**2
+            / ((2 * np.pi) ** 2 * (2 * hlfL) ** 2 * max(1, n_ions))
+        ) ** (1.0 / 4)
+
+        self.iR = get_mesh(
+            self.sigma,
+            lattice.Rbasis,
+            lattice.Gbasis,
+            include_margin=True,
+            exclude_zero=False,
+        )
+        self.iG = get_mesh(
+            1.0 / self.sigma,  # flip sigma <-> 1/sigma for reciprocal
+            lattice.Gbasis,  # flip R <-> G for reciprocal
+            lattice.Rbasis,  # flip R <-> G for reciprocal
+            include_margin=False,
+            exclude_zero=True,
+        )
+
+        log.info(
+            f"Ewald:  sigma: {self.sigma:f}"
+            f"  nR: {self.iR.shape[0]}  nG: {self.iG.shape[0]}"
         )
 
     def __call__(self, rho: FieldH, correct_G0_width: bool = False) -> FieldH:
@@ -97,15 +127,84 @@ class Coulomb_Slab:
 
     def ewald(self, positions: torch.Tensor, Z: torch.Tensor) -> float:
         sigma = self.sigma
-        # sigmaSq = sigma**2
+        sigmaSq = sigma**2
         eta = np.sqrt(0.5) / sigma
-        # lattice = self.grid.lattice
+        lattice = self.grid.lattice
 
         # Position independent terms:
         # Ztot = Z.sum()
         ZsqTot = (Z**2).sum()
+        Zprod = Z.view(-1, 1, 1) * Z.view(1, -1, 1)
+
         # First calculate the self-energy correction:
 
         E = -ZsqTot * eta * (1 / np.sqrt(np.pi))
+        # Next calculate the real space sum:
+
+        rCut = 1e-6  # cutoff to detect self-term
+        pos = positions - torch.floor(0.5 + positions)  # in [-0.5,0.5)
+        x = self.iR.view(1, 1, -1, 3) + (pos.view(-1, 1, 1, 3) - pos.view(1, -1, 1, 3))
+        rVec = x @ lattice.Rbasis.T  # Cartesian separations for all pairs
+        r = rVec.norm(dim=-1)
+        r[torch.where(r < rCut)] = grid.N_SIGMAS_PER_WIDTH * sigma
+        E += (0.5 * Zprod * torch.erfc(eta * r) / r).sum()
+
+        # Next calculate reciprocal space sum
+        restrict_sum = torch.ones(Z.size(dim=0), Z.size(dim=0)).triu()
+        restrict_sum = restrict_sum.view(Z.size(dim=0), Z.size(dim=0), 1)
+
+        delta_sum = 2 - torch.ones(Z.size(dim=0)).diag()
+        prefac = (
+            np.pi * 2 * self.hlfL * Zprod * restrict_sum * delta_sum / lattice.volume()
+        )
+        r12 = pos.view(-1, 1, 1, 3) - pos.view(1, -1, 1, 3)
+        z12 = r12[..., self.iDir]
+
+        c = 1  # Replace with cosine term
+        G = ((self.iG @ lattice.Gbasis.T).square().sum(dim=-1)).sqrt()
+        expPlus = torch.exp(G * z12)
+        expMinus = 1 / expPlus
+        erfcPlus = torch.erfc(eta * (sigmaSq * G + z12))
+        erfcMinus = torch.erfc(eta * (sigmaSq * G - z12))
+
+        zTerm = (0.5 / G) * (expPlus * erfcPlus + expMinus * erfcMinus)
+        E += prefac * c * zTerm
 
         return E
+
+
+def get_mesh(
+    sigma: float,
+    Rbasis: torch.Tensor,
+    Gbasis: torch.Tensor,
+    iDir: int,
+    include_margin: bool,
+    exclude_zero: bool,
+) -> torch.Tensor:
+    """Create mesh to cover non-negligible terms of Gaussian with width `sigma`.
+    The mesh is integral in the coordinates specified by `Rbasis`,
+    with `Gbasis` being the corresponding reciprocal basis.
+    Negligible is defined at double precision using `grid.N_SIGMAS_PER_WIDTH`.
+    Optionally, include a margin of 1 in grid units if `include_margin`.
+    Optionally, exclude the zero (origin) point if `exclude_zero`."""
+    Rcut = grid.N_SIGMAS_PER_WIDTH * sigma
+
+    # Create parallelopiped mesh:
+    RlengthInv = Gbasis.norm(dim=0).to(rc.cpu) / (2 * np.pi)
+    Ncut = 1 + torch.ceil(Rcut * RlengthInv).to(torch.int)
+    Ncut[iDir] = 0
+    iRgrids = tuple(
+        torch.arange(-N, N + 1, device=rc.device, dtype=torch.double) for N in Ncut
+    )
+    iR = torch.stack(torch.meshgrid(*iRgrids, indexing="ij")).flatten(1).T
+    if exclude_zero:
+        iR = iR[torch.where(iR.abs().sum(dim=-1))[0]]
+
+    # Add margin mesh:
+    marginGrid = torch.tensor([-1, 0, +1] if include_margin else [0], device=rc.device)
+    iMargin = torch.stack(torch.meshgrid([marginGrid] * 3, indexing="ij")).flatten(1).T
+    iRmargin = iR[None, ...] + iMargin[:, None, :]
+
+    # Select points within Rcut (including margin):
+    RmagMin = (iRmargin @ Rbasis.T).norm(dim=-1).min(dim=0)[0]
+    return iR[torch.where(RmagMin <= Rcut)[0]]
