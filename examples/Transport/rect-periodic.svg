@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="250mm"
+   height="60mm"
+   viewBox="0 0 250 60"
+   version="1.1"
+   id="svg5"
+   inkscape:version="1.1.2 (0a00cf5339, 2022-02-04)"
+   sodipodi:docname="rect-periodic.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview7"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:pageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:document-units="px"
+     showgrid="false"
+     inkscape:zoom="0.9671774"
+     inkscape:cx="366.01352"
+     inkscape:cy="183.52373"
+     inkscape:window-width="1920"
+     inkscape:window-height="1013"
+     inkscape:window-x="0"
+     inkscape:window-y="30"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1"
+     units="mm"
+     showguides="true"
+     width="250mm" />
+  <defs
+     id="defs2" />
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1">
+    <circle
+       style="fill:#0001f4;fill-opacity:0.490807;stroke:none;stroke-width:0.472443;stop-color:#000000"
+       id="drain"
+       cx="225"
+       cy="30"
+       r="25" />
+    <circle
+       style="fill:#f40000;fill-opacity:0.490807;stroke:none;stroke-width:0.472443;stop-color:#000000"
+       id="source"
+       cx="25"
+       cy="30"
+       r="25" />
+    <path
+       id="boundaryPeriodic"
+       style="fill:none;fill-rule:evenodd;stroke:#087200;stroke-width:1.00000003;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:3.00000008, 3.00000008;stroke-opacity:1;stroke-dashoffset:0"
+       d="M 225,5 H 25 m 0,50 h 200" />
+    <path
+       id="boundaryContacts"
+       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:1;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="M 225,55 V 5 M 25,5 v 50" />
+  </g>
+</svg>
