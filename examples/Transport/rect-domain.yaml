@@ -5,7 +5,7 @@ fermi_circle:
   tau-ee: .inf
   N-theta: 256
 
-geometry:
+patch_set:
   svg_file: rect-domain.svg
   grid_spacing: 1.0
 
