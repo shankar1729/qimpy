@@ -2,33 +2,32 @@ import argparse
 import yaml
 
 import numpy as np
-from pymatgen.io.cif import CifParser
+from ase.io import read
 
 from qimpy.io import Unit
 
 
 def _parse_cif(cif_file) -> (dict, dict):
 
-    cif_parser = CifParser(cif_file)
-    structure = cif_parser.parse_structures(primitive=True)[0]
-    structure.remove_oxidation_states()  # remove +/- from atom names
-
-    coords = structure.frac_coords
-    species = np.array(structure.species, dtype=str).tolist()
-    latt_vec = np.array(structure.lattice.as_dict()["matrix"]).T * Unit.MAP["Angstrom"]
-
+    cif_data = read(cif_file,format="cif")
+    
+    latt_vec = cif_data.get_cell()[:] * Unit.MAP["Angstrom"]
+    coords = cif_data.get_scaled_positions()
+    species = cif_data.get_chemical_symbols()
+    pbc = cif_data.get_pbc()
+    
     lattice = {
         "vector1": latt_vec[0, :].tolist(),
         "vector2": latt_vec[1, :].tolist(),
         "vector3": latt_vec[2, :].tolist(),
-        "periodic": list(structure.pbc),
-    }
+        "periodic": np.array(pbc).tolist(),
+    } # list(pbc) returns something weird but putting it to an array and back doesn't 
 
     coordinates = [
         [symbol] + position.tolist() for symbol, position in zip(species, coords)
     ]
 
-    ions = {"ions": {"coordinates": coordinates}}
+    ions = {"ions": {"coordinates": coordinates, "fractional": True}}
     lattice = {"lattice": lattice}
 
     return lattice, ions
