@@ -91,7 +91,7 @@ class Transport(TreeNode):
                 PatchSet,
                 patch_set,
                 material=self.material,
-                process_grid=self.process_grid
+                process_grid=self.process_grid,
             ),
             TreeNode.ChildOptions(
                 "parameter_grid",

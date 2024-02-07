@@ -1,11 +1,9 @@
 from __future__ import annotations
-from typing import Optional
 from abc import abstractmethod
 
 import torch
 
-from qimpy import TreeNode, MPI, rc
-from qimpy.io import CheckpointPath, CheckpointContext
+from qimpy import TreeNode, MPI
 from qimpy.mpi import ProcessGrid
 from qimpy.transport.material import Material
 
@@ -29,6 +27,7 @@ class Geometry(TreeNode):
         self.material = material
 
     @abstractmethod
-    def rho_dot(self, rho_list_eval: list[torch.Tensor], t: float
-                ) -> list[torch.Tensor]:
+    def rho_dot(
+        self, rho_list_eval: list[torch.Tensor], t: float
+    ) -> list[torch.Tensor]:
         """Return list of drho/dt from PatchSet or ParameterGrid"""

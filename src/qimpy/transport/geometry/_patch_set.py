@@ -4,7 +4,7 @@ from typing import Optional
 import torch
 import numpy as np
 
-from qimpy import TreeNode, MPI, rc
+from qimpy import MPI, rc
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import ProcessGrid, TaskDivision, BufferView
 from qimpy.profiler import stopwatch
@@ -62,9 +62,9 @@ class PatchSet(Geometry):
             the accuracy of format of the output.
         """
         super().__init__(
-                material=material,
-                process_grid=process_grid,
-                )
+            material=material,
+            process_grid=process_grid,
+        )
         self.grid_spacing = grid_spacing
         self.contact_names = list(contacts.keys())
         self.quad_set = parse_svg(svg_file, grid_spacing, self.contact_names)
