@@ -74,7 +74,7 @@ class TimeEvolution(TreeNode):
         geometry: Geometry,
     ) -> list[torch.Tensor]:
         """Ingredient of time step: compute rho_initial + dt * f(rho_eval)."""
-        rho_dot_list = geometry.rho_dot(rho_list_eval)
+        rho_dot_list = geometry.rho_dot(rho_list_eval, self.t)
         return [
             (rho_initial + dt * rho_dot)
             for rho_initial, rho_dot in zip(rho_list_initial, rho_dot_list)

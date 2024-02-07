@@ -211,12 +211,13 @@ class PatchSet(Geometry):
     def rho_dot(
         self,
         rho_list_eval: list[torch.Tensor],
+        t: float,
     ) -> list[torch.Tensor]:
         """Compute f(rho_eval), ingredient of time step"""
         material = self.material
         rho_list_padded = self.apply_boundaries(rho_list_eval)
         return [
-            (patch.rho_dot(rho_padded) + material.rho_dot(rho_eval))
+            (patch.rho_dot(rho_padded) + material.rho_dot(rho_eval, t))
             for rho_padded, rho_eval, patch in zip(
                 rho_list_padded, rho_list_eval, self.patches
             )

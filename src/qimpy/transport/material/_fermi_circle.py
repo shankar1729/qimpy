@@ -82,7 +82,7 @@ class FermiCircle(Material):
         return SpecularReflector(n, self.v, self.comm, self.k_division)
 
     @stopwatch
-    def rho_dot(self, rho: torch.Tensor) -> torch.Tensor:
+    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         if not (self.tau_inv_p or self.tau_inv_ee):
             return torch.zeros_like(rho)  # no scattering
 

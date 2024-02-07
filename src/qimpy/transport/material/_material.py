@@ -42,6 +42,7 @@ class Material(TreeNode):
         self.n_bands = n_bands
         self.n_dim = n_dim
         self.wk = wk
+        self.nk = nk
         self.k = torch.zeros((nk, n_dim), device=rc.device)
         self.E = torch.zeros((nk, n_bands), device=rc.device)
         self.v = torch.zeros((nk, n_bands, n_dim), device=rc.device)
@@ -68,6 +69,6 @@ class Material(TreeNode):
         should be the corresponding Nsurf x Nkbb_mine distribution function."""
 
     @abstractmethod
-    def rho_dot(self, rho: torch.Tensor) -> torch.Tensor:
+    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         """Return material contribution to drho/dt.
         This should include scattering and any coherent evolution in band space."""
