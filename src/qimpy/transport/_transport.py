@@ -5,7 +5,7 @@ from qimpy.rc import MPI
 from qimpy.io import CheckpointPath, Checkpoint, CheckpointContext
 from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
-from .geometry import Geometry
+from .geometry import Geometry, PatchSet, ParameterGrid
 from .material import Material, AbInitio, FermiCircle
 from . import TimeEvolution
 
@@ -20,7 +20,8 @@ class Transport(TreeNode):
         *,
         ab_initio: Optional[Union[AbInitio, dict]] = None,
         fermi_circle: Optional[Union[FermiCircle, dict]] = None,
-        geometry: Union[Geometry, dict],
+        patch_set: Optional[Union[PatchSet, dict]] = None,
+        parameter_grid: Optional[Union[ParameterGrid, dict]] = None,
         time_evolution: Optional[Union[TimeEvolution, dict]] = None,
         checkpoint: Optional[str] = None,
         checkpoint_out: Optional[str] = None,
@@ -82,13 +83,24 @@ class Transport(TreeNode):
             ),
             have_default=False,
         )
-        self.add_child(
+        self.add_child_one_of(
             "geometry",
-            Geometry,
-            geometry,
             checkpoint_in,
-            material=self.material,
-            process_grid=self.process_grid,
+            TreeNode.ChildOptions(
+                "patch_set",
+                PatchSet,
+                patch_set,
+                material=self.material,
+                process_grid=self.process_grid
+            ),
+            TreeNode.ChildOptions(
+                "parameter_grid",
+                ParameterGrid,
+                parameter_grid,
+                material=self.material,
+                process_grid=self.process_grid,
+            ),
+            have_default=False,
         )
         self.add_child(
             "time_evolution",

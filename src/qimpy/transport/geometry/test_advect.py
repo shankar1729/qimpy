@@ -62,7 +62,7 @@ def run(
             tau_p=np.inf,
             tau_ee=np.inf,
         ),
-        geometry=dict(svg_file=svg_file, grid_spacing=grid_spacing, contacts={}),
+        patch_set=dict(svg_file=svg_file, grid_spacing=grid_spacing, contacts={}),
         time_evolution=dict(t_max=t_max, dt_save=dt_save, n_collate=10),
         checkpoint_out="animation/advect_{:04d}.h5",
         process_grid_shape=process_grid_shape,
