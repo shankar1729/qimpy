@@ -45,6 +45,7 @@ class AbInitio(Material):
         self,
         *,
         fname: str,
+        mu: float = 0.0,
         rotation: Sequence[Sequence[float]] = ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
@@ -64,7 +65,7 @@ class AbInitio(Material):
         with Checkpoint(fname) as checkpoint:
             attrs = checkpoint.attrs
             self.T = float(attrs["Tmax"])
-            self.mu = float(attrs["dmuMax"])
+            self.mu = mu
             nk = int(attrs["nk"])
             self.k_division = TaskDivision(
                 n_tot=nk, i_proc=self.comm.rank, n_procs=self.comm.size
@@ -242,7 +243,7 @@ class AbInitio(Material):
         H0 = torch.diag_embed(self.E) + self.zeemanH(
             torch.tensor([Bfield]).to(rc.device)
         )
-        rho0, _, _ = self.rho_fermi(H0, dmu)
+        rho0, _, _ = self.rho_fermi(H0, self.mu + dmu)
         return torch.flatten(rho0)
 
     def get_reflector(

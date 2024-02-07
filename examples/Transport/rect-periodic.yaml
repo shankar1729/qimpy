@@ -1,5 +1,6 @@
 ab_initio:
   fname: ldbd-CsPbBr3-dft.h5
+  mu: 0.528824 eV
 
 patch_set:
   svg_file: rect-periodic.svg

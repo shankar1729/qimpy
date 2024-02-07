@@ -6,7 +6,7 @@ from qimpy import rc
 
 class PackedHermitian:
     """Packed real representation of Hermitian matrices."""
-    
+
     def __init__(self, N: int) -> None:
         """Initialize representation for N x N hermitian matrices."""
         i = np.arange(N)
@@ -15,9 +15,9 @@ class PackedHermitian:
         i2 = j * N + i  # swapped entry
 
         # Separate real / imaginary part from complex:
-        self.pack_index = torch.from_numpy(
-             + np.where(i >= j, 2 * i1, 2 * i2 + 1)
-        ).to(device=rc.device)
+        self.pack_index = torch.from_numpy(+np.where(i >= j, 2 * i1, 2 * i2 + 1)).to(
+            device=rc.device
+        )
 
         # Reconstruct complex hermitian version:
         unpack_real = np.where(i >= j, i1, i2)
@@ -42,14 +42,14 @@ class PackedHermitian:
         offdiag = np.where(i > j)[0]
         o1 = i1[offdiag]
         o2 = i2[offdiag]
-        R[o1,o1] = 1.0
-        R[o1,o2] = 1.0j
-        R[o2,o1] = 1.0
-        R[o2,o2] = -1.0j
-        Rinv[o1,o1] = +0.5
-        Rinv[o1,o2] = +0.5
-        Rinv[o2,o1] = -0.5j
-        Rinv[o2,o2] = +0.5j
+        R[o1, o1] = 1.0
+        R[o1, o2] = 1.0j
+        R[o2, o1] = 1.0
+        R[o2, o2] = -1.0j
+        Rinv[o1, o1] = +0.5
+        Rinv[o1, o2] = +0.5
+        Rinv[o2, o1] = -0.5j
+        Rinv[o2, o2] = +0.5j
         self.R = torch.from_numpy(R).to(rc.device)
         self.Rinv = torch.from_numpy(Rinv).to(rc.device)
         self.N = N
