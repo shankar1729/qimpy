@@ -8,7 +8,7 @@ from qimpy.profiler import StopWatch
 from qimpy.io import CheckpointPath
 from qimpy.grid import FieldH, FieldR
 from .functional import Functional, get_libxc_functional_names, FunctionalsLibxc
-from . import lda, gga, PlusU
+from . import lda, gga, mgga, PlusU
 
 
 N_CUT = 1e-16  # Regularization threshold for densities
@@ -268,6 +268,8 @@ INTERNAL_FUNCTIONAL_NAMES = {
     "lda_teter",
     "gga_pbe",
     "gga_pbesol",
+    "mgga_tpss_x",
+    "mgga_revtpss_x",
 }
 
 
@@ -315,11 +317,15 @@ def _get_functionals(name: str, scale_factor: float) -> list[Union[Functional, s
                 gga.x_pbe(scale_factor=scale_factor, sol=False),
                 gga.c_pbe(scale_factor=scale_factor, sol=False),
             ]
-        else:  # key == 'gga_pbesol'
+        elif key == "gga_pbesol":
             return [
                 gga.x_pbe(scale_factor=scale_factor, sol=True),
                 gga.c_pbe(scale_factor=scale_factor, sol=True),
             ]
+        elif key == "mgga_tpss_x":
+            return [mgga.x_tpss(scale_factor=scale_factor, rev=False)]
+        elif key == "mgga_revtpss_x":
+            return [mgga.x_tpss(scale_factor=scale_factor, rev=True)]
     else:
         # Check LibXC functionals:
         libxc_names = get_libxc_functional_names()
