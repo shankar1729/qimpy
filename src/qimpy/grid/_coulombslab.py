@@ -8,7 +8,18 @@ from . import Grid, FieldH
 
 
 class Coulomb_Slab:
+    """Coulomb interactions between fields and point charges in a truncated Slab geometry"""
+
+    grid: Grid
+    ion_width: float
+    sigma: float
+    iDir: int  # Truncated direction (zero-based indexing)
+    iR: torch.Tensor  # Ewald real-space mesh points
+    iG: torch.Tensor  # Ewald reciprocal-space mesh points
+    _kernel: torch.Tensor  # Coulomb kernel
+
     def __init__(self, grid: Grid, n_ions: int, iDir: int) -> None:
+        """Initialize truncated coulomb calculation"""
         self.iDir = iDir
         self.grid = grid
         self.update_lattice_dependent(n_ions)
@@ -139,6 +150,7 @@ class Coulomb_Slab:
         # First calculate the self-energy correction:
 
         E = -ZsqTot * eta * (1 / np.sqrt(np.pi))
+
         # Next calculate the real space sum:
 
         rCut = 1e-6  # cutoff to detect self-term
@@ -147,7 +159,20 @@ class Coulomb_Slab:
         rVec = x @ lattice.Rbasis.T  # Cartesian separations for all pairs
         r = rVec.norm(dim=-1)
         r[torch.where(r < rCut)] = grid.N_SIGMAS_PER_WIDTH * sigma
-        E += (0.5 * Zprod * torch.erfc(eta * r) / r).sum()
+        Eterm = (0.5 * Zprod * torch.erfc(eta * r) / r).sum()
+        E += Eterm
+        minus_E_r_by_r = (
+            Eterm + (2.0 * eta / np.sqrt(np.pi)) * Zprod * torch.exp(-((eta * r) ** 2))
+        ) / (r**2)
+
+        if positions.requires_grad:
+            positions.grad -= ((rVec @ lattice.Rbasis) * minus_E_r_by_r[..., None]).sum(
+                dim=(1, 2)
+            )
+        if lattice.requires_grad:
+            lattice.grad -= 0.5 * torch.einsum(
+                "rij, rija, rijb -> ab", minus_E_r_by_r, rVec, rVec
+            )
 
         # Next calculate reciprocal space sum
         restrict_sum = torch.ones(Z.size(dim=0), Z.size(dim=0)).triu()
@@ -168,7 +193,13 @@ class Coulomb_Slab:
         erfcMinus = torch.erfc(eta * (sigmaSq * G - z12))
 
         zTerm = (0.5 / G) * (expPlus * erfcPlus + expMinus * erfcMinus)
-        E += prefac * c * zTerm
+        E12 = prefac * c * zTerm
+        E += E12
+        # E12_r12 += (prefac * -s * zTerm * (2*M_PI)) * iG;
+        # E12_r12[iDir] += prefac * c * zTermPrime * L;
+
+        if lattice.requires_grad:
+            lattice.grad -= E12 * torch.eye(3)
 
         return E
 
