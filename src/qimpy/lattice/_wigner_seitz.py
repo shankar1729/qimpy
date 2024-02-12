@@ -12,7 +12,7 @@ class WignerSeitz:
     edges: torch.Tensor  # Edges of Wigner-Seitz lattice
     vertices: torch.Tensor  # Vertices of Wigner-Seitz lattice
     faces: torch.Tensor  # Faces of Wigner-Seitz lattice
-    tol: float  # Relative error threshold in detecting symmetries
+    tol: float  # Relative error threshold in detecting geometric properties
 
     def __init__(self, basis: torch.Tensor, tol: float = 1e-6) -> None:
         """Initialize Wigner-Seitz lattice.
@@ -26,27 +26,14 @@ class WignerSeitz:
         self.basis = basis
         self.tol = tol
         basisGrid = get_grid(basis)
-
-        def get_plane_distance(r):
-            """Signed distance of r from each perpendicular bisector plane from 0->basisGrid."""
-            bgrid_mag = torch.linalg.norm(basisGrid, axis=-1)
-            bgrid_hat = basisGrid / bgrid_mag[:,
-                                    None]  # outward normal of the perpendicular bisector planes
-            return r @ bgrid_hat.T - 0.5 * bgrid_mag
-
-        def ws_boundary_distance(r):
-            """Distance to WS boundary (Cartesian coords in axis=-1): <0 == inside, >0 == outside."""
-            return torch.max(get_plane_distance(r), dim=-1)[0]
-
-        def ws_plane_count(r):
-            """Number of planes each point within r is on."""
-            return torch.count_nonzero(torch.abs(get_plane_distance(r)) < tol, axis=-1)
+        self.faces = basisGrid
 
         # Down-select to planes that lie on WS boundary:
-        basisGrid = basisGrid[torch.where(ws_boundary_distance(0.5 * basisGrid) < tol)[0]]
+        basisGrid = basisGrid[torch.where(self.ws_boundary_distance(0.5 * basisGrid) < tol)[0]]
         # Down-select to WS faces with finite area:
         basisGrid = basisGrid[
-            ws_plane_count(0.5 * basisGrid) == 1]  # must be only face with 0 distance
+            self.ws_plane_count(0.5 * basisGrid) == 1]  # must be only face with 0 distance
+        self.faces = basisGrid
         n_faces = len(basisGrid)
         self.faces = basisGrid
         assert 6 <= n_faces <= 14
@@ -61,7 +48,7 @@ class WignerSeitz:
         vertices = torch.linalg.solve(Lhs, rhs)
 
         # Down-select vertices to WS boundary:
-        on_boundary = (torch.abs(ws_boundary_distance(vertices)) < tol)
+        on_boundary = (torch.abs(self.ws_boundary_distance(vertices)) < tol)
         vertices = vertices[on_boundary]
         vertices = weld_points(vertices, tol)
         self.vertices = vertices
@@ -70,9 +57,25 @@ class WignerSeitz:
         # Find edges of WS boundary:
         i_vertex_pairs = get_combinations(n_vertices, 2)
         edge_midpoints = vertices[i_vertex_pairs].mean(axis=1)
-        on_boundary = (ws_plane_count(edge_midpoints) == 2)
+        on_boundary = (self.ws_plane_count(edge_midpoints) == 2)
         edges = i_vertex_pairs[on_boundary]
         self.edges = edges
+
+    def get_plane_distance(self, r):
+        """Signed distance of r from each perpendicular bisector plane from 0->basisGrid."""
+        basisGrid=self.faces
+        bgrid_mag = torch.linalg.norm(basisGrid, axis=-1)
+        bgrid_hat = basisGrid / bgrid_mag[:,
+                                None]  # outward normal of the perpendicular bisector planes
+        return r @ bgrid_hat.T - 0.5 * bgrid_mag
+
+    def ws_boundary_distance(self, r):
+        """Distance to WS boundary (Cartesian coords in axis=-1): <0 == inside, >0 == outside."""
+        return torch.max(self.get_plane_distance(r), dim=-1)[0]
+
+    def ws_plane_count(self, r):
+        """Number of planes each point within r is on."""
+        return torch.count_nonzero(torch.abs(self.get_plane_distance(r)) < self.tol, axis=-1)
 
     def write_x3d(self, filename: str) -> None:
         """Construct x3d file to visualize the constructed Wigner-Seitz cell"""
