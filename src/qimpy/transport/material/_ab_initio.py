@@ -46,6 +46,7 @@ class AbInitio(Material):
         *,
         fname: str,
         mu: float = 0.0,
+        eph_scatt: bool = True,
         rotation: Sequence[Sequence[float]] = ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
@@ -61,11 +62,12 @@ class AbInitio(Material):
             :yaml:`3 x 3 rotation matrix from material to simulation frame.`
         """
         self.comm = process_grid.get_comm("k")
+        self.mu = mu
+        self.eph_scatt = eph_scatt
         watch = StopWatch("Dynamics.read_checkpoint")
         with Checkpoint(fname) as checkpoint:
             attrs = checkpoint.attrs
             self.T = float(attrs["Tmax"])
-            self.mu = mu
             nk = int(attrs["nk"])
             self.k_division = TaskDivision(
                 n_tot=nk, i_proc=self.comm.rank, n_procs=self.comm.size
@@ -98,14 +100,15 @@ class AbInitio(Material):
 
             self.v = torch.einsum("kibb->kbi", P).real
             # Construct P operators from matrix elements in checkpoint:
-            self.P = self.constructP(checkpoint)
-            self.P_eye = apply_batched(
-                self.P, torch.tile(self.eye_bands[None], (nk, 1, 1))[..., None]
-            )
-            nnzP = self.comm.allreduce(torch.count_nonzero(self.P))
-            ntotP = self.comm.allreduce(np.prod(self.P.shape))
-            fill_percent_P = 100.0 * nnzP / ntotP
-            log.info(f"P tensor fill fraction: {fill_percent_P:.1f}%")
+            if eph_scatt:
+                self.P = self.constructP(checkpoint)
+                self.P_eye = apply_batched(
+                    self.P, torch.tile(self.eye_bands[None], (nk, 1, 1))[..., None]
+                )
+                nnzP = self.comm.allreduce(torch.count_nonzero(self.P))
+                ntotP = self.comm.allreduce(np.prod(self.P.shape))
+                fill_percent_P = 100.0 * nnzP / ntotP
+                log.info(f"P tensor fill fraction: {fill_percent_P:.1f}%")
 
     @stopwatch
     def constructP(self, checkpoint: Checkpoint, n_blocks: int = 100) -> torch.Tensor:
@@ -255,6 +258,8 @@ class AbInitio(Material):
     def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         """Overall drho/dt in interaction picture.
         Input and output rho are in packed (real) form."""
+        if not self.eph_scatt:
+            return torch.zeros_like(rho)
         ik_start = self.k_division.i_start
         ik_stop = self.k_division.i_stop
         nk_mine = ik_stop - ik_start

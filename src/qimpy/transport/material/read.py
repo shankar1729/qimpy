@@ -41,8 +41,9 @@ def read_header(file) -> dict:
     ePhEnabled, spinorial = read_byte(file, 2)
     spinWeightFlags = read_int(file)[0]
     spinWeight = spinWeightFlags & 3  # degeneracy for spin
-    haveL = bool(int(format(spinWeightFlags & 4, '04b')[
-                         1]))  # whether angular momentum is included in data
+    haveL = bool(
+        int(format(spinWeightFlags & 4, "04b")[1])
+    )  # whether angular momentum is included in data
     R = np.array(read_double(file, 9)).reshape((3, 3))  # lattice vectors
     return {
         "dmuMin": dmuMin,
@@ -56,7 +57,7 @@ def read_header(file) -> dict:
         "spinorial": bool(spinorial),
         "spinWeight": spinWeight,
         "haveL": haveL,
-        "R": R
+        "R": R,
     }
 
 
@@ -96,7 +97,7 @@ def read_eph(file, ik, G, omega_ph, ikpair, nInner):
 
 
 def read_ldbd(ldbd_file, n_bands, h5_file=None):
-    with open(ldbd_file, mode='rb') as file:
+    with open(ldbd_file, mode="rb") as file:
         header = read_header(file)
         nk = header["nk"]
         T = header["Tmax"]
@@ -155,11 +156,12 @@ def main():
         type=str,
         help="checkpoint file in HDF5 format (checkpoint.h5 if unspecified)",
     )
-    parser.add_argument("-n",
-                        "--n_bands",
-                        help="number of bands for each kpoint in FeynWann data file",
-                        type=int,
-                        required=True,
+    parser.add_argument(
+        "-n",
+        "--n_bands",
+        help="number of bands for each kpoint in FeynWann data file",
+        type=int,
+        required=True,
     )
 
     args = parser.parse_args()
