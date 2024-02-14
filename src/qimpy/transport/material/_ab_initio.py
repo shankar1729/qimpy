@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Sequence, Callable, Union, Optional
+from functools import cache
 
 import torch
 import numpy as np
@@ -278,3 +279,14 @@ class AbInitio(Material):
         return (ph.pack(rho_dot_I + rho_dot_I.conj().swapaxes(-1, -2))).view(
             n_spatial_1, n_spatial_2, nkbb
         )  # + h.c.
+
+    def get_observable_names(self) -> str:
+        return "q,Sx,Sy,Sz"  # charge, components of spin operator
+
+    @cache
+    def get_observables(self, Nkbb) -> torch.Tensor:
+        q = torch.ones((1, Nkbb), device=rc.device)
+        S_obs = self.S.swapaxes(0, 1)
+        assert Nkbb == np.prod(S_obs.shape[1:])
+        S_obs = torch.reshape(S_obs, (3, Nkbb))
+        return torch.cat((q, S_obs), dim=0)

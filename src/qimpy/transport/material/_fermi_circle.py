@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Callable
+from functools import cache
 
 import numpy as np
 import torch
@@ -103,6 +104,13 @@ class FermiCircle(Material):
             result += rho_v * self.tau_inv_ee  # combines with rho_0 - rho above
 
         return result
+
+    def get_observable_names(self) -> str:
+        return "q"  # charge
+
+    @cache
+    def get_observables(self, Nkbb) -> torch.Tensor:
+        return torch.ones((1, Nkbb), device=rc.device)
 
 
 class SpecularReflector:

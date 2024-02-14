@@ -72,3 +72,11 @@ class Material(TreeNode):
     def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         """Return material contribution to drho/dt.
         This should include scattering and any coherent evolution in band space."""
+
+    @abstractmethod
+    def get_observable_names(self) -> str:
+        """Return string of observables, comma seperated, specific to each material."""
+
+    @abstractmethod
+    def get_observables(self, Nkbb) -> torch.Tensor:
+        """Return tensor of all observables specific to each material. dim:"""
