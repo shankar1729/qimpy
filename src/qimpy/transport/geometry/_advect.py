@@ -4,8 +4,8 @@ from typing import Callable, Optional, NamedTuple
 import numpy as np
 import torch
 
-from qimpy import rc, MPI
-from qimpy.mpi import BufferView, globalreduce
+from qimpy import rc
+from qimpy.mpi import globalreduce
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
 from . import within_circles
