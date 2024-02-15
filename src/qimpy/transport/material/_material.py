@@ -5,7 +5,7 @@ from abc import abstractmethod
 import torch
 
 from qimpy import TreeNode, MPI, rc
-from qimpy.mpi import ProcessGrid, TaskDivision
+from qimpy.mpi import ProcessGrid, TaskDivision, BufferView
 from qimpy.io import CheckpointPath
 
 
@@ -74,9 +74,24 @@ class Material(TreeNode):
         This should include scattering and any coherent evolution in band space."""
 
     @abstractmethod
-    def get_observable_names(self) -> str:
+    def get_observable_names(self) -> list[str]:
         """Return string of observables, comma seperated, specific to each material."""
 
     @abstractmethod
-    def get_observables(self, Nkbb) -> torch.Tensor:
-        """Return tensor of all observables specific to each material. dim:"""
+    def get_observables(self, Nkbb: int, t: float) -> torch.Tensor:
+        """Return tensor of complex conjugates of all observables specific to each
+        material. (No x Nkbb_mine) where No is number of observables."""
+
+    def measure_observables(
+        self, rho: torch.Tensor, V: torch.Tensor, t: float
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Retrun density and flux of observables, (Nx x Ny x No) for density and
+        (Nx x Ny x No x 2) for flux."""
+        Nkbb = rho.shape[-1]
+        obs = self.get_observables(Nkbb, t)
+        density = self.wk * torch.einsum("xya, oa -> xyo", rho, obs)
+        flux = self.wk * torch.einsum("xya, xyav, oa -> xyov", rho, V, obs)
+        if self.comm.size > 1:
+            self.comm.Allreduce(MPI.IN_PLACE, BufferView(density))
+            self.comm.Allreduce(MPI.IN_PLACE, BufferView(flux))
+        return density, flux

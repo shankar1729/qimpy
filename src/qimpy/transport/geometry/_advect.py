@@ -176,22 +176,6 @@ class Advect:
             + self.v_prime(rho[Advect.NON_GHOST, :], self.V[..., 1], axis=1)
         )
 
-    @property
-    def density(self):
-        """Density at each point (integrate over momenta)."""
-        result = self.rho.sum(dim=2) * self.wk
-        if self.material.comm.size > 1:
-            self.material.comm.Allreduce(MPI.IN_PLACE, BufferView(result))
-        return result
-
-    @property
-    def velocity(self):
-        """Average velocity at each point (integrate over momenta)."""
-        result = (self.rho @ self.v) * self.wk
-        if self.material.comm.size > 1:
-            self.material.comm.Allreduce(MPI.IN_PLACE, BufferView(result))
-        return result
-
 
 def to_numpy(f: torch.Tensor) -> np.ndarray:
     """Move torch.Tensor to numpy array, regardless of input device etc."""

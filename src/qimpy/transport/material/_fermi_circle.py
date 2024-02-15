@@ -105,12 +105,12 @@ class FermiCircle(Material):
 
         return result
 
-    def get_observable_names(self) -> str:
-        return "q"  # charge
+    def get_observable_names(self) -> list[str]:
+        return ["q"]  # charge
 
     @cache
-    def get_observables(self, Nkbb) -> torch.Tensor:
-        return torch.ones((1, Nkbb), device=rc.device)
+    def get_observables(self, Nkbb: int, t: float) -> torch.Tensor:
+        return torch.ones((1, Nkbb), device=rc.device)  # charge observable
 
 
 class SpecularReflector:

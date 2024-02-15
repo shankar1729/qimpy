@@ -100,8 +100,8 @@ def read_ldbd(ldbd_file, n_bands, h5_file=None):
     with open(ldbd_file, mode="rb") as file:
         header = read_header(file)
         nk = header["nk"]
-        T = header["Tmax"]
-        byte_offsets = read_size_t(file, nk)  # not used anymore
+        _ = header["Tmax"]  # Temp: not used
+        _ = read_size_t(file, nk)  # byte_offsets: not used anymore
         # Intializing:
         k = np.zeros((nk, 3))
         E = np.zeros((nk, n_bands))
