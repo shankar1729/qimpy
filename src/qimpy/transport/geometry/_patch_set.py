@@ -238,12 +238,15 @@ class PatchSet(Geometry):
             cp_path.write("apertures", torch.from_numpy(self.quad_set.apertures)),
             "q",
             "g",
-            "rho",
-            "v",
+            "density",
+            "flux",
         ]
         cp_path.attrs["grid_spacing"] = self.grid_spacing
         cp_path.attrs["contact_names"] = ",".join(self.contact_names)
         cp_path.attrs["aperture_names"] = ",".join(self.quad_set.aperture_names)
+        cp_path.attrs["observable_names"] = ",".join(
+            self.material.get_observable_names()
+        )
         stash = self.stash
         cp_path.attrs["t"] = np.array(stash.t)
         cp_path.attrs["i_step"] = np.array(stash.i_step)
@@ -253,11 +256,12 @@ class PatchSet(Geometry):
             cp_quad = CheckpointPath(checkpoint, f"{path}/quad{i_quad}")
             n_stash = len(stash.t)
             grid_size = tuple(grid_size_np)
-            stashed_size = (n_stash,) + grid_size
+            n_obs = len(self.material.get_observable_names())
+            stashed_size = (n_stash,) + grid_size + (n_obs,)
             q = torch.empty(grid_size + (2,))
             g = torch.empty(grid_size)
-            rho = torch.empty(stashed_size)
-            v = torch.empty(stashed_size + (2,))
+            density = torch.empty(stashed_size)
+            flux = torch.empty(stashed_size + (2,))
             for i_patch in np.where(self.sub_quad_set.quad_index == i_quad)[0]:
                 tag = 3 * i_patch
                 i_proc = self.comm.rank
@@ -268,14 +272,14 @@ class PatchSet(Geometry):
                     patch = self.patches[i_patch_mine]
                     q_cur = patch.q
                     g_cur = patch.g[..., 0]
-                    rho_cur = torch.stack(stash.rho[i_patch_mine], dim=0)
-                    v_cur = torch.stack(stash.v[i_patch_mine], dim=0)
+                    density_cur = torch.stack(stash.density[i_patch_mine], dim=0)
+                    flux_cur = torch.stack(stash.flux[i_patch_mine], dim=0)
                     if i_proc:
                         # Send to head for write:
                         self.comm.Send(BufferView(q_cur), 0, tag=tag)
                         self.comm.Send(BufferView(g_cur), 0, tag=tag + 1)
-                        self.comm.Send(BufferView(rho_cur), 0, tag=tag + 2)
-                        self.comm.Send(BufferView(v_cur), 0, tag=tag + 3)
+                        self.comm.Send(BufferView(density_cur), 0, tag=tag + 2)
+                        self.comm.Send(BufferView(flux_cur), 0, tag=tag + 3)
                 if not i_proc:
                     # Receive and write from head:
                     grid_start = self.sub_quad_set.grid_start[i_patch]
@@ -286,20 +290,22 @@ class PatchSet(Geometry):
                     if not local:
                         q_cur = torch.empty(patch_size + (2,))
                         g_cur = torch.empty(patch_size)
-                        rho_cur = torch.empty((n_stash,) + patch_size)
-                        v_cur = torch.empty((n_stash,) + patch_size + (2,))
+                        density_cur = torch.empty((n_stash,) + patch_size + (n_obs,))
+                        flux_cur = torch.empty(
+                            (n_stash,) + patch_size + (n_obs,) + (2,)
+                        )
                         self.comm.Recv(BufferView(q_cur), whose, tag=tag)
                         self.comm.Recv(BufferView(g_cur), whose, tag=tag + 1)
-                        self.comm.Recv(BufferView(rho_cur), whose, tag=tag + 2)
-                        self.comm.Recv(BufferView(v_cur), whose, tag=tag + 3)
+                        self.comm.Recv(BufferView(density_cur), whose, tag=tag + 2)
+                        self.comm.Recv(BufferView(flux_cur), whose, tag=tag + 3)
                     q[slice0, slice1] = q_cur
                     g[slice0, slice1] = g_cur
-                    rho[:, slice0, slice1] = rho_cur
-                    v[:, slice0, slice1] = v_cur
+                    density[:, slice0, slice1] = density_cur
+                    flux[:, slice0, slice1] = flux_cur
             cp_quad.write("q", q)
             cp_quad.write("g", g)
-            cp_quad.write("rho", rho)
-            cp_quad.write("v", v)
+            cp_quad.write("density", density)
+            cp_quad.write("flux", flux)
         self.stash = ResultStash(len(self.patches))  # Clear stashed history
         return saved_list
 
@@ -309,8 +315,9 @@ class PatchSet(Geometry):
         stash.i_step.append(i_step)
         stash.t.append(t)
         for i_patch_mine, patch in enumerate(self.patches):
-            stash.rho[i_patch_mine].append(patch.density)
-            stash.v[i_patch_mine].append(patch.velocity)
+            density, flux = self.material.measure_observables(patch.rho, t)
+            stash.density[i_patch_mine].append(density)
+            stash.flux[i_patch_mine].append(flux)
 
 
 # Constants for edge data transfer:
@@ -350,11 +357,11 @@ class ResultStash:
 
     i_step: list[int]
     t: list[float]
-    rho: list[list[torch.Tensor]]
-    v: list[list[torch.Tensor]]
+    density: list[list[torch.Tensor]]
+    flux: list[list[torch.Tensor]]
 
     def __init__(self, n_patches_mine: int):
         self.i_step = []
         self.t = []
-        self.rho = [[] for _ in range(n_patches_mine)]
-        self.v = [[] for _ in range(n_patches_mine)]
+        self.density = [[] for _ in range(n_patches_mine)]
+        self.flux = [[] for _ in range(n_patches_mine)]
