@@ -66,8 +66,8 @@ def run(
             t_list = np.array(cp_geom.attrs["t"])[mine]
             for i_quad in range(n_quads):
                 cp_quad = cp_geom[f"quad{i_quad}"]
-                rho_list.append(np.array(cp_quad["rho"][mine]))
-                v = np.array(cp_quad["v"][mine])
+                rho_list.append(np.array(cp_quad["density"][mine][:, :, :, 0]))
+                v = np.array(cp_quad["flux"][mine][:, :, :, 0])
                 vx_list.append(v[..., 0])
                 vy_list.append(v[..., 1])
 
