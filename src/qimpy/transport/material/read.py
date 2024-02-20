@@ -96,7 +96,7 @@ def read_eph(file, ik, G, omega_ph, ikpair, nInner):
     G.append(G_cur)  # dense e-ph matrix for k-pair (but sparse in ik, jk)
 
 
-def read_ldbd(ldbd_file, n_bands, h5_file=None):
+def read_ldbd(ldbd_file, n_bands, eph_scatt, h5_file=None):
     with open(ldbd_file, mode="rb") as file:
         header = read_header(file)
         nk = header["nk"]
@@ -114,16 +114,17 @@ def read_ldbd(ldbd_file, n_bands, h5_file=None):
         for ik in tqdm(range(nk), f"Reading {ldbd_file}"):
             read_k_point(file, header, ik, k, E, P, S, L, G, omega_ph, ikpair)
 
-    G = np.concatenate(G, axis=0)
-    omega_ph = np.concatenate(omega_ph, axis=0)
-    ikpair = np.concatenate(ikpair, axis=0)
+    if eph_scatt:
+        G = np.concatenate(G, axis=0)
+        omega_ph = np.concatenate(omega_ph, axis=0)
+        ikpair = np.concatenate(ikpair, axis=0)
 
     if h5_file is not None:
-        write_checkpoint(h5_file, header, k, E, P, S, L, G, omega_ph, ikpair)
+        write_checkpoint(h5_file, header, k, E, P, S, L, G, omega_ph, ikpair, eph_scatt)
 
 
 @stopwatch
-def write_checkpoint(h5_file, header, k, E, P, S, L, G, omega_ph, ikpair):
+def write_checkpoint(h5_file, header, k, E, P, S, L, G, omega_ph, ikpair, eph_scatt):
     with h5py.File(h5_file, "w") as fp:
         for key, value in header.items():
             fp.attrs[key] = value
@@ -132,9 +133,10 @@ def write_checkpoint(h5_file, header, k, E, P, S, L, G, omega_ph, ikpair):
         fp["P"] = P
         fp["S"] = S
         fp["L"] = L
-        fp["G"] = G
-        fp["omega_ph"] = omega_ph
-        fp["ikpair"] = ikpair
+        if eph_scatt:
+            fp["G"] = G
+            fp["omega_ph"] = omega_ph
+            fp["ikpair"] = ikpair
 
 
 def main():
@@ -146,22 +148,28 @@ def main():
         "-d",
         "--data-file",
         type=str,
-        help="data file from FeynWann",
         required=True,
+        help="data file from FeynWann",
     )
     parser.add_argument(
         "-c",
         "--checkpoint-file",
-        default="checkpoint.h5",
         type=str,
+        default="checkpoint.h5",
         help="checkpoint file in HDF5 format (checkpoint.h5 if unspecified)",
     )
     parser.add_argument(
         "-n",
         "--n_bands",
-        help="number of bands for each kpoint in FeynWann data file",
         type=int,
         required=True,
+        help="number of bands for each kpoint in FeynWann data file",
+    )
+    parser.add_argument(
+        "-eph",
+        "--eph_scattering",
+        action="store_true",
+        help="include electron-phonon matrix elements",
     )
 
     args = parser.parse_args()
@@ -169,7 +177,9 @@ def main():
     ldbd_file = args.data_file
     h5_file = args.checkpoint_file
     n_bands = args.n_bands
-    read_ldbd(ldbd_file, n_bands, h5_file)
+    eph_scatt = args.eph_scattering
+    print(eph_scatt)
+    read_ldbd(ldbd_file, n_bands, eph_scatt, h5_file)
     StopWatch.print_stats()
 
 
