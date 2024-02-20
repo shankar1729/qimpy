@@ -21,6 +21,7 @@ class Material(TreeNode):
     k: torch.Tensor  #: nk x n_dim wave vectors
     E: torch.Tensor  #: nk x n_bands energies
     v: torch.Tensor  #: nk x n_bands x n_dim velocities in plane
+    rho0: torch.Tensor  #: nk x n_bands x n_bands initial density matrix
 
     def __init__(
         self,
@@ -46,6 +47,7 @@ class Material(TreeNode):
         self.k = torch.zeros((nk, n_dim), device=rc.device)
         self.E = torch.zeros((nk, n_bands), device=rc.device)
         self.v = torch.zeros((nk, n_bands, n_dim), device=rc.device)
+        self.rho0 = torch.zeros((nk, n_bands, n_bands), device=rc.device)
 
     @property
     def transport_velocity(self) -> torch.Tensor:

@@ -86,30 +86,38 @@ class AbInitio(Material):
             )
             watch.stop()
 
-            n_bands = self.E.shape[-1]
-            self.eye_bands = torch.eye(n_bands, device=rc.device)
-            self.packed_hermitian = PackedHermitian(n_bands)
+        n_bands = self.E.shape[-1]
+        self.eye_bands = torch.eye(n_bands, device=rc.device)
+        self.packed_hermitian = PackedHermitian(n_bands)
 
-            super().__init__(
-                wk=wk,
-                nk=nk,
-                n_bands=n_bands,
-                n_dim=3,
-                checkpoint_in=checkpoint_in,
-                process_grid=process_grid,
+        super().__init__(
+            wk=wk,
+            nk=nk,
+            n_bands=n_bands,
+            n_dim=3,
+            checkpoint_in=checkpoint_in,
+            process_grid=process_grid,
+        )
+
+        self.v = torch.einsum("kibb->kbi", P).real
+        # Zeroth order Hamiltonian:
+        H0 = torch.diag_embed(self.E) + self.zeemanH(
+            torch.tensor([[0.0, 0.0, 0.0]]).to(rc.device)
+        )
+        self.rho0, _, _ = self.rho_fermi(H0, self.mu)
+        # Construct P operators from matrix elements in checkpoint:
+        if eph_scatt:
+            self.P = self.constructP(checkpoint)
+            self.P_eye = apply_batched(
+                self.P, torch.tile(self.eye_bands[None], (nk, 1, 1))[..., None]
             )
-
-            self.v = torch.einsum("kibb->kbi", P).real
-            # Construct P operators from matrix elements in checkpoint:
-            if eph_scatt:
-                self.P = self.constructP(checkpoint)
-                self.P_eye = apply_batched(
-                    self.P, torch.tile(self.eye_bands[None], (nk, 1, 1))[..., None]
-                )
-                nnzP = self.comm.allreduce(torch.count_nonzero(self.P))
-                ntotP = self.comm.allreduce(np.prod(self.P.shape))
-                fill_percent_P = 100.0 * nnzP / ntotP
-                log.info(f"P tensor fill fraction: {fill_percent_P:.1f}%")
+            nnzP = self.comm.allreduce(torch.count_nonzero(self.P))
+            ntotP = self.comm.allreduce(np.prod(self.P.shape))
+            fill_percent_P = 100.0 * nnzP / ntotP
+            log.info(f"P tensor fill fraction: {fill_percent_P:.1f}%")
+            self.rho_dot_scatter0 = self.rho_dot_scatter(
+                self.packed_hermitian.unpack(self.rho0)
+            )  # for detailed balance correction
 
     @stopwatch
     def constructP(self, checkpoint: Checkpoint, n_blocks: int = 100) -> torch.Tensor:
