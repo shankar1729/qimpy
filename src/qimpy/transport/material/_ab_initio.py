@@ -48,7 +48,11 @@ class AbInitio(Material):
         fname: str,
         mu: float = 0.0,
         eph_scatt: bool = True,
-        rotation: Sequence[Sequence[float]] = ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
+        rotation: Sequence[Sequence[float]] = (
+            (1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (0.0, 0.0, 1.0),
+        ),
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
@@ -75,15 +79,22 @@ class AbInitio(Material):
             )
             wk = 1 / float(attrs["nkTot"])
             k_mine = slice(self.k_division.i_start, self.k_division.i_stop)
+            self.k = torch.from_numpy(checkpoint["k"][k_mine]).to(rc.device)
             self.E = torch.from_numpy(checkpoint["E"][k_mine]).to(rc.device)
             P = torch.from_numpy(checkpoint["P"][k_mine]).to(rc.device)
-            self.S = torch.from_numpy(checkpoint["S"][k_mine]).to(rc.device)
+            spinorial = bool(attrs["spinorial"])
+            self.S = (
+                torch.from_numpy(checkpoint["S"][k_mine]).to(rc.device)
+                if spinorial
+                else None
+            )
             haveL = bool(attrs["haveL"])
             self.L = (
                 torch.from_numpy(checkpoint["L"][k_mine]).to(rc.device)
                 if haveL
                 else None
             )
+            ePhEnabled = bool(attrs["ePhEnabled"])
             watch.stop()
 
         n_bands = self.E.shape[-1]
@@ -106,7 +117,7 @@ class AbInitio(Material):
         )
         self.rho0, _, _ = self.rho_fermi(H0, self.mu)
         # Construct P operators from matrix elements in checkpoint:
-        if eph_scatt:
+        if eph_scatt and ePhEnabled:
             self.P = self.constructP(checkpoint)
             self.P_eye = apply_batched(
                 self.P, torch.tile(self.eye_bands[None], (nk, 1, 1))[..., None]
