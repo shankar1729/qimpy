@@ -126,9 +126,11 @@ class PatchSet(Geometry):
             patch.rho = rho_new
 
     @stopwatch
-    def apply_boundaries(self, rho_list: list[torch.Tensor]) -> list[torch.Tensor]:
-        """Apply all boundary conditions to `rho` and produce ghost-padded version.
-        The list contains the data for each patch."""
+    def apply_boundaries(
+        self, rho_list: list[torch.Tensor], t: float
+    ) -> list[torch.Tensor]:
+        """Apply all boundary conditions to `rho` at time `t` and produce
+        ghost-padded version. The list contains the data for each patch."""
         # Create padded version for all patches:
         out_list = []
         for patch, rho in zip(self.patches, rho_list):
@@ -156,8 +158,8 @@ class PatchSet(Geometry):
                         ghost_data = reflector(ghost_data)  # reciprocal space changes
                         ghost_data = ghost_data.flip(dims=(0,))  # flip short axis
                         # Apply contacts, if any:
-                        for contact_slice, contact_rho in patch.contacts[i_edge]:
-                            ghost_data[:, contact_slice] = contact_rho[None]
+                        for contact_slice, contactor in patch.contacts[i_edge]:
+                            ghost_data[:, contact_slice] = contactor(t)
                         # Store back:
                         if i_edge % 2 == 0:
                             ghost_data = ghost_data.swapaxes(0, 1)  # restore axis order
@@ -218,7 +220,7 @@ class PatchSet(Geometry):
     ) -> list[torch.Tensor]:
         """Compute f(rho_eval), ingredient of time step"""
         material = self.material
-        rho_list_padded = self.apply_boundaries(rho_list_eval)
+        rho_list_padded = self.apply_boundaries(rho_list_eval, t)
         return [
             (patch.rho_dot(rho_padded) + material.rho_dot(rho_eval, t))
             for rho_padded, rho_eval, patch in zip(

@@ -65,10 +65,13 @@ class Material(TreeNode):
         be calculated pointwise in real-space with output of the same dimensions."""
 
     @abstractmethod
-    def get_contact_distribution(self, n: torch.Tensor, **kwargs) -> torch.Tensor:
-        """Return the distribution function at a contact with orientation `n`
-        and specified keyword arguments. For an Nsurf x 2 tensor n, the output
-        should be the corresponding Nsurf x Nkbb_mine distribution function."""
+    def get_contactor(
+        self, n: torch.Tensor, **kwargs
+    ) -> Callable[[float], torch.Tensor]:
+        """Return a function (or callable object) to calculate the distribution
+        function at a contact with orientation `n` and specified keyword arguments.
+        For an Nsurf x 2 tensor n, the function should take time `t` as an input
+        and return the corresponding Nsurf x Nkbb_mine distribution function."""
 
     @abstractmethod
     def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:

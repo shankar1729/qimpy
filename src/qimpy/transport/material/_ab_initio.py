@@ -142,7 +142,6 @@ class AbInitio(Material):
         block_shape_flat = (-1, n_bands_sq, n_bands_sq)
         P_shape = (2, nk_mine * nk, n_bands_sq, n_bands_sq)
         P = torch.zeros(P_shape, dtype=torch.double, device=rc.device)
-        Pbar = torch.zeros_like(P)
         prefactor = np.pi * self.wk
 
         def get_mine(ik) -> Union[torch.Tensor, slice, None]:
@@ -256,18 +255,9 @@ class AbInitio(Material):
         return self.packed_hermitian.pack(rho), E, V
 
     def get_contact_distribution(
-        self,
-        n: torch.Tensor,
-        *,
-        dmu: float = 0.0,
-        Bfield: Sequence[float] = (0.0, 0.0, 0.0),
-    ) -> torch.Tensor:
-        # Zeroth order Hamiltonian including constant ext field:
-        H0 = torch.diag_embed(self.E) + self.zeemanH(
-            torch.tensor([Bfield]).to(rc.device)
-        )
-        rho0, _, _ = self.rho_fermi(H0, self.mu + dmu)
-        return torch.flatten(rho0)
+        self, n: torch.Tensor, **kwargs
+    ) -> Callable[[float], torch.Tensor]:
+        return Contactor(self, n, **kwargs)
 
     def get_reflector(
         self, n: torch.Tensor
@@ -316,3 +306,33 @@ class AbInitio(Material):
         S_obs_packed *= weight.fill_diagonal_(1.0)[None, None, :]
         S_obs_packed = torch.reshape(S_obs_packed, (3, Nkbb))
         return torch.cat((q, S_obs_packed), dim=0)
+
+
+class Contactor:
+    """Contact with fixed chemical potential and magnetic field."""
+
+    ab_initio: AbInitio  #: Corresponding AbInitio instance
+    rho0_S: torch.Tensor  #: Contact distribution fixed in Schrodinger picture
+
+    def __init__(
+        self,
+        ab_initio: AbInitio,
+        n: torch.Tensor,
+        *,
+        dmu: float = 0.0,
+        Bfield: Sequence[float] = (0.0, 0.0, 0.0),
+    ) -> None:
+        self.ab_initio = ab_initio
+        # Zeroth order Hamiltonian including constant ext field:
+        H0 = torch.diag_embed(ab_initio.E) + ab_initio.zeemanH(
+            torch.tensor([Bfield]).to(rc.device)
+        )
+        self.rho0_S, _, _ = ab_initio.rho_fermi(H0, ab_initio.mu + dmu)
+
+    def __call__(self, t: float) -> torch.Tensor:
+        """Return interaction-picture contact distribution at time `t`."""
+        ab_initio = self.ab_initio
+        ph = ab_initio.packed_hermitian
+        phase = ab_initio.schrodingerV(t)
+        rho0_I = ph.pack(ph.unpack(self.rho0_S) * phase.conj)
+        return torch.flatten(rho0_I)

@@ -15,7 +15,7 @@ class Contact(NamedTuple):
     """Definition of a contact."""
 
     selection: slice  #: Slice of edge's data that are within the contact
-    rho: torch.Tensor  #: Corresponding distribution values
+    contactor: Callable[[float], torch.Tensor]  #: Corresponding distribution calculator
 
 
 class Advect:
@@ -37,7 +37,7 @@ class Advect:
     reflectors: list[
         Optional[Callable[[torch.Tensor], torch.Tensor]]
     ]  #: Material-dependent reflector for each edge that needs one
-    contacts: list[list[Contact]]  #: Contacts (multiple possibly) by edge
+    contactors: list[list[Contact]]  #: Contact calculators (multiple possibly) by edge
 
     N_GHOST: int = 2  #: currently a constant, but could depend on slope method later
 
@@ -163,10 +163,10 @@ class Advect:
                     # Assume each edge intersection with contact is contiguous
                     # Using this reduce selection to a slice (more convenient):
                     contact_slice = slice(selection_start, selection_stop)
-                    contact_rho = material.get_contact_distribution(
+                    contactor = material.get_contactor(
                         normal[contact_slice], **contact_params_i
                     )
-                    self.contacts[i_edge].append(Contact(contact_slice, contact_rho))
+                    self.contacts[i_edge].append(Contact(contact_slice, contactor))
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor) -> torch.Tensor:
