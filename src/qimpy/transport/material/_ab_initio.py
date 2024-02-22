@@ -283,7 +283,7 @@ class AbInitio(Material):
         phase = self.schrodingerV(t)
         rho_I = ph.unpack(rho)  # interaction picture, unpacked to complex
         rho_S = rho_I * phase
-        rho_dot_S = self.rho_dot_scatter(rho_S)
+        rho_dot_S = self.rho_dot_scatter(rho_S) - self.rho_dot_scatter0
         rho_dot_I = rho_dot_S * phase.conj()
         return (ph.pack(rho_dot_I + rho_dot_I.conj().swapaxes(-1, -2))).view(
             n_spatial_1, n_spatial_2, nkbb
