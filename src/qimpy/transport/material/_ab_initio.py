@@ -97,6 +97,20 @@ class AbInitio(Material):
             ePhEnabled = bool(attrs["ePhEnabled"])
             watch.stop()
 
+        # Applying rotation
+        self.rotation = torch.tensor(rotation)
+        self.k = torch.einsum("ij, kj -> ki", self.rotation, self.k)
+        P = torch.einsum("ij, kjab -> kiab", (1.0 + 0.0j) * self.rotation, P)
+        self.S = (
+            torch.einsum("ij, kjab -> kiab", (1.0 + 0.0j) * self.rotation, self.S)
+            if spinorial
+            else None
+        )
+        self.L = (
+            torch.einsum("ij, kjab -> kiab", (1.0 + 0.0j) * self.rotation, self.L)
+            if spinorial
+            else None
+        )
         n_bands = self.E.shape[-1]
         self.eye_bands = torch.eye(n_bands, device=rc.device)
         self.packed_hermitian = PackedHermitian(n_bands)
