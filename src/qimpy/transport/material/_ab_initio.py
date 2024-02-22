@@ -98,7 +98,7 @@ class AbInitio(Material):
             watch.stop()
 
         # Applying rotation
-        self.rotation = torch.tensor(rotation)
+        self.rotation = torch.tensor(rotation, device=rc.device)
         self.k = torch.einsum("ij, kj -> ki", self.rotation, self.k)
         P = torch.einsum("ij, kjab -> kiab", (1.0 + 0.0j) * self.rotation, P)
         self.S = (
@@ -108,7 +108,7 @@ class AbInitio(Material):
         )
         self.L = (
             torch.einsum("ij, kjab -> kiab", (1.0 + 0.0j) * self.rotation, self.L)
-            if spinorial
+            if haveL
             else None
         )
         n_bands = self.E.shape[-1]
