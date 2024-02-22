@@ -5,7 +5,8 @@ ab_initio:
 
 patch_set:
   svg_file: rect-periodic.svg
-  grid_spacing: 1.0
+  svg_unit: 100.0 nm
+  grid_spacing: 100.0 nm
 
   contacts:
     source:
@@ -16,8 +17,8 @@ patch_set:
       Bfield: [0., -1. T, 0.]
 
 time_evolution:
-  t_max: 1000.0
-  dt_save: 5.0
+  t_max: 40.0 ps
+  dt_save: 0.2 ps
   n_collate: 32
 
 checkpoint_out: animation/advect_{:04d}.h5

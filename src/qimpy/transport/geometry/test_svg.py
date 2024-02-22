@@ -20,11 +20,16 @@ def main():
     parser.add_argument("input_svg", help="Input SVG filename", type=str)
     parser.add_argument("n_processes", help="# processes to test division", type=int)
     parser.add_argument(
+        "--svg_unit", help="real length per SVG unit", type=float, default=1.0
+    )
+    parser.add_argument(
         "--grid_spacing", help="grid spacing to test", type=float, default=1.0
     )
     args = parser.parse_args()
 
-    quad_set = parse_svg(args.input_svg, args.grid_spacing, contact_names=[])
+    quad_set = parse_svg(
+        args.input_svg, args.svg_unit, args.grid_spacing, contact_names=[]
+    )
 
     log.info(f"Found {len(quad_set.quads)} quads:")
     for i_quad, (quad, adjacency, grid_size) in enumerate(

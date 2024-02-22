@@ -38,13 +38,26 @@ class QuadSet:
 
 
 def parse_svg(
-    svg_file: str, grid_spacing: float, contact_names: Iterable[str], tol: float = 1e-3
+    svg_file: str,
+    svg_unit: float,
+    grid_spacing: float,
+    contact_names: Iterable[str],
+    tol: float = 1e-3,
 ) -> QuadSet:
     """Parse SVG file into QuadSet, sampled with `grid_spacing`,
-    and with vertex equivalence determined with tolerance `tol`."""
+    and with vertex equivalence determined with tolerance `tol`.
+    All distances are scaled by `svg_unit` in the output.
+    Note that `grid_spacing` is in the output units since it sets the
+    simulation resolution, while `tol` applies in the SVG units before
+    scaling since it deals with design tolerance in the SVG editor."""
     svg_xml = minidom.parse(svg_file)
     splines, colors, dashed = get_splines(svg_xml)
     circles, circle_names = get_circles(svg_xml)
+
+    # Transition SVG quantities to real units:
+    splines *= svg_unit
+    circles *= svg_unit
+    tol *= svg_unit  # At input, `tol` is in SVG units
 
     # Check contact specification:
     contact_indices = []

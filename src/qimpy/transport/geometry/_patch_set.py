@@ -38,6 +38,7 @@ class PatchSet(Geometry):
         *,
         material: Material,
         svg_file: str,
+        svg_unit: float = 1.0,
         grid_spacing: float,
         contacts: dict[str, dict],
         grid_size_max: int = 0,
@@ -51,6 +52,8 @@ class PatchSet(Geometry):
         ----------
         svg_file
             :yaml:`Path to an SVG file containing the input geometry.
+        svg_unit
+            :yaml:`Real length corresponding to one unit of distance in SVG.`
         grid_spacing
             :yaml:`Maximum spacing between grid points anywhere in the geometry.`
             This is used to select the number of grid points in each domain.
@@ -67,7 +70,7 @@ class PatchSet(Geometry):
         )
         self.grid_spacing = grid_spacing
         self.contact_names = list(contacts.keys())
-        self.quad_set = parse_svg(svg_file, grid_spacing, self.contact_names)
+        self.quad_set = parse_svg(svg_file, svg_unit, grid_spacing, self.contact_names)
         aperture_circles = torch.from_numpy(self.quad_set.apertures).to(rc.device)
         contact_circles = torch.from_numpy(self.quad_set.contacts).to(rc.device)
         contact_params = list(contacts.values())
