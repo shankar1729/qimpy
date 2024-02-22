@@ -254,7 +254,7 @@ class AbInitio(Material):
         rho = torch.einsum("...ab, ...b, ...cb -> ...ac", V, f, V.conj())
         return self.packed_hermitian.pack(rho), E, V
 
-    def get_contact_distribution(
+    def get_contactor(
         self, n: torch.Tensor, **kwargs
     ) -> Callable[[float], torch.Tensor]:
         return Contactor(self, n, **kwargs)
@@ -334,5 +334,5 @@ class Contactor:
         ab_initio = self.ab_initio
         ph = ab_initio.packed_hermitian
         phase = ab_initio.schrodingerV(t)
-        rho0_I = ph.pack(ph.unpack(self.rho0_S) * phase.conj)
+        rho0_I = ph.pack(ph.unpack(self.rho0_S) * phase.conj())
         return torch.flatten(rho0_I)
