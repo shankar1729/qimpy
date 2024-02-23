@@ -72,30 +72,52 @@ class AbInitio(Material):
         watch = StopWatch("Dynamics.read_checkpoint")
         with Checkpoint(fname) as checkpoint:
             attrs = checkpoint.attrs
-            self.T = float(attrs["Tmax"])
+            T = float(attrs["Tmax"])
             nk = int(attrs["nk"])
-            self.k_division = TaskDivision(
+            k_division = TaskDivision(
                 n_tot=nk, i_proc=self.comm.rank, n_procs=self.comm.size
             )
             wk = 1 / float(attrs["nkTot"])
-            k_mine = slice(self.k_division.i_start, self.k_division.i_stop)
-            self.k = torch.from_numpy(checkpoint["k"][k_mine]).to(rc.device)
-            self.E = torch.from_numpy(checkpoint["E"][k_mine]).to(rc.device)
+            k_mine = slice(k_division.i_start, k_division.i_stop)
+            k = torch.from_numpy(checkpoint["k"][k_mine]).to(rc.device)
+            E = torch.from_numpy(checkpoint["E"][k_mine]).to(rc.device)
             P = torch.from_numpy(checkpoint["P"][k_mine]).to(rc.device)
             spinorial = bool(attrs["spinorial"])
-            self.S = (
+            S = (
                 torch.from_numpy(checkpoint["S"][k_mine]).to(rc.device)
                 if spinorial
                 else None
             )
             haveL = bool(attrs["haveL"])
-            self.L = (
+            L = (
                 torch.from_numpy(checkpoint["L"][k_mine]).to(rc.device)
                 if haveL
                 else None
             )
             ePhEnabled = bool(attrs["ePhEnabled"])
             watch.stop()
+
+        n_bands = E.shape[-1]
+        self.eye_bands = torch.eye(n_bands, device=rc.device)
+        self.packed_hermitian = PackedHermitian(n_bands)
+
+        super().__init__(
+            wk=wk,
+            nk=nk,
+            n_bands=n_bands,
+            n_dim=3,
+            checkpoint_in=checkpoint_in,
+            process_grid=process_grid,
+        )
+
+        self.T = T
+        self.k_division = k_division
+        self.kmine = k_mine
+        self.k = k
+        self.E = E
+        self.S = S
+        self.L = L
+        self.v = torch.einsum("kibb->kbi", P).real
 
         # Applying rotation
         self.rotation = torch.tensor(rotation, device=rc.device)
@@ -111,20 +133,7 @@ class AbInitio(Material):
             if haveL
             else None
         )
-        n_bands = self.E.shape[-1]
-        self.eye_bands = torch.eye(n_bands, device=rc.device)
-        self.packed_hermitian = PackedHermitian(n_bands)
 
-        super().__init__(
-            wk=wk,
-            nk=nk,
-            n_bands=n_bands,
-            n_dim=3,
-            checkpoint_in=checkpoint_in,
-            process_grid=process_grid,
-        )
-
-        self.v = torch.einsum("kibb->kbi", P).real
         # Zeroth order Hamiltonian:
         H0 = torch.diag_embed(self.E) + self.zeemanH(
             torch.tensor([[0.0, 0.0, 0.0]]).to(rc.device)
@@ -313,7 +322,7 @@ class AbInitio(Material):
         phase = self.schrodingerV(t)
         S_obs = self.S.swapaxes(0, 1)
         assert Nkbb == np.prod(S_obs.shape[1:])
-        S_obs = S_obs.conj() * phase[None, :]  # complex conjugate then phase of rho
+        S_obs = S_obs * phase[None, :].conj()  # complex conjugate then phase of rho
         S_obs_packed = ph.pack(S_obs)  # packed to real
         weight = torch.ones(self.n_bands, self.n_bands, device=rc.device) * 2.0
         # Multiply weight of 2 to off-diagonal only:
