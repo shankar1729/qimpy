@@ -68,7 +68,7 @@ class FermiCircle(Material):
         self.v[:] = self.v_all[self.k_mine]
 
         # Cached normalizations for collision intergal
-        self.nk_inv = 1.0 / len(N_theta)
+        self.nk_inv = 1.0 / N_theta
         self.vv_inv = torch.linalg.inv(
             torch.einsum("...i, ...j -> ij", self.v_all, self.v_all)
         )
