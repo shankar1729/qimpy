@@ -178,7 +178,6 @@ def main():
     h5_file = args.checkpoint_file
     n_bands = args.n_bands
     eph_scatt = args.eph_scattering
-    print(eph_scatt)
     read_ldbd(ldbd_file, n_bands, eph_scatt, h5_file)
     StopWatch.print_stats()
 

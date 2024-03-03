@@ -71,10 +71,11 @@ class TimeEvolution(TreeNode):
         dt: float,
         rho_list_initial: list[torch.Tensor],
         rho_list_eval: list[torch.Tensor],
+        t: float,
         geometry: Geometry,
     ) -> list[torch.Tensor]:
         """Ingredient of time step: compute rho_initial + dt * f(rho_eval)."""
-        rho_dot_list = geometry.rho_dot(rho_list_eval, self.t)
+        rho_dot_list = geometry.rho_dot(rho_list_eval, t)
         return [
             (rho_initial + dt * rho_dot)
             for rho_initial, rho_dot in zip(rho_list_initial, rho_dot_list)
@@ -84,10 +85,10 @@ class TimeEvolution(TreeNode):
         """Second-order correct time step."""
         rho_list_init = geometry.rho_list
         rho_list_half = self.next_rho_list(
-            0.5 * self.dt, rho_list_init, rho_list_init, geometry
+            0.5 * self.dt, rho_list_init, rho_list_init, self.t, geometry
         )
         geometry.rho_list = self.next_rho_list(
-            self.dt, rho_list_init, rho_list_half, geometry
+            self.dt, rho_list_init, rho_list_half, self.t + 0.5 * self.dt, geometry
         )
 
     def run(self, transport: qimpy.transport.Transport) -> None:

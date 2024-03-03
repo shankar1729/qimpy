@@ -80,7 +80,7 @@ class Material(TreeNode):
 
     @abstractmethod
     def get_observable_names(self) -> list[str]:
-        """Return string of observables, comma seperated, specific to each material."""
+        """Return list of observable names, specific to each material."""
 
     @abstractmethod
     def get_observables(self, Nkbb: int, t: float) -> torch.Tensor:
