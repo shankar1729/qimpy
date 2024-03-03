@@ -10,6 +10,7 @@ from qimpy.mpi import ProcessGrid, TaskDivision, BufferView
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
 from . import (
+    TensorList,
     Geometry,
     Patch,
     BicubicPatch,
@@ -117,22 +118,20 @@ class PatchSet(Geometry):
         self.stash = ResultStash(len(self.patches))
 
     @property
-    def rho_list(self) -> list[torch.Tensor]:
-        return [patch.rho for patch in self.patches]
+    def rho(self) -> TensorList:
+        return TensorList(patch.rho for patch in self.patches)
 
-    @rho_list.setter
-    def rho_list(self, rho_list_new) -> None:
-        for patch, rho_new in zip(self.patches, rho_list_new):
-            patch.rho = rho_new
+    @rho.setter
+    def rho(self, rho_new: TensorList) -> None:
+        for patch, rho_new_i in zip(self.patches, rho_new):
+            patch.rho = rho_new_i
 
     @stopwatch
-    def apply_boundaries(
-        self, rho_list: list[torch.Tensor], t: float
-    ) -> list[torch.Tensor]:
+    def apply_boundaries(self, rho_list: TensorList, t: float) -> TensorList:
         """Apply all boundary conditions to `rho` at time `t` and produce
         ghost-padded version. The list contains the data for each patch."""
         # Create padded version for all patches:
-        out_list = []
+        out_list = TensorList()
         for patch, rho in zip(self.patches, rho_list):
             out = torch.zeros(patch.rho_padded_shape, device=rc.device)
             out[Patch.NON_GHOST, Patch.NON_GHOST] = rho
@@ -213,20 +212,13 @@ class PatchSet(Geometry):
                 set_ghost_zone(out_list[i_patch_mine], i_edge, ghost_data, mask)
         return out_list
 
-    def rho_dot(
-        self,
-        rho_list_eval: list[torch.Tensor],
-        t: float,
-    ) -> list[torch.Tensor]:
-        """Compute f(rho_eval), ingredient of time step"""
+    def rho_dot(self, rho: TensorList, t: float) -> TensorList:
         material = self.material
-        rho_list_padded = self.apply_boundaries(rho_list_eval, t)
-        return [
-            (patch.rho_dot(rho_padded) + material.rho_dot(rho_eval, t))
-            for rho_padded, rho_eval, patch in zip(
-                rho_list_padded, rho_list_eval, self.patches
-            )
-        ]
+        rho_padded = self.apply_boundaries(rho, t)
+        return TensorList(
+            (patch.rho_dot(rho_padded_i) + material.rho_dot(rho_i, t))
+            for rho_padded_i, rho_i, patch in zip(rho_padded, rho, self.patches)
+        )
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext

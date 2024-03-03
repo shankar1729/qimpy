@@ -1,4 +1,5 @@
 __all__ = (
+    "TensorList",
     "BicubicPatch",
     "Patch",
     "plot_spline",
@@ -17,6 +18,7 @@ __all__ = (
     "Geometry",
 )
 
+from ._tensor_list import TensorList
 from ._spline import (
     BicubicPatch,
     plot_spline,

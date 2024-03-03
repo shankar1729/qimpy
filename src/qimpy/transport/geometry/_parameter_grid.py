@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import torch
-
 from qimpy.mpi import ProcessGrid
 from qimpy.transport.material import Material
-from . import Geometry
+from . import TensorList, Geometry
 
 
 class ParameterGrid(Geometry):
@@ -17,8 +15,7 @@ class ParameterGrid(Geometry):
         *,
         material: Material,
         process_grid: ProcessGrid,
-        # checkpoint_in: CheckpointPath = CheckpointPath(),
-    ):
+    ) -> None:
         """
         Initialize parameter grid parameters.
 
@@ -32,9 +29,13 @@ class ParameterGrid(Geometry):
         )
         self.dt_max = 0
 
-    def rho_dot(
-        self,
-        rho_list_eval: list[torch.Tensor],
-        t: float,
-    ) -> list[torch.Tensor]:
+    def rho_dot(self, rho: TensorList, t: float) -> TensorList:
         return NotImplemented
+
+    @property
+    def rho(self) -> TensorList:
+        return NotImplemented
+
+    @rho.setter
+    def rho(self, rho_new: TensorList) -> None:
+        raise NotImplementedError

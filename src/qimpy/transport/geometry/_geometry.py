@@ -1,11 +1,10 @@
 from __future__ import annotations
 from abc import abstractmethod
 
-import torch
-
 from qimpy import TreeNode, MPI
 from qimpy.mpi import ProcessGrid
-from qimpy.transport.material import Material
+from ..material import Material
+from . import TensorList
 
 
 class Geometry(TreeNode):
@@ -27,7 +26,15 @@ class Geometry(TreeNode):
         self.material = material
 
     @abstractmethod
-    def rho_dot(
-        self, rho_list_eval: list[torch.Tensor], t: float
-    ) -> list[torch.Tensor]:
+    def rho_dot(self, rho: TensorList, t: float) -> TensorList:
         """Return list of drho/dt from PatchSet or ParameterGrid"""
+
+    @property
+    @abstractmethod
+    def rho(self) -> TensorList:
+        """Get current values of density matrices."""
+
+    @rho.setter
+    @abstractmethod
+    def rho(self, rho_new: TensorList) -> None:
+        """Set current values of density matrices."""
