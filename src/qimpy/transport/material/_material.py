@@ -94,8 +94,11 @@ class Material(TreeNode):
         (Nx x Ny x No x 2) for flux."""
         obs = self.get_observables(t)
         density = self.wk * torch.einsum("xya, oa -> xyo", rho, obs)
-        flux = self.wk * torch.einsum(
-            "xya, av, oa -> xyov", rho, self.transport_velocity, obs
+        flux = (
+            self.wk
+            * torch.einsum(
+                "xya, av, oa -> xyov", rho, self.transport_velocity, obs
+            ).contiguous()
         )
         if self.comm.size > 1:
             self.comm.Allreduce(MPI.IN_PLACE, BufferView(density))
