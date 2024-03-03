@@ -309,26 +309,25 @@ class AbInitio(Material):
         rho_dot_S = self.rho_dot_scatter(rho_S) - self.rho_dot_scatter0
         rho_dot_I = rho_dot_S * phase.conj()
         return (ph.pack(rho_dot_I + rho_dot_I.conj().swapaxes(-1, -2))).view(
-            n_spatial_1, n_spatial_2, nkbb
+            n_spatial_1, n_spatial_2, nkbb[self.k_mine]
         )  # + h.c.
 
     def get_observable_names(self) -> list[str]:
         return ["q", "Sx", "Sy", "Sz"]  # charge, components of spin operator
 
     @cache
-    def get_observables(self, Nkbb: int, t: float) -> torch.Tensor:
-        q = torch.ones((1, Nkbb), device=rc.device)  # charge observable
+    def get_observables(self, t: float) -> torch.Tensor:
+        Nkbb_mine = np.prod(self.rho0.shape)
+        q = torch.ones((1, Nkbb_mine), device=rc.device)  # charge observable
         ph = self.packed_hermitian
         phase = self.schrodingerV(t)
         S_obs = self.S.swapaxes(0, 1)
-        assert Nkbb == np.prod(S_obs.shape[1:])
         S_obs = S_obs * phase[None, :].conj()  # complex conjugate then phase of rho
         S_obs_packed = ph.pack(S_obs)  # packed to real
         weight = torch.ones(self.n_bands, self.n_bands, device=rc.device) * 2.0
         # Multiply weight of 2 to off-diagonal only:
         S_obs_packed *= weight.fill_diagonal_(1.0)[None, None, :]
-        S_obs_packed = torch.reshape(S_obs_packed, (3, Nkbb))
-        return torch.cat((q, S_obs_packed), dim=0)
+        return torch.cat((q, S_obs_packed.flatten(1, 3)), dim=0)
 
 
 class Contactor:

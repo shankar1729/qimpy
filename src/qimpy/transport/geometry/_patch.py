@@ -98,11 +98,11 @@ class Patch:
         self.wk = material.wk
 
         # Initialize distribution function:
-        Nkbb = self.v.shape[0]  # flattened density-matrix count
+        Nkbb = self.v.shape[0]  # flattened density-matrix count (Nkbb_mine of material)
         padding = 2 * Patch.N_GHOST
         self.rho_shape = (N[0], N[1], Nkbb)
         self.rho_padded_shape = (N[0] + padding, N[1] + padding, Nkbb)
-        self.rho = torch.tile(torch.reshape(material.rho0, (Nkbb,)), (N[0], N[1], 1))
+        self.rho = torch.tile(material.rho0.flatten(), (N[0], N[1], 1))
 
         # Initialize v*drho/dx calculator:
         self.v_prime = torch.jit.script(Vprime())

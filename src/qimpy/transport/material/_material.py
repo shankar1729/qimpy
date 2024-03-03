@@ -18,10 +18,10 @@ class Material(TreeNode):
     n_bands: int  #: number of bands at each k
     n_dim: int  #: dimensionality of material (2 or 3)
     wk: float  #: Brillouin zone integration weight
-    k: torch.Tensor  #: nk x n_dim wave vectors
-    E: torch.Tensor  #: nk x n_bands energies
-    v: torch.Tensor  #: nk x n_bands x n_dim velocities in plane
-    rho0: torch.Tensor  #: nk x n_bands x n_bands initial density matrix
+    k: torch.Tensor  #: nk_mine x n_dim wave vectors
+    E: torch.Tensor  #: nk_mine x n_bands energies
+    v: torch.Tensor  #: nk_mine x n_bands x n_dim velocities in plane
+    rho0: torch.Tensor  #: nk_mine x n_bands x n_bands initial density matrix
 
     def __init__(
         self,
@@ -39,21 +39,21 @@ class Material(TreeNode):
         self.k_division = TaskDivision(
             n_tot=nk, i_proc=self.comm.rank, n_procs=self.comm.size
         )
+        nk_mine = self.k_division.n_mine
         self.k_mine = slice(self.k_division.i_start, self.k_division.i_stop)
         self.n_bands = n_bands
         self.n_dim = n_dim
         self.wk = wk
-        self.nk = nk
-        self.k = torch.zeros((nk, n_dim), device=rc.device)
-        self.E = torch.zeros((nk, n_bands), device=rc.device)
-        self.v = torch.zeros((nk, n_bands, n_dim), device=rc.device)
-        self.rho0 = torch.zeros((nk, n_bands, n_bands), device=rc.device)
+        self.k = torch.zeros((nk_mine, n_dim), device=rc.device)
+        self.E = torch.zeros((nk_mine, n_bands), device=rc.device)
+        self.v = torch.zeros((nk_mine, n_bands, n_dim), device=rc.device)
+        self.rho0 = torch.zeros((nk_mine, n_bands, n_bands), device=rc.device)
 
     @property
     def transport_velocity(self) -> torch.Tensor:
         """Effective velocity for each density-matrix component.
         This always has dimensions (nk_mine * (n_bands**2)) x 2."""
-        v_plane = self.v[self.k_mine, :, :2]  # ignore out-of-plane component if present
+        v_plane = self.v[..., :2]  # ignore out-of-plane component if present
         v_dm = 0.5 * (v_plane[:, :, None] + v_plane[:, None])  # for density matrix
         return v_dm.flatten(0, 2)  # flatten k and both band dimensions
 
@@ -83,7 +83,7 @@ class Material(TreeNode):
         """Return list of observable names, specific to each material."""
 
     @abstractmethod
-    def get_observables(self, Nkbb: int, t: float) -> torch.Tensor:
+    def get_observables(self, t: float) -> torch.Tensor:
         """Return tensor of complex conjugates of all observables specific to each
         material. (No x Nkbb_mine) where No is number of observables."""
 
@@ -92,8 +92,7 @@ class Material(TreeNode):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Retrun density and flux of observables, (Nx x Ny x No) for density and
         (Nx x Ny x No x 2) for flux."""
-        Nkbb = rho.shape[-1]
-        obs = self.get_observables(Nkbb, t)
+        obs = self.get_observables(t)
         density = self.wk * torch.einsum("xya, oa -> xyo", rho, obs)
         flux = self.wk * torch.einsum(
             "xya, av, oa -> xyov", rho, self.transport_velocity, obs

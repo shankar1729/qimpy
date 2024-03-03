@@ -63,12 +63,15 @@ class FermiCircle(Material):
         dtheta = 2 * np.pi / N_theta
         theta = theta0 + torch.arange(N_theta, device=rc.device) * dtheta
         k_hat = torch.stack([theta.cos(), theta.sin()], dim=-1)
-        self.k[:] = k_hat * kF
-        self.v[:] = k_hat[:, None] * vF
+        self.v_all = k_hat[:, None] * vF
+        self.k[:] = k_hat[self.k_mine] * kF
+        self.v[:] = self.v_all[self.k_mine]
 
         # Cached normalizations for collision intergal
-        self.nk_inv = 1.0 / len(self.k)
-        self.vv_inv = torch.linalg.inv(torch.einsum("...i, ...j -> ij", self.v, self.v))
+        self.nk_inv = 1.0 / len(N_theta)
+        self.vv_inv = torch.linalg.inv(
+            torch.einsum("...i, ...j -> ij", self.v_all, self.v_all)
+        )
 
     def get_contactor(
         self, n: torch.Tensor, *, dmu: float = 0.0, vD: float = 0.0
@@ -81,7 +84,7 @@ class FermiCircle(Material):
         return lambda t: rho_contact  # TODO: add time-dependence options
 
     def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
-        return SpecularReflector(n, self.v, self.comm, self.k_division)
+        return SpecularReflector(n, self.v_all, self.comm, self.k_division)
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
