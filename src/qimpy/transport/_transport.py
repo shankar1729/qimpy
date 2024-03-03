@@ -40,8 +40,12 @@ class Transport(TreeNode):
         fermi_circle
             :yaml:`Fermi-circle material for graphene/2DEG.`
             Exactly one supported material type must be specified.
-        geometry
-            :yaml:`Geometry specification.`
+        patch_set
+            :yaml:`Geometry consisting of bicubic patches.`
+            Exactly one supported geometry type must be specified.
+        parameter_grid
+            :yaml:`Virtual geometry of disconnected points for batched dynamics.`
+            Exactly one supported geometry type must be specified.
         checkpoint
             :yaml:`Checkpoint file to read at start-up.`
         checkpoint_out
