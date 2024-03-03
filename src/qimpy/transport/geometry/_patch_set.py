@@ -11,7 +11,7 @@ from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
 from . import (
     Geometry,
-    Advect,
+    Patch,
     BicubicPatch,
     parse_svg,
     QuadSet,
@@ -28,7 +28,7 @@ class PatchSet(Geometry):
     contact_names: list[str]  #: Names of contacts used in SVG specification and plots
     quad_set: QuadSet  #: Original geometry specification from SVG
     sub_quad_set: SubQuadSet  #: Division into smaller quads for tuning parallelization
-    patches: list[Advect]  #: Advection for each quad patch local to this process
+    patches: list[Patch]  #: Advection for each quad patch local to this process
     patch_division: TaskDivision  #: Division of patches over `comm`
     stash: ResultStash  #: Saved results for collating into fewer checkpoints
 
@@ -98,7 +98,7 @@ class PatchSet(Geometry):
             boundary = torch.from_numpy(self.quad_set.get_boundary(i_quad))
             transformation = BicubicPatch(boundary=boundary.to(rc.device))
             self.patches.append(
-                Advect(
+                Patch(
                     transformation=transformation,
                     grid_size_tot=tuple(self.quad_set.grid_size[i_quad]),
                     grid_start=grid_start,
@@ -135,7 +135,7 @@ class PatchSet(Geometry):
         out_list = []
         for patch, rho in zip(self.patches, rho_list):
             out = torch.zeros(patch.rho_padded_shape, device=rc.device)
-            out[Advect.NON_GHOST, Advect.NON_GHOST] = rho
+            out[Patch.NON_GHOST, Patch.NON_GHOST] = rho
             out_list.append(out)
 
         # Populate ghost zones across patches where needed:
@@ -327,17 +327,17 @@ class PatchSet(Geometry):
 
 # Constants for edge data transfer:
 IN_SLICES = [
-    (slice(None), Advect.GHOST_L),
-    (Advect.GHOST_R, slice(None)),
-    (slice(None), Advect.GHOST_R),
-    (Advect.GHOST_L, slice(None)),
+    (slice(None), Patch.GHOST_L),
+    (Patch.GHOST_R, slice(None)),
+    (slice(None), Patch.GHOST_R),
+    (Patch.GHOST_L, slice(None)),
 ]  #: input slice for each edge orientation during edge communication
 
 OUT_SLICES = [
-    (Advect.NON_GHOST, Advect.GHOST_L),
-    (Advect.GHOST_R, Advect.NON_GHOST),
-    (Advect.NON_GHOST, Advect.GHOST_R),
-    (Advect.GHOST_L, Advect.NON_GHOST),
+    (Patch.NON_GHOST, Patch.GHOST_L),
+    (Patch.GHOST_R, Patch.NON_GHOST),
+    (Patch.NON_GHOST, Patch.GHOST_R),
+    (Patch.GHOST_L, Patch.NON_GHOST),
 ]  #: output slice for each edge orientation during edge communication
 
 FLIP_DIMS = [(0, 1), (0,), None, (1,)]  #: which dims to flip during edge transfer

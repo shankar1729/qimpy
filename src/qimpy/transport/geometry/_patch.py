@@ -18,8 +18,8 @@ class Contact(NamedTuple):
     contactor: Callable[[float], torch.Tensor]  #: Corresponding distribution calculator
 
 
-class Advect:
-    """Real-space advection on a quad-patch with an arbitrary transformation."""
+class Patch:
+    """Quad-patch with real-space advection on an arbitrary transformation."""
 
     q: torch.Tensor  #: Nx x Ny x 2 Cartesian coordinates
     g: torch.Tensor  #: Nx x Ny x 1 sqrt(metric), with extra dimensipm for broadcasting
@@ -99,7 +99,7 @@ class Advect:
 
         # Initialize distribution function:
         Nkbb = self.v.shape[0]  # flattened density-matrix count
-        padding = 2 * Advect.N_GHOST
+        padding = 2 * Patch.N_GHOST
         self.rho_shape = (N[0], N[1], Nkbb)
         self.rho_padded_shape = (N[0] + padding, N[1] + padding, Nkbb)
         self.rho = torch.tile(torch.reshape(material.rho0, (Nkbb,)), (N[0], N[1], 1))
@@ -172,8 +172,8 @@ class Advect:
     def rho_dot(self, rho: torch.Tensor) -> torch.Tensor:
         """Compute rho_dot, given current rho."""
         return -1.0 * (
-            self.v_prime(rho[:, Advect.NON_GHOST], self.V[..., 0], axis=0)
-            + self.v_prime(rho[Advect.NON_GHOST, :], self.V[..., 1], axis=1)
+            self.v_prime(rho[:, Patch.NON_GHOST], self.V[..., 0], axis=0)
+            + self.v_prime(rho[Patch.NON_GHOST, :], self.V[..., 1], axis=1)
         )
 
 
