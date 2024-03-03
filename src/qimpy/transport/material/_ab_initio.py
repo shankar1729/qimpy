@@ -9,7 +9,7 @@ from qimpy import log, rc
 from qimpy.mpi import TaskDivision, BufferView
 from qimpy.math import ceildiv
 from qimpy.profiler import StopWatch, stopwatch
-from qimpy.io import Checkpoint, CheckpointPath, Unit
+from qimpy.io import Checkpoint, CheckpointPath, Unit, InvalidInputException
 from qimpy.mpi import ProcessGrid
 from . import Material
 from . import PackedHermitian
@@ -140,7 +140,9 @@ class AbInitio(Material):
         )
         self.rho0, _, _ = self.rho_fermi(H0, self.mu)
         # Construct P operators from matrix elements in checkpoint:
-        if eph_scatt and ePhEnabled:
+        if eph_scatt:
+            if not ePhEnabled:
+                raise InvalidInputException("No e-ph scattering available in h5 input")
             self.P = self.constructP(checkpoint)
             self.P_eye = apply_batched(
                 self.P, torch.tile(self.eye_bands[None], (nk, 1, 1))[..., None]
@@ -228,11 +230,12 @@ class AbInitio(Material):
         Batch dimension is put at end for efficient matrix multiplication."""
         if self.comm.size == 1:
             return rho.permute(1, 2, 3, 0)
+        nk = self.k_division.n_tot
         n_bands = self.n_bands
         n_batch = rho.shape[0]
         sendbuf = rho.reshape(n_batch, -1).T.contiguous()
         recvbuf = torch.zeros(
-            (n_batch, self.nk * n_bands * n_bands), dtype=rho.dtype, device=rc.device
+            (n_batch, nk * n_bands * n_bands), dtype=rho.dtype, device=rc.device
         )
         mpi_type = rc.mpi_type[rho.dtype]
         recv_prev = self.k_division.n_prev * n_bands * n_bands * n_batch
@@ -240,7 +243,7 @@ class AbInitio(Material):
             (BufferView(sendbuf), np.prod(rho.shape), 0, mpi_type),
             (BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1], mpi_type),
         )
-        return recvbuf.reshape(self.nk, n_bands, n_bands, n_batch)
+        return recvbuf.reshape(nk, n_bands, n_bands, n_batch)
 
     def rho_dot_scatter(self, rho: torch.Tensor) -> torch.Tensor:
         """drho/dt due to scattering in Schrodinger picture.
