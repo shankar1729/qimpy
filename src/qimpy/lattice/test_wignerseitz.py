@@ -23,7 +23,7 @@ def weld_points(points: torch.Tensor, tol: float) -> torch.Tensor:
     return points[unique_indices]
 
 
-def get_grid(basis: torch.Tensor) -> torch.Tensor:
+def get_grid(basis: torch.Tensor) -> tuple[torch.Tensor, ...]:
     """Return grid containing linear combinations of basis vectors sufficient to cover Wigner-Seitz cell"""
     a, b, c = basis[:, 0], basis[:, 1], basis[:, 2]
     # Find maximum radius of sphere within parallelopiped from basis lattice vectors
@@ -38,17 +38,17 @@ def get_grid(basis: torch.Tensor) -> torch.Tensor:
     iGridZ = np.arange(-shape_min[2], shape_min[2] + 1)
     # Reduce grid for any orthogonal basis vector
     if np.dot(a, b) == 0 == np.dot(a, c):
-        iGridX = np.arange(-1, 2)
+        iGridX = np.arange(-1., 2.)
     if np.dot(b, a) == 0 == np.dot(b, c):
-        iGridY = np.arange(-1, 2)
+        iGridY = np.arange(-1., 2.)
     if np.dot(c, a) == 0 == np.dot(c, b):
-        iGridZ = np.arange(-1, 2)
+        iGridZ = np.arange(-1., 2.)
     iGrid = np.array([x.flatten() for x in np.meshgrid(iGridX, iGridY, iGridZ)]).T
     iGrid = iGrid[np.where((iGrid ** 2).sum(axis=1) > 0)[0]]  # eliminate origin
-    return torch.tensor(iGrid) @ basis.T
+    return torch.tensor(iGrid), torch.tensor(iGrid) @ basis.T
 
 def getWignerSeitz(basis: torch.Tensor, tol: float = 1e-6):
-    basisGrid = get_grid(basis)
+    iGrid, basisGrid = get_grid(basis)
     print(f"Initial lattice vectors considered = {len(basisGrid)}")
 
     def get_plane_distance(r):
@@ -67,10 +67,13 @@ def getWignerSeitz(basis: torch.Tensor, tol: float = 1e-6):
         return torch.count_nonzero(torch.abs(get_plane_distance(r)) < tol, dim=-1)
 
     # Down-select to planes that lie on WS boundary:
-    basisGrid = basisGrid[torch.where(ws_boundary_distance(0.5 * basisGrid) < tol)[0]]
+    touchWS = torch.where(ws_boundary_distance(0.5 * basisGrid) < tol)[0]
+    basisGrid = basisGrid[touchWS]
+    iGrid = iGrid[touchWS]
     # Down-select to WS faces with finite area:
-    basisGrid = basisGrid[
-        ws_plane_count(0.5 * basisGrid) == 1]  # must be only face with 0 distance
+    finiteArea = (ws_plane_count(0.5 * basisGrid) == 1)
+    basisGrid = basisGrid[finiteArea]  # must be only face with 0 distance
+    iGrid = iGrid[finiteArea]
     n_faces = len(basisGrid)
     print(f"Number of WS faces = {n_faces}")
     assert 6 <= n_faces <= 14
@@ -104,6 +107,14 @@ def getWignerSeitz(basis: torch.Tensor, tol: float = 1e-6):
     write_x3d("wigner_seitz.x3d", np.array(vertices), np.array(edges))
     print("(HINT: run \"view3dscene wigner_seitz.x3d\" to visualize the outputted Wigner-Seitz cell)")
 
+    """S = torch.tensor([20,140,20])
+    iv = torch.tensor([52,59,73])
+    vec = (iv / S) @ basis.T
+    ind1 = reduceIndex(iGrid, basis, iv, S)
+    vec2 = reduceVector(basisGrid/2, vec)
+    print("1. REDUCE ", vec, "->", (ind1 / S) @ basis.T)
+    print("2. REDUCE ", vec, "->", vec2)"""
+
 
 def write_x3d(filename: str, vertices: np.ndarray, edges: np.ndarray) -> None:
     NSMAP = {'xsd': 'http://www.w3.org/2001/XMLSchema-instance'}
@@ -131,11 +142,49 @@ def write_x3d(filename: str, vertices: np.ndarray, edges: np.ndarray) -> None:
                                pretty_print=True, doctype=docinfo))
 
 
+def reduceVector(faces, r0, tol=1.e-8):
+    """Find the point within the Wigner-Seitz cell equivalent to x (Cartesian coords)"""
+    changed = True
+    r = torch.clone(r0)
+    while changed:
+        changed = False
+        for face in faces:  # TO-DO: simplify by considering only half-faces
+            # equation of plane given by eqn.x==1 (x in Cartesian coords)
+            feqn = face / torch.sum(face**2)
+            fdotr = torch.dot(feqn, r)
+            if torch.abs(fdotr) > 1 + tol:  # not in fundamental zone
+                fimg = 2 * face  # image of origin through WS face (Cartesian coords)
+                r -= (torch.floor(0.5 * (1 + fdotr)) * fimg)
+                changed = True
+    return r
+
+
+def reduceIndex(iFaces, R, iv0, S, tol=1.e-8):
+    """Find the point within the Wigner-Seitz cell equivalent to x (Cartesian coords)"""
+    changed = True
+    iv = torch.clone(iv0)
+    RTR = R.T @ R
+    while changed:
+        changed = False
+        for iFace in iFaces:  # TO-DO: simplify by considering only half-faces
+            # equation of plane given by eqn.x==1 (x in Lattice coords)
+            feqn = 2 / (metric_length_squared(RTR, iFace)) * (RTR @ iFace)
+            fdotr = torch.dot(feqn, iv / S)
+            if torch.abs(fdotr) > 1 + tol:  # not in fundamental zone
+                fimg = iFace.to(int)  # image of origin through WS face (Lattice coords)
+                iv -= (torch.floor(0.5 * (1 + fdotr)).to(int) * fimg * S)
+                changed = True
+    return iv
+
+
+def metric_length_squared(M, v):
+    result = torch.sum(v**2 * torch.diag(M))
+    result += 2 * (v[0]*v[1]*M[0,1] + v[0]*v[2]*M[0,2] + v[1]*v[2]*M[1,2])
+    return result
 
 
 a_cubic = 10.0
-#getWignerSeitz(a_cubic * torch.eye(3))
-#getWignerSeitz(a_cubic*0.5*torch.tensor([[1,-0,0],[0,10,0],[0,0,1]]))
+#getWignerSeitz(a_cubic* torch.eye(3))
 #getWignerSeitz(a_cubic*0.5*torch.tensor([[0,1,1],[1,0,1],[1,1,0]]))
 #getWignerSeitz(a_cubic*0.5*torch.tensor([[1,1,-1],[1,-1,1],[-1,1,1]]))
 getWignerSeitz(a_cubic*0.5*torch.tensor([[1,-0,1],[1,-10,0],[0,1,1]]))

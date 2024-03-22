@@ -10,8 +10,9 @@ class WignerSeitz:
 
     basis: torch.Tensor  # Input basis vectors in real-space or reciprocal space
     edges: torch.Tensor  # Edges of Wigner-Seitz lattice
-    vertices: torch.Tensor  # Vertices of Wigner-Seitz lattice
-    faces: torch.Tensor  # Faces of Wigner-Seitz lattice
+    vertices: torch.Tensor  # Vertices of Wigner-Seitz lattice (Cartesian coords)
+    faces: torch.Tensor  # Faces of Wigner-Seitz lattice (Cartesian coords)
+    iFaces: torch.Tensor  # Faces of Wigner-Seitz lattice (Lattice coords)
     tol: float  # Relative error threshold in detecting geometric properties
 
     def __init__(self, basis: torch.Tensor, tol: float = 1e-6) -> None:
@@ -25,23 +26,25 @@ class WignerSeitz:
 
         self.basis = basis
         self.tol = tol
-        basisGrid = get_grid(basis)
-        self.faces = basisGrid
+        self.iFaces, self.faces = get_grid(basis)
+        faces = self.faces
+        iFaces = self.iFaces
 
         # Down-select to planes that lie on WS boundary:
-        basisGrid = basisGrid[torch.where(self.ws_boundary_distance(0.5 * basisGrid) < tol)[0]]
+        touchWS = torch.where(self.ws_boundary_distance(0.5 * faces) < tol)[0]
+        faces = faces[touchWS]
+        iFaces = iFaces[touchWS]
         # Down-select to WS faces with finite area:
-        basisGrid = basisGrid[
-            self.ws_plane_count(0.5 * basisGrid) == 1]  # must be only face with 0 distance
-        self.faces = basisGrid
-        n_faces = len(basisGrid)
-        self.faces = basisGrid
+        finiteArea = (self.ws_plane_count(0.5 * faces) == 1)
+        faces = faces[finiteArea]  # must be only face with 0 distance
+        iFaces = iFaces[finiteArea]
+        n_faces = len(faces)
         assert 6 <= n_faces <= 14
         assert n_faces % 2 == 0
 
         # Compute vertices by 3-way intersection of planes
         i_face_triplets = get_combinations(n_faces, 3)
-        Lhs = 0.5 * basisGrid[i_face_triplets]  # n_triplets x 3 x 3
+        Lhs = 0.5 * faces[i_face_triplets]  # n_triplets x 3 x 3
         intersect = (torch.abs(torch.linalg.det(Lhs)) > tol)
         Lhs = Lhs[intersect]
         rhs = (Lhs ** 2).sum(dim=-1)
@@ -62,10 +65,9 @@ class WignerSeitz:
         self.edges = edges
 
     def get_plane_distance(self, r):
-        """Signed distance of r from each perpendicular bisector plane from 0->basisGrid."""
-        basisGrid=self.faces
-        bgrid_mag = torch.linalg.norm(basisGrid, axis=-1)
-        bgrid_hat = basisGrid / bgrid_mag[:,
+        """Signed distance of r from each perpendicular bisector plane from 0->faces."""
+        bgrid_mag = torch.linalg.norm(self.faces, axis=-1)
+        bgrid_hat = self.faces / bgrid_mag[:,
                                 None]  # outward normal of the perpendicular bisector planes
         return r @ bgrid_hat.T - 0.5 * bgrid_mag
 
@@ -76,6 +78,41 @@ class WignerSeitz:
     def ws_plane_count(self, r):
         """Number of planes each point within r is on."""
         return torch.count_nonzero(torch.abs(self.get_plane_distance(r)) < self.tol, axis=-1)
+
+    def reduceVector(self, r, tol=1.e-8):
+        """Find the point within the Wigner-Seitz cell equivalent to x (Cartesian coords)"""
+        changed = True
+        while changed:
+            changed = False
+            for face in self.faces:  # TO-DO: simplify by considering only half-faces
+                # equation of plane given by eqn.x==1 (x in Cartesian coords)
+                feqn = face / torch.sum(face ** 2)
+                fdotr = torch.dot(feqn, r)
+                if torch.abs(fdotr) > 1 + tol:  # not in fundamental zone
+                    fimg = 2 * face  # image of origin through WS face (Cartesian coords)
+                    r -= (torch.floor(0.5 * (1 + fdotr)) * fimg)
+                    changed = True
+        return r
+
+    def reduceIndex(self, iv0, S, tol=1.e-8):
+        """Find the point within the Wigner-Seitz cell equivalent to iv (mesh coordinates with sample count S)"""
+        changed = True
+        iv = torch.clone(iv0)
+        iFaces = self.iFaces
+        R = self.basis
+        RTR = R.T @ R
+        while changed:
+            changed = False
+            for iFace in iFaces:  # TO-DO: simplify by considering only half-faces
+                # equation of plane given by eqn.x==1 (x in Lattice coords)
+                feqn = 2 / (metric_length_squared(RTR, iFace)) * (RTR @ iFace)
+                fdotr = torch.einsum("i,vi->v", feqn, iv / S[None, :])
+                outside = torch.greater(torch.abs(fdotr), 1 + tol)
+                fimg = iFace.to(int)  # image of origin through WS face (Lattice coords)
+                #result = (torch.floor(0.5 * (1 + fdotr)).to(int)[:,None] * (fimg * S)[None,:])
+                iv[outside,:] -= (torch.floor(0.5 * (1 + fdotr)).to(int)[outside,None] * (fimg * S)[None,:])
+                changed = (torch.sum(outside) > 0)
+        return iv
 
     def write_x3d(self, filename: str) -> None:
         """Construct x3d file to visualize the constructed Wigner-Seitz cell"""
@@ -124,7 +161,7 @@ def weld_points(points: torch.Tensor, tol: float) -> torch.Tensor:
     return points[unique_indices]
 
 
-def get_grid(basis: torch.Tensor) -> torch.Tensor:
+def get_grid(basis: torch.Tensor) -> tuple[torch.Tensor, ...]:
     """Return grid containing linear combinations of basis vectors sufficient to cover Wigner-Seitz cell"""
     a, b, c = basis[:, 0], basis[:, 1], basis[:, 2]
     # Find maximum radius of sphere within parallelopiped from basis lattice vectors
@@ -139,11 +176,17 @@ def get_grid(basis: torch.Tensor) -> torch.Tensor:
     iGridZ = np.arange(-shape_min[2], shape_min[2] + 1)
     # Reduce grid for any orthogonal basis vector
     if np.dot(a, b) == 0 == np.dot(a, c):
-        iGridX = np.arange(-1, 2)
+        iGridX = np.arange(-1., 2.)
     if np.dot(b, a) == 0 == np.dot(b, c):
-        iGridY = np.arange(-1, 2)
+        iGridY = np.arange(-1., 2.)
     if np.dot(c, a) == 0 == np.dot(c, b):
-        iGridZ = np.arange(-1, 2)
+        iGridZ = np.arange(-1., 2.)
     iGrid = np.array([x.flatten() for x in np.meshgrid(iGridX, iGridY, iGridZ)]).T
     iGrid = iGrid[np.where((iGrid ** 2).sum(axis=1) > 0)[0]]  # eliminate origin
-    return torch.tensor(iGrid) @ basis.T
+    return torch.tensor(iGrid), torch.tensor(iGrid) @ basis.T
+
+
+def metric_length_squared(M, v) -> torch.Tensor:
+    result = torch.sum(v**2 * torch.diag(M))
+    result += 2 * (v[0]*v[1]*M[0,1] + v[0]*v[2]*M[0,2] + v[1]*v[2]*M[1,2])
+    return result
