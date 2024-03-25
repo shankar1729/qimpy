@@ -81,6 +81,10 @@ class CoulombEmbedder:
         weights = smoothTheta(wsOrig.ws_boundary_distance(xWS))
         self.bMap = torch.sparse_coo_tensor(np.array([iEquivOrig, iEmbed]), weights,
                                             device=rc.device)
+        colSums = torch.sparse.sum(self.bMap, dim=1).to_dense()
+        colNorms = torch.sparse.spdiags(1. / colSums, offsets=torch.tensor([0]),
+                                        shape=(Sorig.prod(), Sorig.prod()))
+        self.bMap = torch.sparse.mm(colNorms, self.bMap)
 
     def embedExpand(self, fieldOrig: FieldR) -> FieldR:
         """Expand real-space field 'fieldOrig' within larger embedding cell."""

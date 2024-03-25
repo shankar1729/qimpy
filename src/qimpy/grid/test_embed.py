@@ -25,11 +25,12 @@ def check_embed(grid: Grid, latticeCenter: Sequence[float], periodic: np.ndarray
     data1, data2, data3 = extend_grid(blob, grid, periodic, torch.tensor(latticeCenter))
 
     fig, axs = plt.subplots(1, 3)
-
-    show(axs[0], data1.sum(axis=0), "Original data")
-    show(axs[1], data2.sum(axis=0), "Embedded data")
-    show(axs[2], data3.sum(axis=0), "Embedded->Original data")
-
+    im = []
+    im.append(show(axs[0], data1.sum(axis=0), "Original data"))
+    im.append(show(axs[1], data2.sum(axis=0), "Embedded data"))
+    im.append(show(axs[2], data3.sum(axis=0), "Embedded->Original data"))
+    for _im in im:
+        fig.colorbar(_im, orientation='horizontal')
     plt.show()
 
 
@@ -70,6 +71,10 @@ def extend_grid(dataOrig: torch.Tensor, gridOrig: Grid, periodic: np.ndarray, la
     weights = smoothTheta(wsOrig.ws_boundary_distance(xWS))
     bMap = torch.sparse_coo_tensor(np.array([iEquivOrig, iEmbed]), weights,
                                    device=rc.device)
+    colSums = torch.sparse.sum(bMap, dim=1).to_dense()
+    colNorms = torch.sparse.spdiags(1./colSums,offsets=torch.tensor([0]),
+                                    shape=(Sorig.prod(), Sorig.prod()))
+    bMap = torch.sparse.mm(colNorms, bMap)
     dataEmbed = (dataOrig.reshape(-1) @ bMap).reshape(gridEmbed.shape)
     dataOrig2 = (dataEmbed.reshape(-1) @ bMap.T).reshape(gridOrig.shape)
     return dataOrig, dataEmbed, dataOrig2
@@ -87,10 +92,11 @@ def get_r(grid, R, space='R'):
 
 
 def show(ax, data, title=None):
-    ax.imshow(data, origin='lower')
     #ax.plot(center[1] * data.shape[0], center[2] * data.shape[1], 'rx')
     if title:
         ax.set_title(title)
+    return ax.imshow(data, origin='lower')
+
 
 
 def main():
