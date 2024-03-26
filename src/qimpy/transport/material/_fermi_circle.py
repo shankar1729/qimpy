@@ -113,7 +113,8 @@ class FermiCircle(Material):
         return ["q"]  # charge
 
     @cache
-    def get_observables(self, Nkbb: int, t: float) -> torch.Tensor:
+    def get_observables(self, t: float) -> torch.Tensor:
+        Nkbb = len(self.k)  # since n_bands = 1
         return torch.ones((1, Nkbb), device=rc.device)  # charge observable
 
 
