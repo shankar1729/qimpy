@@ -39,8 +39,6 @@ class AbInitio(Material):
     S: torch.Tensor
     L: Optional[torch.Tensor]
     P: torch.Tensor  # P and Pbar operators stacked together
-    rho0: torch.Tensor  # Equilibrium density matrix
-    rho: torch.Tensor  # Current density matrix
 
     def __init__(
         self,
@@ -122,14 +120,14 @@ class AbInitio(Material):
         # Applying rotation
         self.rotation = torch.tensor(rotation, device=rc.device)
         self.k = torch.einsum("ij, kj -> ki", self.rotation, self.k)
-        P = torch.einsum("ij, kjab -> kiab", (1.0 + 0.0j) * self.rotation, P)
+        P = torch.einsum("ij, kjab -> kiab", self.rotation.to(P.dtype), P)
         self.S = (
-            torch.einsum("ij, kjab -> kiab", (1.0 + 0.0j) * self.rotation, self.S)
+            torch.einsum("ij, kjab -> kiab", self.rotation.to(S.dtype), self.S)
             if spinorial
             else None
         )
         self.L = (
-            torch.einsum("ij, kjab -> kiab", (1.0 + 0.0j) * self.rotation, self.L)
+            torch.einsum("ij, kjab -> kiab", self.rotation.to(L.dtype), self.L)
             if haveL
             else None
         )
@@ -143,7 +141,7 @@ class AbInitio(Material):
         if eph_scatt:
             if not ePhEnabled:
                 raise InvalidInputException("No e-ph scattering available in h5 input")
-            self.P = self.constructP(checkpoint)
+            self.P = self.constructP(fname)
             self.P_eye = apply_batched(
                 self.P, torch.tile(self.eye_bands[None], (nk, 1, 1))[..., None]
             )
@@ -156,9 +154,9 @@ class AbInitio(Material):
             )  # for detailed balance correction
 
     @stopwatch
-    def constructP(self, checkpoint: Checkpoint, n_blocks: int = 100) -> torch.Tensor:
+    def constructP(self, fname: str, n_blocks: int = 100) -> torch.Tensor:
         log.info("Constructing P tensor")
-        nk = self.nk
+        nk = self.k_division.n_tot
         ik_start = self.k_division.i_start
         ik_stop = self.k_division.i_stop
         nk_mine = ik_stop - ik_start
@@ -188,42 +186,43 @@ class AbInitio(Material):
             return torch.einsum("AB, kBC, CD -> kAD", ph.Rinv, out, ph.R).real
 
         # Operate in blocks to reduce working memory:
-        cp_ikpair = checkpoint["ikpair"]
-        n_pairs = cp_ikpair.shape[0]
-        block_size = ceildiv(n_pairs, n_blocks)
-        block_lims = np.minimum(
-            np.arange(0, n_pairs + block_size - 1, block_size), n_pairs
-        )
-        cp_omega_ph = checkpoint["omega_ph"]
-        cp_G = checkpoint["G"]
-        for block_start, block_stop in zip(block_lims[:-1], block_lims[1:]):
-            # Read current slice of data:
-            cur = slice(block_start, block_stop)
-            ik, jk = torch.from_numpy(cp_ikpair[cur]).to(rc.device).T
-            omega_ph = torch.from_numpy(cp_omega_ph[cur]).to(rc.device)
-            G = torch.from_numpy(cp_G[cur]).to(rc.device)
-            bose_occ = bose(omega_ph, self.T)[:, None, None]
-            wm = prefactor * bose_occ
-            wp = prefactor * (bose_occ + 1.0)
+        with Checkpoint(fname) as checkpoint:
+            cp_ikpair = checkpoint["ikpair"]
+            n_pairs = cp_ikpair.shape[0]
+            block_size = ceildiv(n_pairs, n_blocks)
+            block_lims = np.minimum(
+                np.arange(0, n_pairs + block_size - 1, block_size), n_pairs
+            )
+            cp_omega_ph = checkpoint["omega_ph"]
+            cp_G = checkpoint["G"]
+            for block_start, block_stop in zip(block_lims[:-1], block_lims[1:]):
+                # Read current slice of data:
+                cur = slice(block_start, block_stop)
+                ik, jk = torch.from_numpy(cp_ikpair[cur]).to(rc.device).T
+                omega_ph = torch.from_numpy(cp_omega_ph[cur]).to(rc.device)
+                G = torch.from_numpy(cp_G[cur]).to(rc.device)
+                bose_occ = bose(omega_ph, self.T)[:, None, None]
+                wm = prefactor * bose_occ
+                wp = prefactor * (bose_occ + 1.0)
 
-            # Contributions to dynamics of ik:
-            if (sel := get_mine(ik)) is not None:
-                i_pair = (ik[sel] - ik_start) * nk + jk[sel]
-                Gcur = G[sel]
-                Gsq = pack_real("kac, kbd -> kabcd", Gcur, Gcur.conj())
-                P[0].index_add_(0, i_pair, wm[sel] * Gsq)  # P contribution
-                P[1].index_add_(0, i_pair, wp[sel] * Gsq)  # Pbar contribution
+                # Contributions to dynamics of ik:
+                if (sel := get_mine(ik)) is not None:
+                    i_pair = (ik[sel] - ik_start) * nk + jk[sel]
+                    Gcur = G[sel]
+                    Gsq = pack_real("kac, kbd -> kabcd", Gcur, Gcur.conj())
+                    P[0].index_add_(0, i_pair, wm[sel] * Gsq)  # P contribution
+                    P[1].index_add_(0, i_pair, wp[sel] * Gsq)  # Pbar contribution
 
-            # Contributions to dynamics of jk:
-            if (sel := get_mine(jk)) is not None:
-                i_pair = (jk[sel] - ik_start) * nk + ik[sel]
-                Gcur = G[sel]
-                Gsq = pack_real("kca, kdb -> kabcd", Gcur.conj(), Gcur)
-                P[0].index_add_(0, i_pair, wp[sel] * Gsq)  # P contribution
-                P[1].index_add_(0, i_pair, wm[sel] * Gsq)  # Pbar contribution
+                # Contributions to dynamics of jk:
+                if (sel := get_mine(jk)) is not None:
+                    i_pair = (jk[sel] - ik_start) * nk + ik[sel]
+                    Gcur = G[sel]
+                    Gsq = pack_real("kca, kdb -> kabcd", Gcur.conj(), Gcur)
+                    P[0].index_add_(0, i_pair, wp[sel] * Gsq)  # P contribution
+                    P[1].index_add_(0, i_pair, wm[sel] * Gsq)  # Pbar contribution
 
-        op_shape = (2, nk_mine * n_bands_sq, nk * n_bands_sq)
-        return P.unflatten(1, (nk_mine, nk)).swapaxes(2, 3).reshape(op_shape)
+            op_shape = (2, nk_mine * n_bands_sq, nk * n_bands_sq)
+            return P.unflatten(1, (nk_mine, nk)).swapaxes(2, 3).reshape(op_shape)
 
     def collectT(self, rho: torch.Tensor) -> torch.Tensor:
         """Collect rho from all MPI processes and transpose batch dimension.
@@ -301,9 +300,8 @@ class AbInitio(Material):
         nk_mine = ik_stop - ik_start
         n_spatial_1 = rho.shape[0]
         n_spatial_2 = rho.shape[1]
-        n_spatial = np.prod(rho.shape[:2])
-        nkbb = np.prod(rho.shape[2:])
-        rho = rho.view(n_spatial, nk_mine, self.n_bands, self.n_bands)
+        rho = rho.flatten(0, 1).unflatten(1, (nk_mine, self.n_bands, self.n_bands))
+        nkbb_mine = np.prod(rho.shape[1:])
         # Compute scattering in Schrodinger picture:
         ph = self.packed_hermitian
         phase = self.schrodingerV(t)
@@ -312,7 +310,7 @@ class AbInitio(Material):
         rho_dot_S = self.rho_dot_scatter(rho_S) - self.rho_dot_scatter0
         rho_dot_I = rho_dot_S * phase.conj()
         return (ph.pack(rho_dot_I + rho_dot_I.conj().swapaxes(-1, -2))).view(
-            n_spatial_1, n_spatial_2, nkbb[self.k_mine]
+            n_spatial_1, n_spatial_2, nkbb_mine
         )  # + h.c.
 
     def get_observable_names(self) -> list[str]:
