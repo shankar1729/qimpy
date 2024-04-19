@@ -186,7 +186,9 @@ class AbInitio(Material):
             return torch.einsum("AB, kBC, CD -> kAD", ph.Rinv, out, ph.R).real
 
         # Operate in blocks to reduce working memory:
-        with Checkpoint(fname) as checkpoint:
+        with Checkpoint(
+            fname
+        ) as checkpoint:  # change this somehow to avoid 2 Opened checkpoint file for reading
             cp_ikpair = checkpoint["ikpair"]
             n_pairs = cp_ikpair.shape[0]
             block_size = ceildiv(n_pairs, n_blocks)
@@ -301,7 +303,6 @@ class AbInitio(Material):
         n_spatial_1 = rho.shape[0]
         n_spatial_2 = rho.shape[1]
         rho = rho.flatten(0, 1).unflatten(1, (nk_mine, self.n_bands, self.n_bands))
-        nkbb_mine = np.prod(rho.shape[1:])
         # Compute scattering in Schrodinger picture:
         ph = self.packed_hermitian
         phase = self.schrodingerV(t)
@@ -309,8 +310,11 @@ class AbInitio(Material):
         rho_S = rho_I * phase
         rho_dot_S = self.rho_dot_scatter(rho_S) - self.rho_dot_scatter0
         rho_dot_I = rho_dot_S * phase.conj()
-        return (ph.pack(rho_dot_I + rho_dot_I.conj().swapaxes(-1, -2))).view(
-            n_spatial_1, n_spatial_2, nkbb_mine
+        rho = rho.flatten(1, 3).unflatten(0, (n_spatial_1, n_spatial_2))
+        return (
+            (ph.pack(rho_dot_I + rho_dot_I.conj().swapaxes(-1, -2)))
+            .flatten(1, 3)
+            .unflatten(0, (n_spatial_1, n_spatial_2))
         )  # + h.c.
 
     def get_observable_names(self) -> list[str]:
