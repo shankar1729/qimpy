@@ -6,7 +6,7 @@ import torch
 import numpy as np
 
 from qimpy import log, rc
-from qimpy.mpi import TaskDivision, BufferView
+from qimpy.mpi import BufferView
 from qimpy.math import ceildiv
 from qimpy.profiler import StopWatch, stopwatch
 from qimpy.io import Checkpoint, CheckpointPath, Unit, InvalidInputException
@@ -35,7 +35,6 @@ class AbInitio(Material):
 
     T: float
     mu: float
-    nk: int
     S: torch.Tensor
     L: Optional[torch.Tensor]
     P: torch.Tensor  # P and Pbar operators stacked together
@@ -68,51 +67,41 @@ class AbInitio(Material):
         self.mu = mu
         self.eph_scatt = eph_scatt
         watch = StopWatch("Dynamics.read_checkpoint")
-        with Checkpoint(fname) as checkpoint:
-            attrs = checkpoint.attrs
-            T = float(attrs["Tmax"])
-            nk = int(attrs["nk"])
-            k_division = TaskDivision(
-                n_tot=nk, i_proc=self.comm.rank, n_procs=self.comm.size
-            )
+        with Checkpoint(fname) as data_file:
+            attrs = data_file.attrs
+            self.T = float(attrs["Tmax"])
             wk = 1 / float(attrs["nkTot"])
-            k_mine = slice(k_division.i_start, k_division.i_stop)
-            k = torch.from_numpy(checkpoint["k"][k_mine]).to(rc.device)
-            E = torch.from_numpy(checkpoint["E"][k_mine]).to(rc.device)
-            P = torch.from_numpy(checkpoint["P"][k_mine]).to(rc.device)
+            nk, n_bands = data_file["E"].shape
+            super().__init__(
+                wk=wk,
+                nk=nk,
+                n_bands=n_bands,
+                n_dim=3,
+                checkpoint_in=checkpoint_in,
+                process_grid=process_grid,
+            )
+
+            self.k[:] = torch.from_numpy(data_file["k"][self.k_mine]).to(rc.device)
+            self.E[:] = torch.from_numpy(data_file["E"][self.k_mine]).to(rc.device)
+            P = torch.from_numpy(data_file["P"][self.k_mine]).to(rc.device)
             spinorial = bool(attrs["spinorial"])
             S = (
-                torch.from_numpy(checkpoint["S"][k_mine]).to(rc.device)
+                torch.from_numpy(data_file["S"][self.k_mine]).to(rc.device)
                 if spinorial
                 else None
             )
             haveL = bool(attrs["haveL"])
             L = (
-                torch.from_numpy(checkpoint["L"][k_mine]).to(rc.device)
+                torch.from_numpy(data_file["L"][self.k_mine]).to(rc.device)
                 if haveL
                 else None
             )
             ePhEnabled = bool(attrs["ePhEnabled"])
             watch.stop()
 
-        n_bands = E.shape[-1]
         self.eye_bands = torch.eye(n_bands, device=rc.device)
         self.packed_hermitian = PackedHermitian(n_bands)
 
-        super().__init__(
-            wk=wk,
-            nk=nk,
-            n_bands=n_bands,
-            n_dim=3,
-            checkpoint_in=checkpoint_in,
-            process_grid=process_grid,
-        )
-
-        self.T = T
-        self.k_division = k_division
-        self.kmine = k_mine
-        self.k = k
-        self.E = E
         self.S = S
         self.L = L
         self.v = torch.einsum("kibb->kbi", P).real
