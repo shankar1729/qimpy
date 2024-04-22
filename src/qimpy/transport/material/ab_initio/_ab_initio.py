@@ -11,7 +11,7 @@ from qimpy.math import ceildiv
 from qimpy.profiler import StopWatch, stopwatch
 from qimpy.io import Checkpoint, CheckpointPath, Unit, InvalidInputException
 from qimpy.mpi import ProcessGrid
-from . import Material
+from .. import Material
 from . import PackedHermitian
 
 

@@ -6,7 +6,8 @@ from qimpy.io import CheckpointPath, Checkpoint, CheckpointContext
 from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
 from .geometry import Geometry, PatchSet, ParameterGrid
-from .material import Material, AbInitio, FermiCircle
+from .material import Material, FermiCircle
+from .material.ab_initio import AbInitio
 from . import TimeEvolution
 
 
