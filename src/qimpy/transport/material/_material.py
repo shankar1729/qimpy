@@ -15,6 +15,7 @@ class Material(TreeNode):
     comm: MPI.Comm  #: Communicator for reciprocal-space split over k
     k_division: TaskDivision  #: Division of k-points over MPI
     k_mine: slice  #: slice of k on current process
+    nk_mine: int  #: number of k-points on current process
     n_bands: int  #: number of bands at each k
     n_dim: int  #: dimensionality of material (2 or 3)
     wk: float  #: Brillouin zone integration weight
@@ -39,15 +40,15 @@ class Material(TreeNode):
         self.k_division = TaskDivision(
             n_tot=nk, i_proc=self.comm.rank, n_procs=self.comm.size
         )
-        nk_mine = self.k_division.n_mine
+        self.nk_mine = self.k_division.n_mine
         self.k_mine = slice(self.k_division.i_start, self.k_division.i_stop)
         self.n_bands = n_bands
         self.n_dim = n_dim
         self.wk = wk
-        self.k = torch.zeros((nk_mine, n_dim), device=rc.device)
-        self.E = torch.zeros((nk_mine, n_bands), device=rc.device)
-        self.v = torch.zeros((nk_mine, n_bands, n_dim), device=rc.device)
-        self.rho0 = torch.zeros((nk_mine, n_bands, n_bands), device=rc.device)
+        self.k = torch.zeros((self.nk_mine, n_dim), device=rc.device)
+        self.E = torch.zeros((self.nk_mine, n_bands), device=rc.device)
+        self.v = torch.zeros((self.nk_mine, n_bands, n_dim), device=rc.device)
+        self.rho0 = torch.zeros((self.nk_mine, n_bands, n_bands), device=rc.device)
 
     @property
     def transport_velocity(self) -> torch.Tensor:

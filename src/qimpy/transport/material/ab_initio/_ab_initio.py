@@ -35,6 +35,7 @@ class AbInitio(Material):
 
     T: float
     mu: float
+    rotation: torch.Tensor
     S: torch.Tensor
     L: Optional[torch.Tensor]
     P: torch.Tensor  # P and Pbar operators stacked together
@@ -66,9 +67,13 @@ class AbInitio(Material):
         self.comm = process_grid.get_comm("k")
         self.mu = mu
         self.eph_scatt = eph_scatt
+        self.rotation = torch.tensor(rotation, device=rc.device)
         watch = StopWatch("Dynamics.read_checkpoint")
-        with Checkpoint(fname) as data_file:
+        with (Checkpoint(fname) as data_file):
             attrs = data_file.attrs
+            ePhEnabled = bool(attrs["ePhEnabled"])
+            spinorial = bool(attrs["spinorial"])
+            haveL = bool(attrs["haveL"])
             self.T = float(attrs["Tmax"])
             wk = 1 / float(attrs["nkTot"])
             nk, n_bands = data_file["E"].shape
@@ -81,45 +86,16 @@ class AbInitio(Material):
                 process_grid=process_grid,
             )
 
-            self.k[:] = torch.from_numpy(data_file["k"][self.k_mine]).to(rc.device)
-            self.E[:] = torch.from_numpy(data_file["E"][self.k_mine]).to(rc.device)
-            P = torch.from_numpy(data_file["P"][self.k_mine]).to(rc.device)
-            spinorial = bool(attrs["spinorial"])
-            S = (
-                torch.from_numpy(data_file["S"][self.k_mine]).to(rc.device)
-                if spinorial
-                else None
-            )
-            haveL = bool(attrs["haveL"])
-            L = (
-                torch.from_numpy(data_file["L"][self.k_mine]).to(rc.device)
-                if haveL
-                else None
-            )
-            ePhEnabled = bool(attrs["ePhEnabled"])
+            self.k[:] = self.read_scalars(data_file, "k")
+            self.E[:] = self.read_scalars(data_file, "E")
+            P = self.read_vectors(data_file, "P")
+            self.S = self.read_vectors(data_file, "S") if spinorial else None
+            self.L = self.read_vectors(data_file, "L") if haveL else None
             watch.stop()
 
+        self.v = torch.einsum("kibb->kbi", P).real
         self.eye_bands = torch.eye(n_bands, device=rc.device)
         self.packed_hermitian = PackedHermitian(n_bands)
-
-        self.S = S
-        self.L = L
-        self.v = torch.einsum("kibb->kbi", P).real
-
-        # Applying rotation
-        self.rotation = torch.tensor(rotation, device=rc.device)
-        self.k = torch.einsum("ij, kj -> ki", self.rotation, self.k)
-        P = torch.einsum("ij, kjab -> kiab", self.rotation.to(P.dtype), P)
-        self.S = (
-            torch.einsum("ij, kjab -> kiab", self.rotation.to(S.dtype), self.S)
-            if spinorial
-            else None
-        )
-        self.L = (
-            torch.einsum("ij, kjab -> kiab", self.rotation.to(L.dtype), self.L)
-            if haveL
-            else None
-        )
 
         # Zeroth order Hamiltonian:
         H0 = torch.diag_embed(self.E) + self.zeemanH(
@@ -141,6 +117,24 @@ class AbInitio(Material):
             self.rho_dot_scatter0 = self.rho_dot_scatter(
                 self.packed_hermitian.unpack(self.rho0)
             )  # for detailed balance correction
+
+    def read_scalars(self, data_file: Checkpoint, name: str) -> torch.Tensor:
+        """Read quantities that don't transform with rotations from data_file."""
+        dset = data_file[name]
+        offset = (self.k_division.i_start,) + (0,) * (len(dset.shape) - 1)
+        size = (self.nk_mine,) + dset.shape[1:]
+        return data_file.read_slice(dset, offset, size)
+
+    def read_vectors(self, data_file: Checkpoint, name: str) -> torch.Tensor:
+        """Read quantities that transform as a vector with rotations from data_file.
+        The second index is assumed to be the Cartesian index."""
+        dset = data_file[name]
+        offset = (self.k_division.i_start,) + (0,) * (len(dset.shape) - 1)
+        size = (self.nk_mine,) + dset.shape[1:]
+        result = data_file.read_slice(dset, offset, size)
+        return torch.einsum(
+            "ij, kj... -> ki...", self.rotation.to(result.dtype), result
+        )
 
     @stopwatch
     def constructP(self, fname: str, n_blocks: int = 100) -> torch.Tensor:
