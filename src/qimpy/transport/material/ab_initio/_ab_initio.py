@@ -10,7 +10,7 @@ from qimpy.profiler import StopWatch
 from qimpy.io import Checkpoint, CheckpointPath, Unit
 from qimpy.mpi import ProcessGrid
 from .. import Material, fermi
-from . import PackedHermitian, RelaxationTime, Lindblad
+from . import PackedHermitian, RelaxationTime, Lindblad, Light
 
 
 class DynamicsTerm(Protocol):
@@ -31,6 +31,7 @@ class AbInitio(Material):
     S: Optional[torch.Tensor]  #: Spin matrix elements
     L: Optional[torch.Tensor]  #: Angular momentum matrix elements
     scattering: DynamicsTerm  #: scattering functional
+    light: Light  #: coherent-light interaction
     dynamics_terms: list[DynamicsTerm]  #: all active drho/dt contributions
 
     def __init__(
@@ -45,6 +46,7 @@ class AbInitio(Material):
         ),
         relaxation_time: Optional[Union[RelaxationTime, dict]] = None,
         lindblad: Optional[Union[Lindblad, dict]] = None,
+        light: Optional[Union[Light, dict]] = None,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
@@ -120,6 +122,10 @@ class AbInitio(Material):
             )
             if not isinstance(self.scattering, RelaxationTime) or self.scattering:
                 self.dynamics_terms.append(self.scattering)
+
+            if light is not None:
+                self.add_child("light", Light, light, checkpoint_in, ab_initio=self)
+                self.dynamics_terms.append(self.light)
 
     def read_scalars(self, data_file: Checkpoint, name: str) -> torch.Tensor:
         """Read quantities that don't transform with rotations from data_file."""
