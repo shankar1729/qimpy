@@ -105,3 +105,11 @@ class Material(TreeNode):
             self.comm.Allreduce(MPI.IN_PLACE, BufferView(density))
             self.comm.Allreduce(MPI.IN_PLACE, BufferView(flux))
         return density, flux
+
+
+def fermi(E, mu, T):
+    return torch.special.expit((mu - E) / T)
+
+
+def bose(omegaPh, T):
+    return 1 / torch.expm1(omegaPh / T)

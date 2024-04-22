@@ -4,22 +4,35 @@ from typing import Union
 import numpy as np
 import torch
 
-from qimpy import rc, log
-from qimpy.io import Checkpoint
+from qimpy import rc, log, TreeNode
+from qimpy.io import Checkpoint, CheckpointPath, InvalidInputException
 from qimpy.mpi import BufferView
 from qimpy.math import ceildiv
 from qimpy.profiler import stopwatch
-from . import AbInitio, bose
+from qimpy.transport import material
+from .. import bose
 
 
-class Scattering:
-    ab_initio: AbInitio
+class Lindblad(TreeNode):
+    ab_initio: material.ab_initio.AbInitio
     P: torch.Tensor  #: P and Pbar operators stacked together
     rho_dot0: torch.Tensor  #: rho_dot(rho0) for detailed balance correction
 
     @stopwatch
-    def __init__(self, ab_initio: AbInitio, data_file: Checkpoint) -> None:
+    def __init__(
+        self,
+        *,
+        ab_initio: material.ab_initio.AbInitio,
+        data_file: Checkpoint,
+        checkpoint_in: CheckpointPath = CheckpointPath(),
+    ) -> None:
+        """
+        Initialize ab initio Lindbladian scattering (no free parameters).
+        """
+        super().__init__()
         self.ab_initio = ab_initio
+        if not bool(data_file.attrs["ePhEnabled"]):
+            raise InvalidInputException("No e-ph scattering available in data file")
 
         log.info("Constructing P tensor")
         nk = ab_initio.k_division.n_tot

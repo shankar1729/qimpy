@@ -1,5 +1,6 @@
-__all__ = ["AbInitio", "fermi", "bose", "PackedHermitian", "Scattering"]
+__all__ = ["PackedHermitian", "RelaxationTime", "Lindblad", "AbInitio"]
 
 from ._packed_hermitian import PackedHermitian
-from ._ab_initio import AbInitio, fermi, bose
-from ._scattering import Scattering
+from ._relaxation_time import RelaxationTime
+from ._lindblad import Lindblad
+from ._ab_initio import AbInitio

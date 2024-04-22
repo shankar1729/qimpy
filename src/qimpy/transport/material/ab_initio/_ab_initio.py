@@ -1,17 +1,24 @@
 from __future__ import annotations
-from typing import Sequence, Callable, Optional
+from typing import Sequence, Callable, Optional, Union, Protocol
 from functools import cache
 
 import torch
 import numpy as np
 
-from qimpy import log, rc
+from qimpy import log, rc, TreeNode
 from qimpy.profiler import StopWatch
-from qimpy.io import Checkpoint, CheckpointPath, Unit, InvalidInputException
+from qimpy.io import Checkpoint, CheckpointPath, Unit
 from qimpy.mpi import ProcessGrid
-from qimpy.transport import material
-from .. import Material
-from . import PackedHermitian
+from .. import Material, fermi
+from . import PackedHermitian, RelaxationTime, Lindblad
+
+
+class DynamicsTerm(Protocol):
+    """Definition of a coherent/incoherent term within AbInitio's rho_dot."""
+
+    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
+        """Compute drho/dt given rho, with input and output in Schrodinger picture.
+        Only compute one half of the result; hermitian conjugate is added later."""
 
 
 class AbInitio(Material):
@@ -23,19 +30,21 @@ class AbInitio(Material):
     P: torch.Tensor  #: Momentum matrix elements
     S: Optional[torch.Tensor]  #: Spin matrix elements
     L: Optional[torch.Tensor]  #: Angular momentum matrix elements
-    scattering: Optional[material.ab_initio.Scattering]  #: scattering functional
+    scattering: DynamicsTerm  #: scattering functional
+    dynamics_terms: list[DynamicsTerm]  #: all active drho/dt contributions
 
     def __init__(
         self,
         *,
         fname: str,
         mu: float = 0.0,
-        eph_scatt: bool = True,
         rotation: Sequence[Sequence[float]] = (
             (1.0, 0.0, 0.0),
             (0.0, 1.0, 0.0),
             (0.0, 0.0, 1.0),
         ),
+        relaxation_time: Optional[Union[RelaxationTime, dict]] = None,
+        lindblad: Optional[Union[Lindblad, dict]] = None,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
@@ -46,17 +55,23 @@ class AbInitio(Material):
         ----------
         fname
             :yaml:`File name to load materials data from.`
+        mu
+            :yaml:`Chemical potential in equilbrium.`
         rotation
             :yaml:`3 x 3 rotation matrix from material to simulation frame.`
+        relaxation_time
+            :yaml:`Relaxation-time approximation to scattering.`
+            Exactly one supported scattering type must be specified.
+        lindblad
+            :yaml:`Ab-initio lindblad scattering.`
+            Exactly one supported scattering type must be specified.
         """
         self.comm = process_grid.get_comm("k")
         self.mu = mu
-        self.eph_scatt = eph_scatt
         self.rotation = torch.tensor(rotation, device=rc.device)
         watch = StopWatch("Dynamics.read_checkpoint")
         with Checkpoint(fname) as data_file:
             attrs = data_file.attrs
-            ePhEnabled = bool(attrs["ePhEnabled"])
             spinorial = bool(attrs["spinorial"])
             haveL = bool(attrs["haveL"])
             self.T = float(attrs["Tmax"])
@@ -89,14 +104,22 @@ class AbInitio(Material):
             )
             self.rho0, _, _ = self.rho_fermi(H0, self.mu)
 
-            if eph_scatt:
-                if not ePhEnabled:
-                    raise InvalidInputException(
-                        f"No e-ph scattering available in {fname}"
-                    )
-                self.scattering = material.ab_initio.Scattering(self, data_file)
-            else:
-                self.scattering = None
+            # Initialize optional terms in the dynamics
+            self.dynamics_terms = []
+
+            self.add_child_one_of(
+                "scattering",
+                checkpoint_in,
+                TreeNode.ChildOptions(
+                    "relaxation-time", RelaxationTime, relaxation_time, ab_initio=self
+                ),
+                TreeNode.ChildOptions(
+                    "lindblad", Lindblad, lindblad, ab_initio=self, data_file=data_file
+                ),
+                have_default=True,
+            )
+            if not isinstance(self.scattering, RelaxationTime) or self.scattering:
+                self.dynamics_terms.append(self.scattering)
 
     def read_scalars(self, data_file: Checkpoint, name: str) -> torch.Tensor:
         """Read quantities that don't transform with rotations from data_file."""
@@ -153,7 +176,7 @@ class AbInitio(Material):
     def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         """Overall drho/dt in interaction picture.
         Input and output rho are in packed (real) form."""
-        if not self.eph_scatt:  # TODO: check for coherent evolution too
+        if not self.dynamics_terms:
             return torch.zeros_like(rho)
         watch = StopWatch("AbInitio.rho_dot_pre")
         shape_in = rho.shape
@@ -168,8 +191,8 @@ class AbInitio(Material):
 
         # Compute rho_dot (upto an overall +h.c.) in Schrodinger picture:
         rho_dot_S = torch.zeros_like(rho_S)
-        if self.scattering is not None:
-            rho_dot_S += self.scattering.rho_dot(rho_S, t)
+        for dynamics_term in self.dynamics_terms:
+            rho_dot_S += dynamics_term.rho_dot(rho_S, t)
 
         # Convert result back to interaction picture:
         watch = StopWatch("AbInitio.rho_dot_post")
@@ -225,11 +248,3 @@ class Contactor:
         phase = ab_initio.schrodingerV(t)
         rho0_I = ph.pack(ph.unpack(self.rho0_S) * phase.conj())
         return torch.flatten(rho0_I)
-
-
-def fermi(E, mu, T):
-    return torch.special.expit((mu - E) / T)
-
-
-def bose(omegaPh, T):
-    return 1 / torch.expm1(omegaPh / T)
