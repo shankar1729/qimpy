@@ -14,9 +14,12 @@ class Light(TreeNode):
     coherent: bool  #: Whether term is Coherent or Lindbladian
     gauge: str  #: Gauge: one of velocity or length
     A0: torch.Tensor  #: Vector potential amplitude
+    E0: torch.Tensor  #: Electric field amplitude
     omega: float  #: light frequency
     t0: float  #: center of Gaussian pulse, if sigma is non-zero
     sigma: float  #: width of Gaussian pulse in time, if non-zero
+    A0_dot_P: torch.Tensor  #: Precomputed A0 . P matrix elements
+    E0_dot_R: torch.Tensor  #: Precomputed E0 . R matrix elements
 
     def __init__(
         self,
@@ -62,30 +65,24 @@ class Light(TreeNode):
         # Get amplitude from A0 or E0:
         if (A0 is None) == (E0 is None):
             raise InvalidInputException("Exactly one of A0 and E0 must be specified")
-        if self.gauge == "velocity":
-            if A0 is not None:
-                self.A0 = torch.tensor(A0, device=rc.device)
-            elif E0 is not None:
-                self.A0 = torch.tensor(E0, device=rc.device) / omega
-            if self.A0.shape[-1] == 2:  # handle complex tensors
-                self.A0 = torch.view_as_complex(self.A0)
-            else:
-                self.A0 = self.A0 * (1.0 + 0.0j)
-            self.A0real_dot_P = torch.einsum("i, kiab -> kab", (1.0 + 0.0j) * self.A0.real, ab_initio.P)
-            self.A0imag_dot_P = torch.einsum("i, kiab -> kab", (1.0 + 0.0j) * self.A0.imag, ab_initio.P) 
-        elif self.gauge == "length":
-            if E0 is not None:
-                self.E0 = torch.tensor(E0, device=rc.device)
-            elif A0 is not None:
-                self.E0 = torch.tensor(A0, device=rc.device) * omega
-            if self.E0.shape[-1] == 2:  # handle complex tensors
-                self.E0 = torch.view_as_complex(self.E0)
-            else:
-                self.E0 = self.E0 * (1.0 + 0.0j)
-            self.E0real_dot_R = torch.einsum("i, kiab -> kab", (1.0 + 0.0j) * self.E0.real, ab_initio.R)
-            self.E0imag_dot_R = torch.einsum("i, kiab -> kab", (1.0 + 0.0j) * self.E0.imag, ab_initio.R)
+        if A0 is not None:
+            self.A0 = torch.tensor(A0, device=rc.device)
+        elif E0 is not None:
+            self.A0 = torch.tensor(E0, device=rc.device) / omega
+        if self.A0.shape[-1] == 2:  # handle complex tensors
+            self.A0 = torch.view_as_complex(self.A0)
         else:
-            raise InvalidInputException("Parameter gauge should only be velocity or length")
+            self.A0 = self.A0.to(torch.complex128)
+        self.E0 = self.A0 * omega
+
+        if self.gauge == "velocity":
+            self.A0_dot_P = torch.einsum("i, kiab -> kab", self.A0, ab_initio.P)
+        elif self.gauge == "length":
+            self.E0_dot_R = torch.einsum("i, kiab -> kab", self.E0, ab_initio.R)
+        else:
+            raise InvalidInputException(
+                "Parameter gauge should only be velocity or length"
+            )
 
         self.omega = omega
         self.t0 = t0
@@ -93,12 +90,15 @@ class Light(TreeNode):
         self.coherent = coherent
 
     def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
-        prefac = np.exp( -(t-t0)**2/(2*self.sigma**2) )/np.sqrt(np.sqrt(np.pi)*self.sigma) if self.sigma > 0 else 1
+        prefac = -0.5j * np.exp(1j * self.omega * t)  # with Louiville, symmetrization
+        if self.sigma:
+            prefac *= np.exp(-((t - self.t0) ** 2) / (2 * self.sigma**2)) / np.sqrt(
+                np.sqrt(np.pi) * self.sigma
+            )
+
         if self.gauge == "velocity":
-            light_interaction = prefac * ((-1.0j * np.cos(self.omega * t)) * self.A0real_dot_P +
-                               (-1.0j * np.sin(self.omega * t)) * self.A0imag_dot_P)
-        elif self.gauge == "length":
-            light_interaction = prefac * ((-1.0j * np.cos(self.omega * t)) * self.E0real_dot_R +
-                               (-1.0j * np.sin(self.omega * t)) * self.E0imag_dot_R)
-        return light_interaction @ rho
-        
+            light_interaction = prefac * self.A0_dot_P
+        else:  # self.gauge == "length"
+            light_interaction = prefac * self.E0_dot_R
+
+        return (light_interaction - light_interaction.swapaxes(-2, -1).conj()) @ rho
