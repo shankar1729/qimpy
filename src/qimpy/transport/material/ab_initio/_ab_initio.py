@@ -1,6 +1,5 @@
 from __future__ import annotations
 from typing import Sequence, Callable, Optional, Union, Protocol
-from functools import cache
 
 import torch
 import numpy as np
@@ -211,7 +210,6 @@ class AbInitio(Material):
     def get_observable_names(self) -> list[str]:
         return ["q", "Sx", "Sy", "Sz"]  # charge, components of spin operator
 
-    @cache
     def get_observables(self, t: float) -> torch.Tensor:
         Nkbb_mine = np.prod(self.rho0.shape)
         q = torch.ones((1, Nkbb_mine), device=rc.device)  # charge observable
