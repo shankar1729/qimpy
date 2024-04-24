@@ -6,7 +6,7 @@ import numpy as np
 
 from qimpy import log, rc, TreeNode
 from qimpy.profiler import StopWatch
-from qimpy.io import Checkpoint, CheckpointPath, Unit
+from qimpy.io import Checkpoint, CheckpointPath, Unit, InvalidInputException
 from qimpy.mpi import ProcessGrid
 from .. import Material, fermi
 from . import PackedHermitian, RelaxationTime, Lindblad, Light
@@ -37,6 +37,7 @@ class AbInitio(Material):
         self,
         *,
         fname: str,
+        T: float,
         mu: float = 0.0,
         rotation: Sequence[Sequence[float]] = (
             (1.0, 0.0, 0.0),
@@ -56,6 +57,8 @@ class AbInitio(Material):
         ----------
         fname
             :yaml:`File name to load materials data from.`
+        T
+            :yaml:`Temperature.`
         mu
             :yaml:`Chemical potential in equilbrium.`
         rotation
@@ -75,7 +78,9 @@ class AbInitio(Material):
             attrs = data_file.attrs
             spinorial = bool(attrs["spinorial"])
             haveL = bool(attrs["haveL"])
-            self.T = float(attrs["Tmax"])
+            if T > (Tmax := float(attrs["Tmax"])):
+                raise InvalidInputException(f"{T = } exceeds {Tmax = }")
+            self.T = T
             wk = 1 / float(attrs["nkTot"])
             nk, n_bands = data_file["E"].shape
             log.info(f"Initializing AbInitio material with {nk = } and {n_bands = }")
