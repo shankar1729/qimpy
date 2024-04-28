@@ -53,6 +53,17 @@ def select_division(quad_set: QuadSet, n_processes: int) -> int:
             np.concatenate((grid_size_max_list, additional_sizes))
         )
 
+    # Fill any large geometric gaps in above list:
+    gap_ratios = grid_size_max_list[1:] / grid_size_max_list[:-1]
+    for i_gap, gap_ratio in enumerate(gap_ratios):
+        if gap_ratio > 1.5:
+            log_spacing = 0.2
+            scale_factors = np.exp(np.arange(0, np.log(gap_ratio), log_spacing))
+            additional_sizes = np.round(grid_size_max_list[i_gap] * scale_factors)
+            grid_size_max_list = np.unique(
+                np.concatenate((grid_size_max_list, additional_sizes.astype(int)))
+            )
+
     # Check and report candidates:
     log.info("\n--- Quad subdivision candidates ---")
     log.info("grid_size_max  n_quads  size_imbalance number_imbalance")
