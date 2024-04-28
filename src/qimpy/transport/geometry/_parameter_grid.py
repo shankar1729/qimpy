@@ -73,7 +73,7 @@ class ParameterGrid(Geometry):
                 for key, values in dimension.items():
                     parameters[key] = self.create_values(i_dim, **values)
         log.info(f"{parameters}")
-        exit()
+        # exit()
 
     def create_values(
         self,

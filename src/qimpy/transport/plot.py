@@ -198,8 +198,8 @@ class PlotGeometry:
         edge_indices = []
         with h5py.File(checkpoint_file, "r") as cp:
             grid_spacing = float(cp["/geometry"].attrs["grid_spacing"])
-            contact_names = str(cp["/geometry"].attrs["contact_names"]).split(",")
-            aperture_names = str(cp["/geometry"].attrs["aperture_names"]).split(",")
+            contact_names = split_names(str(cp["/geometry"].attrs["contact_names"]))
+            aperture_names = split_names(str(cp["/geometry"].attrs["aperture_names"]))
             contacts = np.array(cp["/geometry/contacts"])
             apertures = np.array(cp["/geometry/apertures"])
             vertices = np.array(cp["/geometry/vertices"])
@@ -387,6 +387,10 @@ class PlotGeometry:
         )
         interpolator = mtri.LinearTriInterpolator(self.triangulation, values_all)
         return interpolator(self.x_grid, self.y_grid), values_all
+
+
+def split_names(input: str) -> list[str]:
+    return input.split(",") if input else []
 
 
 if __name__ == "__main__":

@@ -117,7 +117,7 @@ class Geometry(TreeNode):
 
     @abstractmethod
     def rho_dot(self, rho: TensorList, t: float) -> TensorList:
-        """Return list of drho/dt from PatchSet or ParameterGrid"""
+        """Return list of drho/dt corresponding to each rho at time `t`."""
 
     @property
     def rho(self) -> TensorList:
