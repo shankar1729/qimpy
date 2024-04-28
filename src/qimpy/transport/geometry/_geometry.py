@@ -4,7 +4,7 @@ from abc import abstractmethod
 import torch
 import numpy as np
 
-from qimpy import rc, TreeNode, MPI
+from qimpy import log, rc, TreeNode, MPI
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import ProcessGrid, TaskDivision, BufferView
 from ..material import Material
@@ -75,9 +75,16 @@ class Geometry(TreeNode):
         contact_params = list(contacts.values())
 
         # Subdivide:
-        if not grid_size_max:
+        if grid_size_max:
+            log.info(f"Using specified {grid_size_max = }")
+        else:
             grid_size_max = select_division(quad_set, self.comm.size)
         self.sub_quad_set = subdivide(quad_set, grid_size_max)
+        log.info(
+            f"Subdivided {len(quad_set.quads)} quads to "
+            f"{len(self.sub_quad_set.quad_index)} for split "
+            f"over {self.comm.size} processes."
+        )
         self.patch_division = TaskDivision(
             n_tot=len(self.sub_quad_set.quad_index),
             n_procs=self.comm.size,

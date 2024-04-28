@@ -46,9 +46,11 @@ def select_division(quad_set: QuadSet, n_processes: int) -> int:
         scale_factors = np.exp(
             -log_spacing - np.arange(0, 0.5 * np.log(needed_expansion), log_spacing)
         )
-        additional_sizes = np.round(grid_size_max_list[0] * scale_factors)
+        additional_sizes = np.maximum(
+            1, np.round(grid_size_max_list[0] * scale_factors).astype(int)
+        )
         grid_size_max_list = np.unique(
-            np.concatenate((grid_size_max_list, additional_sizes.astype(int)))
+            np.concatenate((grid_size_max_list, additional_sizes))
         )
 
     # Check and report candidates:
