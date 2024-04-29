@@ -72,8 +72,26 @@ class ParameterGrid(Geometry):
             if dimension is not None:
                 for key, values in dimension.items():
                     parameters[key] = self.create_values(i_dim, **values)
-        log.info(f"{parameters}")
-        # exit()
+        log.info(f"Initialized parameter grid of dimensions: {shape}")
+
+        # Initialize material for parameter subsets in each patch:
+        patches_mine = slice(self.patch_division.i_start, self.patch_division.i_stop)
+        for patch, grid_start, grid_stop in zip(
+            self.patches,
+            self.sub_quad_set.grid_start[patches_mine],
+            self.sub_quad_set.grid_stop[patches_mine],
+        ):
+            # Initialize parameter subsets:
+            slice0 = slice(grid_start[0], grid_stop[0])
+            slice1 = slice(grid_start[1], grid_stop[1])
+            parameters_sub = {
+                key: values[
+                    slice(None) if (values.shape[0] == 1) else slice0,
+                    slice(None) if (values.shape[1] == 1) else slice1,
+                ]
+                for key, values in parameters.items()
+            }
+            patch.fields = material.initialize_fields(patch.rho, parameters_sub)
 
     def create_values(
         self,
@@ -113,7 +131,10 @@ class ParameterGrid(Geometry):
             return values[None]
 
     def rho_dot(self, rho: TensorList, t: float) -> TensorList:
-        return TensorList(self.material.rho_dot(rho_i, t) for rho_i in rho)
+        return TensorList(
+            self.material.rho_dot(rho_i, t, patch.fields)
+            for rho_i, patch in zip(rho, self.patches)
+        )
 
 
 _GRID_VERTICES = (1.0 / 3) * np.array(

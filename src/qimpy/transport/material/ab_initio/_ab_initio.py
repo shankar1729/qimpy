@@ -131,6 +131,11 @@ class AbInitio(Material):
                 self.add_child("light", Light, light, checkpoint_in, ab_initio=self)
                 self.dynamics_terms.append(self.light)
 
+    def initialize_fields(
+        self, rho: torch.Tensor, params: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
+        return {}  # No spatially-varying / parameter sweep fields yet
+
     def read_scalars(self, data_file: Checkpoint, name: str) -> torch.Tensor:
         """Read quantities that don't transform with rotations from data_file."""
         dset = data_file[name]
@@ -183,7 +188,9 @@ class AbInitio(Material):
     ) -> Callable[[torch.Tensor], torch.Tensor]:  # absorbing boundary
         return torch.zeros_like
 
-    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
+    def rho_dot(
+        self, rho: torch.Tensor, t: float, fields: dict[str, torch.Tensor]
+    ) -> torch.Tensor:
         """Overall drho/dt in interaction picture.
         Input and output rho are in packed (real) form."""
         if not self.dynamics_terms:

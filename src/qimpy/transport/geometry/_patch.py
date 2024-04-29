@@ -33,6 +33,7 @@ class Patch:
     v_prime: torch.jit.ScriptModule  #: Underlying advection logic
 
     material: Material
+    fields: dict[str, torch.Tensor]  #: Spatially-dependent material property cache
     aperture_selections: list[Optional[torch.Tensor]]  #: Aperture indices for each edge
     reflectors: list[
         Optional[Callable[[torch.Tensor], torch.Tensor]]
