@@ -44,6 +44,7 @@ class AbInitio(Material):
             (0.0, 1.0, 0.0),
             (0.0, 0.0, 1.0),
         ),
+        orbital_zeeman: Optional[bool] = None,
         relaxation_time: Optional[Union[RelaxationTime, dict]] = None,
         lindblad: Optional[Union[Lindblad, dict]] = None,
         light: Optional[Union[Light, dict]] = None,
@@ -63,12 +64,17 @@ class AbInitio(Material):
             :yaml:`Chemical potential in equilbrium.`
         rotation
             :yaml:`3 x 3 rotation matrix from material to simulation frame.`
+        orbital_zeeman
+            :yaml:`Whether to include L matrix elements in Zeeman coupling.`
+            The default None amounts to using L if available in the data.
         relaxation_time
             :yaml:`Relaxation-time approximation to scattering.`
             Exactly one supported scattering type must be specified.
         lindblad
             :yaml:`Ab-initio lindblad scattering.`
             Exactly one supported scattering type must be specified.
+        light
+            :yaml:`Light-matter interaction (coherent / Lindblad).`
         """
         self.comm = process_grid.get_comm("k")
         self.mu = mu
@@ -78,6 +84,14 @@ class AbInitio(Material):
             attrs = data_file.attrs
             spinorial = bool(attrs["spinorial"])
             haveL = bool(attrs["haveL"])
+            if orbital_zeeman is None:
+                useL = haveL
+            else:
+                useL = orbital_zeeman
+                if useL and not haveL:
+                    raise InvalidInputException(
+                        f"L not available in {fname} for orbital-zeeman"
+                    )
             if T > (Tmax := float(attrs["Tmax"])):
                 raise InvalidInputException(f"{T = } exceeds {Tmax = }")
             self.T = T
@@ -97,17 +111,15 @@ class AbInitio(Material):
             self.E[:] = self.read_scalars(data_file, "E")
             self.P = self.read_vectors(data_file, "P")
             self.S = self.read_vectors(data_file, "S") if spinorial else None
-            self.L = self.read_vectors(data_file, "L") if haveL else None
+            self.L = self.read_vectors(data_file, "L") if useL else None
             watch.stop()
 
             self.v = torch.einsum("kibb->kbi", self.P).real
             self.eye_bands = torch.eye(n_bands, device=rc.device)
             self.packed_hermitian = PackedHermitian(n_bands)
 
-            # Zeroth order Hamiltonian:
-            H0 = torch.diag_embed(self.E) + self.zeemanH(
-                torch.tensor([[0.0, 0.0, 0.0]]).to(rc.device)
-            )
+            # Zeroth order Hamiltonian and density matrix:
+            H0 = torch.diag_embed(self.E.to(torch.complex128))[None]
             self.rho0, _, _ = self.rho_fermi(H0, self.mu)
 
             # Initialize optional terms in the dynamics
@@ -134,7 +146,15 @@ class AbInitio(Material):
     def initialize_fields(
         self, rho: torch.Tensor, params: dict[str, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
-        return {}  # No spatially-varying / parameter sweep fields yet
+        return self.initialize_fields_local(rho, **params)
+
+    def initialize_fields_local(
+        self, rho: torch.Tensor, *, pumpB: Optional[torch.Tensor] = None
+    ) -> dict[str, torch.Tensor]:
+        if pumpB is not None:
+            H0 = torch.diag_embed(self.E) + self.zeemanH(pumpB)
+            rho[:] = self.rho_fermi(H0, self.mu)[0].flatten(-3, -1)
+        return {}  # No local fields yet
 
     def read_scalars(self, data_file: Checkpoint, name: str) -> torch.Tensor:
         """Read quantities that don't transform with rotations from data_file."""
