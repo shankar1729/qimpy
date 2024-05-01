@@ -100,7 +100,7 @@ class AbInitio(Material):
                     raise InvalidInputException(
                         f"L not available in {fname} for orbital-zeeman"
                     )
-            if T > (Tmax := float(attrs["Tmax"])):
+            if T > (Tmax := float(attrs["Tmax"])) * (1 + 1e-6):
                 raise InvalidInputException(f"{T = } exceeds {Tmax = }")
             self.T = T
             wk = 1 / float(attrs["nkTot"])
