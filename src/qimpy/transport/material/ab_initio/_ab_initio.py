@@ -4,7 +4,7 @@ from typing import Sequence, Callable, Optional, Union, Protocol
 import torch
 import numpy as np
 
-from qimpy import log, rc, TreeNode
+from qimpy import log, rc
 from qimpy.profiler import StopWatch
 from qimpy.io import Checkpoint, CheckpointPath, Unit, InvalidInputException
 from qimpy.mpi import ProcessGrid
@@ -15,9 +15,13 @@ from . import PackedHermitian, RelaxationTime, Lindblad, Light
 class DynamicsTerm(Protocol):
     """Definition of a coherent/incoherent term within AbInitio's rho_dot."""
 
+    constant_params: dict[str, torch.Tensor]  #: Constant values of parameters
+
     def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
         """Initialize spatially-dependent fields / parameter sweeps per patch.
-        Implement the part of `Material.initialize_fields` for current term."""
+        Implement the part of `Material.initialize_fields` for current term.
+        The `params` account for `constant_params` first and then override
+        by any specified spatial dependent / parameter sweep values."""
 
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         """Compute drho/dt given rho, with input and output in Schrodinger picture.
@@ -35,7 +39,7 @@ class AbInitio(Material):
     L: Optional[torch.Tensor]  #: Angular momentum matrix elements
     scattering: DynamicsTerm  #: scattering functional
     light: Light  #: coherent-light interaction
-    dynamics_terms: list[DynamicsTerm]  #: all active drho/dt contributions
+    dynamics_terms: dict[str, DynamicsTerm]  #: all active drho/dt contributions
 
     def __init__(
         self,
@@ -73,10 +77,10 @@ class AbInitio(Material):
             The default None amounts to using L if available in the data.
         relaxation_time
             :yaml:`Relaxation-time approximation to scattering.`
-            Exactly one supported scattering type must be specified.
+            Multiple scattering types specified will all contirbute independently.
         lindblad
             :yaml:`Ab-initio lindblad scattering.`
-            Exactly one supported scattering type must be specified.
+            Multiple scattering types specified will all contirbute independently.
         light
             :yaml:`Light-matter interaction (coherent / Lindblad).`
         """
@@ -127,25 +131,32 @@ class AbInitio(Material):
             self.rho0, _, _ = self.rho_fermi(H0, self.mu)
 
             # Initialize optional terms in the dynamics
-            self.dynamics_terms = []
+            self.dynamics_terms = {}
 
-            self.add_child_one_of(
-                "scattering",
-                checkpoint_in,
-                TreeNode.ChildOptions(
-                    "relaxation-time", RelaxationTime, relaxation_time, ab_initio=self
-                ),
-                TreeNode.ChildOptions(
-                    "lindblad", Lindblad, lindblad, ab_initio=self, data_file=data_file
-                ),
-                have_default=True,
-            )
-            if not isinstance(self.scattering, RelaxationTime) or self.scattering:
-                self.dynamics_terms.append(self.scattering)
+            if relaxation_time is not None:
+                self.add_child(
+                    "relaxation_time",
+                    RelaxationTime,
+                    relaxation_time,
+                    checkpoint_in,
+                    ab_initio=self,
+                )
+                self.dynamics_terms["relaxation_time"] = self.relaxation_time
+
+            if lindblad is not None:
+                self.add_child(
+                    "lindblad",
+                    Lindblad,
+                    lindblad,
+                    checkpoint_in,
+                    ab_initio=self,
+                    data_file=data_file,
+                )
+                self.dynamics_terms["lindblad"] = self.lindblad
 
             if light is not None:
                 self.add_child("light", Light, light, checkpoint_in, ab_initio=self)
-                self.dynamics_terms.append(self.light)
+                self.dynamics_terms["light"] = self.light
 
     def initialize_fields(
         self, rho: torch.Tensor, params: dict[str, torch.Tensor], patch_id: int
@@ -164,8 +175,14 @@ class AbInitio(Material):
             H0 = torch.diag_embed(self.E) + self.zeemanH(pumpB)
             rho[:] = self.rho_fermi(H0, self.mu)[0].flatten(-3, -1)
 
-        for dynamics_term in self.dynamics_terms:
-            dynamics_term.initialize_fields(kwargs, patch_id)
+        for term_name, dynamics_term in self.dynamics_terms.items():
+            params = dict(**dynamics_term.constant_params)  # default constant values
+            prefix = f"{term_name}_"
+            # Override with any varying versions:
+            for key, value in kwargs.items():
+                if key.startswith(prefix):
+                    params[key.replace(prefix, "")] = value
+            dynamics_term.initialize_fields(params, patch_id)
 
     def read_scalars(self, data_file: Checkpoint, name: str) -> torch.Tensor:
         """Read quantities that don't transform with rotations from data_file."""
@@ -225,8 +242,7 @@ class AbInitio(Material):
         if not self.dynamics_terms:
             return torch.zeros_like(rho)
         watch = StopWatch("AbInitio.rho_dot_pre")
-        shape_in = rho.shape
-        rho = rho.reshape(-1, self.nk_mine, self.n_bands, self.n_bands)
+        rho = rho.unflatten(-1, (self.nk_mine, self.n_bands, self.n_bands))
 
         # Switch to Schrodinger picture for scattering / coherent evolution:
         ph = self.packed_hermitian
@@ -237,14 +253,14 @@ class AbInitio(Material):
 
         # Compute rho_dot (upto an overall +h.c.) in Schrodinger picture:
         rho_dot_S = torch.zeros_like(rho_S)
-        for dynamics_term in self.dynamics_terms:
+        for dynamics_term in self.dynamics_terms.values():
             rho_dot_S += dynamics_term.rho_dot(rho_S, t, patch_id)
 
         # Convert result back to interaction picture:
         watch = StopWatch("AbInitio.rho_dot_post")
         rho_dot_I = rho_dot_S * phase.conj()
         rho_dot_I += rho_dot_I.conj().swapaxes(-1, -2)  # + h.c.
-        result = ph.pack(rho_dot_I).reshape(shape_in)
+        result = ph.pack(rho_dot_I).flatten(-3, -1)
         watch.stop()
         return result
 

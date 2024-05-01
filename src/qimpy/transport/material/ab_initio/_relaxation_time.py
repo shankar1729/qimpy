@@ -13,6 +13,8 @@ class RelaxationTime(TreeNode):
     tau_p: float  #: momentum relaxation time
     tau_s: float  #: spin relaxation time
 
+    constant_params: dict[str, torch.Tensor]  #: constant values of parameters
+
     def __init__(
         self,
         *,
@@ -35,10 +37,6 @@ class RelaxationTime(TreeNode):
         self.ab_initio = ab_initio
         self.tau_p = tau_p
         self.tau_s = tau_s
-
-    def __bool__(self) -> bool:
-        """Whether there is non-zero scattering."""
-        return bool(np.isfinite(self.tau_p) or np.isfinite(self.tau_s))
 
     def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
         pass  # TODO

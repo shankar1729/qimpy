@@ -21,6 +21,8 @@ class Light(TreeNode):
     A0_dot_P: torch.Tensor  #: Precomputed A0 . P matrix elements
     E0_dot_R: torch.Tensor  #: Precomputed E0 . R matrix elements
 
+    constant_params: dict[str, torch.Tensor]  #: constant values of parameters
+
     def __init__(
         self,
         *,

@@ -4,7 +4,7 @@ from typing import Optional
 import numpy as np
 import torch
 
-from qimpy import rc, log
+from qimpy import rc, log, io
 from qimpy.io import CheckpointPath, InvalidInputException
 from qimpy.mpi import ProcessGrid
 from qimpy.transport.material import Material
@@ -70,7 +70,7 @@ class ParameterGrid(Geometry):
         parameters: dict[str, torch.Tensor] = {}
         for i_dim, dimension in enumerate([dimension1, dimension2]):
             if dimension is not None:
-                for key, values in dimension.items():
+                for key, values in io.dict.key_cleanup(dimension).items():
                     parameters[key] = self.create_values(i_dim, **values)
         log.info(f"Initialized parameter grid of dimensions: {shape}")
 

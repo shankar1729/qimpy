@@ -18,16 +18,25 @@ class Lindblad(TreeNode):
     P: torch.Tensor  #: P and Pbar operators stacked together
     rho_dot0: torch.Tensor  #: rho_dot(rho0) for detailed balance correction
 
+    constant_params: dict[str, torch.Tensor]  #: constant values of parameters
+    scale_factor: dict[int, torch.Tensor]  #: scale factors per patch
+
     @stopwatch
     def __init__(
         self,
         *,
         ab_initio: material.ab_initio.AbInitio,
         data_file: Checkpoint,
+        scale_factor: float = 1.0,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """
-        Initialize ab initio Lindbladian scattering (no free parameters).
+        Initialize ab initio Lindbladian scattering.
+
+        Parameters
+        ----------
+        scale_factor
+            :yaml:`Overall scale factor for scattering rate.`
         """
         super().__init__()
         self.ab_initio = ab_initio
@@ -111,36 +120,44 @@ class Lindblad(TreeNode):
         ntotP = ab_initio.comm.allreduce(np.prod(self.P.shape))
         fill_percent_P = 100.0 * nnzP / ntotP
         log.info(f"P tensor fill fraction: {fill_percent_P:.1f}%")
-        self.rho_dot0 = self.rho_dot(ph.unpack(ab_initio.rho0), -np.inf, 0)
+
+        self.rho_dot0 = self._calculate(ph.unpack(ab_initio.rho0))
+        self.constant_params = dict(scale_factor=torch.tensor(scale_factor))
+        self.scale_factor = dict()
 
     def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
-        pass  # TODO
+        self._initialize_fields(patch_id, **params)
+
+    def _initialize_fields(self, patch_id: int, *, scale_factor: torch.Tensor) -> None:
+        self.scale_factor[patch_id] = scale_factor[..., None, None, None]
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         """drho/dt due to scattering in Schrodinger picture.
         Input and output rho are in unpacked (complex Hermitian) form."""
+        return self.scale_factor[patch_id] * (self._calculate(rho) - self.rho_dot0)
+
+    def _calculate(self, rho: torch.Tensor) -> torch.Tensor:
+        """Internal drho/dt calculation without detailed balance / scaling."""
         ab_initio = self.ab_initio
         ph = ab_initio.packed_hermitian
         eye = ab_initio.eye_bands
-        rho_all = self.collectT(ph.pack(rho))  # packed, all k
+        rho_all = self._collectT(ph.pack(rho))  # packed, all k
         Prho_packed = apply_batched(self.P, rho_all)
         Prho_packed[1] -= self.P_eye[1]  # convert [1] to Pbar @ (rho - eye)
         Prho, minus_Prhobar = ph.unpack(Prho_packed)
-        result = (eye - rho) @ Prho + rho @ minus_Prhobar  # unpacked, my k only
-        if t > -np.inf:
-            result -= self.rho_dot0
-        return result
+        return (eye - rho) @ Prho + rho @ minus_Prhobar  # unpacked, my k only
 
-    def collectT(self, rho: torch.Tensor) -> torch.Tensor:
+    def _collectT(self, rho: torch.Tensor) -> torch.Tensor:
         """Collect rho from all MPI processes and transpose batch dimension.
         Batch dimension is put at end for efficient matrix multiplication."""
         ab_initio = self.ab_initio
         if ab_initio.comm.size == 1:
-            return rho.permute(1, 2, 3, 0)
+            return torch.einsum("...kab -> kab...", rho)
         nk = ab_initio.k_division.n_tot
         n_bands = ab_initio.n_bands
-        n_batch = rho.shape[0]
+        batch_shape = rho.shape[:-3]
+        n_batch = np.prod(batch_shape)
         sendbuf = rho.reshape(n_batch, -1).T.contiguous()
         recvbuf = torch.zeros(
             (n_batch, nk * n_bands * n_bands), dtype=rho.dtype, device=rc.device
@@ -151,11 +168,11 @@ class Lindblad(TreeNode):
             (BufferView(sendbuf), np.prod(rho.shape), 0, mpi_type),
             (BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1], mpi_type),
         )
-        return recvbuf.reshape(nk, n_bands, n_bands, n_batch)
+        return recvbuf.reshape((nk, n_bands, n_bands) + batch_shape)
 
 
 def apply_batched(P: torch.Tensor, rho: torch.Tensor) -> torch.Tensor:
     """Apply batched flattened-rho operator P on batched rho.
     Batch dimension is at end of input, and at beginning of output."""
-    result = (P @ rho.flatten(0, 2)).swapaxes(-2, -1)
+    result = torch.einsum("ikK, K... -> i...k", P, rho.flatten(0, 2))
     return result.unflatten(-1, (-1,) + rho.shape[1:3])
