@@ -74,9 +74,9 @@ class FermiCircle(Material):
         )
 
     def initialize_fields(
-        self, rho: torch.Tensor, params: dict[str, torch.Tensor]
-    ) -> dict[str, torch.Tensor]:
-        return {}  # No spatially-varying / parameter sweep fields yet
+        self, rho: torch.Tensor, params: dict[str, torch.Tensor], patch_id: int
+    ) -> None:
+        pass  # No spatially-varying / parameter sweep fields yet
 
     def get_contactor(
         self, n: torch.Tensor, *, dmu: float = 0.0, vD: float = 0.0
@@ -92,9 +92,7 @@ class FermiCircle(Material):
         return SpecularReflector(n, self.v_all, self.comm, self.k_division)
 
     @stopwatch
-    def rho_dot(
-        self, rho: torch.Tensor, t: float, fields: dict[str, torch.Tensor]
-    ) -> torch.Tensor:
+    def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         if not (self.tau_inv_p or self.tau_inv_ee):
             return torch.zeros_like(rho)  # no scattering
 

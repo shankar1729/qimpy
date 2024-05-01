@@ -144,17 +144,21 @@ class AbInitio(Material):
                 self.dynamics_terms.append(self.light)
 
     def initialize_fields(
-        self, rho: torch.Tensor, params: dict[str, torch.Tensor]
-    ) -> dict[str, torch.Tensor]:
-        return self.initialize_fields_local(rho, **params)
+        self, rho: torch.Tensor, params: dict[str, torch.Tensor], patch_id: int
+    ) -> None:
+        self.initialize_fields_local(rho, patch_id, **params)
 
     def initialize_fields_local(
-        self, rho: torch.Tensor, *, pumpB: Optional[torch.Tensor] = None
-    ) -> dict[str, torch.Tensor]:
+        self,
+        rho: torch.Tensor,
+        patch_id: int,
+        *,
+        pumpB: Optional[torch.Tensor] = None,
+    ) -> None:
         if pumpB is not None:
             H0 = torch.diag_embed(self.E) + self.zeemanH(pumpB)
             rho[:] = self.rho_fermi(H0, self.mu)[0].flatten(-3, -1)
-        return {}  # No local fields yet
+        pass  # No local fields yet
 
     def read_scalars(self, data_file: Checkpoint, name: str) -> torch.Tensor:
         """Read quantities that don't transform with rotations from data_file."""

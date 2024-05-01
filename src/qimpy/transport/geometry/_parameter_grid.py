@@ -91,7 +91,7 @@ class ParameterGrid(Geometry):
                 ]
                 for key, values in parameters.items()
             }
-            patch.fields = material.initialize_fields(patch.rho, parameters_sub)
+            material.initialize_fields(patch.rho, parameters_sub, id(patch))
 
     def create_values(
         self,
@@ -132,7 +132,7 @@ class ParameterGrid(Geometry):
 
     def rho_dot(self, rho: TensorList, t: float) -> TensorList:
         return TensorList(
-            self.material.rho_dot(rho_i, t, patch.fields)
+            self.material.rho_dot(rho_i, t, id(patch))
             for rho_i, patch in zip(rho, self.patches)
         )
 

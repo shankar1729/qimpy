@@ -62,13 +62,13 @@ class PatchSet(Geometry):
         # Initialize spatially-dependent fields, if any:
         field_params = {}  # TODO: mechanism for input of spatially-varying fields
         for patch in self.patches:
-            patch.fields = material.initialize_fields(patch.rho, field_params)
+            material.initialize_fields(patch.rho, field_params, id(patch))
 
     def rho_dot(self, rho: TensorList, t: float) -> TensorList:
         material = self.material
         rho_padded = self.apply_boundaries(rho, t)
         return TensorList(
-            (patch.rho_dot(rho_padded_i) + material.rho_dot(rho_i, t, patch.fields))
+            (patch.rho_dot(rho_padded_i) + material.rho_dot(rho_i, t, id(patch)))
             for rho_padded_i, rho_i, patch in zip(rho_padded, rho, self.patches)
         )
 
