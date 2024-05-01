@@ -37,6 +37,8 @@ class AbInitio(Material):
     P: torch.Tensor  #: Momentum matrix elements
     S: Optional[torch.Tensor]  #: Spin matrix elements
     L: Optional[torch.Tensor]  #: Angular momentum matrix elements
+    B: Optional[torch.Tensor]  #: Constant applied external field
+    evecs: Optional[torch.Tensor]  #: Unitary rotations w.r.t data due to B, if any
     scattering: DynamicsTerm  #: scattering functional
     light: Light  #: coherent-light interaction
     dynamics_terms: dict[str, DynamicsTerm]  #: all active drho/dt contributions
@@ -53,6 +55,7 @@ class AbInitio(Material):
             (0.0, 0.0, 1.0),
         ),
         orbital_zeeman: Optional[bool] = None,
+        B: Optional[Sequence[float]] = None,
         relaxation_time: Optional[Union[RelaxationTime, dict]] = None,
         lindblad: Optional[Union[Lindblad, dict]] = None,
         light: Optional[Union[Light, dict]] = None,
@@ -121,6 +124,19 @@ class AbInitio(Material):
             self.S = self.read_vectors(data_file, "S") if spinorial else None
             self.L = self.read_vectors(data_file, "L") if useL else None
             watch.stop()
+
+            # Apply constant magnetic field, if any:
+            if B is None:
+                self.B = None
+                self.evecs = None
+            else:
+                self.B = torch.tensor(B, device=rc.device)
+                assert self.B.shape == (3,)
+                H0 = torch.diag_embed(self.E) + self.zeemanH(self.B)
+                self.E[:], self.evecs = torch.linalg.eigh(H0)
+                self.apply_evecs(self.P)
+                self.apply_evecs(self.S)  # skips if None automatically
+                self.apply_evecs(self.L)  # skips if None automatically
 
             self.v = torch.einsum("kibb->kbi", self.P).real
             self.eye_bands = torch.eye(n_bands, device=rc.device)
@@ -201,6 +217,14 @@ class AbInitio(Material):
         return torch.einsum(
             "ij, kj... -> ki...", self.rotation.to(result.dtype), result
         )
+
+    def apply_evecs(self, M: Optional[torch.Tensor]) -> None:
+        """Apply transformation by `evecs` to final two band dimensions.
+        For convenience, handles optional tensors = None correctly."""
+        if M is not None:
+            M[:] = torch.einsum(
+                "kba, k...bc, kcd -> k...ad", self.evecs.conj(), M, self.evecs
+            )
 
     def schrodingerV(self, t: float) -> torch.Tensor:
         """Compute unitary rotations from interaction to Schrodinger picture."""

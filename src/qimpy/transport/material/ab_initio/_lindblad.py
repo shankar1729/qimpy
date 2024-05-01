@@ -55,6 +55,22 @@ class Lindblad(TreeNode):
         P = torch.zeros(P_shape, dtype=torch.double, device=rc.device)
         prefactor = np.pi * ab_initio.wk
 
+        # Collect together evecs for all k if needed:
+        if (ab_initio.comm.size == 1) or (ab_initio.evecs is None):
+            evecs = ab_initio.evecs
+        else:
+            sendbuf = ab_initio.evecs.contiguous()
+            recvbuf = torch.zeros(
+                (nk,) + sendbuf.shape[1:], dtype=sendbuf.dtype, device=rc.device
+            )
+            mpi_type = rc.mpi_type[sendbuf.dtype]
+            recv_prev = ab_initio.k_division.n_prev * n_bands_sq
+            ab_initio.comm.Allgatherv(
+                (BufferView(sendbuf), np.prod(sendbuf.shape), 0, mpi_type),
+                (BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1], mpi_type),
+            )
+            evecs = recvbuf
+
         def get_mine(ik) -> Union[torch.Tensor, slice, None]:
             """Utility to fetch efficient slices of relevant k-points."""
             if ab_initio.k_division.n_procs == 1:
@@ -89,6 +105,8 @@ class Lindblad(TreeNode):
             ik, jk = torch.from_numpy(cp_ikpair[cur]).to(rc.device).T
             omega_ph = torch.from_numpy(cp_omega_ph[cur]).to(rc.device)
             G = torch.from_numpy(cp_G[cur]).to(rc.device)
+            if evecs is not None:
+                G = torch.einsum("kba, kbc, kcd -> kad", evecs[ik].conj(), G, evecs[jk])
             bose_occ = bose(omega_ph, ab_initio.T)[:, None, None]
             wm = prefactor * bose_occ
             wp = prefactor * (bose_occ + 1.0)
