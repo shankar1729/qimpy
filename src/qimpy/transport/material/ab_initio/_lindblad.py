@@ -122,7 +122,9 @@ class Lindblad(TreeNode):
         log.info(f"P tensor fill fraction: {fill_percent_P:.1f}%")
 
         self.rho_dot0 = self._calculate(ph.unpack(ab_initio.rho0))
-        self.constant_params = dict(scale_factor=torch.tensor(scale_factor))
+        self.constant_params = dict(
+            scale_factor=torch.tensor(scale_factor, device=rc.device)
+        )
         self.scale_factor = dict()
 
     def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
