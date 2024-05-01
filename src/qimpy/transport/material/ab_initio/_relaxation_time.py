@@ -40,7 +40,10 @@ class RelaxationTime(TreeNode):
         """Whether there is non-zero scattering."""
         return bool(np.isfinite(self.tau_p) or np.isfinite(self.tau_s))
 
-    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
+    def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
+        pass  # TODO
+
+    def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         if not self:
             return torch.zeros_like(rho)
         raise NotImplementedError

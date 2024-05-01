@@ -15,7 +15,11 @@ from . import PackedHermitian, RelaxationTime, Lindblad, Light
 class DynamicsTerm(Protocol):
     """Definition of a coherent/incoherent term within AbInitio's rho_dot."""
 
-    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
+    def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
+        """Initialize spatially-dependent fields / parameter sweeps per patch.
+        Implement the part of `Material.initialize_fields` for current term."""
+
+    def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         """Compute drho/dt given rho, with input and output in Schrodinger picture.
         Only compute one half of the result; hermitian conjugate is added later."""
 
@@ -154,11 +158,14 @@ class AbInitio(Material):
         patch_id: int,
         *,
         pumpB: Optional[torch.Tensor] = None,
+        **kwargs,
     ) -> None:
         if pumpB is not None:
             H0 = torch.diag_embed(self.E) + self.zeemanH(pumpB)
             rho[:] = self.rho_fermi(H0, self.mu)[0].flatten(-3, -1)
-        pass  # No local fields yet
+
+        for dynamics_term in self.dynamics_terms:
+            dynamics_term.initialize_fields(kwargs, patch_id)
 
     def read_scalars(self, data_file: Checkpoint, name: str) -> torch.Tensor:
         """Read quantities that don't transform with rotations from data_file."""
@@ -212,9 +219,7 @@ class AbInitio(Material):
     ) -> Callable[[torch.Tensor], torch.Tensor]:  # absorbing boundary
         return torch.zeros_like
 
-    def rho_dot(
-        self, rho: torch.Tensor, t: float, fields: dict[str, torch.Tensor]
-    ) -> torch.Tensor:
+    def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         """Overall drho/dt in interaction picture.
         Input and output rho are in packed (real) form."""
         if not self.dynamics_terms:
@@ -233,7 +238,7 @@ class AbInitio(Material):
         # Compute rho_dot (upto an overall +h.c.) in Schrodinger picture:
         rho_dot_S = torch.zeros_like(rho_S)
         for dynamics_term in self.dynamics_terms:
-            rho_dot_S += dynamics_term.rho_dot(rho_S, t)
+            rho_dot_S += dynamics_term.rho_dot(rho_S, t, patch_id)
 
         # Convert result back to interaction picture:
         watch = StopWatch("AbInitio.rho_dot_post")

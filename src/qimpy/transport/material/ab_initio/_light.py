@@ -89,7 +89,10 @@ class Light(TreeNode):
         self.sigma = sigma
         self.coherent = coherent
 
-    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
+    def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
+        pass  # TODO
+
+    def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         prefac = -0.5j * np.exp(1j * self.omega * t)  # with Louiville, symmetrization
         if self.sigma:
             prefac *= np.exp(-((t - self.t0) ** 2) / (2 * self.sigma**2)) / np.sqrt(

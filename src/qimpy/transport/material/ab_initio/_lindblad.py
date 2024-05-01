@@ -111,10 +111,13 @@ class Lindblad(TreeNode):
         ntotP = ab_initio.comm.allreduce(np.prod(self.P.shape))
         fill_percent_P = 100.0 * nnzP / ntotP
         log.info(f"P tensor fill fraction: {fill_percent_P:.1f}%")
-        self.rho_dot0 = self.rho_dot(ph.unpack(ab_initio.rho0), -np.inf)
+        self.rho_dot0 = self.rho_dot(ph.unpack(ab_initio.rho0), -np.inf, 0)
+
+    def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
+        pass  # TODO
 
     @stopwatch
-    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
+    def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         """drho/dt due to scattering in Schrodinger picture.
         Input and output rho are in unpacked (complex Hermitian) form."""
         ab_initio = self.ab_initio
