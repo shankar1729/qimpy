@@ -70,12 +70,19 @@ class PulseB(TreeNode):
         t_starts: torch.Tensor,
         angles: torch.Tensor,
     ) -> None:
+        # Construct orthogonal frame for rotating field
         B = self.ab_initio.B  # constant magnetic field
-        mu_B = Unit.MAP["mu_B"]  # Bohr magneton
         assert B is not None
-        omega = abs(g * mu_B * B.norm())  # Larmor frequency
-        durations = angles / abs(g * mu_B * 0.5 * B0.norm(dim=-1))[..., None]
-        self.H0[patch_id] = self.ab_initio.zeemanH(B0)
+        Bhat = B / B.norm()
+        B0r = B0 - (B0 @ Bhat)[..., None] * Bhat  # remove parallel component
+        B0i = torch.linalg.cross(Bhat, B0r)  # direction after 90 degree rotation
+
+        # Get rotation frequencies and durations
+        mu_B = Unit.MAP["mu_B"]  # Bohr magneton
+        omega = g * mu_B * B.norm()  # Larmor frequency (signed)
+        durations = angles / abs(g * mu_B * B0r.norm(dim=-1))[..., None]
+
+        self.H0[patch_id] = self.ab_initio.zeemanH(B0r + 1j * B0i)
         self.omega[patch_id] = omega
         self.t_starts[patch_id] = t_starts
         self.t_stops[patch_id] = t_starts + durations
@@ -86,5 +93,6 @@ class PulseB(TreeNode):
         t_stops = self.t_stops[patch_id]
         omega = self.omega[patch_id]
         in_range = torch.where(torch.logical_and(t >= t_starts, t <= t_stops), 1.0, 0.0)
-        prefactor = 1j * (torch.cos(omega * t) * in_range.sum(dim=-1))
-        return prefactor[..., None, None, None] * (rho @ self.H0[patch_id])
+        prefactor = -0.5j * torch.exp(1j * omega * t) * in_range.sum(dim=-1)
+        iH = prefactor[..., None, None, None] * self.H0[patch_id]
+        return (iH - iH.swapaxes(-1, -2).conj()) @ rho
