@@ -135,5 +135,10 @@ def _initialize_unit_map():
     Unit.MAP["Ω"] = Ohm
     Unit.MAP["μ_B"] = mu_B
 
+    # Angles:
+    Unit.MAP["pi"] = math.pi
+    Unit.MAP["π"] = math.pi
+    Unit.MAP["deg"] = math.pi / 180.0
+
 
 _initialize_unit_map()
