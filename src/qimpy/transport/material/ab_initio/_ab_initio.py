@@ -41,7 +41,7 @@ class AbInitio(Material):
     evecs: Optional[torch.Tensor]  #: Unitary rotations w.r.t data due to B, if any
     scattering: DynamicsTerm  #: scattering functional
     light: Light  #: light-matter interactions
-    pulseB: PulseB  #: magnetic field pulses
+    pulseB: list[PulseB]  #: magnetic field pulses
     dynamics_terms: dict[str, DynamicsTerm]  #: all active drho/dt contributions
 
     def __init__(
@@ -60,7 +60,7 @@ class AbInitio(Material):
         relaxation_time: Optional[Union[RelaxationTime, dict]] = None,
         lindblad: Optional[Union[Lindblad, dict]] = None,
         light: Optional[Union[Light, dict]] = None,
-        pulseB: Optional[Union[PulseB, dict]] = None,
+        pulseB: Optional[list[Union[PulseB, dict]]] = None,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
@@ -179,8 +179,13 @@ class AbInitio(Material):
                 self.dynamics_terms["light"] = self.light
 
             if pulseB is not None:
-                self.add_child("pulseB", PulseB, pulseB, checkpoint_in, ab_initio=self)
-                self.dynamics_terms["pulseB"] = self.pulseB
+                self.pulseB = []
+                for i_pulse, pulseBi in enumerate(pulseB):
+                    name = f"pulseB{i_pulse + 1}"
+                    self.add_child(name, PulseB, pulseBi, checkpoint_in, ab_initio=self)
+                    pulseBcur = getattr(self, name)
+                    self.pulseB.append(pulseBcur)
+                    self.dynamics_terms[name] = pulseBcur
 
     def initialize_fields(
         self, rho: torch.Tensor, params: dict[str, torch.Tensor], patch_id: int
