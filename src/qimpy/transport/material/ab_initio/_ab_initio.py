@@ -9,7 +9,7 @@ from qimpy.profiler import StopWatch
 from qimpy.io import Checkpoint, CheckpointPath, Unit, InvalidInputException
 from qimpy.mpi import ProcessGrid
 from .. import Material, fermi
-from . import PackedHermitian, RelaxationTime, Lindblad, Light
+from . import PackedHermitian, RelaxationTime, Lindblad, Light, PulseB
 
 
 class DynamicsTerm(Protocol):
@@ -40,7 +40,8 @@ class AbInitio(Material):
     B: Optional[torch.Tensor]  #: Constant applied external field
     evecs: Optional[torch.Tensor]  #: Unitary rotations w.r.t data due to B, if any
     scattering: DynamicsTerm  #: scattering functional
-    light: Light  #: coherent-light interaction
+    light: Light  #: light-matter interactions
+    pulseB: PulseB  #: magnetic field pulses
     dynamics_terms: dict[str, DynamicsTerm]  #: all active drho/dt contributions
 
     def __init__(
@@ -59,6 +60,7 @@ class AbInitio(Material):
         relaxation_time: Optional[Union[RelaxationTime, dict]] = None,
         lindblad: Optional[Union[Lindblad, dict]] = None,
         light: Optional[Union[Light, dict]] = None,
+        pulseB: Optional[Union[PulseB, dict]] = None,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
@@ -86,6 +88,8 @@ class AbInitio(Material):
             Multiple scattering types specified will all contirbute independently.
         light
             :yaml:`Light-matter interaction (coherent / Lindblad).`
+        pulseB
+            :yaml:`Magnetic field pulses.`
         """
         self.comm = process_grid.get_comm("k")
         self.mu = mu
@@ -173,6 +177,10 @@ class AbInitio(Material):
             if light is not None:
                 self.add_child("light", Light, light, checkpoint_in, ab_initio=self)
                 self.dynamics_terms["light"] = self.light
+
+            if pulseB is not None:
+                self.add_child("pulseB", PulseB, pulseB, checkpoint_in, ab_initio=self)
+                self.dynamics_terms["pulseB"] = self.pulseB
 
     def initialize_fields(
         self, rho: torch.Tensor, params: dict[str, torch.Tensor], patch_id: int

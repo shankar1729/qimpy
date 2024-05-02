@@ -42,6 +42,4 @@ class RelaxationTime(TreeNode):
         pass  # TODO
 
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
-        if not self:
-            return torch.zeros_like(rho)
         raise NotImplementedError
