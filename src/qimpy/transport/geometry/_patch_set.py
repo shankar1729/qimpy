@@ -57,6 +57,7 @@ class PatchSet(Geometry):
             contacts=contacts,
             grid_size_max=grid_size_max,
             quad_set=parse_svg(svg_file, svg_unit, grid_spacing, list(contacts.keys())),
+            checkpoint_in=checkpoint_in,
         )
 
         # Initialize spatially-dependent fields, if any:

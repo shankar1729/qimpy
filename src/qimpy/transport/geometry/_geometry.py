@@ -42,6 +42,7 @@ class Geometry(TreeNode):
         contacts: dict[str, dict],
         grid_size_max: int,
         process_grid: ProcessGrid,
+        checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
         """
         Initialize geometry parameters, typically used from a derived class.
@@ -94,6 +95,10 @@ class Geometry(TreeNode):
         # Build an advect object for each sub-quad local to this process:
         self.patches = []
         mine = slice(self.patch_division.i_start, self.patch_division.i_stop)
+        if checkpoint_in:
+            rho_initial = torch.from_numpy(np.array(checkpoint_in[0]["/geometry"]["quad0"]['rho'][-1])).to(rc.device)
+        else:
+            rho_initial = None
         for i_quad, grid_start, grid_stop, adjacency, has_apertures in zip(
             self.sub_quad_set.quad_index[mine],
             self.sub_quad_set.grid_start[mine],
@@ -115,6 +120,7 @@ class Geometry(TreeNode):
                     aperture_circles=aperture_circles,
                     contact_circles=contact_circles,
                     contact_params=contact_params,
+                    rho_initial=rho_initial,
                 )
             )
         self.dt_max = self.comm.allreduce(
@@ -154,6 +160,7 @@ class Geometry(TreeNode):
             "g",
             "density",
             "flux",
+            "rho",
         ]
         cp_path.attrs["grid_spacing"] = self.grid_spacing
         cp_path.attrs["contact_names"] = ",".join(self.contact_names)
@@ -164,6 +171,11 @@ class Geometry(TreeNode):
         stash = self.stash
         cp_path.attrs["t"] = np.array(stash.t)
         cp_path.attrs["i_step"] = np.array(stash.i_step)
+        n_stash_rho = len(stash.t_rho)
+        if n_stash_rho:
+            cp_path.attrs["t_rho"] = np.array(stash.t_rho)
+        nkpts,nbands = self.material.E.shape
+        Nkbb = nkpts * nbands**2
         # Collect MPI-split data to be written from head (avoids slow h5-mpio):
         checkpoint, path = cp_path
         for i_quad, grid_size_np in enumerate(self.quad_set.grid_size):
@@ -176,8 +188,10 @@ class Geometry(TreeNode):
             g = torch.empty(grid_size)
             density = torch.empty(stashed_size)
             flux = torch.empty(stashed_size + (2,))
+            if n_stash_rho:
+                rho = torch.empty((n_stash_rho,) + grid_size + (Nkbb,))
             for i_patch in np.where(self.sub_quad_set.quad_index == i_quad)[0]:
-                tag = 3 * i_patch
+                tag = 5 * i_patch
                 i_proc = self.comm.rank
                 whose = self.patch_division.whose(i_patch)
                 local = i_proc == whose
@@ -188,12 +202,16 @@ class Geometry(TreeNode):
                     g_cur = patch.g[..., 0]
                     density_cur = torch.stack(stash.density[i_patch_mine], dim=0)
                     flux_cur = torch.stack(stash.flux[i_patch_mine], dim=0)
+                    if n_stash_rho:
+                        rho_cur = torch.stack(stash.rho[i_patch_mine], dim=0)
                     if i_proc:
                         # Send to head for write:
                         self.comm.Send(BufferView(q_cur), 0, tag=tag)
                         self.comm.Send(BufferView(g_cur), 0, tag=tag + 1)
                         self.comm.Send(BufferView(density_cur), 0, tag=tag + 2)
                         self.comm.Send(BufferView(flux_cur), 0, tag=tag + 3)
+                        if n_stash_rho:
+                            self.comm.Send(BufferView(rho_cur), 0, tag=tag + 4)
                 if not i_proc:
                     # Receive and write from head:
                     grid_start = self.sub_quad_set.grid_start[i_patch]
@@ -212,26 +230,37 @@ class Geometry(TreeNode):
                         self.comm.Recv(BufferView(g_cur), whose, tag=tag + 1)
                         self.comm.Recv(BufferView(density_cur), whose, tag=tag + 2)
                         self.comm.Recv(BufferView(flux_cur), whose, tag=tag + 3)
+                        if n_stash_rho:
+                            rho_cur = torch.empty((n_stash_rho,) + patch_size + (Nkbb,))
+                            self.comm.Recv(BufferView(rho_cur), whose, tag=tag + 4)
                     q[slice0, slice1] = q_cur
                     g[slice0, slice1] = g_cur
                     density[:, slice0, slice1] = density_cur
                     flux[:, slice0, slice1] = flux_cur
+                    if n_stash_rho:
+                        rho[:, slice0, slice1] = rho_cur
             cp_quad.write("q", q)
             cp_quad.write("g", g)
             cp_quad.write("density", density)
             cp_quad.write("flux", flux)
+            if n_stash_rho:
+                cp_quad.write("rho", rho)
         self.stash = ResultStash(len(self.patches))  # Clear stashed history
         return saved_list
 
-    def update_stash(self, i_step: int, t: float) -> None:
+    def update_stash(self, i_step: int, t: float, update_rho: bool) -> None:
         """Stash results for current step for a future save_checkpoint call."""
         stash = self.stash
         stash.i_step.append(i_step)
         stash.t.append(t)
+        if update_rho:
+            stash.t_rho.append(t)
         for i_patch_mine, patch in enumerate(self.patches):
             density, flux = self.material.measure_observables(patch.rho, t)
             stash.density[i_patch_mine].append(density)
             stash.flux[i_patch_mine].append(flux)
+            if update_rho:
+                stash.rho[i_patch_mine].append(patch.rho)
 
 
 class ResultStash:
@@ -241,9 +270,13 @@ class ResultStash:
     t: list[float]
     density: list[list[torch.Tensor]]
     flux: list[list[torch.Tensor]]
+    rho: list[list[torch.Tensor]]
+    t_rho: list[float]
 
     def __init__(self, n_patches_mine: int):
         self.i_step = []
         self.t = []
+        self.t_rho = []
         self.density = [[] for _ in range(n_patches_mine)]
         self.flux = [[] for _ in range(n_patches_mine)]
+        self.rho = [[] for _ in range(n_patches_mine)]

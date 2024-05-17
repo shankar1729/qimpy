@@ -63,6 +63,7 @@ class AbInitio(Material):
         pulseB: Optional[Union[PulseB, dict]] = None,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
+        write_observables: list[str] = ["q", "S"],
     ):
         """
         Initialize ab initio material.
@@ -94,6 +95,7 @@ class AbInitio(Material):
         self.comm = process_grid.get_comm("k")
         self.mu = mu
         self.rotation = torch.tensor(rotation, device=rc.device)
+        self.write_observables = write_observables
         watch = StopWatch("Dynamics.read_checkpoint")
         with Checkpoint(fname) as data_file:
             attrs = data_file.attrs
@@ -297,20 +299,38 @@ class AbInitio(Material):
         return result
 
     def get_observable_names(self) -> list[str]:
-        return ["q", "Sx", "Sy", "Sz"]  # charge, components of spin operator
+        observable_names = []
+        if "q" in self.write_observables:
+            observable_names.append("q")
+        if "S" in self.write_observables:
+            observable_names += ["Sx", "Sy", "Sz"]
+        if "J" in self.write_observables:
+            observable_names += ["Jx", "Jy", "Jz"]
+        return observable_names  # charge, components of spin and current operator
 
     def get_observables(self, t: float) -> torch.Tensor:
-        Nkbb_mine = np.prod(self.rho0.shape)
-        q = torch.ones((1, Nkbb_mine), device=rc.device)  # charge observable
-        ph = self.packed_hermitian
-        phase = self.schrodingerV(t)
-        S_obs = self.S.swapaxes(0, 1)
-        S_obs = S_obs * phase[None, :].conj()  # complex conjugate then phase of rho
-        S_obs_packed = ph.pack(S_obs)  # packed to real
-        weight = torch.ones(self.n_bands, self.n_bands, device=rc.device) * 2.0
-        # Multiply weight of 2 to off-diagonal only:
-        S_obs_packed *= weight.fill_diagonal_(1.0)[None, None, :]
-        return torch.cat((q, S_obs_packed.flatten(1, 3)), dim=0)
+        orbs_tuple = ()
+        if "q" in self.write_observables:
+            Nkbb_mine = np.prod(self.rho0.shape)
+            q = torch.ones((1, Nkbb_mine), device=rc.device)  # charge observable
+            orbs_tuple += (q,)
+        if "S" in self.write_observables or "J" in self.write_observables:
+            ph = self.packed_hermitian
+            phase = self.schrodingerV(t)
+            weight = torch.ones(self.n_bands, self.n_bands, device=rc.device) * 2.0
+        if "S" in self.write_observables:
+            S_obs = self.S.swapaxes(0, 1)
+            S_obs = S_obs * phase[None, :].conj()  # complex conjugate then phase of rho
+            S_obs_packed = ph.pack(S_obs)  # packed to real
+            # Multiply weight of 2 to off-diagonal only:
+            S_obs_packed *= weight.fill_diagonal_(1.0)[None, None, :]
+            orbs_tuple += (S_obs_packed.flatten(1, 3),)
+        if "J" in self.write_observables:
+            J_obs = -self.P.swapaxes(0, 1)*phase[None, :].conj()
+            J_obs_packed = ph.pack(J_obs)
+            J_obs_packed *= weight.fill_diagonal_(1.0)[None, None, :]
+            orbs_tuple += (J_obs_packed.flatten(1, 3),)
+        return torch.cat(orbs_tuple, dim=0)
 
 
 class Contactor:

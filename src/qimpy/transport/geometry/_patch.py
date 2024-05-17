@@ -47,6 +47,8 @@ class Patch:
     GHOST_L = slice(0, N_GHOST)  #: ghost indices on left/bottom
     GHOST_R = slice(-N_GHOST, None)  #: ghost indices on right/top side
 
+    rho_initial: torch.Tensor # initial rho read from restart
+
     def __init__(
         self,
         *,
@@ -60,6 +62,7 @@ class Patch:
         contact_circles: torch.Tensor,
         contact_params: list[dict],
         material: Material,
+        rho_initial: torch.Tensor = None,
     ) -> None:
         # Initialize mesh:
         grids1d = [
@@ -102,7 +105,12 @@ class Patch:
         padding = 2 * Patch.N_GHOST
         self.rho_shape = (N[0], N[1], Nkbb)
         self.rho_padded_shape = (N[0] + padding, N[1] + padding, Nkbb)
-        self.rho = torch.tile(material.rho0.flatten(), (N[0], N[1], 1))
+        if rho_initial is not None: # restart from checkpoint
+            slice0 = slice(grid_start[0], grid_stop[0])
+            slice1 = slice(grid_start[1], grid_stop[1])
+            self.rho = rho_initial[slice0, slice1]
+        else:
+            self.rho = torch.tile(material.rho0.flatten(), (N[0], N[1], 1))
 
         # Initialize v*drho/dx calculator:
         self.v_prime = torch.jit.script(Vprime())
