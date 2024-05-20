@@ -27,6 +27,7 @@ class PulseB(TreeNode):
         ab_initio: material.ab_initio.AbInitio,
         B0: Sequence[float] = (0.0, 0.0, 0.0),
         g: float = 0.0,
+        g_flip: float = 0.0,
         t_starts: Sequence[float] = (0.0,),
         angles: Sequence[float] = (np.pi,),
         checkpoint_in: CheckpointPath = CheckpointPath(),
@@ -39,7 +40,11 @@ class PulseB(TreeNode):
         B0
             :yaml:`Magnetic field amplitude vector.`
         g
-            :yaml:`Effective gyromagnetic ratio to calculate mean Larmor frequency.`
+            :yaml:`Gyromagnetic ratio magnitude to calculate mean Larmor frequency.`
+        g_flip
+            :yaml:`Gyromagnetic ratio magnitude to calculate flip time.`
+            May be different from g for anisotropic system.
+            If unspecified or set to zero, assumed to be same as `g`.
         t_starts
             :yaml:`Start times of oscillating magnetic field pulse.`
         angles
@@ -50,6 +55,7 @@ class PulseB(TreeNode):
         self.constant_params = dict(
             B0=torch.tensor(B0, device=rc.device),
             g=torch.tensor(g, device=rc.device),
+            g_flip=torch.tensor(g_flip, device=rc.device),
             t_starts=torch.tensor(t_starts, device=rc.device),
             angles=torch.tensor(angles, device=rc.device),
         )
@@ -67,6 +73,7 @@ class PulseB(TreeNode):
         *,
         B0: torch.Tensor,
         g: torch.Tensor,
+        g_flip: torch.Tensor,
         t_starts: torch.Tensor,
         angles: torch.Tensor,
     ) -> None:
@@ -79,8 +86,9 @@ class PulseB(TreeNode):
 
         # Get rotation frequencies and durations
         mu_B = Unit.MAP["mu_B"]  # Bohr magneton
-        omega = g * mu_B * B.norm()  # Larmor frequency (signed)
-        durations = angles / abs(g * mu_B * B0r.norm(dim=-1))[..., None]
+        omega = g * mu_B * B.norm()  # Larmor frequency
+        g_flip = torch.where(g_flip == 0.0, g, g_flip)
+        durations = angles / abs(g_flip * mu_B * B0r.norm(dim=-1))[..., None]
 
         self.H0[patch_id] = self.ab_initio.zeemanH(B0r + 1j * B0i)
         self.omega[patch_id] = omega
@@ -93,6 +101,6 @@ class PulseB(TreeNode):
         t_stops = self.t_stops[patch_id]
         omega = self.omega[patch_id]
         in_range = torch.where(torch.logical_and(t >= t_starts, t <= t_stops), 1.0, 0.0)
-        prefactor = -0.5j * torch.exp(1j * omega * t) * in_range.sum(dim=-1)
+        prefactor = -0.5j * torch.exp(-1j * omega * t) * in_range.sum(dim=-1)
         iH = prefactor[..., None, None, None] * self.H0[patch_id]
         return (iH - iH.swapaxes(-1, -2).conj()) @ rho
