@@ -140,7 +140,6 @@ class RelaxationTime(TreeNode):
             dbetamu = F / dF
             limit_ind = (torch.abs(dbetamu) > self.max_dbetamu) # indices that need to be limited by self.max_dbetamu
             dbetamu[limit_ind] = torch.sign(F[limit_ind]) * self.max_dbetamu
-            print(betamu.shape, dbetamu.shape)
             betamu -= dbetamu
             distribution = self.fermi_dirac(exp_betaE,betamu)
             F = torch.einsum(sum_rule, distribution).reshape(reshape) - f_total
