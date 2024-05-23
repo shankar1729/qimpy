@@ -105,7 +105,7 @@ class Patch:
         padding = 2 * Patch.N_GHOST
         self.rho_shape = (N[0], N[1], Nkbb)
         self.rho_padded_shape = (N[0] + padding, N[1] + padding, Nkbb)
-        if rho_initial is not None: # restart from checkpoint
+        if rho_initial is not None: # read from geometry, to restart
             slice0 = slice(grid_start[0], grid_stop[0])
             slice1 = slice(grid_start[1], grid_stop[1])
             self.rho = rho_initial[slice0, slice1]

@@ -63,7 +63,7 @@ class AbInitio(Material):
         pulseB: Optional[Union[PulseB, dict]] = None,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
-        write_observables: list[str] = ["q", "S"],
+        write_observables: Optional[list[str]] = ["q", "S"],
     ):
         """
         Initialize ab initio material.
@@ -91,11 +91,12 @@ class AbInitio(Material):
             :yaml:`Light-matter interaction (coherent / Lindblad).`
         pulseB
             :yaml:`Magnetic field pulses.`
+        write_observables
+            :yaml:`Control which observables will be output.`
         """
         self.comm = process_grid.get_comm("k")
         self.mu = mu
         self.rotation = torch.tensor(rotation, device=rc.device)
-        self.write_observables = write_observables
         watch = StopWatch("Dynamics.read_checkpoint")
         with Checkpoint(fname) as data_file:
             attrs = data_file.attrs
@@ -183,6 +184,23 @@ class AbInitio(Material):
             if pulseB is not None:
                 self.add_child("pulseB", PulseB, pulseB, checkpoint_in, ab_initio=self)
                 self.dynamics_terms["pulseB"] = self.pulseB
+                
+        # Control output observables
+        obs_dict = {
+            "S": [["Sx", "Sy", "Sz"], self.S], 
+            "J": [["Jx", "Jy", "Jz"], -self.P], 
+            "SJ": [["SJx", "SJy", "SJz"], -0.5 * (self.S @ self.P + self.P @ self.S)],
+        }
+        self.observable_names = (["q"] if "q" in write_observables else []) + sum(
+            [obs_dict[orb][0] for orb in write_observables if orb != "q"], []
+        )
+        obs_list = [obs_dict[orb][1].swapaxes(0,1) for orb in write_observables if orb != "q"]
+        if obs_list:
+            self.obs_stacked = torch.cat(obs_list, dim=0)
+            self.weight = (torch.ones(self.n_bands, self.n_bands, device=rc.device) * 2.0
+                 ).fill_diagonal_(1.0)[None, None, :]
+        else:
+            self.obs_stacked = torch.tensor([])
 
     def initialize_fields(
         self, rho: torch.Tensor, params: dict[str, torch.Tensor], patch_id: int
@@ -299,37 +317,23 @@ class AbInitio(Material):
         return result
 
     def get_observable_names(self) -> list[str]:
-        observable_names = []
-        if "q" in self.write_observables:
-            observable_names.append("q")
-        if "S" in self.write_observables:
-            observable_names += ["Sx", "Sy", "Sz"]
-        if "J" in self.write_observables:
-            observable_names += ["Jx", "Jy", "Jz"]
-        return observable_names  # charge, components of spin and current operator
+        return self.observable_names
 
     def get_observables(self, t: float) -> torch.Tensor:
         orbs_tuple = ()
-        if "q" in self.write_observables:
+        if "q" in self.observable_names:
             Nkbb_mine = np.prod(self.rho0.shape)
             q = torch.ones((1, Nkbb_mine), device=rc.device)  # charge observable
             orbs_tuple += (q,)
-        if "S" in self.write_observables or "J" in self.write_observables:
+        
+        if self.obs_stacked.shape[0] > 0:
             ph = self.packed_hermitian
             phase = self.schrodingerV(t)
-            weight = torch.ones(self.n_bands, self.n_bands, device=rc.device) * 2.0
-        if "S" in self.write_observables:
-            S_obs = self.S.swapaxes(0, 1)
-            S_obs = S_obs * phase[None, :].conj()  # complex conjugate then phase of rho
-            S_obs_packed = ph.pack(S_obs)  # packed to real
-            # Multiply weight of 2 to off-diagonal only:
-            S_obs_packed *= weight.fill_diagonal_(1.0)[None, None, :]
-            orbs_tuple += (S_obs_packed.flatten(1, 3),)
-        if "J" in self.write_observables:
-            J_obs = -self.P.swapaxes(0, 1)*phase[None, :].conj()
-            J_obs_packed = ph.pack(J_obs)
-            J_obs_packed *= weight.fill_diagonal_(1.0)[None, None, :]
-            orbs_tuple += (J_obs_packed.flatten(1, 3),)
+            obs = self.obs_stacked * phase[None, :].conj()  # complex conjugate then phase of rho
+            obs_packed = ph.pack(obs)
+            obs_packed *= self.weight
+            orbs_tuple += (obs_packed.flatten(1, 3),)
+            
         return torch.cat(orbs_tuple, dim=0)
 
 

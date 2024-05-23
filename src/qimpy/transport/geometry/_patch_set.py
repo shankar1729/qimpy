@@ -24,6 +24,7 @@ class PatchSet(Geometry):
         grid_spacing: float,
         contacts: dict[str, dict],
         grid_size_max: int = 0,
+        write_rho: bool = False,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
@@ -57,6 +58,7 @@ class PatchSet(Geometry):
             contacts=contacts,
             grid_size_max=grid_size_max,
             quad_set=parse_svg(svg_file, svg_unit, grid_spacing, list(contacts.keys())),
+            write_rho=write_rho,
             checkpoint_in=checkpoint_in,
         )
 

@@ -16,8 +16,6 @@ class TimeEvolution(TreeNode):
     i_step: int  #: Current step number
     n_steps: int  #: Number of steps
     save_interval: int  #: Save results every so many steps
-    save_rho_interval: int  #: Save rho every so many steps
-    write_rho: bool  #: whether to write rho to checkpoint file
     n_collate: int  #: Collect these many save steps into a single checkpoint
     integrator: str  #: Time-step style used for integration
 
@@ -29,8 +27,6 @@ class TimeEvolution(TreeNode):
         t_max: float,
         n_collate: int,
         integrator: str = "RK2",
-        write_rho: bool = False,
-        dt_save_rho: float = 0.0,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         geometry: Geometry,
     ) -> None:
@@ -56,8 +52,6 @@ class TimeEvolution(TreeNode):
             corresponding to the number of collated steps.
         integrator
             :yaml:`Integrator for time-stepping: RK2 or RK4.`
-        dt_save_rho
-            :yaml:`Time interval at which to save rho.`
         geometry
             Corresponding geometry from which maximum time step is determined
         """
@@ -80,24 +74,10 @@ class TimeEvolution(TreeNode):
         elif dt_max and (dt > dt_max):
             raise InvalidInputException(f"{dt = } must be smaller than {dt_max = }")
         self.dt = dt
+        self.i_step_initial = i_step_initial
         self.i_step = i_step_initial
-        self.n_steps = max(1, int(np.round(t_max/ self.dt))) + i_step_initial
+        self.n_steps = max(1, int(np.round(t_max / self.dt))) + i_step_initial
         self.save_interval = max(1, int(np.round(dt_save / self.dt)))
-        self.write_rho = write_rho
-        if write_rho: 
-            if dt_save_rho > 0:
-                self.save_rho_interval = max(self.save_interval, int(np.round(dt_save_rho / self.dt)))
-                if self.save_rho_interval % self.save_interval != 0:
-                    raise InvalidInputException(
-                        "save_rho_interval should be divisible by save_interval"
-                    )
-            else:
-                self.save_rho_interval = self.save_interval * n_collate # Only save one rho in a file
-                log.info(f"rho saving interval is set to {self.save_rho_interval}")
-            if (self.n_steps // self.save_interval) * self.save_interval % self.save_rho_interval != 0:
-                log.info("The rho at the last save step will not be saved. " 
-                         "For a proper restart, please let "
-                         "the last save step also divisible by save_rho_interval.")
         self.n_collate = n_collate
         self.integrator = integrator
         if integrator not in {"RK2", "RK4"}:
@@ -124,14 +104,11 @@ class TimeEvolution(TreeNode):
         """Run time evolution loop, checkpointing at regular intervals."""
         i_collate = 0
         while self.i_step <= self.n_steps:
-            if self.i_step % self.save_interval == 0:
-                update_rho = (self.write_rho and self.i_step % self.save_rho_interval == 0)
-                transport.geometry.update_stash(self.i_step, self.t, update_rho)
+            if self.i_step % self.save_interval == 0 and (self.i_step > self.i_step_initial or self.i_step == 0):
+                transport.geometry.update_stash(self.i_step, self.t)
                 i_collate += 1
                 log.info(f"Stashed results of step {self.i_step}")
-                if update_rho:
-                    log.info(f"Stashed rho of step {self.i_step}")
-                if i_collate == self.n_collate:
+                if i_collate == self.n_collate or self.i_step == 0:
                     transport.save(self.i_step)
                     i_collate = 0
 
