@@ -127,13 +127,13 @@ class Light(TreeNode):
             self.light_matter[patch_id] = light_matter
             self.omega[patch_id] = omega
         else: # lindblad light
-            prefac = np.sqrt(np.sqrt(np.pi/8/smearing**2))
+            prefac = torch.sqrt(torch.sqrt(torch.pi/8/smearing**2))
             Nk,Nb = ab_initio.E.shape
             dE = ab_initio.E.reshape([Nk,Nb,1]) - ab_initio.E.reshape([Nk,1,Nb])
             plus = prefac * light_matter * torch.exp( - ((dE + omega) / (2*smearing)) **2 )
             minus = prefac * light_matter * torch.exp( - ((dE - omega) / (2*smearing)) **2 )
-            plus_deg = self.plus.swapaxes(-2, -1).conj()
-            minus_deg = self.minus.swapaxes(-2, -1).conj()
+            plus_deg = plus.swapaxes(-2, -1).conj()
+            minus_deg = minus.swapaxes(-2, -1).conj()
             
             self.identity_mat = torch.tile(torch.eye(Nb), (1,Nk,1,1)).to(rc.device)
             self.plus[patch_id] = plus
