@@ -50,6 +50,8 @@ class PatchSet(Geometry):
             Note that this only affects parallelization and performance by
             changing how data is divided into patches, and does not affect
             the accuracy of format of the output.
+        write_rho
+            :yaml:`Whether to write rho to checkpoint file.`
         """
         super().__init__(
             material=material,

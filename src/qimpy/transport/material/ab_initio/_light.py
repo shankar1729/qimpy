@@ -20,7 +20,7 @@ class Light(TreeNode):
     t0: float  #: center of Gaussian pulse, if sigma is non-zero
     sigma: float  #: width of Gaussian pulse in time, if non-zero
     smearing: float #: Width of Gaussian
-    light_matter: torch.Tensor  #: Precomputed A0 . P or E0 . R matrix elements
+    amp_mat: torch.Tensor  #: Amplitude matrix, precomputed A0 . P or E0 . R matrix elements
 
     constant_params: dict[str, torch.Tensor]  #: constant values of parameters
 
@@ -90,7 +90,7 @@ class Light(TreeNode):
         self.t0 = {}
         self.sigma = {}
         if self.coherent:
-            self.light_matter = {}
+            self.amp_mat = {}
             self.omega = {}
         else:
             self.plus = {}
@@ -113,9 +113,9 @@ class Light(TreeNode):
     ) -> None:
         ab_initio = self.ab_initio
         if self.gauge == "velocity":
-            light_matter = torch.einsum("i, kiab -> kab", A0, ab_initio.P)
+            amp_mat = torch.einsum("i, kiab -> kab", A0, ab_initio.P)
         elif self.gauge == "length":
-            light_matter = torch.einsum("i, kiab -> kab", A0 * omega, ab_initio.R)
+            amp_mat = torch.einsum("i, kiab -> kab", A0 * omega, ab_initio.R)
         else:
             raise InvalidInputException(
                 "Parameter gauge should only be velocity or length"
@@ -124,14 +124,14 @@ class Light(TreeNode):
         self.t0[patch_id] = t0
         self.sigma[patch_id] = sigma
         if self.coherent:
-            self.light_matter[patch_id] = light_matter
+            self.amp_mat[patch_id] = amp_mat
             self.omega[patch_id] = omega
         else: # lindblad light
             prefac = torch.sqrt(torch.sqrt(torch.pi/8/smearing**2))
             Nk,Nb = ab_initio.E.shape
             dE = ab_initio.E.reshape([Nk,Nb,1]) - ab_initio.E.reshape([Nk,1,Nb])
-            plus = prefac * light_matter * torch.exp( - ((dE + omega) / (2*smearing)) **2 )
-            minus = prefac * light_matter * torch.exp( - ((dE - omega) / (2*smearing)) **2 )
+            plus = prefac * amp_mat * torch.exp( - ((dE + omega) / (2*smearing)) **2 )
+            minus = prefac * amp_mat * torch.exp( - ((dE - omega) / (2*smearing)) **2 )
             plus_deg = plus.swapaxes(-2, -1).conj()
             minus_deg = minus.swapaxes(-2, -1).conj()
             
@@ -155,7 +155,7 @@ class Light(TreeNode):
         if self.coherent:
             omega = self.omega[patch_id]
             prefac *= -0.5j * torch.exp(-1j * omega * t)  # with Louiville, symmetrization
-            interaction = prefac * self.light_matter[patch_id]
+            interaction = prefac * self.amp_mat[patch_id]
 
             return (interaction - interaction.swapaxes(-2, -1).conj()) @ rho
 
