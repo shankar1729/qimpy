@@ -19,8 +19,8 @@ class Light(TreeNode):
     omega: float  #: light frequency
     t0: float  #: center of Gaussian pulse, if sigma is non-zero
     sigma: float  #: width of Gaussian pulse in time, if non-zero
-    A0_dot_P: torch.Tensor  #: Precomputed A0 . P matrix elements
-    E0_dot_R: torch.Tensor  #: Precomputed E0 . R matrix elements
+    smearing: float #: Width of Gaussian
+    light_matter: torch.Tensor  #: Precomputed A0 . P or E0 . R matrix elements
 
     constant_params: dict[str, torch.Tensor]  #: constant values of parameters
 
