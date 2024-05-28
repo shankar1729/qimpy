@@ -187,10 +187,11 @@ class AbInitio(Material):
                 
         # Control output observables
         obs_dict = {
-            "S": [["Sx", "Sy", "Sz"], self.S], 
             "J": [["Jx", "Jy", "Jz"], -self.P], 
-            "SJ": [["SJx", "SJy", "SJz"], -0.5 * (self.S @ self.P + self.P @ self.S)],
         }
+        if spinorial:
+            obs_dict["S"] = [["Sx", "Sy", "Sz"], self.S]
+            obs_dict["SJ"] = [["SJx", "SJy", "SJz"], -0.5 * (self.S @ self.P + self.P @ self.S)]
         self.observable_names = (["q"] if "q" in write_observables else []) + sum(
             [obs_dict[orb][0] for orb in write_observables if orb != "q"], []
         )

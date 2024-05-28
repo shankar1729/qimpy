@@ -37,6 +37,7 @@ class RelaxationTime(TreeNode):
         tau_recomb: float = np.inf,
         nv: int = 0,
         eps: float = 1e-12,
+        dmu_eps: float = 1e-8,
         only_diagonal: bool = True,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
@@ -95,8 +96,9 @@ class RelaxationTime(TreeNode):
             log.info("Enable phenomenon recombination.")
             self.exp_betaE = {}
             self.betamuk0 = {}
-        self.max_dbetamu = max_dmu/ab_initio.T
-        self.eps = eps
+        self.max_dbetamu = max_dmu / ab_initio.T
+        self.eps = float(eps)
+        self.dbetamu_eps = float(dmu_eps) / ab_initio.T
         self.nbands = ab_initio.E.shape[-1]
         self.only_diagonal = only_diagonal
 
@@ -123,8 +125,8 @@ class RelaxationTime(TreeNode):
             self.betamue0[patch_id] = torch.ones([1,1]).to(rc.device) * betamu0
         if torch.isfinite(tau_h):
             self.tau_h[patch_id] = tau_h
-            self.exp_betaEh[patch_id] = torch.exp(ab_initio.E[:,:nv]/ab_initio.T)
-            self.betamuh0[patch_id] = torch.ones([1,1]).to(rc.device) * betamu0
+            self.exp_betaEh[patch_id] = torch.exp(-ab_initio.E[:,:nv]/ab_initio.T)
+            self.betamuh0[patch_id] = -torch.ones([1,1]).to(rc.device) * betamu0
         if torch.isfinite(tau_eh):
             self.tau_eh[patch_id] = tau_eh
         if torch.isfinite(tau_recomb):
@@ -153,8 +155,9 @@ class RelaxationTime(TreeNode):
         if patch_id in self.tau_h:
             fh = rho[...,range(nv),range(nv)].real
             betamuh,fh_eq = self.find_mu(
-                fh, self.exp_betaEh[patch_id], self.betamuh0[patch_id], sum_rule="...kb -> ...", reshape=fh.shape[:-2]
+                1-fh, self.exp_betaEh[patch_id], self.betamuh0[patch_id], sum_rule="...kb -> ...", reshape=fh.shape[:-2]
             )
+            fh_eq = 1 - fh_eq
             if self.only_diagonal:
                 result[...,range(nv),range(nv)] -= (fh - fh_eq)/(2*self.tau_h[patch_id]) 
             else:
@@ -188,6 +191,8 @@ class RelaxationTime(TreeNode):
             betamu -= dbetamu
             distribution = self.fermi_dirac(exp_betaE,betamu)
             F = torch.einsum(sum_rule, distribution).reshape(reshape) - f_total
+            if torch.max(torch.abs(dbetamu)) < self.dbetamu_eps:
+                break
         return betamu, distribution
     
     def fermi_dirac(self, exp_betaE: torch.Tensor, betamu: torch.Tensor) -> torch.Tensor:
