@@ -13,7 +13,7 @@ def is_async_reduce_supported(is_cuda: bool) -> bool:
     if is_cuda:
         # OpenMPI does not support Ireduce, Iallreduce etc. on GPU buffers
         # TODO: add similar checks for other MPI implementations
-        return "Open MPI" not in MPI.Get_library_version()
+        return False  # "Open MPI" not in MPI.Get_library_version()
     else:
         return True  # cpu MPI likely always supports it
 
