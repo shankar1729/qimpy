@@ -91,56 +91,46 @@ class Coulomb_Slab:
         return result
 
     def stress(self, rho1: FieldH, rho2: FieldH) -> torch.Tensor:
-        grid = self.grid
         hlfL = self.hlfL
-        Gbasis = grid.lattice.Gbasis
-        iG = grid.get_mesh("H").to(torch.double)
-        G = iG @ Gbasis.T
-        G = G.permute(3, 0, 1, 2)  # Bringing cartesian coordinate to first axis
-        Gplane = G
-        iGplane = iG.permute(3, 0, 1, 2)
-        iGplane[self.iDir, ...] = 0  # Set perpendicular direction elements to zero
-        Gplane[self.iDir, ...] = 0  # Set perpendicular direction elements to zero
-        Gplaneabs = (Gplane.square().sum(dim=0)).sqrt()
+        iG = self.grid.get_mesh("H").to(torch.double)
+        G = self.grid.get_mesh("H").to(torch.double) @ self.grid.lattice.Gbasis.T
+        Gplane = G.clone()
+        Gplane[..., self.iDir] = 0  # Set perpendicular direction elements to zero
+
+        iGplane = iG.clone()
+        iGplane[..., self.iDir] = 0  # Set perpendicular direction elements to zero
+
+        iGperp = iG[..., self.iDir]
+        Gplaneabs = (Gplane.square().sum(dim=-1)).sqrt()
         Gplaneabsinv = torch.where(Gplaneabs == 0, 0, 1 / Gplaneabs)
-        Gperp = G[self.iDir, ...]
-        Gsq = G.square().sum(dim=0)
-        log.info(f"Shape of G in stress function: {G.size()}")
-        log.info(f"Shape of Gsq in stress function: {Gsq.size()}")
-        expCosTerm = torch.exp(-Gplaneabs * hlfL) * torch.cos(Gperp * hlfL)
+        Gsq = G.square().sum(dim=-1)
+
+        expCosTerm = torch.exp(-Gplaneabs * hlfL) * torch.cos(np.pi * iGperp)
         Gsqinv = torch.where(Gsq == 0, 0, 1 / Gsq)
         prefac1 = 2 * (1 - expCosTerm) * Gsqinv
-        stress_kernel = (
-            4
-            * np.pi
-            * Gsqinv
-            * (prefac1 - expCosTerm * hlfL * Gplaneabsinv)
-            * iGplane[None]
-            * iGplane[:, None]
+        stress_kernel = torch.einsum(
+            "ijk, ijkl, ijkm->lmijk",
+            4 * np.pi * Gsqinv * (prefac1 - expCosTerm * hlfL * Gplaneabsinv),
+            Gplane,
+            Gplane,
         )
+        GGT_idir_idir = self.grid.lattice.Gbasis[self.iDir, self.iDir] ** 2
 
-        GGT_idir_idir = Gbasis[self.iDir, self.iDir] ** 2
-
-        log.info(f"Gbasis[self.iDir, self.iDir] = {Gbasis[self.iDir, self.iDir]}")
-        # stress_kernel[self.iDir, self.iDir, ...] = 4 * np.pi * torch.where(Gsq == 0, -hlfL ** 2 / GGT_idir_idir,
-        #    Gsqinv * (prefac1 * iG[..., self.iDir] ** 2 + expCosTerm * hlfL * Gplaneabs / GGT_idir_idir)
-        # )
         stress_kernel[self.iDir, self.iDir, ...] = (
             4
             * np.pi
             * torch.where(
                 Gsq == 0,
-                -(hlfL**2) / GGT_idir_idir,
+                -(hlfL**2),
                 Gsqinv
                 * (
-                    prefac1 * iG[..., self.iDir] ** 2
-                    + expCosTerm * hlfL * Gplaneabs / GGT_idir_idir
+                    prefac1 * GGT_idir_idir * iG[..., self.iDir] ** 2
+                    + expCosTerm * hlfL * Gplaneabs
                 ),
             )
         )
 
         stress_rho2 = FieldH(self.grid, data=(stress_kernel * rho2.data))
-        # log.info(f"rho2.data shape {rho2.data.size()}")
         log.info(f"Stress from CoulombSlab.stress {rho1 ^ stress_rho2}")
         return rho1 ^ stress_rho2
 
