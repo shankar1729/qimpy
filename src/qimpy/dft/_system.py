@@ -8,7 +8,7 @@ from qimpy.io import Checkpoint, CheckpointPath
 from qimpy.mpi import ProcessGrid
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
-from qimpy.grid import Grid, Coulomb
+from qimpy.grid import Grid, Coulomb, Coulomb_Slab
 from .ions import Ions
 from .electrons import Electrons
 from .geometry import Geometry
@@ -133,8 +133,15 @@ class System(TreeNode):
             comm=self.electrons.comm,  # Parallel
             ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff,
         )
-        self.coulomb = Coulomb(self.grid, self.ions.n_ions)
-
+        periodic = self.lattice.periodic
+        if all(periodic):
+            log.info("Fully periodic calculation...running in _coulomb.py")
+            self.coulomb = Coulomb(self.grid, self.ions.n_ions)
+        else:
+            iDir = [i for (i, x) in enumerate(periodic) if not x]
+            log.info("Truncated calculation...running in _coulombslab.py")
+            log.info(f"number of ions {self.ions.n_ions}")
+            self.coulomb = Coulomb_Slab(self.grid, self.ions.n_ions, iDir[0])
         self.add_child(
             "geometry",
             Geometry,
@@ -169,6 +176,8 @@ class System(TreeNode):
 
     def run(self) -> None:
         """Run any actions specified in the input."""
+        log.info(f"self.geometry in run method of _system {self.geometry}")
+        log.info(f"self.child_names in system.run {self.child_names}")
         self.geometry.run(self)
         self.export(self)
 
