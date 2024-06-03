@@ -4,7 +4,7 @@ import numpy as np
 
 import qimpy
 from qimpy import TreeNode, log, rc
-from qimpy.io import CheckpointPath, InvalidInputException
+from qimpy.io import CheckpointPath, CheckpointContext, InvalidInputException
 from .geometry import Geometry
 
 
@@ -14,6 +14,7 @@ class TimeEvolution(TreeNode):
     t: float  #: Current time
     dt: float  #: Time step (set automatically if zero)
     i_step: int  #: Current step number
+    i_step_initial: int  #: Initial step number for current job (not zero if continued)
     n_steps: int  #: Number of steps
     save_interval: int  #: Save results every so many steps
     n_collate: int  #: Collect these many save steps into a single checkpoint
@@ -57,14 +58,14 @@ class TimeEvolution(TreeNode):
         """
         super().__init__()
         if checkpoint_in:
-            i_step_initial = checkpoint_in[0]["/geometry"].attrs["i_step"][-1]
-            t_initial = checkpoint_in[0]["/geometry"].attrs["t"][-1]
-            log.info(
-                f"Setting initial step to {i_step_initial}, initial time to {t_initial}"
-            )
+            attrs = checkpoint_in.attrs
+            self.i_step_initial = attrs["i_step"]
+            self.t = attrs["t"]
+            log.info(f"Continuing from checkpoint at step {self.i_step_initial}")
         else:
-            i_step_initial, t_initial = 0, 0.0
-        self.t = t_initial
+            self.i_step_initial = 0
+            self.t = 0.0
+        self.i_step = self.i_step_initial
         dt_max = geometry.dt_max
         if dt == 0.0:
             if dt_max == 0.0:
@@ -76,8 +77,6 @@ class TimeEvolution(TreeNode):
         elif dt_max and (dt > dt_max):
             raise InvalidInputException(f"{dt = } must be smaller than {dt_max = }")
         self.dt = dt
-        self.i_step_initial = i_step_initial
-        self.i_step = i_step_initial
         self.n_steps = max(1, int(np.round(t_max / self.dt)))
         self.save_interval = max(1, int(np.round(dt_save / self.dt)))
         self.n_collate = n_collate
@@ -127,3 +126,11 @@ class TimeEvolution(TreeNode):
             )
             self.i_step += 1
             self.t += self.dt
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["t"] = self.t
+        attrs["i_step"] = self.i_step
+        return ["t", "i_step"]
