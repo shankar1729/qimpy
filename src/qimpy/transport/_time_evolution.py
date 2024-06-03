@@ -59,9 +59,11 @@ class TimeEvolution(TreeNode):
         if checkpoint_in:
             i_step_initial = checkpoint_in[0]["/geometry"].attrs["i_step"][-1]
             t_initial = checkpoint_in[0]["/geometry"].attrs["t"][-1]
-            log.info(f"Setting initial step to {i_step_initial}, initial time to {t_initial}")
+            log.info(
+                f"Setting initial step to {i_step_initial}, initial time to {t_initial}"
+            )
         else:
-            i_step_initial,t_initial = 0, 0.0
+            i_step_initial, t_initial = 0, 0.0
         self.t = t_initial
         dt_max = geometry.dt_max
         if dt == 0.0:
@@ -76,7 +78,7 @@ class TimeEvolution(TreeNode):
         self.dt = dt
         self.i_step_initial = i_step_initial
         self.i_step = i_step_initial
-        self.n_steps = max(1, int(np.round(t_max / self.dt))) + i_step_initial
+        self.n_steps = max(1, int(np.round(t_max / self.dt)))
         self.save_interval = max(1, int(np.round(dt_save / self.dt)))
         self.n_collate = n_collate
         self.integrator = integrator
@@ -104,7 +106,8 @@ class TimeEvolution(TreeNode):
         """Run time evolution loop, checkpointing at regular intervals."""
         i_collate = 0
         while self.i_step <= self.n_steps:
-            if self.i_step % self.save_interval == 0 and (self.i_step > self.i_step_initial or self.i_step == 0):
+            should_save = (self.i_step > self.i_step_initial) or (self.i_step == 0)
+            if self.i_step % self.save_interval == 0 and should_save:
                 transport.geometry.update_stash(self.i_step, self.t)
                 i_collate += 1
                 log.info(f"Stashed results of step {self.i_step}")
