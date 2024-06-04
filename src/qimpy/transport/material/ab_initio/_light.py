@@ -19,8 +19,8 @@ class Light(TreeNode):
     omega: float  #: light frequency
     t0: float  #: center of Gaussian pulse, if sigma is non-zero
     sigma: float  #: width of Gaussian pulse in time, if non-zero
-    smearing: float #: Width of Gaussian
-    amp_mat: torch.Tensor  #: Amplitude matrix, precomputed A0 . P or E0 . R matrix elements
+    smearing: float  #: Width of Gaussian
+    amp_mat: torch.Tensor  #: Amplitude matrix, precomputed A0 . P or E0 . R
 
     constant_params: dict[str, torch.Tensor]  #: constant values of parameters
 
@@ -79,7 +79,7 @@ class Light(TreeNode):
             A0 = torch.view_as_complex(A0)
         else:
             A0 = A0.to(torch.complex128)
-            
+
         self.constant_params = dict(
             A0=A0,
             omega=torch.tensor(omega, device=rc.device),
@@ -100,7 +100,7 @@ class Light(TreeNode):
 
     def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
         self._initialize_fields(patch_id, **params)
-        
+
     def _initialize_fields(
         self,
         patch_id: int,
@@ -126,16 +126,16 @@ class Light(TreeNode):
         if self.coherent:
             self.amp_mat[patch_id] = amp_mat
             self.omega[patch_id] = omega
-        else: # lindblad light
-            prefac = torch.sqrt(torch.sqrt(torch.pi/8/smearing**2))
-            Nk,Nb = ab_initio.E.shape
-            dE = ab_initio.E.reshape([Nk,Nb,1]) - ab_initio.E.reshape([Nk,1,Nb])
-            plus = prefac * amp_mat * torch.exp( - ((dE + omega) / (2*smearing)) **2 )
-            minus = prefac * amp_mat * torch.exp( - ((dE - omega) / (2*smearing)) **2 )
+        else:  #: lindblad version
+            prefac = torch.sqrt(torch.sqrt(torch.pi / (8 * smearing**2)))
+            exp_factor = -1.0 / (smearing**2)
+            Nk, Nb = ab_initio.E.shape
+            dE = ab_initio.E.reshape([Nk, Nb, 1]) - ab_initio.E.reshape([Nk, 1, Nb])
+            plus = prefac * amp_mat * torch.exp(exp_factor * ((dE + omega) ** 2))
+            minus = prefac * amp_mat * torch.exp(exp_factor * ((dE - omega) ** 2))
             plus_deg = plus.swapaxes(-2, -1).conj()
             minus_deg = minus.swapaxes(-2, -1).conj()
-            
-            self.identity_mat = torch.tile(torch.eye(Nb), (1,Nk,1,1)).to(rc.device)
+            self.identity_mat = torch.tile(torch.eye(Nb), (1, Nk, 1, 1)).to(rc.device)
             self.plus[patch_id] = plus
             self.plus_deg[patch_id] = plus_deg
             self.minus[patch_id] = minus
@@ -147,26 +147,29 @@ class Light(TreeNode):
         sigma = self.sigma[patch_id]
         if sigma > 0:
             prefac = torch.exp(-((t - t0) ** 2) / (2 * sigma**2)) / np.sqrt(
-                        np.sqrt(np.pi) * sigma
-                    )
+                np.sqrt(np.pi) * sigma
+            )
         else:
             prefac = 1.0
-        
+
         if self.coherent:
             omega = self.omega[patch_id]
-            prefac *= -0.5j * torch.exp(-1j * omega * t)  # with Louiville, symmetrization
+            prefac *= -0.5j * torch.exp(-1j * omega * t)  # Louiville, symmetrization
             interaction = prefac * self.amp_mat[patch_id]
-
             return (interaction - interaction.swapaxes(-2, -1).conj()) @ rho
-
         else:
             prefac = 0.5 * prefac**2
             I_minus_rho = self.identity_mat - rho
-            return prefac * (self.commute(I_minus_rho @ self.plus[patch_id] @ rho, 
-                                          self.plus_deg[patch_id]) 
-                           + self.commute(I_minus_rho @ self.minus[patch_id] @ rho, 
-                                          self.minus_deg[patch_id])
+            plus = self.plus[patch_id]
+            minus = self.minus[patch_id]
+            plus_deg = self.plus_deg[patch_id]
+            minus_deg = self.minus_deg[patch_id]
+            return prefac * (
+                commutator(I_minus_rho @ plus @ rho, plus_deg)
+                + commutator(I_minus_rho @ minus @ rho, minus_deg)
             )
-            
-    def commute(self, A, B):
-        return A @ B - B @ A
+
+
+def commutator(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """Commutator of two tensors (along final two dimensions)."""
+    return A @ B - B @ A
