@@ -67,7 +67,8 @@ class Geometry(TreeNode):
             changing how data is divided into patches, and does not affect
             the accuracy of format of the output.
         write_rho
-            :yaml:`Whether to write rho to checkpoint file.`
+            :yaml:`Whether to write the full density matrices to the checkpoint file.`
+            If not (default), only observables are written to the checkpoint file.
         """
         super().__init__()
         self.comm = process_grid.get_comm("r")
@@ -99,10 +100,6 @@ class Geometry(TreeNode):
         # Build an advect object for each sub-quad local to this process:
         self.patches = []
         mine = slice(self.patch_division.i_start, self.patch_division.i_stop)
-        if checkpoint_in: # TODO: Take care of multiple grids
-            rho_initial = torch.from_numpy(np.array(checkpoint_in[0]["/geometry"]["quad0"]['rho'])).to(rc.device)
-        else:
-            rho_initial = None
         for i_quad, grid_start, grid_stop, adjacency, has_apertures in zip(
             self.sub_quad_set.quad_index[mine],
             self.sub_quad_set.grid_start[mine],
@@ -124,14 +121,14 @@ class Geometry(TreeNode):
                     aperture_circles=aperture_circles,
                     contact_circles=contact_circles,
                     contact_params=contact_params,
-                    rho_initial=rho_initial,
+                    checkpoint_in=checkpoint_in.relative(f"quad{i_quad}"),
                 )
             )
         self.dt_max = self.comm.allreduce(
             min((patch.dt_max for patch in self.patches), default=np.inf), op=MPI.MIN
         )
         self.stash = ResultStash(len(self.patches))
-        
+
         self.write_rho = write_rho
 
     @abstractmethod
@@ -177,7 +174,7 @@ class Geometry(TreeNode):
         stash = self.stash
         cp_path.attrs["t"] = np.array(stash.t)
         cp_path.attrs["i_step"] = np.array(stash.i_step)
-        nkpts,nbands = self.material.E.shape
+        nkpts, nbands = self.material.E.shape
         Nkbb = nkpts * nbands**2
         # Collect MPI-split data to be written from head (avoids slow h5-mpio):
         checkpoint, path = cp_path

@@ -42,7 +42,8 @@ class ParameterGrid(Geometry):
             :yaml:`Parameter names and values to sweep along dimension 2.`
             Specification is the same as for `dimension1`.
         write_rho
-            :yaml:`Whether to write rho to checkpoint file.`
+            :yaml:`Whether to write the full density matrices to the checkpoint file.`
+            If not (default), only observables are written to the checkpoint file.
         """
         assert len(shape) == 2
         self.shape = shape

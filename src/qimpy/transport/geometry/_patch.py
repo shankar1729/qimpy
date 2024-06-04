@@ -5,6 +5,7 @@ import numpy as np
 import torch
 
 from qimpy import rc
+from qimpy.io import CheckpointPath
 from qimpy.mpi import globalreduce
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
@@ -47,7 +48,7 @@ class Patch:
     GHOST_L = slice(0, N_GHOST)  #: ghost indices on left/bottom
     GHOST_R = slice(-N_GHOST, None)  #: ghost indices on right/top side
 
-    rho_initial: torch.Tensor # initial rho read from restart
+    rho_initial: torch.Tensor  # initial rho read from restart
 
     def __init__(
         self,
@@ -62,7 +63,7 @@ class Patch:
         contact_circles: torch.Tensor,
         contact_params: list[dict],
         material: Material,
-        rho_initial: torch.Tensor = None,
+        checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         # Initialize mesh:
         grids1d = [
@@ -105,10 +106,11 @@ class Patch:
         padding = 2 * Patch.N_GHOST
         self.rho_shape = (N[0], N[1], Nkbb)
         self.rho_padded_shape = (N[0] + padding, N[1] + padding, Nkbb)
-        if rho_initial is not None: # read from geometry, to restart
-            slice0 = slice(grid_start[0], grid_stop[0])
-            slice1 = slice(grid_start[1], grid_stop[1])
-            self.rho = rho_initial[slice0, slice1]
+        if checkpoint_in:
+            checkpoint, path = checkpoint_in.relative("rho")
+            self.rho = checkpoint.read_slice(
+                checkpoint[path], tuple(grid_start) + (0,), N + (Nkbb,)
+            )
         else:
             self.rho = torch.tile(material.rho0.flatten(), (N[0], N[1], 1))
 

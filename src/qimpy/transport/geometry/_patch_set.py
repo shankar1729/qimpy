@@ -51,7 +51,8 @@ class PatchSet(Geometry):
             changing how data is divided into patches, and does not affect
             the accuracy of format of the output.
         write_rho
-            :yaml:`Whether to write rho to checkpoint file.`
+            :yaml:`Whether to write the full density matrices to the checkpoint file.`
+            If not (default), only observables are written to the checkpoint file.
         """
         super().__init__(
             material=material,
