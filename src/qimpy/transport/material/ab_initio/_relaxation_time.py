@@ -15,7 +15,7 @@ class RelaxationTime(TreeNode):
     tau_s: float  #: spin relaxation time
     tau_e: float  #: electron relaxation time
     tau_h: float  #: hole relaxation time
-    tau_eh: float #: electron-hole off-diagonal relaxation
+    tau_eh: float  #: electron-hole off-diagonal relaxation
     max_dmu: float  #: maximum change of mu in find_mu
     tau_recomb: float  #: recombination time
     nv: int  #: number of valance bands
@@ -104,7 +104,7 @@ class RelaxationTime(TreeNode):
 
     def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
         self._initialize_fields(patch_id, **params)
-        
+
     def _initialize_fields(
         self,
         patch_id: int,
@@ -121,80 +121,116 @@ class RelaxationTime(TreeNode):
         betamu0 = ab_initio.mu / ab_initio.T
         if torch.isfinite(tau_e):
             self.tau_e[patch_id] = tau_e
-            self.exp_betaEe[patch_id] = torch.exp(ab_initio.E[:,nv:]/ab_initio.T)
-            self.betamue0[patch_id] = torch.ones([1,1]).to(rc.device) * betamu0
+            self.exp_betaEe[patch_id] = torch.exp(ab_initio.E[:, nv:] / ab_initio.T)
+            self.betamue0[patch_id] = torch.ones([1, 1]).to(rc.device) * betamu0
         if torch.isfinite(tau_h):
             self.tau_h[patch_id] = tau_h
-            self.exp_betaEh[patch_id] = torch.exp(-ab_initio.E[:,:nv]/ab_initio.T)
-            self.betamuh0[patch_id] = -torch.ones([1,1]).to(rc.device) * betamu0
+            self.exp_betaEh[patch_id] = torch.exp(-ab_initio.E[:, :nv] / ab_initio.T)
+            self.betamuh0[patch_id] = -torch.ones([1, 1]).to(rc.device) * betamu0
         if torch.isfinite(tau_eh):
             self.tau_eh[patch_id] = tau_eh
         if torch.isfinite(tau_recomb):
             self.tau_recomb[patch_id] = tau_recomb
-            self.exp_betaE[patch_id] = torch.exp(ab_initio.E/ab_initio.T)
-            self.betamuk0[patch_id] = torch.ones([1, 1, ab_initio.E.shape[0], 1]).to(rc.device) * betamu0
+            self.exp_betaE[patch_id] = torch.exp(ab_initio.E / ab_initio.T)
+            self.betamuk0[patch_id] = (
+                torch.ones([1, 1, ab_initio.E.shape[0], 1]).to(rc.device) * betamu0
+            )
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         # rho.shape: (x,y,k,b)
         nv = self.nv
         result = torch.zeros_like(rho)
-        
+
         if patch_id in self.tau_e:
             nbands = self.nbands
-            fe = rho[...,range(nv,nbands),range(nv,nbands)].real
-            betamue,fe_eq = self.find_mu(
-                fe, self.exp_betaEe[patch_id], self.betamue0[patch_id], sum_rule="...kb -> ...", reshape=fe.shape[:-2]
+            fe = rho[..., range(nv, nbands), range(nv, nbands)].real
+            betamue, fe_eq = self.find_mu(
+                fe,
+                self.exp_betaEe[patch_id],
+                self.betamue0[patch_id],
+                sum_rule="...kb -> ...",
+                reshape=fe.shape[:-2],
             )
             if self.only_diagonal:
-                result[...,range(nv,nbands),range(nv,nbands)] -= (fe - fe_eq)/(2*self.tau_e[patch_id]) 
+                result[..., range(nv, nbands), range(nv, nbands)] -= (fe - fe_eq) / (
+                    2 * self.tau_e[patch_id]
+                )
             else:
-                result[...,nv:,nv:] -= (rho[...,nv:,nv:] -  torch.diag_embed(fe_eq))/(2*self.tau_e[patch_id])
+                result[..., nv:, nv:] -= (
+                    rho[..., nv:, nv:] - torch.diag_embed(fe_eq)
+                ) / (2 * self.tau_e[patch_id])
             self.betamue0[patch_id] = betamue
-            
+
         if patch_id in self.tau_h:
-            fh = rho[...,range(nv),range(nv)].real
-            betamuh,fh_eq = self.find_mu(
-                1-fh, self.exp_betaEh[patch_id], self.betamuh0[patch_id], sum_rule="...kb -> ...", reshape=fh.shape[:-2]
+            fh = rho[..., range(nv), range(nv)].real
+            betamuh, fh_eq = self.find_mu(
+                1 - fh,
+                self.exp_betaEh[patch_id],
+                self.betamuh0[patch_id],
+                sum_rule="...kb -> ...",
+                reshape=fh.shape[:-2],
             )
             fh_eq = 1 - fh_eq
             if self.only_diagonal:
-                result[...,range(nv),range(nv)] -= (fh - fh_eq)/(2*self.tau_h[patch_id]) 
+                result[..., range(nv), range(nv)] -= (fh - fh_eq) / (
+                    2 * self.tau_h[patch_id]
+                )
             else:
-                result[...,:nv,:nv] -= (rho[...,:nv,:nv] -  torch.diag_embed(fh_eq))/(2*self.tau_h[patch_id])
+                result[..., :nv, :nv] -= (
+                    rho[..., :nv, :nv] - torch.diag_embed(fh_eq)
+                ) / (2 * self.tau_h[patch_id])
             self.betamuh0[patch_id] = betamuh
-            
+
         if patch_id in self.tau_eh:
-            result[...,nv:,:nv] -= rho[...,nv:,:nv]/self.tau_eh[patch_id] # + h.c later
-            
+            result[..., nv:, :nv] -= (
+                rho[..., nv:, :nv] / self.tau_eh[patch_id]
+            )  # + h.c later
+
         if patch_id in self.tau_recomb:
-            fk = torch.einsum("...bb -> ...b",rho).real
-            betamuk,fk_eq = self.find_mu(
-                fk, self.exp_betaE[patch_id], self.betamuk0[patch_id], sum_rule="...kb -> ...k", reshape=fk.shape[:-1]+(1,)
+            fk = torch.einsum("...bb -> ...b", rho).real
+            betamuk, fk_eq = self.find_mu(
+                fk,
+                self.exp_betaE[patch_id],
+                self.betamuk0[patch_id],
+                sum_rule="...kb -> ...k",
+                reshape=fk.shape[:-1] + (1,),
             )
-            result -= (rho -  torch.diag_embed(fk_eq))/(2*self.tau_recomb[patch_id])
+            result -= (rho - torch.diag_embed(fk_eq)) / (2 * self.tau_recomb[patch_id])
             self.betamuk0[patch_id] = betamuk
 
         return result
-    
-    def find_mu(self, f: torch.Tensor, exp_betaE: torch.Tensor, betamu0: torch.Tensor, sum_rule: str, reshape: tuple = (1,)) -> tuple[float, torch.Tensor]:
+
+    def find_mu(
+        self,
+        f: torch.Tensor,
+        exp_betaE: torch.Tensor,
+        betamu0: torch.Tensor,
+        sum_rule: str,
+        reshape: tuple = (1,),
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         f_total = torch.einsum(sum_rule, f).reshape(reshape)
         betamu = betamu0
-        distribution = self.fermi_dirac(exp_betaE,betamu)
+        distribution = fermi_dirac(exp_betaE, betamu)
         F = torch.einsum(sum_rule, distribution).reshape(reshape) - f_total
         while torch.max(torch.abs(F)) > self.eps:
-            exp_beta_Emu = exp_betaE/torch.exp(betamu)
-            dF = torch.einsum(sum_rule, exp_beta_Emu/(exp_beta_Emu + 1)**2).reshape(reshape)
+            exp_beta_Emu = exp_betaE / torch.exp(betamu)
+            dF = torch.einsum(sum_rule, exp_beta_Emu / (exp_beta_Emu + 1) ** 2).reshape(
+                reshape
+            )
             dbetamu = F / dF
-            limit_ind = (torch.abs(dbetamu) > self.max_dbetamu) # indices that need to be limited by self.max_dbetamu
+            limit_ind = (
+                torch.abs(dbetamu) > self.max_dbetamu
+            )  # indices that need to be limited by self.max_dbetamu
             dbetamu[limit_ind] = torch.sign(F[limit_ind]) * self.max_dbetamu
             betamu -= dbetamu
-            distribution = self.fermi_dirac(exp_betaE,betamu)
+            distribution = fermi_dirac(exp_betaE, betamu)
             F = torch.einsum(sum_rule, distribution).reshape(reshape) - f_total
             if torch.max(torch.abs(dbetamu)) < self.dbetamu_eps:
                 break
         return betamu, distribution
-    
-    def fermi_dirac(self, exp_betaE: torch.Tensor, betamu: torch.Tensor) -> torch.Tensor:
-        expbetamu = torch.exp(betamu)
-        return 1/(exp_betaE/expbetamu + 1)
+
+
+def fermi_dirac(exp_betaE: torch.Tensor, betamu: torch.Tensor) -> torch.Tensor:
+    expbetamu = torch.exp(betamu)
+    return 1 / (exp_betaE / expbetamu + 1)
