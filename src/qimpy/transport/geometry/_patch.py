@@ -48,8 +48,6 @@ class Patch:
     GHOST_L = slice(0, N_GHOST)  #: ghost indices on left/bottom
     GHOST_R = slice(-N_GHOST, None)  #: ghost indices on right/top side
 
-    rho_initial: torch.Tensor  # initial rho read from restart
-
     def __init__(
         self,
         *,

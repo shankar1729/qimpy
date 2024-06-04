@@ -128,7 +128,6 @@ class Geometry(TreeNode):
             min((patch.dt_max for patch in self.patches), default=np.inf), op=MPI.MIN
         )
         self.stash = ResultStash(len(self.patches))
-
         self.write_rho = write_rho
 
     @abstractmethod
