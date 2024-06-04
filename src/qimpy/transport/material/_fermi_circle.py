@@ -115,12 +115,17 @@ class FermiCircle(Material):
         return result
 
     def get_observable_names(self) -> list[str]:
-        return ["q"]  # charge
+        return ["n", "jx", "jy"]  # density and fluxes
 
     @cache
     def get_observables(self, t: float) -> torch.Tensor:
-        Nkbb = len(self.k)  # since n_bands = 1
-        return torch.ones((1, Nkbb), device=rc.device)  # charge observable
+        return torch.cat(
+            (
+                torch.ones((1, self.nk_mine), device=rc.device),
+                self.transport_velocity.T,
+            ),
+            dim=0,
+        )
 
 
 class SpecularReflector:
