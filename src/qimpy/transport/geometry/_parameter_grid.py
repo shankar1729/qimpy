@@ -97,7 +97,8 @@ class ParameterGrid(Geometry):
                 ]
                 for key, values in parameters.items()
             }
-            material.initialize_fields(patch.rho, parameters_sub, id(patch))
+            rho_initial = patch.rho.clone().detach() if checkpoint_in else patch.rho
+            material.initialize_fields(rho_initial, parameters_sub, id(patch))
 
     def create_values(
         self,
