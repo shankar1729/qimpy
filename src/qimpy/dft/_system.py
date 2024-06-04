@@ -8,7 +8,7 @@ from qimpy.io import Checkpoint, CheckpointPath
 from qimpy.mpi import ProcessGrid
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
-from qimpy.grid import Grid, Coulomb, Coulomb_Slab
+from qimpy.grid import Grid, Coulomb, Coulomb_Slab, Coulomb_Isolated
 from .ions import Ions
 from .electrons import Electrons
 from .geometry import Geometry
@@ -137,6 +137,9 @@ class System(TreeNode):
         if all(periodic):
             log.info("Fully periodic calculation...running in _coulomb.py")
             self.coulomb = Coulomb(self.grid, self.ions.n_ions)
+        elif all([not x for x in periodic]):
+            log.info("Fully isolated calculation...running in _coulombisolated.py")
+            self.coulomb = Coulomb_Isolated(self.grid, self.ions.n_ions)
         else:
             iDir = [i for (i, x) in enumerate(periodic) if not x]
             log.info("Truncated calculation...running in _coulombslab.py")
