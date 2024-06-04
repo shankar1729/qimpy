@@ -6,7 +6,7 @@ import numpy as np
 
 from qimpy import log, rc, TreeNode, MPI
 from qimpy.io import CheckpointPath, CheckpointContext
-from qimpy.mpi import ProcessGrid, TaskDivision, BufferView
+from qimpy.mpi import ProcessGrid, TaskDivision
 from ..material import Material
 from . import (
     TensorList,
@@ -32,6 +32,7 @@ class Geometry(TreeNode):
     patch_division: TaskDivision  #: Division of patches over `comm`
     stash: ResultStash  #: Saved results for collating into fewer checkpoints
     dt_max: float  #: Maximum stable time step
+    save_rho: bool  #: whether to write rho to checkpoint file
 
     def __init__(
         self,
@@ -41,7 +42,9 @@ class Geometry(TreeNode):
         grid_spacing: float,
         contacts: dict[str, dict],
         grid_size_max: int,
+        save_rho: bool = False,
         process_grid: ProcessGrid,
+        checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
         """
         Initialize geometry parameters, typically used from a derived class.
@@ -63,6 +66,9 @@ class Geometry(TreeNode):
             Note that this only affects parallelization and performance by
             changing how data is divided into patches, and does not affect
             the accuracy of format of the output.
+        save_rho
+            :yaml:`Whether to write the full density matrices to the checkpoint file.`
+            If not (default), only observables are written to the checkpoint file.
         """
         super().__init__()
         self.comm = process_grid.get_comm("r")
@@ -115,12 +121,14 @@ class Geometry(TreeNode):
                     aperture_circles=aperture_circles,
                     contact_circles=contact_circles,
                     contact_params=contact_params,
+                    checkpoint_in=checkpoint_in.relative(f"quad{i_quad}"),
                 )
             )
         self.dt_max = self.comm.allreduce(
             min((patch.dt_max for patch in self.patches), default=np.inf), op=MPI.MIN
         )
         self.stash = ResultStash(len(self.patches))
+        self.save_rho = save_rho
 
     @abstractmethod
     def rho_dot(self, rho: TensorList, t: float) -> TensorList:
@@ -152,9 +160,10 @@ class Geometry(TreeNode):
             cp_path.write("apertures", torch.from_numpy(self.quad_set.apertures)),
             "q",
             "g",
-            "density",
-            "flux",
+            "observables",
         ]
+        if self.save_rho:
+            saved_list.append("rho")
         cp_path.attrs["grid_spacing"] = self.grid_spacing
         cp_path.attrs["contact_names"] = ",".join(self.contact_names)
         cp_path.attrs["aperture_names"] = ",".join(self.quad_set.aperture_names)
@@ -164,62 +173,32 @@ class Geometry(TreeNode):
         stash = self.stash
         cp_path.attrs["t"] = np.array(stash.t)
         cp_path.attrs["i_step"] = np.array(stash.i_step)
-        # Collect MPI-split data to be written from head (avoids slow h5-mpio):
+
+        n_observables = len(self.material.get_observable_names())
+        Nkbb = self.material.k_division.n_tot * self.material.n_bands**2
         checkpoint, path = cp_path
         for i_quad, grid_size_np in enumerate(self.quad_set.grid_size):
+            # Create group and datasets together from all processes:
             cp_quad = CheckpointPath(checkpoint, f"{path}/quad{i_quad}")
             n_stash = len(stash.t)
             grid_size = tuple(grid_size_np)
-            n_obs = len(self.material.get_observable_names())
-            stashed_size = (n_stash,) + grid_size + (n_obs,)
-            q = torch.empty(grid_size + (2,))
-            g = torch.empty(grid_size)
-            density = torch.empty(stashed_size)
-            flux = torch.empty(stashed_size + (2,))
-            for i_patch in np.where(self.sub_quad_set.quad_index == i_quad)[0]:
-                tag = 3 * i_patch
-                i_proc = self.comm.rank
-                whose = self.patch_division.whose(i_patch)
-                local = i_proc == whose
-                if local:
-                    i_patch_mine = i_patch - self.patch_division.i_start
-                    patch = self.patches[i_patch_mine]
-                    q_cur = patch.q
-                    g_cur = patch.g[..., 0]
-                    density_cur = torch.stack(stash.density[i_patch_mine], dim=0)
-                    flux_cur = torch.stack(stash.flux[i_patch_mine], dim=0)
-                    if i_proc:
-                        # Send to head for write:
-                        self.comm.Send(BufferView(q_cur), 0, tag=tag)
-                        self.comm.Send(BufferView(g_cur), 0, tag=tag + 1)
-                        self.comm.Send(BufferView(density_cur), 0, tag=tag + 2)
-                        self.comm.Send(BufferView(flux_cur), 0, tag=tag + 3)
-                if not i_proc:
-                    # Receive and write from head:
-                    grid_start = self.sub_quad_set.grid_start[i_patch]
-                    grid_stop = self.sub_quad_set.grid_stop[i_patch]
-                    patch_size = tuple(grid_stop - grid_start)
-                    slice0 = slice(grid_start[0], grid_stop[0])
-                    slice1 = slice(grid_start[1], grid_stop[1])
-                    if not local:
-                        q_cur = torch.empty(patch_size + (2,))
-                        g_cur = torch.empty(patch_size)
-                        density_cur = torch.empty((n_stash,) + patch_size + (n_obs,))
-                        flux_cur = torch.empty(
-                            (n_stash,) + patch_size + (n_obs,) + (2,)
-                        )
-                        self.comm.Recv(BufferView(q_cur), whose, tag=tag)
-                        self.comm.Recv(BufferView(g_cur), whose, tag=tag + 1)
-                        self.comm.Recv(BufferView(density_cur), whose, tag=tag + 2)
-                        self.comm.Recv(BufferView(flux_cur), whose, tag=tag + 3)
-                    q[slice0, slice1] = q_cur
-                    g[slice0, slice1] = g_cur
-                    density[:, slice0, slice1] = density_cur
-                    flux[:, slice0, slice1] = flux_cur
-            cp_quad.write("q", q)
-            cp_quad.write("g", g)
-            cp_quad.write("density", density)
-            cp_quad.write("flux", flux)
+            cp_quad.create_dataset("q", grid_size + (2,), np.float64)
+            cp_quad.create_dataset("g", grid_size, np.float64)
+            cp_quad.create_dataset(
+                "observables", (n_stash,) + grid_size + (n_observables,), np.float64
+            )
+            if self.save_rho:
+                cp_quad.create_dataset("rho", grid_size + (Nkbb,), np.float64)
+
+            # Write independently from each patch on this quad:
+            my_patches = slice(self.patch_division.i_start, self.patch_division.i_stop)
+            for i_patch_mine in np.where(
+                self.sub_quad_set.quad_index[my_patches] == i_quad
+            )[0]:
+                patch = self.patches[i_patch_mine]
+                observables = torch.stack(stash.observables[i_patch_mine], dim=0)
+                patch.save_checkpoint(cp_quad, observables, self.save_rho)
+
         self.stash = ResultStash(len(self.patches))  # Clear stashed history
         return saved_list
 
@@ -229,9 +208,9 @@ class Geometry(TreeNode):
         stash.i_step.append(i_step)
         stash.t.append(t)
         for i_patch_mine, patch in enumerate(self.patches):
-            density, flux = self.material.measure_observables(patch.rho, t)
-            stash.density[i_patch_mine].append(density)
-            stash.flux[i_patch_mine].append(flux)
+            stash.observables[i_patch_mine].append(
+                self.material.measure_observables(patch.rho, t)
+            )
 
 
 class ResultStash:
@@ -239,11 +218,9 @@ class ResultStash:
 
     i_step: list[int]
     t: list[float]
-    density: list[list[torch.Tensor]]
-    flux: list[list[torch.Tensor]]
+    observables: list[list[torch.Tensor]]
 
     def __init__(self, n_patches_mine: int):
         self.i_step = []
         self.t = []
-        self.density = [[] for _ in range(n_patches_mine)]
-        self.flux = [[] for _ in range(n_patches_mine)]
+        self.observables = [[] for _ in range(n_patches_mine)]

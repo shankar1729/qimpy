@@ -23,6 +23,7 @@ class ParameterGrid(Geometry):
         shape: tuple[int, int],
         dimension1: Optional[dict[str, dict[str, list]]] = None,
         dimension2: Optional[dict[str, dict[str, list]]] = None,
+        save_rho: bool = False,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
@@ -40,6 +41,9 @@ class ParameterGrid(Geometry):
         dimension2
             :yaml:`Parameter names and values to sweep along dimension 2.`
             Specification is the same as for `dimension1`.
+        save_rho
+            :yaml:`Whether to write the full density matrices to the checkpoint file.`
+            If not (default), only observables are written to the checkpoint file.
         """
         assert len(shape) == 2
         self.shape = shape
@@ -63,6 +67,8 @@ class ParameterGrid(Geometry):
             grid_spacing=1,
             grid_size_max=0,
             contacts={},
+            save_rho=save_rho,
+            checkpoint_in=checkpoint_in,
         )
         self.dt_max = 0  # disable transport dt limit
 
@@ -91,7 +97,8 @@ class ParameterGrid(Geometry):
                 ]
                 for key, values in parameters.items()
             }
-            material.initialize_fields(patch.rho, parameters_sub, id(patch))
+            rho_initial = patch.rho.clone().detach() if checkpoint_in else patch.rho
+            material.initialize_fields(rho_initial, parameters_sub, id(patch))
 
     def create_values(
         self,

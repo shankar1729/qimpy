@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional, NamedTuple, TypeVar
+from typing import Any, Optional, NamedTuple, TypeVar, Sequence
 import os
 
 import h5py
@@ -178,6 +178,15 @@ class CheckpointPath(NamedTuple):
             return cast_default(var)  # Use explicitly specified value when allowed
         else:
             raise CheckpointOverrideException(var_name)  # and raise, when not allowed
+
+    def create_dataset(
+        self, name: str, shape: Sequence[int], dtype: np.dtype, **kwargs
+    ) -> Any:
+        """Create dataset with `name` within current checkpoint path."""
+        assert self.checkpoint is not None
+        self.checkpoint.create_dataset(
+            "/".join((self.path, name)), shape, dtype, **kwargs
+        )
 
     def write(self, name: str, data: torch.Tensor) -> str:
         """Write `data` available on all processes to `name` within current path.

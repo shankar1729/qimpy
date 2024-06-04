@@ -24,6 +24,7 @@ class PatchSet(Geometry):
         grid_spacing: float,
         contacts: dict[str, dict],
         grid_size_max: int = 0,
+        save_rho: bool = False,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
@@ -49,6 +50,9 @@ class PatchSet(Geometry):
             Note that this only affects parallelization and performance by
             changing how data is divided into patches, and does not affect
             the accuracy of format of the output.
+        save_rho
+            :yaml:`Whether to write the full density matrices to the checkpoint file.`
+            If not (default), only observables are written to the checkpoint file.
         """
         super().__init__(
             material=material,
@@ -57,6 +61,8 @@ class PatchSet(Geometry):
             contacts=contacts,
             grid_size_max=grid_size_max,
             quad_set=parse_svg(svg_file, svg_unit, grid_spacing, list(contacts.keys())),
+            save_rho=save_rho,
+            checkpoint_in=checkpoint_in,
         )
 
         # Initialize spatially-dependent fields, if any:

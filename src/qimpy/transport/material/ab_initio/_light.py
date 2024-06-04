@@ -6,6 +6,7 @@ import numpy as np
 
 from qimpy import rc, TreeNode
 from qimpy.io import CheckpointPath, InvalidInputException
+from qimpy.profiler import stopwatch
 from qimpy.transport import material
 
 
@@ -18,8 +19,8 @@ class Light(TreeNode):
     omega: float  #: light frequency
     t0: float  #: center of Gaussian pulse, if sigma is non-zero
     sigma: float  #: width of Gaussian pulse in time, if non-zero
-    A0_dot_P: torch.Tensor  #: Precomputed A0 . P matrix elements
-    E0_dot_R: torch.Tensor  #: Precomputed E0 . R matrix elements
+    smearing: float  #: Width of Gaussian
+    amp_mat: torch.Tensor  #: Amplitude matrix, precomputed A0 . P or E0 . R
 
     constant_params: dict[str, torch.Tensor]  #: constant values of parameters
 
@@ -34,6 +35,7 @@ class Light(TreeNode):
         omega: float,
         t0: float = 0.0,
         sigma: float = 0.0,
+        smearing: float = 0.001,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """
@@ -58,6 +60,8 @@ class Light(TreeNode):
             :yaml:`Center of Gaussian pulse, used only if sigma is non-zero.`
         sigma
             :yaml:`Time width of Gaussian pulse, if non-zero.`
+        smearing
+            :yaml:`Width of Gaussian function to represent delta function.`
         """
         super().__init__()
         self.coherent = coherent
@@ -68,42 +72,104 @@ class Light(TreeNode):
         if (A0 is None) == (E0 is None):
             raise InvalidInputException("Exactly one of A0 and E0 must be specified")
         if A0 is not None:
-            self.A0 = torch.tensor(A0, device=rc.device)
+            A0 = torch.tensor(A0, device=rc.device)
         elif E0 is not None:
-            self.A0 = torch.tensor(E0, device=rc.device) / omega
-        if self.A0.shape[-1] == 2:  # handle complex tensors
-            self.A0 = torch.view_as_complex(self.A0)
+            A0 = torch.tensor(E0, device=rc.device) / omega
+        if A0.shape[-1] == 2:  # handle complex tensors
+            A0 = torch.view_as_complex(A0)
         else:
-            self.A0 = self.A0.to(torch.complex128)
-        self.E0 = self.A0 * omega
+            A0 = A0.to(torch.complex128)
 
+        self.constant_params = dict(
+            A0=A0,
+            omega=torch.tensor(omega, device=rc.device),
+            t0=torch.tensor(t0, device=rc.device),
+            sigma=torch.tensor(sigma, device=rc.device),
+            smearing=torch.tensor(smearing, device=rc.device),
+        )
+        self.t0 = {}
+        self.sigma = {}
+        if self.coherent:
+            self.amp_mat = {}
+            self.omega = {}
+        else:
+            self.plus = {}
+            self.plus_deg = {}
+            self.minus = {}
+            self.minus_deg = {}
+
+    def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
+        self._initialize_fields(patch_id, **params)
+
+    def _initialize_fields(
+        self,
+        patch_id: int,
+        *,
+        A0: torch.Tensor,
+        omega: torch.Tensor,
+        t0: torch.Tensor,
+        sigma: torch.Tensor,
+        smearing: torch.Tensor,
+    ) -> None:
+        ab_initio = self.ab_initio
         if self.gauge == "velocity":
-            self.A0_dot_P = torch.einsum("i, kiab -> kab", self.A0, ab_initio.P)
+            amp_mat = torch.einsum("i, kiab -> kab", A0, ab_initio.P)
         elif self.gauge == "length":
-            self.E0_dot_R = torch.einsum("i, kiab -> kab", self.E0, ab_initio.R)
+            amp_mat = torch.einsum("i, kiab -> kab", A0 * omega, ab_initio.R)
         else:
             raise InvalidInputException(
                 "Parameter gauge should only be velocity or length"
             )
 
-        self.omega = omega
-        self.t0 = t0
-        self.sigma = sigma
-        self.coherent = coherent
+        self.t0[patch_id] = t0
+        self.sigma[patch_id] = sigma
+        if self.coherent:
+            self.amp_mat[patch_id] = amp_mat
+            self.omega[patch_id] = omega
+        else:  #: lindblad version
+            prefac = torch.sqrt(torch.sqrt(torch.pi / (8 * smearing**2)))
+            exp_factor = -1.0 / (smearing**2)
+            Nk, Nb = ab_initio.E.shape
+            dE = ab_initio.E.reshape([Nk, Nb, 1]) - ab_initio.E.reshape([Nk, 1, Nb])
+            plus = prefac * amp_mat * torch.exp(exp_factor * ((dE + omega) ** 2))
+            minus = prefac * amp_mat * torch.exp(exp_factor * ((dE - omega) ** 2))
+            plus_deg = plus.swapaxes(-2, -1).conj()
+            minus_deg = minus.swapaxes(-2, -1).conj()
+            self.identity_mat = torch.tile(torch.eye(Nb), (1, Nk, 1, 1)).to(rc.device)
+            self.plus[patch_id] = plus
+            self.plus_deg[patch_id] = plus_deg
+            self.minus[patch_id] = minus
+            self.minus_deg[patch_id] = minus_deg
 
-    def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
-        pass  # TODO
-
+    @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
-        prefac = -0.5j * np.exp(1j * self.omega * t)  # with Louiville, symmetrization
-        if self.sigma:
-            prefac *= np.exp(-((t - self.t0) ** 2) / (2 * self.sigma**2)) / np.sqrt(
-                np.sqrt(np.pi) * self.sigma
+        t0 = self.t0[patch_id]
+        sigma = self.sigma[patch_id]
+        if sigma > 0:
+            prefac = torch.exp(-((t - t0) ** 2) / (2 * sigma**2)) / np.sqrt(
+                np.sqrt(np.pi) * sigma
+            )
+        else:
+            prefac = 1.0
+
+        if self.coherent:
+            omega = self.omega[patch_id]
+            prefac *= -0.5j * torch.exp(-1j * omega * t)  # Louiville, symmetrization
+            interaction = prefac * self.amp_mat[patch_id]
+            return (interaction - interaction.swapaxes(-2, -1).conj()) @ rho
+        else:
+            prefac = 0.5 * prefac**2
+            I_minus_rho = self.identity_mat - rho
+            plus = self.plus[patch_id]
+            minus = self.minus[patch_id]
+            plus_deg = self.plus_deg[patch_id]
+            minus_deg = self.minus_deg[patch_id]
+            return prefac * (
+                commutator(I_minus_rho @ plus @ rho, plus_deg)
+                + commutator(I_minus_rho @ minus @ rho, minus_deg)
             )
 
-        if self.gauge == "velocity":
-            light_interaction = prefac * self.A0_dot_P
-        else:  # self.gauge == "length"
-            light_interaction = prefac * self.E0_dot_R
 
-        return (light_interaction - light_interaction.swapaxes(-2, -1).conj()) @ rho
+def commutator(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """Commutator of two tensors (along final two dimensions)."""
+    return A @ B - B @ A

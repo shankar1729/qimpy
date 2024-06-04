@@ -99,23 +99,12 @@ class Material(TreeNode):
         """Return tensor of complex conjugates of all observables specific to each
         material. (No x Nkbb_mine) where No is number of observables."""
 
-    def measure_observables(
-        self, rho: torch.Tensor, t: float
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Retrun density and flux of observables, (Nx x Ny x No) for density and
-        (Nx x Ny x No x 2) for flux."""
-        obs = self.get_observables(t)
-        density = self.wk * torch.einsum("xya, oa -> xyo", rho, obs)
-        flux = (
-            self.wk
-            * torch.einsum(
-                "xya, av, oa -> xyov", rho, self.transport_velocity, obs
-            ).contiguous()
-        )
+    def measure_observables(self, rho: torch.Tensor, t: float) -> torch.Tensor:
+        """Return expectation value of observables, (Nx x Ny x No)."""
+        result = self.wk * torch.einsum("xya, oa -> xyo", rho, self.get_observables(t))
         if self.comm.size > 1:
-            self.comm.Allreduce(MPI.IN_PLACE, BufferView(density))
-            self.comm.Allreduce(MPI.IN_PLACE, BufferView(flux))
-        return density, flux
+            self.comm.Allreduce(MPI.IN_PLACE, BufferView(result))
+        return result
 
 
 def fermi(E, mu, T):
