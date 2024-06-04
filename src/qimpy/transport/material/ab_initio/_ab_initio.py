@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import Sequence, Callable, Optional, Union, Protocol
+import re
 
 import torch
-import numpy as np
 
 from qimpy import log, rc
 from qimpy.profiler import StopWatch
@@ -42,6 +42,8 @@ class AbInitio(Material):
     scattering: DynamicsTerm  #: scattering functional
     light: Light  #: light-matter interactions
     pulseB: PulseB  #: magnetic field pulses
+    observables: torch.Tensor  #: Observable matrix elements in Schrodinger picture
+    observable_names: list[str]  #: list of observable names to be output
     dynamics_terms: dict[str, DynamicsTerm]  #: all active drho/dt contributions
 
     def __init__(
@@ -63,7 +65,7 @@ class AbInitio(Material):
         pulseB: Optional[Union[PulseB, dict]] = None,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
-        write_observables: Optional[list[str]] = ["q", "S"],
+        observable_names: tuple[str] = ("n",),
     ):
         """
         Initialize ab initio material.
@@ -91,8 +93,14 @@ class AbInitio(Material):
             :yaml:`Light-matter interaction (coherent / Lindblad).`
         pulseB
             :yaml:`Magnetic field pulses.`
-        write_observables
+        observable_names
             :yaml:`Control which observables will be output.`
+            Supported variables:
+                * n: number density
+                * jx, jy: number flux components
+                * Sx, Sy, Sz: spin density components
+                * jx_Sx, jx_Sy, ...: spin flux, where jx_Sy = Sy flux along x direction
+            By default, only n (number density) is output.
         """
         self.comm = process_grid.get_comm("k")
         self.mu = mu
@@ -184,24 +192,35 @@ class AbInitio(Material):
             if pulseB is not None:
                 self.add_child("pulseB", PulseB, pulseB, checkpoint_in, ab_initio=self)
                 self.dynamics_terms["pulseB"] = self.pulseB
-                
-        # Control output observables
-        obs_dict = {
-            "J": [["Jx", "Jy", "Jz"], -self.P], 
-        }
-        if spinorial:
-            obs_dict["S"] = [["Sx", "Sy", "Sz"], self.S]
-            obs_dict["SJ"] = [["SJx", "SJy", "SJz"], -0.5 * (self.S @ self.P + self.P @ self.S)]
-        self.observable_names = (["q"] if "q" in write_observables else []) + sum(
-            [obs_dict[orb][0] for orb in write_observables if orb != "q"], []
-        )
-        obs_list = [obs_dict[orb][1].swapaxes(0,1) for orb in write_observables if orb != "q"]
-        if obs_list:
-            self.obs_stacked = torch.cat(obs_list, dim=0)
-            self.weight = (torch.ones(self.n_bands, self.n_bands, device=rc.device) * 2.0
-                 ).fill_diagonal_(1.0)[None, None, :]
-        else:
-            self.obs_stacked = torch.tensor([])
+
+        # Control output observables:
+        if not observable_names:
+            observable_names = ("n",)  # Don't allow empty observables list for now
+        dir_name_to_index = {"x": 0, "y": 1, "z": 2}
+        match_j = re.compile("j[x-z]$")
+        match_S = re.compile("S[x-z]$")
+        match_j_S = re.compile("j[x-z]_S[x-z]$")
+        observables = []
+        for observable_name in observable_names:
+            if observable_name == "n":
+                eye_bands = torch.eye(n_bands, device=rc.device, dtype=torch.complex128)
+                observables.append(eye_bands.repeat(self.nk_mine, 1, 1))
+            elif match_j.match(observable_name):
+                observables.append(self.P[:, dir_name_to_index[observable_name[1]]])
+            elif match_S.match(observable_name):
+                if self.S is None:
+                    raise InvalidInputException(f"{observable_name = } unavailable")
+                observables.append(self.S[:, dir_name_to_index[observable_name[1]]])
+            elif match_j_S.match(observable_name):
+                if self.S is None:
+                    raise InvalidInputException(f"{observable_name = } unavailable")
+                Pi = self.P[:, dir_name_to_index[observable_name[1]]]
+                Sj = self.S[:, dir_name_to_index[observable_name[4]]]
+                observables.append(0.5 * (Pi @ Sj + Sj @ Pi))
+            else:
+                raise InvalidInputException(f"{observable_name = } is not supported")
+        self.observables = torch.stack(observables, dim=0)
+        self.observable_names = list(observable_names)
 
     def initialize_fields(
         self, rho: torch.Tensor, params: dict[str, torch.Tensor], patch_id: int
@@ -321,21 +340,10 @@ class AbInitio(Material):
         return self.observable_names
 
     def get_observables(self, t: float) -> torch.Tensor:
-        orbs_tuple = ()
-        if "q" in self.observable_names:
-            Nkbb_mine = np.prod(self.rho0.shape)
-            q = torch.ones((1, Nkbb_mine), device=rc.device)  # charge observable
-            orbs_tuple += (q,)
-        
-        if self.obs_stacked.shape[0] > 0:
-            ph = self.packed_hermitian
-            phase = self.schrodingerV(t)
-            obs = self.obs_stacked * phase[None, :].conj()  # complex conjugate then phase of rho
-            obs_packed = ph.pack(obs)
-            obs_packed *= self.weight
-            orbs_tuple += (obs_packed.flatten(1, 3),)
-            
-        return torch.cat(orbs_tuple, dim=0)
+        ph = self.packed_hermitian
+        phase_conj = self.schrodingerV(t)[None, :].conj()
+        observablesI = self.observables * phase_conj  # switch to interaction picture
+        return (ph.pack(observablesI) * ph.w_overlap).flatten(1, 3)
 
 
 class Contactor:
