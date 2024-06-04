@@ -28,6 +28,7 @@ class Patch:
     V: torch.Tensor  #: Nx x Ny x Nkbb x 2 mesh coordinate velocities
     dt_max: float  #: Maximum stable time step
     wk: float  #: Integration weight for the flattened density matrix dimensions
+    rho_offset: tuple[int, ...]  #: Offset of density matrix data within that of quad
     rho_shape: tuple[int, ...]  #: Shape of density matrix on patch
     rho_padded_shape: tuple[int, ...]  #: Shape of density matrix with ghost padding
     rho: torch.Tensor  #: current density matrix on this patch
@@ -101,13 +102,16 @@ class Patch:
 
         # Initialize distribution function:
         Nkbb = self.v.shape[0]  # flattened density-matrix count (Nkbb_mine of material)
+        nk_prev = material.k_division.n_prev[material.comm.rank]
+        Nkbb_offset = nk_prev * (material.n_bands**2)
         padding = 2 * Patch.N_GHOST
+        self.rho_offset = tuple(grid_start) + (Nkbb_offset,)
         self.rho_shape = (N[0], N[1], Nkbb)
         self.rho_padded_shape = (N[0] + padding, N[1] + padding, Nkbb)
         if checkpoint_in:
             checkpoint, path = checkpoint_in.relative("rho")
             self.rho = checkpoint.read_slice(
-                checkpoint[path], tuple(grid_start) + (0,), N + (Nkbb,)
+                checkpoint[path], self.rho_offset, self.rho_shape
             )
         else:
             self.rho = torch.tile(material.rho0.flatten(), (N[0], N[1], 1))
@@ -175,6 +179,23 @@ class Patch:
                         normal[contact_slice], **contact_params_i
                     )
                     self.contacts[i_edge].append(Contact(contact_slice, contactor))
+
+    def save_checkpoint(
+        self, cp_path: CheckpointPath, observables: torch.Tensor, save_rho: bool
+    ) -> None:
+        """Save observables, and optionally density matrix, to checkpoint."""
+        cp, path = cp_path
+        assert cp is not None
+        grid_offset = self.rho_offset[:-1]
+        if self.material.comm.rank == 0:
+            # Write quantities not divided over material:
+            cp.write_slice(cp[path + "/q"], grid_offset + (0,), self.q)
+            cp.write_slice(cp[path + "/g"], grid_offset, self.g[:, :, 0])
+            cp.write_slice(
+                cp[path + "/observables"], (0,) + grid_offset + (0,), observables
+            )
+        if save_rho:
+            cp.write_slice(cp[path + "/rho"], self.rho_offset, self.rho)
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor) -> torch.Tensor:

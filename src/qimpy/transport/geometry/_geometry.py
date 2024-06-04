@@ -6,7 +6,7 @@ import numpy as np
 
 from qimpy import log, rc, TreeNode, MPI
 from qimpy.io import CheckpointPath, CheckpointContext
-from qimpy.mpi import ProcessGrid, TaskDivision, BufferView
+from qimpy.mpi import ProcessGrid, TaskDivision
 from ..material import Material
 from . import (
     TensorList,
@@ -173,72 +173,32 @@ class Geometry(TreeNode):
         stash = self.stash
         cp_path.attrs["t"] = np.array(stash.t)
         cp_path.attrs["i_step"] = np.array(stash.i_step)
-        nkpts, nbands = self.material.E.shape
-        Nkbb = nkpts * nbands**2
-        # Collect MPI-split data to be written from head (avoids slow h5-mpio):
+
+        n_observables = len(self.material.get_observable_names())
+        Nkbb = self.material.k_division.n_tot * self.material.n_bands**2
         checkpoint, path = cp_path
         for i_quad, grid_size_np in enumerate(self.quad_set.grid_size):
+            # Create group and datasets together from all processes:
             cp_quad = CheckpointPath(checkpoint, f"{path}/quad{i_quad}")
             n_stash = len(stash.t)
             grid_size = tuple(grid_size_np)
-            n_obs = len(self.material.get_observable_names())
-            stashed_size = (n_stash,) + grid_size + (n_obs,)
-            q = torch.empty(grid_size + (2,))
-            g = torch.empty(grid_size)
-            observables = torch.empty(stashed_size)
+            cp_quad.create_dataset("q", grid_size + (2,), np.float64)
+            cp_quad.create_dataset("g", grid_size, np.float64)
+            cp_quad.create_dataset(
+                "observables", (n_stash,) + grid_size + (n_observables,), np.float64
+            )
             if self.save_rho:
-                rho = torch.empty(grid_size + (Nkbb,))
-            for i_patch in np.where(self.sub_quad_set.quad_index == i_quad)[0]:
-                tag = 5 * i_patch
-                i_proc = self.comm.rank
-                whose = self.patch_division.whose(i_patch)
-                local = i_proc == whose
-                if local:
-                    i_patch_mine = i_patch - self.patch_division.i_start
-                    patch = self.patches[i_patch_mine]
-                    q_cur = patch.q
-                    g_cur = patch.g[..., 0]
-                    observables_cur = torch.stack(
-                        stash.observables[i_patch_mine], dim=0
-                    )
-                    if self.save_rho:
-                        rho_cur = patch.rho
-                    if i_proc:
-                        # Send to head for write:
-                        self.comm.Send(BufferView(q_cur), 0, tag=tag)
-                        self.comm.Send(BufferView(g_cur), 0, tag=tag + 1)
-                        self.comm.Send(BufferView(observables_cur), 0, tag=tag + 2)
-                        if self.save_rho:
-                            self.comm.Send(BufferView(rho_cur), 0, tag=tag + 3)
-                if not i_proc:
-                    # Receive and write from head:
-                    grid_start = self.sub_quad_set.grid_start[i_patch]
-                    grid_stop = self.sub_quad_set.grid_stop[i_patch]
-                    patch_size = tuple(grid_stop - grid_start)
-                    slice0 = slice(grid_start[0], grid_stop[0])
-                    slice1 = slice(grid_start[1], grid_stop[1])
-                    if not local:
-                        q_cur = torch.empty(patch_size + (2,))
-                        g_cur = torch.empty(patch_size)
-                        observables_cur = torch.empty(
-                            (n_stash,) + patch_size + (n_obs,)
-                        )
-                        self.comm.Recv(BufferView(q_cur), whose, tag=tag)
-                        self.comm.Recv(BufferView(g_cur), whose, tag=tag + 1)
-                        self.comm.Recv(BufferView(observables_cur), whose, tag=tag + 2)
-                        if self.save_rho:
-                            rho_cur = torch.empty(patch_size + (Nkbb,))
-                            self.comm.Recv(BufferView(rho_cur), whose, tag=tag + 3)
-                    q[slice0, slice1] = q_cur
-                    g[slice0, slice1] = g_cur
-                    observables[:, slice0, slice1] = observables_cur
-                    if self.save_rho:
-                        rho[slice0, slice1] = rho_cur
-            cp_quad.write("q", q)
-            cp_quad.write("g", g)
-            cp_quad.write("observables", observables)
-            if self.save_rho:
-                cp_quad.write("rho", rho)
+                cp_quad.create_dataset("rho", grid_size + (Nkbb,), np.float64)
+
+            # Write independently from each patch on this quad:
+            my_patches = slice(self.patch_division.i_start, self.patch_division.i_stop)
+            for i_patch_mine in np.where(
+                self.sub_quad_set.quad_index[my_patches] == i_quad
+            )[0]:
+                patch = self.patches[i_patch_mine]
+                observables = torch.stack(stash.observables[i_patch_mine], dim=0)
+                patch.save_checkpoint(cp_quad, observables, self.save_rho)
+
         self.stash = ResultStash(len(self.patches))  # Clear stashed history
         return saved_list
 
