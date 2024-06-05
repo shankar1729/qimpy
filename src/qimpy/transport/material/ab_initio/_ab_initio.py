@@ -105,7 +105,7 @@ class AbInitio(Material):
         self.comm = process_grid.get_comm("k")
         self.mu = mu
         self.rotation = torch.tensor(rotation, device=rc.device)
-        self.fname = fname
+        self.file = file
         self.orbital_zeeman = orbital_zeeman
         observable_names = list(observable_names)
         watch = StopWatch("Dynamics.read_checkpoint")
@@ -355,11 +355,11 @@ class AbInitio(Material):
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
-        saved_list = ["T", "mu", "fname", "rotation"]
+        saved_list = ["T", "mu", "file", "rotation"]
         attrs = cp_path.attrs
         attrs["T"] = self.T
         attrs["mu"] = self.mu
-        attrs["fname"] = self.fname
+        attrs["file"] = self.file
         attrs["rotation"] = torch.Tensor.cpu(self.rotation)
         if self.B:
             attrs["B"] = self.B
