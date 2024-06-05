@@ -30,7 +30,12 @@ class Coulomb_Isolated:
         lattice = grid.lattice
         iG = grid.get_mesh("H").to(torch.double)
         Gsq = (iG @ lattice.Gbasis.T).square().sum(dim=-1)
-        self._kernel = torch.where(Gsq == 0.0, 0.0, (4 * np.pi) / Gsq)
+        Rc = 8
+        self._kernel = torch.where(
+            Gsq == 0.0,
+            2 * np.pi * (Rc**2),
+            (4 * np.pi) * (1 - torch.cos(Rc * torch.sqrt(Gsq))) / Gsq,
+        )
 
     def __call__(self, rho: FieldH, correct_G0_width: bool = False) -> FieldH:
         """Apply coulomb operator on charge density `rho`.
@@ -42,7 +47,27 @@ class Coulomb_Isolated:
         return result
 
     def stress(self, rho1: FieldH, rho2: FieldH) -> torch.Tensor:
-        return 0
+        grid = self.grid
+        lattice = grid.lattice
+        iG = grid.get_mesh("H").to(torch.double)
+        Gsq = (iG @ lattice.Gbasis.T).square().sum(dim=-1)
+        Rc = 8
+        GRc = torch.sqrt(Gsq) * Rc
+        stress_prefac = torch.where(
+            Gsq == 0,
+            0,
+            (4 * np.pi)
+            * (2 * (1 - torch.cos(GRc)) - GRc * torch.sin(GRc))
+            / (Gsq * Gsq),
+        )
+        stress_kernel = torch.einsum(
+            "ijk, ijka, ijkb -> abijk",
+            stress_prefac,
+            iG @ lattice.Gbasis.T,
+            iG @ lattice.Gbasis.T,
+        )
+        stress_rho2 = FieldH(self.grid, data=(stress_kernel * rho2.data))
+        return rho1 ^ stress_rho2
 
     def ewald(self, positions: torch.Tensor, Z: torch.Tensor) -> float:
         lattice = self.grid.lattice
@@ -68,5 +93,5 @@ class Coulomb_Isolated:
                 "ij, ij, ija, ijb -> ab", Zprod, rinv**3, rVec, rVec
             )
             log.info(f"Stresses in Coulomb_Isolted.ewald: {real_sum_stress}")
-            lattice.grad += real_sum_stress
+            lattice.grad -= real_sum_stress
         return E
