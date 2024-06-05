@@ -355,19 +355,19 @@ class AbInitio(Material):
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
-        saved_list = ["T", "mu", "file", "rotation"]
+        saved_list = ["T", "mu", "file", "rotation", "observable_names"]
         attrs = cp_path.attrs
         attrs["T"] = self.T
         attrs["mu"] = self.mu
         attrs["file"] = self.file
         attrs["rotation"] = torch.Tensor.cpu(self.rotation)
+        attrs["observable_names"] = self.observable_names
         if self.B:
             attrs["B"] = self.B
             saved_list.append("B")
         if self.orbital_zeeman:
             attrs["orbital_zeeman"] = self.orbital_zeeman
             saved_list.append("orbital_zeeman")
-        cp_path.attrs["observable_names"] = self.observable_names
         return saved_list
 
 

@@ -71,7 +71,7 @@ class Transport(TreeNode):
             try:
                 checkpoint_in = CheckpointPath(Checkpoint(checkpoint))
                 material_name = checkpoint_in[0].attrs['material']
-                material_restart = self.h5_to_dict(checkpoint_in[0],"material")
+                material_restart = h5_to_dict(checkpoint_in[0],"material")
                 if material_name == "ab-initio":
                     ab_initio = material_restart
                     fermi_circle = None
@@ -133,19 +133,19 @@ class Transport(TreeNode):
             with Checkpoint(filename, writable=True, rotate=False) as cp:
                 self.save_checkpoint(CheckpointPath(cp), CheckpointContext(""))
 
-    def h5_to_dict(self, hdf5, path):
-        if path not in hdf5:
-            return {}
-        result = dict(hdf5[path].attrs)
-        for item in hdf5[path].keys():
-            result[item] = self.h5_to_dict(hdf5[path],item)
-        return result
+def h5_to_dict(hdf5, path):
+    if path not in hdf5:
+        return {}
+    result = dict(hdf5[path].attrs)
+    for item in hdf5[path].keys():
+        result[item] = h5_to_dict(hdf5[path],item)
+    return result
 
-    def recursive_update(self, source, hdf5, path): # Update input parameters from restart h5
-        if path not in hdf5:
-            return
-        source.update(dict(hdf5[path].attrs))
-        for item in hdf5[path].keys():
-            if item not in source:
-                source[item] = {}
-            self.recursive_update(source[item], hdf5[path], item)
+def recursive_update(source, hdf5, path): # Update input parameters from restart h5
+    if path not in hdf5:
+        return
+    source.update(dict(hdf5[path].attrs))
+    for item in hdf5[path].keys():
+        if item not in source:
+            source[item] = {}
+        recursive_update(source[item], hdf5[path], item)
