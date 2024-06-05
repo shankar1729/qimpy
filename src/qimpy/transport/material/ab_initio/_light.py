@@ -169,6 +169,17 @@ class Light(TreeNode):
                 + commutator(I_minus_rho @ minus @ rho, minus_deg)
             )
 
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["coherent"] = self.coherent
+        attrs["gauge"] = self.gauge
+        attrs.update(
+            {param: self.constant_params[param].cpu() for param in self.constant_params}
+        )
+        return ["coherent", "gauge", "A0", "omega", "t0", "sigma", "smearing"]
+
 
 def commutator(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     """Commutator of two tensors (along final two dimensions)."""

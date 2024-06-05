@@ -105,6 +105,9 @@ class AbInitio(Material):
         self.comm = process_grid.get_comm("k")
         self.mu = mu
         self.rotation = torch.tensor(rotation, device=rc.device)
+        self.fname = fname
+        self.orbital_zeeman = orbital_zeeman
+        observable_names = list(observable_names)
         watch = StopWatch("Dynamics.read_checkpoint")
         with Checkpoint(fname) as data_file:
             attrs = data_file.attrs
@@ -198,6 +201,7 @@ class AbInitio(Material):
             observable_names = ("n",)  # Don't allow empty observables list for now
         dir_name_to_index = {"x": 0, "y": 1, "z": 2}
         match_j = re.compile("j[x-z]$")
+        match_jd = re.compile("jd[x-z]$")
         match_S = re.compile("S[x-z]$")
         match_j_S = re.compile("j[x-z]_S[x-z]$")
         observables = []
@@ -207,6 +211,9 @@ class AbInitio(Material):
                 observables.append(eye_bands.repeat(self.nk_mine, 1, 1))
             elif match_j.match(observable_name):
                 observables.append(self.P[:, dir_name_to_index[observable_name[1]]])
+            elif match_jd.match(observable_name):
+                P_diag = torch.diag_embed(torch.einsum("kibb -> kib", self.P))
+                observables.append(P_diag[:, dir_name_to_index[observable_name[2]]])
             elif match_S.match(observable_name):
                 if self.S is None:
                     raise InvalidInputException(f"{observable_name = } unavailable")
@@ -344,6 +351,24 @@ class AbInitio(Material):
         phase_conj = self.schrodingerV(t)[None, :].conj()
         observablesI = self.observables * phase_conj  # switch to interaction picture
         return (ph.pack(observablesI) * ph.w_overlap).flatten(1, 3)
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        saved_list = ["T", "mu", "fname", "rotation"]
+        attrs = cp_path.attrs
+        attrs["T"] = self.T
+        attrs["mu"] = self.mu
+        attrs["fname"] = self.fname
+        attrs["rotation"] = torch.Tensor.cpu(self.rotation)
+        if self.B:
+            attrs["B"] = self.B
+            saved_list.append("B")
+        if self.orbital_zeeman:
+            attrs["orbital_zeeman"] = self.orbital_zeeman
+            saved_list.append("orbital_zeeman")
+        cp_path.attrs["observable_names"] = self.observable_names
+        return saved_list
 
 
 class Contactor:

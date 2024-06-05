@@ -78,6 +78,11 @@ class RelaxationTime(TreeNode):
             tau_recomb=torch.tensor(tau_recomb, device=rc.device),
         )
         self.nv = nv
+        self.max_dmu = max_dmu
+        self.eps = float(eps)
+        self.dmu_eps = float(dmu_eps)
+        self.only_diagonal = only_diagonal
+
         self.tau_e = {}
         self.tau_h = {}
         self.tau_eh = {}
@@ -96,11 +101,10 @@ class RelaxationTime(TreeNode):
             log.info("Enable phenomenon recombination.")
             self.exp_betaE = {}
             self.betamuk0 = {}
+
         self.max_dbetamu = max_dmu / ab_initio.T
-        self.eps = float(eps)
         self.dbetamu_eps = float(dmu_eps) / ab_initio.T
         self.nbands = ab_initio.E.shape[-1]
-        self.only_diagonal = only_diagonal
 
     def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
         self._initialize_fields(patch_id, **params)
@@ -229,6 +233,21 @@ class RelaxationTime(TreeNode):
             if torch.max(torch.abs(dbetamu)) < self.dbetamu_eps:
                 break
         return betamu, distribution
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["nv"] = self.nv
+        attrs["max_dmu"] = self.max_dmu
+        attrs["eps"] = self.eps
+        attrs["dmu_eps"] = self.dmu_eps
+        attrs["only_diagonal"] = self.only_diagonal
+        attrs.update(
+            {param: self.constant_params[param].cpu() for param in self.constant_params}
+        )
+        return ["tau_p", "tau_s", "tau_e", "tau_h", "tau_eh", "tau_recomb",
+                "nv", "max_dmu", "eps", "dmu_eps", "only_diagonal"]
 
 
 def fermi_dirac(exp_betaE: torch.Tensor, betamu: torch.Tensor) -> torch.Tensor:

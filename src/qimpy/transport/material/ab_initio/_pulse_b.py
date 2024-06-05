@@ -104,3 +104,12 @@ class PulseB(TreeNode):
         prefactor = -0.5j * torch.exp(-1j * omega * t) * in_range.sum(dim=-1)
         iH = prefactor[..., None, None, None] * self.H0[patch_id]
         return (iH - iH.swapaxes(-1, -2).conj()) @ rho
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs.update(
+            {param: self.constant_params[param].cpu() for param in self.constant_params}
+        )
+        return ["B0", "g", "g_flip", "t_starts", "angles"]
