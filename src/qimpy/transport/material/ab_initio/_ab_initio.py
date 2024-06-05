@@ -49,7 +49,7 @@ class AbInitio(Material):
     def __init__(
         self,
         *,
-        fname: str,
+        file: str,
         T: float,
         mu: float = 0.0,
         rotation: Sequence[Sequence[float]] = (
@@ -72,8 +72,8 @@ class AbInitio(Material):
 
         Parameters
         ----------
-        fname
-            :yaml:`File name to load materials data from.`
+        file
+            :yaml:`Name of HDF5 file to load materials data from.`
         T
             :yaml:`Temperature.`
         mu
@@ -106,7 +106,7 @@ class AbInitio(Material):
         self.mu = mu
         self.rotation = torch.tensor(rotation, device=rc.device)
         watch = StopWatch("Dynamics.read_checkpoint")
-        with Checkpoint(fname) as data_file:
+        with Checkpoint(file) as data_file:
             attrs = data_file.attrs
             spinorial = bool(attrs["spinorial"])
             haveL = bool(attrs["haveL"])
@@ -116,7 +116,7 @@ class AbInitio(Material):
                 useL = orbital_zeeman
                 if useL and not haveL:
                     raise InvalidInputException(
-                        f"L not available in {fname} for orbital-zeeman"
+                        f"L not available in {file} for orbital-zeeman"
                     )
             if T > (Tmax := float(attrs["Tmax"])) * (1 + 1e-6):
                 raise InvalidInputException(f"{T = } exceeds {Tmax = }")
