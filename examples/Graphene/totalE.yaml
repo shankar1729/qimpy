@@ -1,7 +1,8 @@
 lattice:
-  system: hexagonal
-  a: 4.651
-  c: 15
+  system:
+    name: hexagonal
+    a: 4.651
+    c: 15
   compute-stress: yes
 
 ions:

@@ -40,14 +40,7 @@ class Lattice(TreeNode):
         self,
         *,
         checkpoint_in: CheckpointPath = CheckpointPath(),
-        system: Optional[str] = None,
-        modification: Optional[str] = None,
-        a: Optional[float] = None,
-        b: Optional[float] = None,
-        c: Optional[float] = None,
-        alpha: Optional[float] = None,
-        beta: Optional[float] = None,
-        gamma: Optional[float] = None,
+        system: Optional[dict] = None,
         vector1: Optional[Sequence[float]] = None,
         vector2: Optional[Sequence[float]] = None,
         vector3: Optional[Sequence[float]] = None,
@@ -69,36 +62,62 @@ class Lattice(TreeNode):
         ----------
         system
             :yaml:`Specify crystal system and geometry parameters.`
-            Options include:
+            This must be a dictionary matching one of the following patterns
+            (denoted using YAML input-file syntax, and where [ ] indicates optional):
 
-            * cubic (specify `a`),
-            * tetragonal (specify `a`, `c`)
-            * orthorhombic (specify `a`, `b`, `c`)
-            * hexagonal (specify `a`, `c`)
-            * rhombohedral (specify `a`, `alpha`)
-            * monoclinic (specify `a`, `b`, `c`, `beta`)
-            * triclinic (specify `a`, `b`, `c`, `alpha`, `beta`, `gamma`)
+            .. code-block:: text
 
-        modification
-            :yaml:`Specify modification of lattice.`
-            Options include:
+                system:
+                  name: cubic  # all angles are 90 degrees
+                  a: <value>  # each lattice vector length in bohrs
+                  [modification: body-centered | face-centered]
 
-            * body-centered (only for orthorhombic, tetragonal or cubic)
-            * face-centered (only for orthorhombic or cubic)
-            * base-centered (only for monoclinic)
+                system:
+                  name: tetragonal  # all angles are 90 degrees
+                  a: <value>  # first two lattice vector lengths in bohrs
+                  c: <value>  # third lattice vector length in bohrs
+                  [modification: body-centered]
 
-        a
-            :yaml:`First lattice vector length in bohrs.`
-        b
-            :yaml:`Second lattice vector length in bohrs.`
-        c
-            :yaml:`Third lattice vector length in bohrs.`
-        alpha
-            :yaml:`Angle between b and c in degrees.`
-        beta
-            :yaml:`Angle between c and a in degrees.`
-        gamma
-            :yaml:`Angle between a and b in degrees.`
+                system:
+                  name: orthorhombic  # all angles are 90 degrees
+                  a: <value>  # first lattice vector length in bohrs
+                  b: <value>  # second lattice vector length in bohrs
+                  c: <value>  # third lattice vector length in bohrs
+                  [modification: body-centered | face-centered | base-centered]
+
+                system:
+                  name: hexagonal  # angles are 90, 90 and 120 degrees
+                  a: <value>  # first two lattice vector lengths in bohrs
+                  c: <value>  # third lattice vector length in bohrs
+
+                system:
+                  name: rhombohedral
+                  a: <value>  # each lattice vector length in bohrs
+                  alpha: <value>  # in radians, all angles equal
+
+                system:
+                  name: monoclinic
+                  a: <value>  # first lattice vector length in bohrs
+                  b: <value>  # second lattice vector length in bohrs
+                  c: <value>  # third lattice vector length in bohrs
+                  beta: <value>  # angle between a and c in radians, rest 90 degrees
+                  [modification: base-centered]
+
+                system:
+                  name: triclinic
+                  a: <value>  # first lattice vector length in bohrs
+                  b: <value>  # second lattice vector length in bohrs
+                  c: <value>  # third lattice vector length in bohrs
+                  alpha: <value>  # angle between b and c in radians
+                  beta: <value>  # angle between a and c in radians
+                  gamma: <value>  # angle between a and b in radians
+
+            Note that all lengths are in bohrs and angles are in radians.
+            In the input file, use units like Angstrom or nm explicitly for lengths,
+            and deg explicitly for angles, if needed.
+            If the optional modification is unspecified or None (null in yaml),
+            the unmodified Bravais lattice is selected.
+
         vector1
             :yaml:`First lattice vector (x1, y1, z1) in bohrs.`
         vector2
@@ -152,9 +171,7 @@ class Lattice(TreeNode):
 
             # Get unscaled lattice vectors:
             if system:
-                self.Rbasis = get_Rbasis(
-                    system, modification, a, b, c, alpha, beta, gamma
-                )
+                self.Rbasis = get_Rbasis(**system)
             else:
                 # Direct specification of lattice vectors:
                 def check_vectors(**kwargs):

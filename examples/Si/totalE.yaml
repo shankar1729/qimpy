@@ -1,8 +1,9 @@
 # Diamond-cubic silicon
 lattice:
-  system: cubic
-  modification: face-centered
-  a: 5.43 Angstrom
+  system: 
+    name: cubic
+    modification: face-centered
+    a: 5.43 Angstrom
   movable: yes
 
 ions:

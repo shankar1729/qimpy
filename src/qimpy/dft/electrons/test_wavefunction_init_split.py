@@ -5,6 +5,7 @@ import torch
 import pytest
 
 from qimpy import rc, dft
+from qimpy.io import Unit
 from qimpy.mpi import TaskDivision
 from . import Wavefunction
 
@@ -16,15 +17,17 @@ def make_system(real: bool, spinorial: bool, polarized: bool) -> dft.System:
         # Gamma-point only, non-spinorial (make a bit larger since no k)
         assert not spinorial
         lattice = {
-            "system": "monoclinic",
-            "a": 15.0,
-            "b": 20.0,
-            "c": 18.0,
-            "beta": 105.0,
+            "system": {
+                "name": "monoclinic",
+                "a": 15.0,
+                "b": 20.0,
+                "c": 18.0,
+                "beta": 105.0 * Unit.MAP["deg"],
+            }
         }
         kmesh = {}
     else:
-        lattice = {"system": "hexagonal", "a": 9.0, "c": 12.0}
+        lattice = {"system": {"name": "hexagonal", "a": 9.0, "c": 12.0}}
         kmesh = {"size": [4, 4, 3]}
     return dft.System(
         lattice=lattice,
