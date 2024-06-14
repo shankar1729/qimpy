@@ -26,5 +26,4 @@ geometry:
   relax:
     n-iterations: 10
   
-checkpoint: null  # disable reading checkpoint
-checkpoint-out: totalE.h5  # but still create it
+checkpoint: totalE.h5

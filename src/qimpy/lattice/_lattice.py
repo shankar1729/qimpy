@@ -5,7 +5,6 @@ import numpy as np
 import torch
 
 from qimpy import log, rc, TreeNode
-from qimpy.io import CheckpointOverrideException
 from qimpy.io import (
     CheckpointPath,
     CheckpointContext,
@@ -13,6 +12,9 @@ from qimpy.io import (
     Default,
     WithDefault,
     cast_default,
+    InvalidInputException,
+    check_only_one_specified,
+    CheckpointOverrideException,
 )
 from ._lattice_systems import get_Rbasis
 
@@ -41,9 +43,8 @@ class Lattice(TreeNode):
         *,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         system: Optional[dict] = None,
-        vector1: Optional[Sequence[float]] = None,
-        vector2: Optional[Sequence[float]] = None,
-        vector3: Optional[Sequence[float]] = None,
+        vectors: Optional[Sequence[Sequence[float]]] = None,
+        Rbasis: Optional[torch.Tensor] = None,
         scale: Union[float, Sequence[float], Default[float]] = Default(1.0),
         compute_stress: WithDefault[bool] = Default(False),
         movable: WithDefault[bool] = Default(False),
@@ -52,10 +53,14 @@ class Lattice(TreeNode):
         center: WithDefault[Sequence[float]] = Default((0.0, 0.0, 0.0)),
     ) -> None:
         """Initialize from lattice vectors or lengths and angles.
-        Either specify a lattice `system` and optional `modification`,
-        along with any corresponding required lengths (`a`, `b`, `c`)
-        and angles (`alpha`, `beta`, `gamma`), or explicitly specity
-        all three lattice vectors `vector1`, `vector2` and `vector3`.
+        Either specify a lattice `system` with any required lengths, angles and
+        modifications, or a set of `vectors`, or as the basis matrix `Rbasis`.
+        Exactly one among `system`, `vectors` and `Rbasis` must be specified.
+
+        Note that `vectors` amounts to specifying the vectors in rows in a way
+        that may be common in other codes/interfaces, while `Rbasis` amounts to
+        specifying them in columns, in the form they are stored internally.
+
         Optionally, `scale` lattice vectors by a single or separate factors.
 
         Parameters
@@ -118,12 +123,12 @@ class Lattice(TreeNode):
             If the optional modification is unspecified or None (null in yaml),
             the unmodified Bravais lattice is selected.
 
-        vector1
-            :yaml:`First lattice vector (x1, y1, z1) in bohrs.`
-        vector2
-            :yaml:`Second lattice vector (x2, y2, z2) in bohrs.`
-        vector3
-            :yaml:`Third lattice vector (x3, y3, z3) in bohrs.`
+        vectors
+            :yaml:`Three lattice vectors, each with (x, y, z) in bohrs.`
+            The input is essentially a 3 x 3 matrix, with the vectors in rows.
+        Rbasis
+            :yaml:`Real-space basis vectors in columns.`
+            Overall, the 3 x 3 transformation from fractional to Cartesian coordinates.
         scale
             :yaml:`Scale factor for lattice vectors.` Either a single number
             that uniformly scales all lattice vectors or separate factor
@@ -170,30 +175,27 @@ class Lattice(TreeNode):
             stress = None
 
             # Get unscaled lattice vectors:
-            if system:
-                self.Rbasis = get_Rbasis(**system)
+            check_only_one_specified(system=system, vectors=vectors, Rbasis=Rbasis)
+            if Rbasis is not None:
+                self.Rbasis = Rbasis.to(rc.device)
+            elif system is not None:
+                self.Rbasis = get_Rbasis(**system).to(rc.device)
             else:
-                # Direct specification of lattice vectors:
-                def check_vectors(**kwargs):
-                    for key, value in kwargs.items():
-                        if value is None:
-                            raise KeyError(f"{key} must be specified")
-                        try:
-                            np.array(value, dtype=float).reshape(3)
-                        except ValueError:
-                            raise ValueError(f"{key} must contain 3 numbers")
-
-                check_vectors(vector1=vector1, vector2=vector2, vector3=vector3)
-                self.Rbasis = torch.tensor([vector1, vector2, vector3]).T
+                assert vectors is not None
+                try:
+                    self.Rbasis = torch.tensor(vectors, device=rc.device).T
+                    assert self.Rbasis.shape == (3, 3)
+                except (ValueError, AssertionError):
+                    raise InvalidInputException("vectors must be a 3 x 3 matrix")
 
             # Apply scale if needed:
             if (not isinstance(scale, Default)) and (not checkpoint_in):
-                scale_vector = torch.tensor(scale).flatten()
+                scale_vector = torch.tensor(scale, device=rc.device).flatten()
                 assert len(scale_vector) in (1, 3)
                 self.Rbasis = scale_vector[None, :] * self.Rbasis
 
         # Compute dependent quantities:
-        self.update(self.Rbasis.to(rc.device), report_change=False)
+        self.update(self.Rbasis, report_change=False)
         self.report(report_grad=False)
         check_perpendicular(self.Rbasis, self.periodic)
         self.requires_grad_(False, clear=True)  # initialize gradient
