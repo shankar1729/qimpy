@@ -85,7 +85,8 @@ class XC(TreeNode):
         if libxc_names:
             self._functionals.append(FunctionalsLibxc(spin_polarized, libxc_names))
 
-        self.add_child("plus_U", PlusU, plus_U, checkpoint_in)
+        # DFT+U
+        self.plus_U = PlusU(plus_U)
 
         # Collect overall needs:
         self.need_sigma = any(func.needs_sigma for func in self._functionals)
