@@ -16,10 +16,11 @@ class TreeNode:
     files preserving the same tree structure."""
 
     child_names: list[str]  #: Names of attributes with child objects.
-    _attr_version_map: dict[str, str]  #: Version of children having variants (if any)
+    variant_name: str  #: Version of children having variants (if any)
 
     def __init__(self, **kwargs):
         self.child_names = []
+        self.variant_name = ""
 
     @final
     def save_checkpoint(
@@ -30,11 +31,9 @@ class TreeNode:
         e.g. at a geometry step, or at the end of the simulation.
         Override `_save_checkpoint` to implement the save functionality."""
         if cp_path.checkpoint is not None:
-            # Mark selected variants of children, if required:
-            if hasattr(self, "_attr_version_map"):
-                attrs = cp_path.attrs
-                for attr_name, attr_version_name in self._attr_version_map.items():
-                    attrs[attr_name] = attr_version_name
+            # Mark variant if non-trivial:
+            if self.variant_name:
+                cp_path.attrs["variant_name"] = self.variant_name
             # Save quantities in self:
             saved = self._save_checkpoint(cp_path, context)
             if saved:
@@ -58,7 +57,7 @@ class TreeNode:
         cls: Type[TreeNodeType],
         params: Union[TreeNodeType, dict, str, None],
         checkpoint_in: CheckpointPath,
-        attr_version_name: str = "",
+        attr_variant_name: str = "",
         **kwargs,
     ) -> None:
         """Construct child object `self`.`attr_name` of type `cls`.
@@ -70,12 +69,13 @@ class TreeNode:
         Otherwise check that `params` is already of type `cls`, and if not,
         raise an error clearly stating the types `attr_name` can be.
 
-        Optionally, `attr_version_name` overrides `attr_name` used in the
+        Optionally, `attr_variant_name` overrides `attr_name` used in the
         error, which may be useful when the same `attr_name` could be
         initialized by several versions eg. `kpoints` in :class:`Electrons`
         could be `k-mesh` (:class:`Kmesh`) or `k-path` (:class:`Kmesh`).
         For such cases, use `add_child_one_of` instead, which wraps `add_child`
         and handles the selection of which version of the child to use.
+        This value is also stored as `variant_name` within the attribute.
 
         Finally, this routine supports a special case when `params` is str.
         In this case, `params` becomes a `dict` mapping that str to `{}`.
@@ -110,12 +110,13 @@ class TreeNode:
             )  # drop internal module names
             module_elems.append(cls.__qualname__)
             class_name = ".".join(module_elems)
-            a_name = attr_version_name if attr_version_name else attr_name
+            a_name = attr_variant_name if attr_variant_name else attr_name
             raise TypeError(f"{a_name} must be dict or {class_name}")
 
         # Add as an attribute and child in hierarchy:
         setattr(self, attr_name, result)
         self.child_names.append(attr_name)
+        result.variant_name = attr_variant_name
 
     class ChildOptions:
         """Arguments to `qimpy.TreeNode.add_child`.
@@ -124,12 +125,12 @@ class TreeNode:
 
         def __init__(
             self,
-            attr_version_name: str,
+            attr_variant_name: str,
             cls: Type[TreeNodeType],
             params: Union[TreeNodeType, dict, None],
             **kwargs,
         ) -> None:
-            self.attr_version_name = attr_version_name
+            self.attr_variant_name = attr_variant_name
             self.cls = cls
             self.params = params
             self.kwargs = kwargs
@@ -153,39 +154,38 @@ class TreeNode:
         child's initialization (as the data within would be incompatible).
         """
         # Check checkpoint for child version it contains if any:
-        attr_version_name_checkpoint = (
-            checkpoint_in.attrs[attr_name]
-            if (checkpoint_in and (attr_name in checkpoint_in.attrs))
-            else ""
-        )
+        variant_name = ""
+        if checkpoint_in:
+            variant_name = checkpoint_in.relative(attr_name).attrs["variant_name"]
 
         # Check argument list:
         arg_options = [arg for arg in args if (arg.params is not None)]
         if len(arg_options) > 1:
-            arg_option_names = ", ".join(arg.attr_version_name for arg in arg_options)
+            arg_option_names = ", ".join(arg.attr_variant_name for arg in arg_options)
             raise ValueError(f"Cannot use more than one of {arg_option_names}")
-        if not (arg_options or have_default or attr_version_name_checkpoint):
-            arg_names = ", ".join(arg.attr_version_name for arg in args)
+        if not (arg_options or have_default or variant_name):
+            arg_names = ", ".join(arg.attr_variant_name for arg in args)
             raise ValueError(f"At least one of {arg_names} must be specified")
 
         # Determine child based on arguments, checkpoint or default:
         if arg_options:
             arg_sel = arg_options[0]  # parameters explicitly specified
-        elif attr_version_name_checkpoint:
+        elif checkpoint_in:
             for arg in args:
-                if arg.attr_version_name == attr_version_name_checkpoint:
+                if arg.attr_variant_name == variant_name:
                     arg_sel = arg  # version selected by checkpoint
                     break
+            else:
+                raise KeyError(f"{variant_name = } not recognized for {attr_name}")
         else:
             arg_sel = args[0]  # default
 
-        # Remember selected variant for writing to checkpoint:
-        if not hasattr(self, "_attr_version_map"):
-            self._attr_version_map = {}
-        self._attr_version_map[attr_name] = arg_sel.attr_version_name
-
         # Prevent loading data from inconsistent checkpoint:
-        if arg_sel.attr_version_name != attr_version_name_checkpoint:
+        if checkpoint_in and (arg_sel.attr_variant_name != variant_name):
+            log.warning(
+                f"Not loading {arg_sel.attr_variant_name} from checkpoint which"
+                f" contains {variant_name} of {attr_name}."
+            )
             checkpoint_in = CheckpointPath()
 
         self.add_child(
@@ -193,6 +193,6 @@ class TreeNode:
             arg_sel.cls,
             arg_sel.params,
             checkpoint_in,
-            arg_sel.attr_version_name,
+            arg_sel.attr_variant_name,
             **arg_sel.kwargs,
         )
