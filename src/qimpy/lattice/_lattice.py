@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Union, Sequence
+from typing import Optional
 
 import numpy as np
 import torch
@@ -9,12 +9,10 @@ from qimpy.io import (
     CheckpointPath,
     CheckpointContext,
     fmt,
-    Default,
-    WithDefault,
-    cast_default,
+    cast_tensor,
+    TensorCompatible,
     InvalidInputException,
     check_only_one_specified,
-    CheckpointOverrideException,
 )
 from ._lattice_systems import get_Rbasis
 
@@ -43,14 +41,14 @@ class Lattice(TreeNode):
         *,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         system: Optional[dict] = None,
-        vectors: Optional[Sequence[Sequence[float]]] = None,
-        Rbasis: Optional[torch.Tensor] = None,
-        scale: Union[float, Sequence[float], Default[float]] = Default(1.0),
-        compute_stress: WithDefault[bool] = Default(False),
-        movable: WithDefault[bool] = Default(False),
-        move_scale: WithDefault[Sequence[float]] = Default((1.0, 1.0, 1.0)),
-        periodic: WithDefault[tuple[bool, bool, bool]] = Default((True, True, True)),
-        center: WithDefault[Sequence[float]] = Default((0.0, 0.0, 0.0)),
+        vectors: Optional[TensorCompatible] = None,
+        Rbasis: Optional[TensorCompatible] = None,
+        scale: TensorCompatible = 1.0,
+        compute_stress: bool = False,
+        movable: bool = False,
+        move_scale: TensorCompatible = (1.0, 1.0, 1.0),
+        periodic: tuple[bool, bool, bool] = (True, True, True),
+        center: TensorCompatible = (0.0, 0.0, 0.0),
     ) -> None:
         """Initialize from lattice vectors or lengths and angles.
         Either specify a lattice `system` with any required lengths, angles and
@@ -154,45 +152,35 @@ class Lattice(TreeNode):
         """
         super().__init__()
         log.info("\n--- Initializing Lattice ---")
-        self.periodic = checkpoint_in.override("periodic", periodic, False)
-        self.movable = checkpoint_in.override("movable", movable, True)
-        self.compute_stress = (
-            checkpoint_in.override("compute_stress", compute_stress, True)
-            or self.movable
-        )
+
+        # Get unscaled lattice vectors:
+        check_only_one_specified(system=system, vectors=vectors, Rbasis=Rbasis)
+        if Rbasis is not None:
+            self.Rbasis = cast_tensor(Rbasis)
+        elif system is not None:
+            self.Rbasis = get_Rbasis(**system).to(rc.device)
+        else:
+            assert vectors is not None
+            self.Rbasis = cast_tensor(vectors, device=rc.device).T
+            if self.Rbasis.shape != (3, 3):
+                raise InvalidInputException("vectors must be a 3 x 3 matrix")
+
+        # Apply scale:
+        scale_vector = cast_tensor(scale).flatten()
+        assert len(scale_vector) in (1, 3)
+        self.Rbasis = scale_vector[None, :] * self.Rbasis
+
+        self.movable = movable
+        self.compute_stress = compute_stress or self.movable
+        self.periodic = periodic
+        self.center = cast_tensor(center)
+        self.move_scale = cast_tensor(move_scale)
         if checkpoint_in:
-            if not isinstance(center, Default):
-                raise CheckpointOverrideException("center")
-            self.center = checkpoint_in.read("center")
-            self.move_scale = checkpoint_in.read("move_scale")
             self.strain_rate = checkpoint_in.read_optional("strain_rate")
-            self.Rbasis = checkpoint_in.read("Rbasis")
             stress = checkpoint_in.read_optional("stress")  # converted to grad below
         else:
-            self.center = torch.tensor(cast_default(center), device=rc.device)
-            self.move_scale = torch.ones(3, device=rc.device)
             self.strain_rate = None
             stress = None
-
-            # Get unscaled lattice vectors:
-            check_only_one_specified(system=system, vectors=vectors, Rbasis=Rbasis)
-            if Rbasis is not None:
-                self.Rbasis = Rbasis.to(rc.device)
-            elif system is not None:
-                self.Rbasis = get_Rbasis(**system).to(rc.device)
-            else:
-                assert vectors is not None
-                try:
-                    self.Rbasis = torch.tensor(vectors, device=rc.device).T
-                    assert self.Rbasis.shape == (3, 3)
-                except (ValueError, AssertionError):
-                    raise InvalidInputException("vectors must be a 3 x 3 matrix")
-
-            # Apply scale if needed:
-            if (not isinstance(scale, Default)) and (not checkpoint_in):
-                scale_vector = torch.tensor(scale, device=rc.device).flatten()
-                assert len(scale_vector) in (1, 3)
-                self.Rbasis = scale_vector[None, :] * self.Rbasis
 
         # Compute dependent quantities:
         self.update(self.Rbasis, report_change=False)
@@ -202,24 +190,19 @@ class Lattice(TreeNode):
         if stress is not None:
             self.grad = self.volume * stress
 
-        # Optionally override optimization / constraints settings:
-        if not isinstance(move_scale, Default):
-            self.move_scale = torch.tensor(move_scale, device=rc.device)
-            assert self.move_scale.shape == (3,)
-
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
         attrs = cp_path.attrs
-        attrs["periodic"] = self.periodic
-        cp_path.write("center", self.center)
+        attrs["Rbasis"] = self.Rbasis.to(rc.cpu)
         attrs["compute_stress"] = self.compute_stress
         attrs["movable"] = self.movable
-        saved_list = ["periodic", "center", "compute_stress", "movable"]
-        saved_list.append(cp_path.write("move_scale", self.move_scale))
+        attrs["periodic"] = self.periodic
+        attrs["center"] = self.center.to(rc.cpu)
+        attrs["move_scale"] = self.move_scale.to(rc.cpu)
+        saved_list = list(attrs.keys())
         if self.strain_rate is not None:
             saved_list.append(cp_path.write("strain_rate", self.strain_rate))
-        saved_list.append(cp_path.write("Rbasis", self.Rbasis))
         if self.compute_stress:
             saved_list.append(cp_path.write("stress", self.stress.detach()))
         return saved_list

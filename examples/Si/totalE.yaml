@@ -24,6 +24,7 @@ grid:
 
 geometry:
   relax:
-    n-iterations: 10
+    n-iterations: 1
   
-checkpoint: totalE.h5
+checkpoint: null
+checkpoint_out: totalE.h5

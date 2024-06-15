@@ -64,7 +64,9 @@ class TreeNode:
         Specifically, construct object from `params` and `kwargs`
         if `params` is a dict, and just from `kwargs` if `params` is None.
         During construction, object and its children will load data from
-        `checkpoint_in`, if it contains a loaded checkpoint file.
+        `checkpoint_in`, if it contains a loaded checkpoint file and any
+        attrs in that location within the checkpoint will also be used as
+        keyword arguments for construction (overridable by params, if present).
         Any '-' in the keys of `params` are replaced with '_' for convenience.
         Otherwise check that `params` is already of type `cls`, and if not,
         raise an error clearly stating the types `attr_name` can be.
@@ -93,11 +95,15 @@ class TreeNode:
 
         # Try all the valid possibilities:
         if isinstance(params, dict):
-            result = cls(
-                **kwargs,
-                **key_cleanup(params),
-                checkpoint_in=checkpoint_in.relative(attr_name),
-            )
+            params = key_cleanup(params)  # higher precedence
+            if checkpoint_in:
+                checkpoint_in = checkpoint_in.relative(attr_name)  # traverse down
+                # Load attributes from checkpoint (lower precedence):
+                for cp_attr_name, cp_attr_value in checkpoint_in.attrs.items():
+                    if cp_attr_name != "variant_name":  # already used to select `cls`
+                        params.setdefault(cp_attr_name.replace("-", "_"), cp_attr_value)
+            print(params)
+            result = cls(**kwargs, **params, checkpoint_in=checkpoint_in)
         elif isinstance(params, cls):
             result = params
         else:

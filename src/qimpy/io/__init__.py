@@ -3,19 +3,21 @@
 __all__ = (
     "log_config",
     "fmt",
-    "dict",
-    "yaml",
     "Default",
     "WithDefault",
     "cast_default",
-    "Checkpoint",
-    "CheckpointPath",
-    "CheckpointContext",
-    "Unit",
-    "UnitOrFloat",
     "CheckpointOverrideException",
     "InvalidInputException",
     "check_only_one_specified",
+    "TensorCompatible",
+    "cast_tensor",
+    "Unit",
+    "UnitOrFloat",
+    "dict",
+    "yaml",
+    "Checkpoint",
+    "CheckpointPath",
+    "CheckpointContext",
 )
 
 from ._log_config import log_config, fmt
@@ -25,6 +27,7 @@ from ._error import (
     InvalidInputException,
     check_only_one_specified,
 )
+from ._tensor import TensorCompatible, cast_tensor
 from ._unit import Unit, UnitOrFloat
 from . import dict, yaml
 from ._checkpoint import Checkpoint, CheckpointPath, CheckpointContext
