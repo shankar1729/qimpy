@@ -102,7 +102,6 @@ class TreeNode:
                 for cp_attr_name, cp_attr_value in checkpoint_in.attrs.items():
                     if cp_attr_name != "variant_name":  # already used to select `cls`
                         params.setdefault(cp_attr_name.replace("-", "_"), cp_attr_value)
-            print(params)
             result = cls(**kwargs, **params, checkpoint_in=checkpoint_in)
         elif isinstance(params, cls):
             result = params
