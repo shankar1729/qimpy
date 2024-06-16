@@ -498,7 +498,7 @@ class Electrons(TreeNode):
         (~self.n_tilde).write(cp_path.relative("n"))
         (~self.n_tilde.grad).write(cp_path.relative("V_ks"))
         self.fillings.write_band_scalars(cp_path.relative("eig"), self.eig)
-        saved_list = ["n", "V_ks", "eig"]
+        saved_list = list(attrs.keys()) + ["n", "V_ks", "eig"]
         if self.save_wavefunction and (context.stage == "end"):
             n_bands = self.fillings.n_bands
             self.C[:, :, :n_bands].write(cp_path.relative("C"))
