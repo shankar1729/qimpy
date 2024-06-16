@@ -490,6 +490,11 @@ class Electrons(TreeNode):
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["spin_polarized"] = self.spin_polarized
+        attrs["spinorial"] = self.spinorial
+        attrs["fixed_H"] = self.fixed_H
+        attrs["save_wavefunction"] = self.save_wavefunction
         (~self.n_tilde).write(cp_path.relative("n"))
         (~self.n_tilde.grad).write(cp_path.relative("V_ks"))
         self.fillings.write_band_scalars(cp_path.relative("eig"), self.eig)
