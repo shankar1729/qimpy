@@ -369,7 +369,7 @@ class Basis(TreeNode):
         # --- start out with high values in priority for all indices
         # --- then replace the ones in fft_index such that they appear in order
         priority = n_fft + torch.arange(n_fft, device=rc.device).repeat(kdiv.n_mine, 1)
-        ik = torch.arange(kdiv.i_start, kdiv.i_stop, device=rc.device)[:, None]
+        ik = torch.arange(kdiv.n_mine, device=rc.device)[:, None]
         priority[ik, fft_index] = torch.arange(self.n_max, device=rc.device)
         self.fft_index = priority.argsort(dim=1)[:, : self.n_tot]
         self.iG = iG[self.fft_index]

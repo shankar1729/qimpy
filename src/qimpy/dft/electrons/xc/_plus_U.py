@@ -1,5 +1,5 @@
 from qimpy import TreeNode, log
-from qimpy.io import CheckpointPath
+from qimpy.io import CheckpointPath, CheckpointContext
 from .. import Wavefunction
 
 
@@ -22,6 +22,14 @@ class PlusU(TreeNode):
         self.U_values = U_values
         for specie, Us in U_values.items():
             log.info(f"  +U on {specie}: {Us}")
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        for specie, Us in self.U_values.items():
+            attrs[specie] = Us  # This probably won't work in general
+        return list(attrs.keys())
 
     def __bool__(self) -> bool:
         return bool(self.U_values)
