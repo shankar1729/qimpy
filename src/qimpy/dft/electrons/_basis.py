@@ -352,17 +352,15 @@ class Basis(TreeNode):
         self.fft_index = priority.argsort(dim=1)[:, : self.n_tot]  # ke<cutoff to front
         self.iG = iG[self.fft_index]
 
-    def _read_indices(self, cp: CheckpointPath) -> None:
+    def _read_indices(self, checkpoint_in: CheckpointPath) -> None:
         """Read fft_index and n from checkpoint, and then set iG and n stats."""
         # Read portion of n and fft_index belonging to this process
         kdiv = self.kpoints.division
-        ik_start = kdiv.i_start
-        nk_mine = kdiv.i_stop - ik_start
-        checkpoint, path = cp
-        n = checkpoint.read_slice(checkpoint[f"{path}/n"], (ik_start,), (nk_mine,))
+        cp, path = checkpoint_in
+        n = cp.read_slice(cp[f"{path}/n"], (kdiv.i_start,), (kdiv.n_mine,))
         self._set_n(n)
-        fft_index = checkpoint.read_slice(
-            checkpoint[f"{path}/fft_index"], (ik_start, 0), (nk_mine, self.n_max)
+        fft_index = cp.read_slice(
+            cp[f"{path}/fft_index"], (kdiv.i_start, 0), (kdiv.n_mine, self.n_max)
         )
         # Introduce padding from n_max to n_tot (which depends on parallelization)
         iG = self.grid.get_mesh("H" if self.real_wavefunctions else "G").view(-1, 3)
@@ -370,8 +368,9 @@ class Basis(TreeNode):
         assert self.n_tot <= n_fft  # make sure padding doesn't exceed grid
         # --- start out with high values in priority for all indices
         # --- then replace the ones in fft_index such that they appear in order
-        priority = n_fft + torch.arange(n_fft, device=rc.device).repeat(nk_mine, 1)
-        priority[fft_index] = torch.arange(self.n_max, device=rc.device)
+        priority = n_fft + torch.arange(n_fft, device=rc.device).repeat(kdiv.n_mine, 1)
+        ik = torch.arange(kdiv.i_start, kdiv.i_stop, device=rc.device)[:, None]
+        priority[ik, fft_index] = torch.arange(self.n_max, device=rc.device)
         self.fft_index = priority.argsort(dim=1)[:, : self.n_tot]
         self.iG = iG[self.fft_index]
 
