@@ -17,7 +17,11 @@ class Fixed(Relax):
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         super().__init__(
-            n_iterations=0, comm=comm, lattice=lattice, checkpoint_in=checkpoint_in
+            n_iterations=0,
+            save_history=False,
+            comm=comm,
+            lattice=lattice,
+            checkpoint_in=checkpoint_in,
         )
 
     def run(self, system: dft.System) -> None:
@@ -29,3 +33,8 @@ class Fixed(Relax):
                     system.save_checkpoint(CheckpointPath(cp), CheckpointContext("end"))
         else:
             Relax.run(self, system)
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        pass  # just need to bypass setting incompatible attributes from Relax

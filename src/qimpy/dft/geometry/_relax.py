@@ -29,6 +29,7 @@ class Relax(Minimize[Gradient]):
         *,
         comm: MPI.Comm,
         lattice: Lattice,
+        i_iter: int = 0,
         n_iterations: int = 20,
         energy_threshold: float = 5e-5,
         fmax_threshold: float = 5e-4,
@@ -48,6 +49,8 @@ class Relax(Minimize[Gradient]):
 
         Parameters
         ----------
+        i_iter
+            Iteration number to start with (used for continuing from checkpoint)
         n_iterations
             :yaml:`Maximum number of iterations.`
         energy_threshold
@@ -97,15 +100,15 @@ class Relax(Minimize[Gradient]):
             checkpoint_in=checkpoint_in,
             comm=comm,
             name="Relax",
-            i_iter_start=(checkpoint_in.attrs["i_iter"] if checkpoint_in else 0),
+            i_iter_start=i_iter,
             n_iterations=n_iterations,
             energy_threshold=energy_threshold,
             extra_thresholds=extra_thresholds,
-            n_consecutive=n_consecutive,
+            n_consecutive=int(n_consecutive),
             method=method,
             cg_type=cg_type,
             line_minimize=line_minimize,
-            n_history=n_history,
+            n_history=int(n_history),
             converge_on=converge_on,
         )
         self.drag_wavefunctions = drag_wavefunctions
@@ -206,8 +209,22 @@ class Relax(Minimize[Gradient]):
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
         stage, i_iter = context
-        saved_list = ["i_iter"]
-        cp_path.attrs["i_iter"] = i_iter if (stage == "geometry") else self.n_iterations
+        attrs = cp_path.attrs
+        attrs["i_iter"] = i_iter if (stage == "geometry") else self.n_iterations
+        attrs["n_iterations"] = self.n_iterations
+        attrs["energy_threshold"] = self.energy_threshold
+        attrs["fmax_threshold"] = self.extra_thresholds["fmax"]
+        if "|stress|" in self.extra_thresholds:
+            attrs["stress_threshold"] = self.extra_thresholds["|stress|"]
+        attrs["n_consecutive"] = self.n_consecutive
+        attrs["method"] = self.method
+        attrs["cg_type"] = self.cg_type
+        attrs["line_minimize"] = self.line_minimize
+        attrs["n_history"] = self.n_history
+        attrs["converge_on"] = self.converge_on
+        attrs["drag_wavefunctions"] = self.drag_wavefunctions
+        attrs["save_history"] = self.history is not None
+        saved_list = list(attrs.keys())
         if stage == "geometry":
             # Prepare for trajectory output if needed:
             history = self.history

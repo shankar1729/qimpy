@@ -106,7 +106,7 @@ class SCF(Pulay[FieldH]):
             n_iterations=n_iterations,
             energy_threshold=float(energy_threshold),
             residual_threshold=float(residual_threshold),
-            n_consecutive=n_consecutive,
+            n_consecutive=int(n_consecutive),
             extra_thresholds={"|deig|": self.eig_threshold},
             n_history=int(n_history),
             mix_fraction=mix_fraction,
