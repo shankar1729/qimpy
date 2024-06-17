@@ -170,6 +170,8 @@ class Geometry(TreeNode):
             "observable_names", ",".join(self.material.get_observable_names())
         )
         stash = self.stash
+        cp_path["t"] = np.array(stash.t)
+        cp_path["i_step"] = np.array(stash.i_step)
 
         n_observables = len(self.material.get_observable_names())
         Nkbb = self.material.k_division.n_tot * self.material.n_bands**2
