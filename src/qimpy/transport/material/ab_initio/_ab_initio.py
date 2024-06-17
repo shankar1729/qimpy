@@ -172,7 +172,7 @@ class AbInitio(Material):
             # Initialize optional terms in the dynamics
             self.dynamics_terms = {}
 
-            if relaxation_time is not None:
+            if (relaxation_time is not None) or checkpoint_in.member("relaxation_time"):
                 self.add_child(
                     "relaxation_time",
                     RelaxationTime,
@@ -182,7 +182,7 @@ class AbInitio(Material):
                 )
                 self.dynamics_terms["relaxation_time"] = self.relaxation_time
 
-            if lindblad is not None:
+            if (lindblad is not None) or checkpoint_in.member("lindblad"):
                 self.add_child(
                     "lindblad",
                     Lindblad,
@@ -193,11 +193,11 @@ class AbInitio(Material):
                 )
                 self.dynamics_terms["lindblad"] = self.lindblad
 
-            if light is not None:
+            if (light is not None) or checkpoint_in.member("light"):
                 self.add_child("light", Light, light, checkpoint_in, ab_initio=self)
                 self.dynamics_terms["light"] = self.light
 
-            if pulseB is not None:
+            if (pulseB is not None) or checkpoint_in.member("pulseB"):
                 self.add_child("pulseB", PulseB, pulseB, checkpoint_in, ab_initio=self)
                 self.dynamics_terms["pulseB"] = self.pulseB
 

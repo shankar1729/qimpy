@@ -5,7 +5,12 @@ import numpy as np
 import torch
 
 from qimpy import rc, log, TreeNode
-from qimpy.io import Checkpoint, CheckpointPath, InvalidInputException
+from qimpy.io import (
+    Checkpoint,
+    CheckpointPath,
+    InvalidInputException,
+    CheckpointContext,
+)
 from qimpy.mpi import BufferView
 from qimpy.math import ceildiv
 from qimpy.profiler import stopwatch
@@ -144,6 +149,13 @@ class Lindblad(TreeNode):
             scale_factor=torch.tensor(scale_factor, device=rc.device)
         )
         self.scale_factor = dict()
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["scale_factor"] = self.constant_params["scale_factor"].item()
+        return list(attrs.keys())
 
     def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
         self._initialize_fields(patch_id, **params)
