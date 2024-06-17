@@ -507,4 +507,6 @@ class Electrons(TreeNode):
             (~self.tau_tilde).write(cp_path.relative("tau"))
             (~self.tau_tilde.grad).write(cp_path.relative("V_tau"))
             saved_list.extend(["tau", "V_tau"])
+        if self.lcao is None:
+            attrs["lcao"] = False
         return saved_list

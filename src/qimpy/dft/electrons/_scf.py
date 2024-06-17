@@ -4,7 +4,7 @@ from typing import Optional, Sequence
 import torch
 
 from qimpy import dft, Energy, MPI
-from qimpy.io import CheckpointPath
+from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import globalreduce
 from qimpy.algorithms import Pulay
 from qimpy.grid import FieldH
@@ -108,9 +108,29 @@ class SCF(Pulay[FieldH]):
             residual_threshold=float(residual_threshold),
             n_consecutive=n_consecutive,
             extra_thresholds={"|deig|": self.eig_threshold},
-            n_history=n_history,
+            n_history=int(n_history),
             mix_fraction=mix_fraction,
         )
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["n_iterations"] = self.n_iterations
+        attrs["energy_threshold"] = self.energy_threshold
+        attrs["residual_threshold"] = self.residual_threshold
+        attrs["n_consecutive"] = self.n_consecutive
+        attrs["n_history"] = self.n_history
+        attrs["mix_fraction"] = self.mix_fraction
+        attrs["mix_fraction_mag"] = self.mix_fraction_mag
+        attrs["q_kerker"] = self.q_kerker
+        attrs["q_metric"] = self.q_metric
+        if self.q_kappa is not None:
+            attrs["q_kappa"] = self.q_kappa
+        attrs["n_eig_steps"] = self.n_eig_steps
+        attrs["eig_threshold"] = self.eig_threshold
+        attrs["mix_density"] = self.mix_density
+        return list(attrs.keys())
 
     def update(self, system: dft.System) -> None:
         self.system = system
