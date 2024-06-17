@@ -25,7 +25,7 @@ class Geometry(TreeNode):
     comm: MPI.Comm  #: Communicator for real-space split over patches
     material: Material  #: Corresponding material
     grid_spacing: float  #: Grid spacing used for discretization
-    contact_names: list[str]  #: Names of contacts used in SVG specification and plots
+    contacts: dict[str, dict]  #: Mapping from SVG contact names to material parameters
     quad_set: QuadSet  #: Original geometry specification from SVG
     sub_quad_set: SubQuadSet  #: Division into smaller quads for tuning parallelization
     patches: list[Patch]  #: Advection for each quad patch local to this process
@@ -75,7 +75,7 @@ class Geometry(TreeNode):
         self.material = material
         self.quad_set = quad_set
         self.grid_spacing = grid_spacing
-        self.contact_names = list(contacts.keys())
+        self.contacts = contacts
         aperture_circles = torch.from_numpy(quad_set.apertures).to(rc.device)
         contact_circles = torch.from_numpy(quad_set.contacts).to(rc.device)
         contact_params = list(contacts.values())
@@ -164,15 +164,12 @@ class Geometry(TreeNode):
         ]
         if self.save_rho:
             saved_list.append("rho")
-        cp_path.attrs["grid_spacing"] = self.grid_spacing
-        cp_path.attrs["contact_names"] = ",".join(self.contact_names)
-        cp_path.attrs["aperture_names"] = ",".join(self.quad_set.aperture_names)
-        cp_path.attrs["observable_names"] = ",".join(
-            self.material.get_observable_names()
+        cp_path.write_str("contact_names", ",".join(self.contacts.keys()))
+        cp_path.write_str("aperture_names", ",".join(self.quad_set.aperture_names))
+        cp_path.write_str(
+            "observable_names", ",".join(self.material.get_observable_names())
         )
         stash = self.stash
-        cp_path.attrs["t"] = np.array(stash.t)
-        cp_path.attrs["i_step"] = np.array(stash.i_step)
 
         n_observables = len(self.material.get_observable_names())
         Nkbb = self.material.k_division.n_tot * self.material.n_bands**2
