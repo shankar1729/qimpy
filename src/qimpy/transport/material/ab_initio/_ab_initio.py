@@ -41,7 +41,7 @@ class AbInitio(Material):
 
     T: float
     mu: float
-    rotation: torch.Tensor
+    rotation: Optional[torch.Tensor]
     P: torch.Tensor  #: Momentum matrix elements
     S: Optional[torch.Tensor]  #: Spin matrix elements
     L: Optional[torch.Tensor]  #: Angular momentum matrix elements
@@ -60,11 +60,7 @@ class AbInitio(Material):
         file: str,
         T: float,
         mu: float = 0.0,
-        rotation: TensorCompatible = (
-            (1.0, 0.0, 0.0),
-            (0.0, 1.0, 0.0),
-            (0.0, 0.0, 1.0),
-        ),
+        rotation: Optional[TensorCompatible] = None,
         orbital_zeeman: Optional[bool] = None,
         B: Optional[TensorCompatible] = None,
         observable_names: Union[str, list[str]] = "n",
@@ -88,6 +84,7 @@ class AbInitio(Material):
             :yaml:`Chemical potential in equilbrium.`
         rotation
             :yaml:`3 x 3 rotation matrix from material to simulation frame.`
+            If unspecified (default), no rotation is performed.
         orbital_zeeman
             :yaml:`Whether to include L matrix elements in Zeeman coupling.`
             The default None amounts to using L if available in the data.
@@ -115,7 +112,7 @@ class AbInitio(Material):
         self.file = file
         self.orbital_zeeman = orbital_zeeman
         self.mu = mu
-        self.rotation = cast_tensor(rotation)
+        self.rotation = None if rotation is None else cast_tensor(rotation)
         watch = StopWatch("Dynamics.read_checkpoint")
         with Checkpoint(file) as data_file:
             attrs = data_file.attrs
@@ -242,7 +239,8 @@ class AbInitio(Material):
         attrs["file"] = self.file
         attrs["T"] = self.T
         attrs["mu"] = self.mu
-        attrs["rotation"] = self.rotation.to(rc.cpu)
+        if self.rotation is not None:
+            attrs["rotation"] = self.rotation.to(rc.cpu)
         if self.orbital_zeeman is not None:
             attrs["orbital_zeeman"] = self.orbital_zeeman
         if self.B is not None:
@@ -290,9 +288,11 @@ class AbInitio(Material):
         offset = (self.k_division.i_start,) + (0,) * (len(dset.shape) - 1)
         size = (self.nk_mine,) + dset.shape[1:]
         result = data_file.read_slice(dset, offset, size)
-        return torch.einsum(
-            "ij, kj... -> ki...", self.rotation.to(result.dtype), result
-        )
+        if self.rotation is not None:
+            result = torch.einsum(
+                "ij, kj... -> ki...", self.rotation.to(result.dtype), result
+            )
+        return result
 
     def apply_evecs(self, M: Optional[torch.Tensor]) -> None:
         """Apply transformation by `evecs` to final two band dimensions.
