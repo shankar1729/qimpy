@@ -17,14 +17,12 @@ Options:
 """
 from typing import Optional
 import argparse
-import ast
 
-import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
-from qimpy.io import Unit
+from qimpy.io import Unit, Checkpoint, CheckpointPath
 
 
 def plot(
@@ -43,16 +41,17 @@ def plot(
     n_occupied_bands = np.array([], dtype=int)  #
     nbands_tot = 0
     plot_units = 1 if units == "Hartree" else Unit.convert(1, units).value
-    for cp_file in checkpoint_files:
-        with h5py.File(cp_file, "r") as h5_file:
-            eig = np.array(h5_file["/electrons/eig"])
-            eig *= plot_units
+    for checkpoint_file in checkpoint_files:
+        with Checkpoint(checkpoint_file) as checkpoint:
+            eig = np.array(checkpoint["/electrons/eig"]) * plot_units
             eigs.append(eig)
-            k_length = np.array(h5_file["/electrons/kpoints/k_length"])
-            labels: dict[int, str] = ast.literal_eval(
-                str(h5_file["/electrons/kpoints"].attrs["labels"])
-            )
-            mu = float(h5_file["/electrons/fillings"].attrs["mu"])
+            cp_k = CheckpointPath(checkpoint, "/electrons/kpoints")
+            assert cp_k.attrs["variant_name"] == "k-path"
+            k_length = np.array(cp_k["k_length"])
+            label_names = cp_k.read_str("labels").split(",")
+            label_indices = list(cp_k["label_indices"])
+            labels: dict[int, str] = dict(zip(label_indices, label_names))
+            mu = float(checkpoint["/electrons/fillings"].attrs["mu"])
             mu *= plot_units
             mus = np.append(mus, mu)
             n_spins, nk, n_bands = eig.shape
