@@ -5,7 +5,7 @@ import torch
 import numpy as np
 
 from qimpy import rc, TreeNode
-from qimpy.io import CheckpointPath, InvalidInputException
+from qimpy.io import CheckpointPath, CheckpointContext, InvalidInputException
 from qimpy.profiler import stopwatch
 from qimpy.transport import material
 
@@ -16,11 +16,11 @@ class Light(TreeNode):
     gauge: str  #: Gauge: one of velocity or length
     A0: torch.Tensor  #: Vector potential amplitude
     E0: torch.Tensor  #: Electric field amplitude
-    omega: float  #: light frequency
-    t0: float  #: center of Gaussian pulse, if sigma is non-zero
-    sigma: float  #: width of Gaussian pulse in time, if non-zero
+    omega: dict[int, torch.Tensor]  #: light frequency
+    t0: dict[int, torch.Tensor]  #: center of Gaussian pulse, if sigma is non-zero
+    sigma: dict[int, torch.Tensor]  #: width of Gaussian pulse in time, if non-zero
     smearing: float  #: Width of Gaussian
-    amp_mat: torch.Tensor  #: Amplitude matrix, precomputed A0 . P or E0 . R
+    amp_mat: dict[int, torch.Tensor]  #: Amplitude matrix, precomputed A0 . P or E0 . R
 
     constant_params: dict[str, torch.Tensor]  #: constant values of parameters
 
@@ -97,6 +97,19 @@ class Light(TreeNode):
             self.plus_deg = {}
             self.minus = {}
             self.minus_deg = {}
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["A0"] = self.constant_params["A0"].to(rc.cpu)
+        attrs["omega"] = self.constant_params["omega"].item()
+        attrs["t0"] = self.constant_params["t0"].item()
+        attrs["sigma"] = self.constant_params["sigma"].item()
+        attrs["smearing"] = self.constant_params["smearing"].item()
+        attrs["coherent"] = self.coherent
+        attrs["gauge"] = self.gauge
+        return list(attrs.keys())
 
     def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
         self._initialize_fields(patch_id, **params)

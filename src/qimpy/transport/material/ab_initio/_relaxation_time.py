@@ -4,20 +4,20 @@ import numpy as np
 import torch
 
 from qimpy import TreeNode, log, rc
-from qimpy.io import CheckpointPath
+from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.profiler import stopwatch
 from qimpy.transport import material
 
 
 class RelaxationTime(TreeNode):
     ab_initio: material.ab_initio.AbInitio
-    tau_p: float  #: momentum relaxation time
-    tau_s: float  #: spin relaxation time
-    tau_e: float  #: electron relaxation time
-    tau_h: float  #: hole relaxation time
-    tau_eh: float  #: electron-hole off-diagonal relaxation
+    tau_p: dict[int, torch.Tensor]  #: momentum relaxation time
+    tau_s: dict[int, torch.Tensor]  #: spin relaxation time
+    tau_e: dict[int, torch.Tensor]  #: electron relaxation time
+    tau_h: dict[int, torch.Tensor]  #: hole relaxation time
+    tau_eh: dict[int, torch.Tensor]  #: electron-hole off-diagonal relaxation
+    tau_recomb: dict[int, torch.Tensor]  #: recombination time
     max_dmu: float  #: maximum change of mu in find_mu
-    tau_recomb: float  #: recombination time
     nv: int  #: number of valance bands
     eps: float
     only_diagonal: bool
@@ -101,6 +101,21 @@ class RelaxationTime(TreeNode):
         self.dbetamu_eps = float(dmu_eps) / ab_initio.T
         self.nbands = ab_initio.E.shape[-1]
         self.only_diagonal = only_diagonal
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["tau_p"] = self.constant_params["tau_p"].item()
+        attrs["tau_s"] = self.constant_params["tau_s"].item()
+        attrs["tau_e"] = self.constant_params["tau_e"].item()
+        attrs["tau_h"] = self.constant_params["tau_h"].item()
+        attrs["tau_eh"] = self.constant_params["tau_eh"].item()
+        attrs["tau_recomb"] = self.constant_params["tau_recomb"].item()
+        attrs["max_dmu"] = self.max_dmu
+        attrs["nv"] = self.nv
+        attrs["eps"] = self.eps
+        return list(attrs.keys())
 
     def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
         self._initialize_fields(patch_id, **params)

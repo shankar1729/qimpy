@@ -1,11 +1,16 @@
 from __future__ import annotations
-from typing import Sequence
 
 import numpy as np
 import torch
 
 from qimpy import rc, TreeNode
-from qimpy.io import CheckpointPath, Unit
+from qimpy.io import (
+    CheckpointPath,
+    Unit,
+    CheckpointContext,
+    TensorCompatible,
+    cast_tensor,
+)
 from qimpy.profiler import stopwatch
 from qimpy.transport import material
 
@@ -25,11 +30,11 @@ class PulseB(TreeNode):
         self,
         *,
         ab_initio: material.ab_initio.AbInitio,
-        B0: Sequence[float] = (0.0, 0.0, 0.0),
+        B0: TensorCompatible = (0.0, 0.0, 0.0),
         g: float = 0.0,
         g_flip: float = 0.0,
-        t_starts: Sequence[float] = (0.0,),
-        angles: Sequence[float] = (np.pi,),
+        t_starts: TensorCompatible = (0.0,),
+        angles: TensorCompatible = (np.pi,),
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """
@@ -53,16 +58,27 @@ class PulseB(TreeNode):
         super().__init__()
         self.ab_initio = ab_initio
         self.constant_params = dict(
-            B0=torch.tensor(B0, device=rc.device),
-            g=torch.tensor(g, device=rc.device),
-            g_flip=torch.tensor(g_flip, device=rc.device),
-            t_starts=torch.tensor(t_starts, device=rc.device),
-            angles=torch.tensor(angles, device=rc.device),
+            B0=cast_tensor(B0),
+            g=cast_tensor(g),
+            g_flip=cast_tensor(g_flip),
+            t_starts=cast_tensor(t_starts),
+            angles=cast_tensor(angles),
         )
         self.H0 = {}
         self.omega = {}
         self.t_starts = {}
         self.t_stops = {}
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["B0"] = self.constant_params["B0"].to(rc.cpu)
+        attrs["g"] = self.constant_params["g"].item()
+        attrs["g_flip"] = self.constant_params["g_flip"].item()
+        attrs["t_starts"] = self.constant_params["t_starts"].to(rc.cpu)
+        attrs["angles"] = self.constant_params["angles"].to(rc.cpu)
+        return list(attrs.keys())
 
     def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
         self._initialize_fields(patch_id, **params)
