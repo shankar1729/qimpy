@@ -133,10 +133,10 @@ class Light(TreeNode):
             Nk, Nb = ab_initio.E.shape
             dE = ab_initio.E.reshape([1, 1, Nk, Nb, 1]) - ab_initio.E.reshape([1, 1, Nk, 1, Nb])
             plus = prefac * amp_mat * torch.exp(
-                exp_factor * ((dE + omega_[:, :, None, None, None]) ** 2)
+                exp_factor * ((dE + omega[:, :, None, None, None]) ** 2)
             )
             minus = prefac * amp_mat * torch.exp(
-                exp_factor * ((dE - omega_[:, :, None, None, None]) ** 2)
+                exp_factor * ((dE - omega[:, :, None, None, None]) ** 2)
             )
             plus_deg = plus.swapaxes(-2, -1).conj()
             minus_deg = minus.swapaxes(-2, -1).conj()
