@@ -32,7 +32,7 @@ class Light(TreeNode):
         gauge: str = "velocity",
         A0: Optional[list[complex]] = None,
         E0: Optional[list[complex]] = None,
-        omega: float,
+        omega: float = 0.0,
         t0: float = 0.0,
         sigma: float = 0.0,
         smearing: float = 0.001,
@@ -121,6 +121,7 @@ class Light(TreeNode):
                 "Parameter gauge should only be velocity or length"
             )
 
+        omega = omega * torch.ones([1,1]).to(rc.device) # easy for broadcasting
         self.t0[patch_id] = t0
         self.sigma[patch_id] = sigma
         if self.coherent:
@@ -130,9 +131,13 @@ class Light(TreeNode):
             prefac = torch.sqrt(torch.sqrt(torch.pi / (8 * smearing**2)))
             exp_factor = -1.0 / (smearing**2)
             Nk, Nb = ab_initio.E.shape
-            dE = ab_initio.E.reshape([Nk, Nb, 1]) - ab_initio.E.reshape([Nk, 1, Nb])
-            plus = prefac * amp_mat * torch.exp(exp_factor * ((dE + omega) ** 2))
-            minus = prefac * amp_mat * torch.exp(exp_factor * ((dE - omega) ** 2))
+            dE = ab_initio.E.reshape([1, 1, Nk, Nb, 1]) - ab_initio.E.reshape([1, 1, Nk, 1, Nb])
+            plus = prefac * amp_mat * torch.exp(
+                exp_factor * ((dE + omega_[:, :, None, None, None]) ** 2)
+            )
+            minus = prefac * amp_mat * torch.exp(
+                exp_factor * ((dE - omega_[:, :, None, None, None]) ** 2)
+            )
             plus_deg = plus.swapaxes(-2, -1).conj()
             minus_deg = minus.swapaxes(-2, -1).conj()
             self.identity_mat = torch.tile(torch.eye(Nb), (1, Nk, 1, 1)).to(rc.device)
@@ -146,16 +151,16 @@ class Light(TreeNode):
         t0 = self.t0[patch_id]
         sigma = self.sigma[patch_id]
         if sigma > 0:
-            prefac = torch.exp(-((t - t0) ** 2) / (2 * sigma**2)) / np.sqrt(
-                np.sqrt(np.pi) * sigma
+            prefac = torch.exp(-((t - t0) ** 2) / (2 * sigma**2)) / torch.sqrt(
+                torch.sqrt(np.pi * sigma**2)
             )
         else:
             prefac = 1.0
 
         if self.coherent:
             omega = self.omega[patch_id]
-            prefac *= -0.5j * torch.exp(-1j * omega * t)  # Louiville, symmetrization
-            interaction = prefac * self.amp_mat[patch_id]
+            prefac = -0.5j * torch.exp(-1j * omega * t) * prefac  # Louiville, symmetrization
+            interaction = prefac[:, :, None, None, None] * self.amp_mat[patch_id][None, None, ...]
             return (interaction - interaction.swapaxes(-2, -1).conj()) @ rho
         else:
             prefac = 0.5 * prefac**2
