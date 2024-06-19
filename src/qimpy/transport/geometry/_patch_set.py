@@ -4,7 +4,7 @@ from typing import Optional
 import torch
 
 from qimpy import MPI, rc
-from qimpy.io import CheckpointPath
+from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import ProcessGrid, BufferView
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
@@ -54,6 +54,9 @@ class PatchSet(Geometry):
             :yaml:`Whether to write the full density matrices to the checkpoint file.`
             If not (default), only observables are written to the checkpoint file.
         """
+        self.svg_file = svg_file
+        self.svg_unit = svg_unit
+        self.grid_spacing_max = grid_size_max
         super().__init__(
             material=material,
             process_grid=process_grid,
@@ -69,6 +72,18 @@ class PatchSet(Geometry):
         field_params = {}  # TODO: mechanism for input of spatially-varying fields
         for patch in self.patches:
             material.initialize_fields(patch.rho, field_params, id(patch))
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["svg_file"] = self.svg_file
+        attrs["svg_unit"] = self.svg_unit
+        attrs["grid_spacing"] = self.grid_spacing
+        # attrs["contacts"] = self.contacts  # TODO: serialize contacts
+        attrs["grid_size_max"] = self.grid_spacing_max
+        attrs["save_rho"] = self.save_rho
+        return list(attrs.keys()) + super()._save_checkpoint(cp_path, context)
 
     def rho_dot(self, rho: TensorList, t: float) -> TensorList:
         material = self.material
