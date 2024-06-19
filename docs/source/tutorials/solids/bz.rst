@@ -25,9 +25,10 @@ Here's an example input file for silicon, which you may save as ``Si.yaml``.
 
     # Diamond-cubic silicon
     lattice:
-      system: cubic
-      modification: face-centered
-      a: 5.43 Å
+      system:
+        name: cubic
+        modification: face-centered
+        a: 5.43 Å
 
     ions:
       pseudopotentials:

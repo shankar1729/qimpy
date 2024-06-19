@@ -1,7 +1,8 @@
 lattice:
-  system: cubic
-  modification: face-centered
-  a: 3.61 Å
+  system:
+    name: cubic
+    modification: face-centered
+    a: 3.61 Å
   movable: yes
 
 ions:

@@ -1,8 +1,9 @@
 lattice:
-  system: cubic
-  modification: face-centered
-  a: 7.41  # bohrs
-  
+  system: 
+    name: cubic
+    modification: face-centered
+    a: 7.41  # bohrs
+
 ions:
   pseudopotentials:
     - DOJO/FR/$ID.upf
