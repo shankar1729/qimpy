@@ -8,7 +8,7 @@ import torch
 from qimpy import rc, MPI
 from qimpy.mpi import ProcessGrid, BufferView, TaskDivision
 from qimpy.profiler import stopwatch
-from qimpy.io import CheckpointPath, CheckpointContext
+from qimpy.io import CheckpointPath
 from . import Material
 
 
@@ -66,25 +66,12 @@ class FermiCircle(Material):
         self.v_all = k_hat[:, None] * vF
         self.k[:] = k_hat[self.k_mine] * kF
         self.v[:] = self.v_all[self.k_mine]
-        self.theta0 = theta0
 
         # Cached normalizations for collision intergal
         self.nk_inv = 1.0 / N_theta
         self.vv_inv = torch.linalg.inv(
             torch.einsum("...i, ...j -> ij", self.v_all, self.v_all)
         )
-
-    def _save_checkpoint(
-        self, cp_path: CheckpointPath, context: CheckpointContext
-    ) -> list[str]:
-        attrs = cp_path.attrs
-        attrs["kF"] = self.kF
-        attrs["vF"] = self.vF
-        attrs["N_theta"] = self.k_division.n_tot
-        attrs["tau_p"] = (1.0 / self.tau_inv_p) if self.tau_inv_p else np.inf
-        attrs["tau_ee"] = (1.0 / self.tau_inv_ee) if self.tau_inv_ee else np.inf
-        attrs["theta0"] = self.theta0
-        return list(attrs.keys())
 
     def initialize_fields(
         self, rho: torch.Tensor, params: dict[str, torch.Tensor], patch_id: int

@@ -7,7 +7,7 @@ import torch
 
 from qimpy import rc, log, TreeNode, dft, MPI
 from qimpy.profiler import stopwatch
-from qimpy.io import CheckpointPath, CheckpointContext
+from qimpy.io import CheckpointPath
 from qimpy.mpi import BufferView, Waitable, globalreduce
 from qimpy.math import eighg, dagger
 from . import Wavefunction
@@ -57,14 +57,6 @@ class Davidson(TreeNode):
             electrons.basis.n_tot * 1e-15  # estimate round-off
         )  # to spot null bands in _regularize
         self._i_iter = 0
-
-    def _save_checkpoint(
-        self, cp_path: CheckpointPath, context: CheckpointContext
-    ) -> list[str]:
-        attrs = cp_path.attrs
-        attrs["n_iterations"] = self.n_iterations
-        attrs["eig_threshold"] = self.eig_threshold
-        return list(attrs.keys())
 
     def __repr__(self) -> str:
         return (

@@ -4,20 +4,20 @@ import numpy as np
 import torch
 
 from qimpy import TreeNode, log, rc
-from qimpy.io import CheckpointPath, CheckpointContext
+from qimpy.io import CheckpointPath
 from qimpy.profiler import stopwatch
 from qimpy.transport import material
 
 
 class RelaxationTime(TreeNode):
     ab_initio: material.ab_initio.AbInitio
-    tau_p: dict[int, torch.Tensor]  #: momentum relaxation time
-    tau_s: dict[int, torch.Tensor]  #: spin relaxation time
-    tau_e: dict[int, torch.Tensor]  #: electron relaxation time
-    tau_h: dict[int, torch.Tensor]  #: hole relaxation time
-    tau_eh: dict[int, torch.Tensor]  #: electron-hole off-diagonal relaxation
-    tau_recomb: dict[int, torch.Tensor]  #: recombination time
+    tau_p: float  #: momentum relaxation time
+    tau_s: float  #: spin relaxation time
+    tau_e: float  #: electron relaxation time
+    tau_h: float  #: hole relaxation time
+    tau_eh: float  #: electron-hole off-diagonal relaxation
     max_dmu: float  #: maximum change of mu in find_mu
+    tau_recomb: float  #: recombination time
     nv: int  #: number of valance bands
     eps: float
     only_diagonal: bool
@@ -103,33 +103,12 @@ class RelaxationTime(TreeNode):
             self.betamuk0 = {}
 
         self.max_dbetamu = max_dmu / ab_initio.T
-        self.max_dmu = max_dmu
-        self.eps = float(eps)
         self.dbetamu_eps = float(dmu_eps) / ab_initio.T
         self.nbands = ab_initio.E.shape[-1]
-        self.dmu_eps = float(dmu_eps)
-        self.only_diagonal = only_diagonal
         self.sum_rules = {
             2: "xykb -> xy", # electron or hole
             3: "xykb -> xyk", # recombination
         }
-
-    def _save_checkpoint(
-        self, cp_path: CheckpointPath, context: CheckpointContext
-    ) -> list[str]:
-        attrs = cp_path.attrs
-        attrs["tau_p"] = self.constant_params["tau_p"].item()
-        attrs["tau_s"] = self.constant_params["tau_s"].item()
-        attrs["tau_e"] = self.constant_params["tau_e"].item()
-        attrs["tau_h"] = self.constant_params["tau_h"].item()
-        attrs["tau_eh"] = self.constant_params["tau_eh"].item()
-        attrs["tau_recomb"] = self.constant_params["tau_recomb"].item()
-        attrs["max_dmu"] = self.max_dmu
-        attrs["nv"] = self.nv
-        attrs["eps"] = self.eps
-        attrs["dmu_eps"] = self.dmu_eps
-        attrs["only_diagonal"] = self.only_diagonal
-        return list(attrs.keys())
 
     def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
         self._initialize_fields(patch_id, **params)
@@ -174,11 +153,6 @@ class RelaxationTime(TreeNode):
         if patch_id in self.tau_e:
             nbands = self.nbands
             fe = rho[..., range(nv, nbands), range(nv, nbands)].real
-            if self.betamue0[patch_id].shape != rho.shape[:2]:
-                self.betamue0[patch_id] = torch.tile(
-                    self.betamue0[patch_id],
-                    rho.shape[:2]
-                )
             betamue, fe_eq = self.find_mu(
                 fe,
                 self.exp_betaEe[patch_id],
@@ -196,11 +170,6 @@ class RelaxationTime(TreeNode):
 
         if patch_id in self.tau_h:
             fh = rho[..., range(nv), range(nv)].real
-            if self.betamuh0[patch_id].shape != rho.shape[:2]:
-                self.betamuh0[patch_id] = torch.tile(
-                    self.betamuh0[patch_id],
-                    rho.shape[:2]
-                )
             betamuh, fh_eq = self.find_mu(
                 1 - fh,
                 self.exp_betaEh[patch_id],
@@ -224,11 +193,6 @@ class RelaxationTime(TreeNode):
 
         if patch_id in self.tau_recomb:
             fk = torch.einsum("...bb -> ...b", rho).real
-            if self.betamuk0[patch_id].shape[:2] != rho.shape[:2]:
-                self.betamuk0[patch_id] = torch.tile(
-                    self.betamuk0[patch_id],
-                    rho.shape[:2] + (1,)
-                )
             betamuk, fk_eq = self.find_mu(
                 fk,
                 self.exp_betaE[patch_id],
@@ -250,7 +214,7 @@ class RelaxationTime(TreeNode):
         f_total = torch.einsum(sum_rule, f)
         reshape = betamu.shape + (1,) * (4 - betamu.ndim)
         # Fermi-dirac distribution, shape (Nx, Ny, Nk, Nb)
-        exp_beta_Emu = exp_betaE[None, None] / torch.exp(betamu).reshape(reshape)
+        exp_beta_Emu = exp_betaE[None,None,:,:] / torch.exp(betamu).reshape(reshape)
         distribution = 1 / (exp_beta_Emu + 1)
         F = torch.einsum(sum_rule, distribution) - f_total
         while torch.max(torch.abs(F)) > self.eps:
@@ -261,9 +225,25 @@ class RelaxationTime(TreeNode):
             )  # indices that need to be limited by self.max_dbetamu
             dbetamu[limit_ind] = torch.sign(F[limit_ind]) * self.max_dbetamu
             betamu = betamu - dbetamu
-            exp_beta_Emu = exp_betaE[None, None] / torch.exp(betamu).reshape(reshape)
+            reshape = betamu.shape + (1,) * (4 - betamu.ndim) # handle broadcasting
+            exp_beta_Emu = exp_betaE[None,None,:,:] / torch.exp(betamu).reshape(reshape)
             distribution = 1 / (exp_beta_Emu + 1)
             F = torch.einsum(sum_rule, distribution) - f_total
             if torch.max(torch.abs(dbetamu)) < self.dbetamu_eps:
                 break
         return betamu, distribution
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["nv"] = self.nv
+        attrs["max_dmu"] = self.max_dmu
+        attrs["eps"] = self.eps
+        attrs["dmu_eps"] = self.dmu_eps
+        attrs["only_diagonal"] = self.only_diagonal
+        attrs.update(
+            {param: self.constant_params[param].cpu() for param in self.constant_params}
+        )
+        return ["tau_p", "tau_s", "tau_e", "tau_h", "tau_eh", "tau_recomb",
+                "nv", "max_dmu", "eps", "dmu_eps", "only_diagonal"]

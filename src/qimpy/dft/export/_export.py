@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Protocol, Optional, Union
 
 from qimpy import TreeNode, dft
-from qimpy.io import CheckpointPath, CheckpointContext
+from qimpy.io import CheckpointPath
 from . import BGW
 
 
@@ -44,10 +44,3 @@ class Export(TreeNode):
         """Run selected geometry action."""
         for exporter in self.exporters:
             exporter.export(system)
-
-    def _save_checkpoint(
-        self, cp_path: CheckpointPath, context: CheckpointContext
-    ) -> list[str]:
-        attrs = cp_path.attrs
-        # TODO: add attributes for each exporter
-        return list(attrs.keys())

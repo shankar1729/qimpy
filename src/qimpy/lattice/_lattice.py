@@ -1,18 +1,18 @@
 from __future__ import annotations
-from typing import Optional
+from typing import Optional, Union, Sequence
 
 import numpy as np
 import torch
 
 from qimpy import log, rc, TreeNode
+from qimpy.io import CheckpointOverrideException
 from qimpy.io import (
     CheckpointPath,
     CheckpointContext,
     fmt,
-    cast_tensor,
-    TensorCompatible,
-    InvalidInputException,
-    check_only_one_specified,
+    Default,
+    WithDefault,
+    cast_default,
 )
 from ._lattice_systems import get_Rbasis
 
@@ -40,93 +40,71 @@ class Lattice(TreeNode):
         self,
         *,
         checkpoint_in: CheckpointPath = CheckpointPath(),
-        system: Optional[dict] = None,
-        vectors: Optional[TensorCompatible] = None,
-        Rbasis: Optional[TensorCompatible] = None,
-        scale: TensorCompatible = 1.0,
-        compute_stress: bool = False,
-        movable: bool = False,
-        move_scale: TensorCompatible = (1.0, 1.0, 1.0),
-        periodic: tuple[bool, bool, bool] = (True, True, True),
-        center: TensorCompatible = (0.0, 0.0, 0.0),
+        system: Optional[str] = None,
+        modification: Optional[str] = None,
+        a: Optional[float] = None,
+        b: Optional[float] = None,
+        c: Optional[float] = None,
+        alpha: Optional[float] = None,
+        beta: Optional[float] = None,
+        gamma: Optional[float] = None,
+        vector1: Optional[Sequence[float]] = None,
+        vector2: Optional[Sequence[float]] = None,
+        vector3: Optional[Sequence[float]] = None,
+        scale: Union[float, Sequence[float], Default[float]] = Default(1.0),
+        compute_stress: WithDefault[bool] = Default(False),
+        movable: WithDefault[bool] = Default(False),
+        move_scale: WithDefault[Sequence[float]] = Default((1.0, 1.0, 1.0)),
+        periodic: WithDefault[tuple[bool, bool, bool]] = Default((True, True, True)),
+        center: WithDefault[Sequence[float]] = Default((0.0, 0.0, 0.0)),
     ) -> None:
         """Initialize from lattice vectors or lengths and angles.
-        Either specify a lattice `system` with any required lengths, angles and
-        modifications, or a set of `vectors`, or as the basis matrix `Rbasis`.
-        Exactly one among `system`, `vectors` and `Rbasis` must be specified.
-
-        Note that `vectors` amounts to specifying the vectors in rows in a way
-        that may be common in other codes/interfaces, while `Rbasis` amounts to
-        specifying them in columns, in the form they are stored internally.
-
+        Either specify a lattice `system` and optional `modification`,
+        along with any corresponding required lengths (`a`, `b`, `c`)
+        and angles (`alpha`, `beta`, `gamma`), or explicitly specity
+        all three lattice vectors `vector1`, `vector2` and `vector3`.
         Optionally, `scale` lattice vectors by a single or separate factors.
 
         Parameters
         ----------
         system
             :yaml:`Specify crystal system and geometry parameters.`
-            This must be a dictionary matching one of the following patterns
-            (denoted using YAML input-file syntax, and where [ ] indicates optional):
+            Options include:
 
-            .. code-block:: text
+            * cubic (specify `a`),
+            * tetragonal (specify `a`, `c`)
+            * orthorhombic (specify `a`, `b`, `c`)
+            * hexagonal (specify `a`, `c`)
+            * rhombohedral (specify `a`, `alpha`)
+            * monoclinic (specify `a`, `b`, `c`, `beta`)
+            * triclinic (specify `a`, `b`, `c`, `alpha`, `beta`, `gamma`)
 
-                system:
-                  name: cubic  # all angles are 90 degrees
-                  a: <value>  # each lattice vector length in bohrs
-                  [modification: body-centered | face-centered]
+        modification
+            :yaml:`Specify modification of lattice.`
+            Options include:
 
-                system:
-                  name: tetragonal  # all angles are 90 degrees
-                  a: <value>  # first two lattice vector lengths in bohrs
-                  c: <value>  # third lattice vector length in bohrs
-                  [modification: body-centered]
+            * body-centered (only for orthorhombic, tetragonal or cubic)
+            * face-centered (only for orthorhombic or cubic)
+            * base-centered (only for monoclinic)
 
-                system:
-                  name: orthorhombic  # all angles are 90 degrees
-                  a: <value>  # first lattice vector length in bohrs
-                  b: <value>  # second lattice vector length in bohrs
-                  c: <value>  # third lattice vector length in bohrs
-                  [modification: body-centered | face-centered | base-centered]
-
-                system:
-                  name: hexagonal  # angles are 90, 90 and 120 degrees
-                  a: <value>  # first two lattice vector lengths in bohrs
-                  c: <value>  # third lattice vector length in bohrs
-
-                system:
-                  name: rhombohedral
-                  a: <value>  # each lattice vector length in bohrs
-                  alpha: <value>  # in radians, all angles equal
-
-                system:
-                  name: monoclinic
-                  a: <value>  # first lattice vector length in bohrs
-                  b: <value>  # second lattice vector length in bohrs
-                  c: <value>  # third lattice vector length in bohrs
-                  beta: <value>  # angle between a and c in radians, rest 90 degrees
-                  [modification: base-centered]
-
-                system:
-                  name: triclinic
-                  a: <value>  # first lattice vector length in bohrs
-                  b: <value>  # second lattice vector length in bohrs
-                  c: <value>  # third lattice vector length in bohrs
-                  alpha: <value>  # angle between b and c in radians
-                  beta: <value>  # angle between a and c in radians
-                  gamma: <value>  # angle between a and b in radians
-
-            Note that all lengths are in bohrs and angles are in radians.
-            In the input file, use units like Angstrom or nm explicitly for lengths,
-            and deg explicitly for angles, if needed.
-            If the optional modification is unspecified or None (null in yaml),
-            the unmodified Bravais lattice is selected.
-
-        vectors
-            :yaml:`Three lattice vectors, each with (x, y, z) in bohrs.`
-            The input is essentially a 3 x 3 matrix, with the vectors in rows.
-        Rbasis
-            :yaml:`Real-space basis vectors in columns.`
-            Overall, the 3 x 3 transformation from fractional to Cartesian coordinates.
+        a
+            :yaml:`First lattice vector length in bohrs.`
+        b
+            :yaml:`Second lattice vector length in bohrs.`
+        c
+            :yaml:`Third lattice vector length in bohrs.`
+        alpha
+            :yaml:`Angle between b and c in degrees.`
+        beta
+            :yaml:`Angle between c and a in degrees.`
+        gamma
+            :yaml:`Angle between a and b in degrees.`
+        vector1
+            :yaml:`First lattice vector (x1, y1, z1) in bohrs.`
+        vector2
+            :yaml:`Second lattice vector (x2, y2, z2) in bohrs.`
+        vector3
+            :yaml:`Third lattice vector (x3, y3, z3) in bohrs.`
         scale
             :yaml:`Scale factor for lattice vectors.` Either a single number
             that uniformly scales all lattice vectors or separate factor
@@ -152,57 +130,77 @@ class Lattice(TreeNode):
         """
         super().__init__()
         log.info("\n--- Initializing Lattice ---")
-
-        # Get unscaled lattice vectors:
-        check_only_one_specified(system=system, vectors=vectors, Rbasis=Rbasis)
-        if Rbasis is not None:
-            self.Rbasis = cast_tensor(Rbasis)
-        elif system is not None:
-            self.Rbasis = get_Rbasis(**system).to(rc.device)
-        else:
-            assert vectors is not None
-            self.Rbasis = cast_tensor(vectors, device=rc.device).T
-            if self.Rbasis.shape != (3, 3):
-                raise InvalidInputException("vectors must be a 3 x 3 matrix")
-
-        # Apply scale:
-        scale_vector = cast_tensor(scale).flatten()
-        assert len(scale_vector) in (1, 3)
-        self.Rbasis = scale_vector[None, :] * self.Rbasis
-
-        self.movable = movable
-        self.compute_stress = compute_stress or self.movable
-        self.periodic = periodic
-        self.center = cast_tensor(center)
-        self.move_scale = cast_tensor(move_scale)
+        self.periodic = checkpoint_in.override("periodic", periodic, False)
+        self.movable = checkpoint_in.override("movable", movable, True)
+        self.compute_stress = (
+            checkpoint_in.override("compute_stress", compute_stress, True)
+            or self.movable
+        )
         if checkpoint_in:
+            if not isinstance(center, Default):
+                raise CheckpointOverrideException("center")
+            self.center = checkpoint_in.read("center")
+            self.move_scale = checkpoint_in.read("move_scale")
             self.strain_rate = checkpoint_in.read_optional("strain_rate")
+            self.Rbasis = checkpoint_in.read("Rbasis")
             stress = checkpoint_in.read_optional("stress")  # converted to grad below
         else:
+            self.center = torch.tensor(cast_default(center), device=rc.device)
+            self.move_scale = torch.ones(3, device=rc.device)
             self.strain_rate = None
             stress = None
 
+            # Get unscaled lattice vectors:
+            if system:
+                self.Rbasis = get_Rbasis(
+                    system, modification, a, b, c, alpha, beta, gamma
+                )
+            else:
+                # Direct specification of lattice vectors:
+                def check_vectors(**kwargs):
+                    for key, value in kwargs.items():
+                        if value is None:
+                            raise KeyError(f"{key} must be specified")
+                        try:
+                            np.array(value, dtype=float).reshape(3)
+                        except ValueError:
+                            raise ValueError(f"{key} must contain 3 numbers")
+
+                check_vectors(vector1=vector1, vector2=vector2, vector3=vector3)
+                self.Rbasis = torch.tensor([vector1, vector2, vector3]).T
+
+            # Apply scale if needed:
+            if (not isinstance(scale, Default)) and (not checkpoint_in):
+                scale_vector = torch.tensor(scale).flatten()
+                assert len(scale_vector) in (1, 3)
+                self.Rbasis = scale_vector[None, :] * self.Rbasis
+
         # Compute dependent quantities:
-        self.update(self.Rbasis, report_change=False)
+        self.update(self.Rbasis.to(rc.device), report_change=False)
         self.report(report_grad=False)
         check_perpendicular(self.Rbasis, self.periodic)
         self.requires_grad_(False, clear=True)  # initialize gradient
         if stress is not None:
             self.grad = self.volume * stress
 
+        # Optionally override optimization / constraints settings:
+        if not isinstance(move_scale, Default):
+            self.move_scale = torch.tensor(move_scale, device=rc.device)
+            assert self.move_scale.shape == (3,)
+
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
         attrs = cp_path.attrs
-        attrs["Rbasis"] = self.Rbasis.to(rc.cpu)
+        attrs["periodic"] = self.periodic
+        cp_path.write("center", self.center)
         attrs["compute_stress"] = self.compute_stress
         attrs["movable"] = self.movable
-        attrs["periodic"] = self.periodic
-        attrs["center"] = self.center.to(rc.cpu)
-        attrs["move_scale"] = self.move_scale.to(rc.cpu)
-        saved_list = list(attrs.keys())
+        saved_list = ["periodic", "center", "compute_stress", "movable"]
+        saved_list.append(cp_path.write("move_scale", self.move_scale))
         if self.strain_rate is not None:
             saved_list.append(cp_path.write("strain_rate", self.strain_rate))
+        saved_list.append(cp_path.write("Rbasis", self.Rbasis))
         if self.compute_stress:
             saved_list.append(cp_path.write("stress", self.stress.detach()))
         return saved_list

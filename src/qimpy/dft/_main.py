@@ -29,7 +29,7 @@ def main():
       -h, --help            show this help message and exit
       -v, --version         print version information and quit
       -i FILE, --input-file FILE
-                            input YAML or checkpoint h5
+                            input file in YAML format
       -o FILE, --output-file FILE
                             output file (stdout if unspecified)
       -c C, --cores C       number of cores per process (overridden by SLURM)
@@ -89,7 +89,7 @@ def main():
             help="print version information and quit",
         )
         group.add_argument(
-            "-i", "--input-file", metavar="FILE", help="input YAML or checkpoint h5"
+            "-i", "--input-file", metavar="FILE", help="input file in YAML format"
         )
         # ---
         parser.add_argument(
@@ -182,19 +182,13 @@ def main():
     # Configure hardware resources
     rc.init(cores_override=args.cores)
 
-    if args.input_file.endswith(".h5"):
-        # Continue from checkpoint:
-        input_dict = dict(checkpoint=args.input_file)
-    else:
-        # Load input parameters from YAML file:
-        input_dict = io.dict.key_cleanup(io.yaml.load(args.input_file))
-        # --- Set default checkpoint file (if not specified in input):
-        input_dict.setdefault(
-            "checkpoint", os.path.splitext(args.input_file)[0] + ".h5"
-        )
-        # --- Include processed input in log:
-        log.info(f"\n# Processed input:\n{io.yaml.dump(input_dict)}")
-        input_dict = io.dict.remove_units(input_dict)  # Remove units
+    # Load input parameters from YAML file:
+    input_dict = io.dict.key_cleanup(io.yaml.load(args.input_file))
+    # --- Set default checkpoint file (if not specified in input):
+    input_dict.setdefault("checkpoint", os.path.splitext(args.input_file)[0] + ".h5")
+    # --- Include processed input in log:
+    log.info(f"\n# Processed input:\n{io.yaml.dump(input_dict)}")
+    input_dict = io.dict.remove_units(input_dict)  # Remove units
 
     # Initialize system with input parameters:
     system = System(process_grid_shape=args.process_grid, **input_dict)

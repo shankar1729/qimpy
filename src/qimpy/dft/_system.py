@@ -34,7 +34,7 @@ class System(TreeNode):
     def __init__(
         self,
         *,
-        lattice: Union[Lattice, dict, None] = None,
+        lattice: Union[Lattice, dict],
         ions: Union[Ions, dict, None] = None,
         symmetries: Union[Symmetries, dict, None] = None,
         electrons: Union[Electrons, dict, None] = None,

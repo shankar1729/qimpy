@@ -23,7 +23,6 @@ class History(TreeNode):
         *,
         comm: MPI.Comm,
         n_max: int,
-        i_iter: int = 0,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         super().__init__()
@@ -31,13 +30,14 @@ class History(TreeNode):
         self.iter_division = TaskDivision(
             n_tot=n_max, n_procs=comm.size, i_proc=comm.rank
         )
-        self.i_iter = i_iter
+        self.i_iter = 0
         self.save_map = {}
 
         if checkpoint_in:
             checkpoint, path = checkpoint_in
             assert checkpoint is not None
             group = checkpoint[path]
+            self.i_iter = group.attrs["i_iter"]
             i_start = self.iter_division.i_start
             i_stop = min(self.iter_division.i_stop, self.i_iter + 1)
             n_in = i_stop - i_start  # number of iterations to be read at this process

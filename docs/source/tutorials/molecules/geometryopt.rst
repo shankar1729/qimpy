@@ -18,9 +18,8 @@ and more converged box sizes and plane-wave cutoffs:
 .. code-block:: yaml
 
     lattice:
-      system:
-        name: cubic
-        a: 20.0
+      system: cubic
+      a: 20.0
 
     electrons:
       basis:

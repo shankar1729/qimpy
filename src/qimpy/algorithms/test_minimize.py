@@ -39,7 +39,7 @@ class RandomFunction(Minimize[FieldR]):  # type: ignore
             n_consecutive=1,
             method=method,
         )
-        lattice = Lattice(system=dict(name="Orthorhombic", a=10.0, b=1.0, c=1.0))
+        lattice = Lattice(system="Orthorhombic", a=10.0, b=1.0, c=1.0)
         symmetries = Symmetries(lattice=lattice)
         grid = Grid(
             lattice=lattice,

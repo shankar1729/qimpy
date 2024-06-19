@@ -5,7 +5,7 @@ import torch
 
 from qimpy import log, TreeNode, MPI
 from qimpy.profiler import StopWatch
-from qimpy.io import CheckpointPath, CheckpointContext
+from qimpy.io import CheckpointPath
 from qimpy.grid import FieldH, FieldR
 from .functional import Functional, get_libxc_functional_names, FunctionalsLibxc
 from . import lda, gga, mgga, PlusU
@@ -17,7 +17,6 @@ N_CUT = 1e-16  # Regularization threshold for densities
 class XC(TreeNode):
     """Exchange-correlation functional."""
 
-    _functional_name: str  #: Internal name of functional for checkpoint
     _functionals: list[Functional]  #: list of functionals that add up to XC
     plus_U: Optional[PlusU]  #: optional DFT+U correction
     need_sigma: bool  #: whether overall functional needs gradient
@@ -66,7 +65,6 @@ class XC(TreeNode):
         log.info("\nInitializing XC:")
         if isinstance(functional, str):
             functional = functional.split(" ")
-        self._functional_name = " ".join(functional)
 
         # Initialize internal and LibXC functional objects:
         self._functionals = []
@@ -93,13 +91,6 @@ class XC(TreeNode):
         self.need_sigma = any(func.needs_sigma for func in self._functionals)
         self.need_lap = any(func.needs_lap for func in self._functionals)
         self.need_tau = any(func.needs_tau for func in self._functionals)
-
-    def _save_checkpoint(
-        self, cp_path: CheckpointPath, context: CheckpointContext
-    ) -> list[str]:
-        attrs = cp_path.attrs
-        attrs["functional"] = self._functional_name
-        return list(attrs.keys())
 
     def __call__(self, n_tilde: FieldH, tau_tilde: FieldH) -> float:
         """Compute exchange-correlation energy and potential.
