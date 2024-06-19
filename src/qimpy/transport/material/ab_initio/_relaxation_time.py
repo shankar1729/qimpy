@@ -78,6 +78,11 @@ class RelaxationTime(TreeNode):
             tau_recomb=torch.tensor(tau_recomb, device=rc.device),
         )
         self.nv = nv
+        self.max_dmu = max_dmu
+        self.eps = float(eps)
+        self.dmu_eps = float(dmu_eps)
+        self.only_diagonal = only_diagonal
+
         self.tau_e = {}
         self.tau_h = {}
         self.tau_eh = {}
@@ -96,6 +101,7 @@ class RelaxationTime(TreeNode):
             log.info("Enable phenomenon recombination.")
             self.exp_betaE = {}
             self.betamuk0 = {}
+
         self.max_dbetamu = max_dmu / ab_initio.T
         self.max_dmu = max_dmu
         self.eps = float(eps)

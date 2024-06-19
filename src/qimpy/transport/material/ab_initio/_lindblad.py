@@ -202,6 +202,15 @@ class Lindblad(TreeNode):
         )
         return recvbuf.reshape((nk, n_bands, n_bands) + batch_shape)
 
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs.update(
+            {param: self.constant_params[param].cpu() for param in self.constant_params}
+        )
+        return ["scale_factor"]
+
 
 def apply_batched(P: torch.Tensor, rho: torch.Tensor) -> torch.Tensor:
     """Apply batched flattened-rho operator P on batched rho.
