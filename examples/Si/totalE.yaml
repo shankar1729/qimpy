@@ -1,9 +1,8 @@
 # Diamond-cubic silicon
 lattice:
-  system: 
-    name: cubic
-    modification: face-centered
-    a: 5.43 Angstrom
+  system: cubic
+  modification: face-centered
+  a: 5.43 Angstrom
   movable: yes
 
 ions:
@@ -16,7 +15,7 @@ ions:
 electrons:
   k-mesh:
     offset: [0.5, 0.5, 0.5] #Monkhorst-Pack
-    size: [4, 4, 4]
+    size: [8, 8, 8]
   save-wavefunction: no  #keeps checkpoint small
 
 grid:
@@ -24,7 +23,7 @@ grid:
 
 geometry:
   relax:
-    n-iterations: 1
+    n-iterations: 10
   
-checkpoint: null
-checkpoint_out: totalE.h5
+checkpoint: null  # disable reading checkpoint
+checkpoint-out: totalE.h5  # but still create it

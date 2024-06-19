@@ -23,8 +23,6 @@ class TimeEvolution(TreeNode):
     def __init__(
         self,
         *,
-        i_step: int = 0,
-        t: float = 0.0,
         dt: float = 0.0,
         dt_save: float,
         t_max: float,
@@ -38,10 +36,6 @@ class TimeEvolution(TreeNode):
 
         Parameters
         ----------
-        i_step
-            Initial step index, used for continuing from checkpoint.
-        t
-            Initial time, used for continuing from checkpoint.
         dt
             :yaml:`Time step for evolution.`
             If zero, this is set to the maximum stable time step for advection.
@@ -63,11 +57,15 @@ class TimeEvolution(TreeNode):
             Corresponding geometry from which maximum time step is determined
         """
         super().__init__()
-        self.i_step_initial = int(i_step)
+        if checkpoint_in:
+            attrs = checkpoint_in.attrs
+            self.i_step_initial = attrs["i_step"]
+            self.t = attrs["t"]
+            log.info(f"Continuing from checkpoint at step {self.i_step_initial}")
+        else:
+            self.i_step_initial = 0
+            self.t = 0.0
         self.i_step = self.i_step_initial
-        self.t = float(t)
-        if i_step:
-            log.info(f"Continuing from step {i_step}")
         dt_max = geometry.dt_max
         if dt == 0.0:
             if dt_max == 0.0:
@@ -78,10 +76,10 @@ class TimeEvolution(TreeNode):
             log.info(f"Setting time step dt = {dt_max = :.4g}")
         elif dt_max and (dt > dt_max):
             raise InvalidInputException(f"{dt = } must be smaller than {dt_max = }")
-        self.dt = float(dt)
+        self.dt = dt
         self.n_steps = max(1, int(np.round(t_max / self.dt)))
         self.save_interval = max(1, int(np.round(dt_save / self.dt)))
-        self.n_collate = int(n_collate)
+        self.n_collate = n_collate
         self.integrator = integrator
         if integrator not in {"RK2", "RK4"}:
             raise InvalidInputException(f"Unrecognized {integrator = }")
@@ -135,9 +133,4 @@ class TimeEvolution(TreeNode):
         attrs = cp_path.attrs
         attrs["t"] = self.t
         attrs["i_step"] = self.i_step
-        attrs["dt"] = self.dt
-        attrs["dt_save"] = self.save_interval * self.dt
-        attrs["t_max"] = self.n_steps * self.dt
-        attrs["n_collate"] = self.n_collate
-        attrs["integrator"] = self.integrator
-        return list(attrs.keys())
+        return ["t", "i_step"]

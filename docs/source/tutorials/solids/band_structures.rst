@@ -10,10 +10,9 @@ First lets specify the bulk silicon energy calculation in Si.yaml, or reuse the 
 .. code-block:: yaml
 
   lattice:
-    system:
-      name: cubic
-      modification: face-centered
-      a: 10.263
+    system: cubic
+    modification: face-centered
+    a: 10.263
 
   ions:
     pseudopotentials:

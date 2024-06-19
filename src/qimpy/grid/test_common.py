@@ -5,7 +5,6 @@ import numpy as np
 import torch
 
 from qimpy import rc
-from qimpy.io import Unit
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
 from . import Grid, FieldH, FieldG
@@ -60,14 +59,6 @@ def get_reference_field(
 def get_grid_inputs() -> tuple[Lattice, Symmetries]:
     """Get dummy lattice etc. needed to create grid."""
     lattice = Lattice(
-        system=dict(
-            name="triclinic",
-            a=2.1,
-            b=2.2,
-            c=2.3,
-            alpha=75 * Unit.MAP["deg"],
-            beta=80 * Unit.MAP["deg"],
-            gamma=85 * Unit.MAP["deg"],
-        )
+        system="triclinic", a=2.1, b=2.2, c=2.3, alpha=75, beta=80, gamma=85
     )  # pick one with no symmetries
     return lattice, Symmetries(lattice=lattice)

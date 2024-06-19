@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from qimpy import dft
-from qimpy.io import CheckpointPath, CheckpointContext
+from qimpy.io import CheckpointPath
 from qimpy.mpi import globalreduce
 from qimpy.math import eighg
 from ._davidson import Davidson
@@ -60,16 +60,6 @@ class CheFSI(Davidson):
         self.filter_order = filter_order
         self.init_threshold = init_threshold
         self._line_prefix = "CheFSI"
-
-    def _save_checkpoint(
-        self, cp_path: CheckpointPath, context: CheckpointContext
-    ) -> list[str]:
-        attrs = cp_path.attrs
-        attrs["n_iterations"] = self.n_iterations
-        attrs["eig_threshold"] = self.eig_threshold
-        attrs["filter_order"] = self.filter_order
-        attrs["init_threshold"] = self.init_threshold
-        return list(attrs.keys())
 
     def __repr__(self) -> str:
         return (

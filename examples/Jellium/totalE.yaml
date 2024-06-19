@@ -1,10 +1,9 @@
 # Free electron gas:
 lattice:
-  system: 
-    name: tetragonal
-    modification: body-centered
-    a: 5  # bohrs
-    c: 7  # bohrs
+  system: tetragonal
+  modification: body-centered
+  a: 5  # bohrs
+  c: 7  # bohrs
   compute-stress: yes
 
 electrons:

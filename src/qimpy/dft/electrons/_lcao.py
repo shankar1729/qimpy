@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from qimpy import rc, dft, MPI
-from qimpy.io import CheckpointPath, CheckpointContext
+from qimpy.io import CheckpointPath
 from qimpy.mpi import BufferView
 from qimpy.math import eighg, dagger
 from qimpy.algorithms import Minimize, MinimizeState, MatrixArray
@@ -49,15 +49,6 @@ class LCAO(Minimize[MatrixArray]):
             energy_threshold=energy_threshold,
             n_consecutive=2,
         )
-
-    def _save_checkpoint(
-        self, cp_path: CheckpointPath, context: CheckpointContext
-    ) -> list[str]:
-        attrs = cp_path.attrs
-        attrs["n_iterations"] = self.n_iterations
-        attrs["energy_threshold"] = self.energy_threshold
-        attrs["gradient_threshold"] = self.extra_thresholds["|grad|"]
-        return list(attrs.keys())
 
     def update(self, system: dft.System) -> None:
         """Set wavefunctions to optimum subspace of atomic orbitals."""

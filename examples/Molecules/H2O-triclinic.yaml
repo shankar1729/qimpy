@@ -1,12 +1,11 @@
 lattice:
-  system:
-    name: triclinic  # for low-symmetry test of force/strain transformations and transpose correctness
-    a: 20.
-    b: 15.
-    c: 18.
-    alpha: 80 deg
-    beta: 95 deg
-    gamma: 75 deg
+  system: triclinic  # for low-symmetry test of force/strain transformations and transpose correctness
+  a: 20.
+  b: 15.
+  c: 18.
+  alpha: 80.
+  beta: 95.
+  gamma: 75.
   compute-stress: yes
 
 ions:

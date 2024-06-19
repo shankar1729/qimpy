@@ -218,32 +218,6 @@ class CheckpointPath(NamedTuple):
         except AssertionError:
             return None
 
-    def write_str(self, name: str, data: str) -> str:
-        """Write string `str` available on all processes to `name` within current path.
-        Data is written as a fixed-length byte string to support parallel access.
-        Returns `name`, which is convenient for accumulating the names of
-        written datasets during reporting."""
-        checkpoint, path = self.relative(name)
-        assert checkpoint is not None
-        checkpoint[path] = np.bytes_(data)
-        return name
-
-    def read_str(self, name: str) -> str:
-        """Read fixed-length byte string from checkpoint as a regular string."""
-        checkpoint, path = self.relative(name)
-        assert checkpoint is not None
-        return str(np.bytes_(checkpoint[path]).decode())
-
-    def __getitem__(self, key: str) -> Any:
-        checkpoint, path = self.relative(key)
-        assert checkpoint is not None
-        return checkpoint[path]
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        checkpoint, path = self.relative(key)
-        assert checkpoint is not None
-        checkpoint[path] = value
-
 
 class CheckpointContext(NamedTuple):
     """Identify from where/when a checkpoint is being written."""

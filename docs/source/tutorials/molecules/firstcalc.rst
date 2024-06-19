@@ -20,9 +20,8 @@ Save the following to `water.yaml`:
 .. code-block:: yaml
 
     lattice:
-      system:
-        name: cubic
-        a: 10.0
+      system: cubic
+      a: 10.0
 
     ions:
       pseudopotentials:

@@ -1,7 +1,6 @@
 lattice:
-  system:
-    name: cubic
-    a: 20.  # bohrs
+  system: cubic
+  a: 20.  # bohrs
   compute-stress: yes
 
 ions:
