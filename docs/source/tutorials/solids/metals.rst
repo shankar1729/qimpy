@@ -8,10 +8,11 @@ Platinum is a face-centered cubic metal with a cubic lattice constant of 3.92 An
 .. code-block:: yaml
 
     lattice:
-      system: cubic
+      system:
+        name: cubic
         modification: face-centered
         a: 3.92 Å
-     
+
     ions:
       pseudopotentials:
         - SG15/$ID_ONCV_PBE.upf

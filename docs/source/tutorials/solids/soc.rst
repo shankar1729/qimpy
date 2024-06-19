@@ -40,9 +40,10 @@ We first run the non-relativistic calculation (but with the new Pseudo Dojo pseu
 .. code-block:: yaml
 
     lattice:
-      system: cubic
-      modification: face-centered
-      a: 7.41
+      system:
+        name: cubic
+        modification: face-centered
+        a: 7.41
 
     ions:
       pseudopotentials:

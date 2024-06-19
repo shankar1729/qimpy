@@ -1,6 +1,7 @@
 lattice:
-  system: Cubic
-  a: 8.37
+  system:
+    name: Cubic
+    a: 8.37
   compute-stress: yes
 
 ions:

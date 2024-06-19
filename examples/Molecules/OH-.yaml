@@ -1,6 +1,7 @@
 lattice:
-  system: cubic
-  a: 20.  # bohrs
+  system:
+    name: cubic
+    a: 20.  # bohrs
 
 ions:
   pseudopotentials:

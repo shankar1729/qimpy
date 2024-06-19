@@ -5,7 +5,13 @@ import numpy as np
 import torch
 
 from qimpy import rc, log, io
-from qimpy.io import CheckpointPath, InvalidInputException
+from qimpy.io import (
+    CheckpointPath,
+    InvalidInputException,
+    TensorCompatible,
+    cast_tensor,
+    CheckpointContext,
+)
 from qimpy.mpi import ProcessGrid
 from qimpy.transport.material import Material
 from . import TensorList, Geometry, QuadSet
@@ -15,14 +21,15 @@ class ParameterGrid(Geometry):
     """Geometry specification."""
 
     shape: tuple[int, int]  #: Dimensions of parameter grid
+    parameters: dict[str, torch.Tensor]  #: Parameters broadcastable with grid
 
     def __init__(
         self,
         *,
         material: Material,
         shape: tuple[int, int],
-        dimension1: Optional[dict[str, dict[str, list]]] = None,
-        dimension2: Optional[dict[str, dict[str, list]]] = None,
+        dimension1: Optional[dict[str, dict[str, TensorCompatible]]] = None,
+        dimension2: Optional[dict[str, dict[str, TensorCompatible]]] = None,
         save_rho: bool = False,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
@@ -46,7 +53,7 @@ class ParameterGrid(Geometry):
             If not (default), only observables are written to the checkpoint file.
         """
         assert len(shape) == 2
-        self.shape = shape
+        self.shape = tuple(shape)
 
         # Create fake geometry for parameter grid
         quad_set = QuadSet(
@@ -73,11 +80,18 @@ class ParameterGrid(Geometry):
         self.dt_max = 0  # disable transport dt limit
 
         # Prepare all parameter values:
-        parameters: dict[str, torch.Tensor] = {}
-        for i_dim, dimension in enumerate([dimension1, dimension2]):
-            if dimension is not None:
-                for key, values in io.dict.key_cleanup(dimension).items():
-                    parameters[key] = self.create_values(i_dim, **values)
+        self.parameters: dict[str, torch.Tensor] = {}
+        if checkpoint_in:
+            cp_parameters = checkpoint_in.relative("parameters")
+            cp, path = cp_parameters
+            if path in cp:
+                for name in cp[path].keys():
+                    self.parameters[name] = cp_parameters.read(name)
+        else:
+            for i_dim, dimension in enumerate([dimension1, dimension2]):
+                if dimension is not None:
+                    for key, values in io.dict.key_cleanup(dimension).items():
+                        self.parameters[key] = self.create_values(i_dim, **values)
         log.info(f"Initialized parameter grid of dimensions: {shape}")
 
         # Initialize material for parameter subsets in each patch:
@@ -95,10 +109,21 @@ class ParameterGrid(Geometry):
                     slice(None) if (values.shape[0] == 1) else slice0,
                     slice(None) if (values.shape[1] == 1) else slice1,
                 ]
-                for key, values in parameters.items()
+                for key, values in self.parameters.items()
             }
             rho_initial = patch.rho.clone().detach() if checkpoint_in else patch.rho
             material.initialize_fields(rho_initial, parameters_sub, id(patch))
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["shape"] = self.shape
+        attrs["save_rho"] = self.save_rho
+        for name, parameter in self.parameters.items():
+            cp_path.write(f"parameters/{name}", parameter)
+        saved_list = [*attrs.keys(), "parameters"]
+        return saved_list + super()._save_checkpoint(cp_path, context)
 
     def create_values(
         self,
@@ -115,14 +140,14 @@ class ParameterGrid(Geometry):
         # Prepare scan of values based on loop or sweep:
         values: Optional[torch.Tensor] = None
         if loop is not None:
-            values = torch.tensor(loop, device=rc.device)
+            values = cast_tensor(loop)
             if len(values) != self.shape[i_dim]:
                 raise InvalidInputException(
                     f"Number of entries in loop = {len(values)} should match"
                     f" length {self.shape[i_dim]} of dimension {i_dim + 1}"
                 )
         if sweep is not None:
-            limits = torch.tensor(sweep, device=rc.device)
+            limits = cast_tensor(sweep)
             if len(limits) != 2:
                 raise InvalidInputException(
                     f"Number of entries in sweep = {len(limits)} must be 2"

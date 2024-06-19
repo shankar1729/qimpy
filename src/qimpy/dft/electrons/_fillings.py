@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Optional, Union, NamedTuple, Callable, Sequence
+from numbers import Integral
 
 import numpy as np
 import torch
@@ -27,6 +28,7 @@ class Fillings(TreeNode):
     """Electron occupation factors (smearing)"""
 
     electrons: dft.electrons.Electrons
+    n_electrons_neutral: float  #: Number of electrons for neutral case
     n_electrons: float  #: Number of electrons
     n_bands_min: int  #: Minimum number of bands to accomodate `n_electrons`
     n_bands: int  #: Number of bands to calculate
@@ -151,7 +153,8 @@ class Fillings(TreeNode):
         self.M_constrain = bool(M_constrain)
 
         # Number of electrons and bands:
-        self.n_electrons = ions.Z_tot - charge
+        self.n_electrons_neutral = ions.Z_tot
+        self.n_electrons = self.n_electrons_neutral - charge
         M_mag = (
             abs(self.M.item())
             if (electrons.spin_polarized and not electrons.spinorial)
@@ -203,8 +206,8 @@ class Fillings(TreeNode):
         n_bands_extra: Union[int, str, Default[str]],
     ) -> None:
         # Determine number of bands:
-        if isinstance(n_bands, int):
-            self.n_bands = n_bands
+        if isinstance(n_bands, Integral):
+            self.n_bands = int(n_bands)
             assert self.n_bands >= 1
             n_bands_method = "explicit"
         else:
@@ -228,8 +231,8 @@ class Fillings(TreeNode):
                 self.n_bands = max(1, int(np.ceil(self.n_bands_min * n_bands_scale)))
                 n_bands_method = n_bands[1:] + "*n_bands_min"
         # --- similarly for extra bands:
-        if isinstance(n_bands_extra, int):
-            self.n_bands_extra = n_bands_extra
+        if isinstance(n_bands_extra, Integral):
+            self.n_bands_extra = int(n_bands_extra)
             assert self.n_bands_extra >= 1
             n_bands_extra_method = "explicit"
         else:
@@ -436,9 +439,20 @@ class Fillings(TreeNode):
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["charge"] = self.n_electrons_neutral - self.n_electrons
+        if self.smearing is not None:
+            attrs["smearing"] = self.smearing
+            attrs["sigma"] = self.sigma
+        attrs["mu"] = self.mu
+        attrs["mu_constrain"] = self.mu_constrain
+        attrs["M_constrain"] = self.M_constrain
+        attrs["M"] = self.M.to(rc.cpu)
+        attrs["B"] = self.B.to(rc.cpu)
+        attrs["n_bands"] = self.n_bands
+        attrs["n_bands_extra"] = self.n_bands_extra
         self.write_band_scalars(cp_path.relative("f"), self.f)
-        cp_path.attrs["mu"] = self.mu
-        return ["f", "mu"]
+        return list(attrs.keys()) + ["f"]
 
     def write_band_scalars(self, cp_path: CheckpointPath, v: torch.Tensor) -> None:
         """Write `v` containing one scalar per band to `cp_path`.

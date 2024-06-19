@@ -6,7 +6,7 @@ import torch
 
 from qimpy import rc, log, TreeNode, grid, MPI
 from qimpy.mpi import TaskDivision
-from qimpy.io import CheckpointPath
+from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
 from ._fft import init_grid_fft, FFT, IFFT, IndicesType
@@ -126,7 +126,7 @@ class Grid(TreeNode):
             shape_min = 4 * np.ceil(np.array(shape_min) / 4).astype(int)
             log.info(f"minimum multiple-of-4 shape: {tuple(shape_min)}")
 
-        if shape:
+        if shape is not None:
             self.shape = tuple(shape)
             # Check symmetries and cutoff of specified shape:
             symmetries.check_grid_shape(self.shape)
@@ -141,6 +141,14 @@ class Grid(TreeNode):
             self.shape = tuple(symmetries.get_grid_shape(shape_min))
         log.info(f"selected shape: {self.shape}")
         init_grid_fft(self)
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["shape"] = self.shape
+        attrs["ke_cutoff"] = self.ke_cutoff
+        return list(attrs.keys())
 
     @property
     def dV(self) -> float:

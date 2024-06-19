@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Union, Sequence
+from typing import Union, Sequence, Optional
 
 import numpy as np
 import torch
@@ -23,17 +23,22 @@ class Kpoints(TreeNode):
         self,
         *,
         process_grid: ProcessGrid,
-        k: torch.Tensor,
-        wk: torch.Tensor,
+        k: Optional[torch.Tensor] = None,
+        wk: Optional[torch.Tensor] = None,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """Initialize from list of k-points and weights. Typically, this should
         be used only by derived classes :class:`Kmesh` or :class:`Kpath`.
         """
         super().__init__()
+        if checkpoint_in:
+            k = checkpoint_in.read("k")
+            wk = checkpoint_in.read("wk")
+        assert k is not None
+        assert wk is not None
+        assert abs(wk.sum() - 1.0) < 1e-14
         self.k = k
         self.wk = wk
-        assert abs(wk.sum() - 1.0) < 1e-14
 
         # Initialize process grid dimension (if -1) and split k-points:
         process_grid.provide_n_tasks("k", k.shape[0])
@@ -55,6 +60,8 @@ class Kmesh(Kpoints):
     """Uniform k-mesh sampling of Brillouin zone"""
 
     size: tuple[int, ...]  #: Dimensions of k-mesh
+    offset: tuple[float, ...]  #: Offset of k-mesh from Gamma
+    use_inversion: bool  #: Whether to use inversion in k-space to reduce k-points
     i_reduced: torch.Tensor  #: Reduced index of each k-point in mesh
     i_sym: torch.Tensor  #: Symmetry index that maps mesh points to reduced set
     invert: torch.Tensor  #: Inversion factor (1, -1) in reduction of each k
@@ -98,6 +105,15 @@ class Kmesh(Kpoints):
             Default: True; should only need to disable this when interfacing
             with codes that do not support this symmetry eg. BerkeleyGW.
         """
+        if checkpoint_in:
+            self.size = tuple(size)
+            self.offset = tuple(offset)
+            self.use_inversion = use_inversion
+            self.i_reduced = checkpoint_in.read("i_reduced")
+            self.i_sym = checkpoint_in.read("i_sym")
+            self.invert = checkpoint_in.read("invert")
+            super().__init__(process_grid=process_grid, checkpoint_in=checkpoint_in)
+            return
 
         # Select size from real-space dimension if needed:
         if isinstance(size, float) or isinstance(size, int):
@@ -181,6 +197,8 @@ class Kmesh(Kpoints):
         # --- store mapping from full k-mesh to reduced set:
         size = tuple(size)
         self.size = size
+        self.offset = tuple(offset)
+        self.use_inversion = use_inversion
         self.i_reduced = i_reduced.reshape(size)  # index into k
         self.i_sym = i_sym.reshape(size)  # symmetry number to get to k
         # --- seperate combined symmetry index into symmetry and inversion:
@@ -190,18 +208,20 @@ class Kmesh(Kpoints):
             log.info("Note: used k-inversion (conjugation) symmetry")
 
         # Initialize base class:
-        super().__init__(
-            process_grid=process_grid, k=k, wk=wk, checkpoint_in=checkpoint_in
-        )
+        super().__init__(process_grid=process_grid, k=k, wk=wk)
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
         saved_list = super()._save_checkpoint(cp_path, context)
         cp_path.attrs["size"] = self.size
+        cp_path.attrs["offset"] = self.offset
+        cp_path.attrs["use_inversion"] = self.use_inversion
         saved_list.extend(
             [
                 "size",
+                "offset",
+                "use_inversion",
                 cp_path.write("i_reduced", self.i_reduced),
                 cp_path.write("i_sym", self.i_sym),
                 cp_path.write("invert", self.invert),
@@ -222,8 +242,8 @@ class Kpath(Kpoints):
         *,
         process_grid: ProcessGrid,
         lattice: Lattice,
-        dk: float,
-        points: list,
+        dk: float = 0.0,
+        points: Optional[list] = None,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """Initialize k-path with spacing `dk` connecting `points`.
@@ -243,6 +263,15 @@ class Kpath(Kpoints):
             and optionally a string label for this point for use in
             band structure plots.
         """
+        if checkpoint_in:
+            labels = checkpoint_in.read_str("labels").split(",")
+            label_indices = list(checkpoint_in["label_indices"])
+            self.labels = dict(zip(label_indices, labels))
+            self.k_length = checkpoint_in.read("k_length")
+            super().__init__(process_grid=process_grid, checkpoint_in=checkpoint_in)
+            return
+        assert dk
+        assert points is not None
 
         # Check types, sizes and separate labels from points:
         dk = float(dk)
@@ -277,14 +306,17 @@ class Kpath(Kpoints):
         log.info(f"Created {nk_tot} k-points on k-path of" f" length {distance_tot:g}")
 
         # Initialize base class:
-        super().__init__(
-            process_grid=process_grid, k=k, wk=wk, checkpoint_in=checkpoint_in
-        )
+        super().__init__(process_grid=process_grid, k=k, wk=wk)
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
         saved_list = super()._save_checkpoint(cp_path, context)
-        cp_path.attrs["labels"] = str(self.labels)
-        saved_list.extend(["labels", cp_path.write("k_length", self.k_length)])
+        saved_list.extend(
+            [
+                cp_path.write_str("labels", ",".join(self.labels.values())),
+                cp_path.write("label_indices", torch.tensor(list(self.labels.keys()))),
+                cp_path.write("k_length", self.k_length),
+            ]
+        )
         return saved_list

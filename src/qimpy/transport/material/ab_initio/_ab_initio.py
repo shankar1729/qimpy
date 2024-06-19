@@ -6,7 +6,15 @@ import torch
 
 from qimpy import log, rc
 from qimpy.profiler import StopWatch
-from qimpy.io import Checkpoint, CheckpointPath, Unit, InvalidInputException
+from qimpy.io import (
+    Checkpoint,
+    CheckpointPath,
+    Unit,
+    InvalidInputException,
+    TensorCompatible,
+    cast_tensor,
+    CheckpointContext,
+)
 from qimpy.mpi import ProcessGrid
 from .. import Material, fermi
 from . import PackedHermitian, RelaxationTime, Lindblad, Light, PulseB
@@ -33,7 +41,7 @@ class AbInitio(Material):
 
     T: float
     mu: float
-    rotation: torch.Tensor
+    rotation: Optional[torch.Tensor]
     P: torch.Tensor  #: Momentum matrix elements
     S: Optional[torch.Tensor]  #: Spin matrix elements
     L: Optional[torch.Tensor]  #: Angular momentum matrix elements
@@ -52,20 +60,16 @@ class AbInitio(Material):
         file: str,
         T: float,
         mu: float = 0.0,
-        rotation: Sequence[Sequence[float]] = (
-            (1.0, 0.0, 0.0),
-            (0.0, 1.0, 0.0),
-            (0.0, 0.0, 1.0),
-        ),
+        rotation: Optional[TensorCompatible] = None,
         orbital_zeeman: Optional[bool] = None,
-        B: Optional[Sequence[float]] = None,
+        B: Optional[TensorCompatible] = None,
+        observable_names: Union[str, list[str]] = "n",
         relaxation_time: Optional[Union[RelaxationTime, dict]] = None,
         lindblad: Optional[Union[Lindblad, dict]] = None,
         light: Optional[Union[Light, dict]] = None,
         pulseB: Optional[Union[PulseB, dict]] = None,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
-        observable_names: tuple[str] = ("n",),
     ):
         """
         Initialize ab initio material.
@@ -80,6 +84,7 @@ class AbInitio(Material):
             :yaml:`Chemical potential in equilbrium.`
         rotation
             :yaml:`3 x 3 rotation matrix from material to simulation frame.`
+            If unspecified (default), no rotation is performed.
         orbital_zeeman
             :yaml:`Whether to include L matrix elements in Zeeman coupling.`
             The default None amounts to using L if available in the data.
@@ -95,6 +100,7 @@ class AbInitio(Material):
             :yaml:`Magnetic field pulses.`
         observable_names
             :yaml:`Control which observables will be output.`
+            Specify either as a list of names, or a comma-separated string.
             Supported variables:
                 * n: number density
                 * jx, jy: number flux components
@@ -103,11 +109,10 @@ class AbInitio(Material):
             By default, only n (number density) is output.
         """
         self.comm = process_grid.get_comm("k")
-        self.mu = mu
-        self.rotation = torch.tensor(rotation, device=rc.device)
         self.file = file
         self.orbital_zeeman = orbital_zeeman
-        observable_names = list(observable_names)
+        self.mu = mu
+        self.rotation = None if rotation is None else cast_tensor(rotation)
         watch = StopWatch("Dynamics.read_checkpoint")
         with Checkpoint(file) as data_file:
             attrs = data_file.attrs
@@ -148,7 +153,7 @@ class AbInitio(Material):
                 self.B = None
                 self.evecs = None
             else:
-                self.B = torch.tensor(B, device=rc.device)
+                self.B = cast_tensor(B)
                 assert self.B.shape == (3,)
                 H0 = torch.diag_embed(self.E) + self.zeemanH(self.B)
                 self.E[:], self.evecs = torch.linalg.eigh(H0)
@@ -167,7 +172,7 @@ class AbInitio(Material):
             # Initialize optional terms in the dynamics
             self.dynamics_terms = {}
 
-            if relaxation_time is not None:
+            if (relaxation_time is not None) or checkpoint_in.member("relaxation_time"):
                 self.add_child(
                     "relaxation_time",
                     RelaxationTime,
@@ -177,7 +182,7 @@ class AbInitio(Material):
                 )
                 self.dynamics_terms["relaxation_time"] = self.relaxation_time
 
-            if lindblad is not None:
+            if (lindblad is not None) or checkpoint_in.member("lindblad"):
                 self.add_child(
                     "lindblad",
                     Lindblad,
@@ -188,17 +193,19 @@ class AbInitio(Material):
                 )
                 self.dynamics_terms["lindblad"] = self.lindblad
 
-            if light is not None:
+            if (light is not None) or checkpoint_in.member("light"):
                 self.add_child("light", Light, light, checkpoint_in, ab_initio=self)
                 self.dynamics_terms["light"] = self.light
 
-            if pulseB is not None:
+            if (pulseB is not None) or checkpoint_in.member("pulseB"):
                 self.add_child("pulseB", PulseB, pulseB, checkpoint_in, ab_initio=self)
                 self.dynamics_terms["pulseB"] = self.pulseB
 
         # Control output observables:
+        if isinstance(observable_names, str):
+            observable_names = observable_names.split(",")
         if not observable_names:
-            observable_names = ("n",)  # Don't allow empty observables list for now
+            observable_names = ["n"]  # Don't allow empty observables list for now
         dir_name_to_index = {"x": 0, "y": 1, "z": 2}
         match_j = re.compile("j[x-z]$")
         match_jd = re.compile("jd[x-z]$")
@@ -228,6 +235,22 @@ class AbInitio(Material):
                 raise InvalidInputException(f"{observable_name = } is not supported")
         self.observables = torch.stack(observables, dim=0)
         self.observable_names = list(observable_names)
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["file"] = self.file
+        attrs["T"] = self.T
+        attrs["mu"] = self.mu
+        if self.rotation is not None:
+            attrs["rotation"] = self.rotation.to(rc.cpu)
+        if self.orbital_zeeman is not None:
+            attrs["orbital_zeeman"] = self.orbital_zeeman
+        if self.B is not None:
+            attrs["B"] = self.B
+        attrs["observable_names"] = ",".join(self.observable_names)
+        return list(attrs.keys())
 
     def initialize_fields(
         self, rho: torch.Tensor, params: dict[str, torch.Tensor], patch_id: int
@@ -269,9 +292,11 @@ class AbInitio(Material):
         offset = (self.k_division.i_start,) + (0,) * (len(dset.shape) - 1)
         size = (self.nk_mine,) + dset.shape[1:]
         result = data_file.read_slice(dset, offset, size)
-        return torch.einsum(
-            "ij, kj... -> ki...", self.rotation.to(result.dtype), result
-        )
+        if self.rotation is not None:
+            result = torch.einsum(
+                "ij, kj... -> ki...", self.rotation.to(result.dtype), result
+            )
+        return result
 
     def apply_evecs(self, M: Optional[torch.Tensor]) -> None:
         """Apply transformation by `evecs` to final two band dimensions.

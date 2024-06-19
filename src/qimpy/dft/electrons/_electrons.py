@@ -490,10 +490,15 @@ class Electrons(TreeNode):
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["spin_polarized"] = self.spin_polarized
+        attrs["spinorial"] = self.spinorial
+        attrs["fixed_H"] = self.fixed_H
+        attrs["save_wavefunction"] = self.save_wavefunction
         (~self.n_tilde).write(cp_path.relative("n"))
         (~self.n_tilde.grad).write(cp_path.relative("V_ks"))
         self.fillings.write_band_scalars(cp_path.relative("eig"), self.eig)
-        saved_list = ["n", "V_ks", "eig"]
+        saved_list = list(attrs.keys()) + ["n", "V_ks", "eig"]
         if self.save_wavefunction and (context.stage == "end"):
             n_bands = self.fillings.n_bands
             self.C[:, :, :n_bands].write(cp_path.relative("C"))
@@ -502,4 +507,6 @@ class Electrons(TreeNode):
             (~self.tau_tilde).write(cp_path.relative("tau"))
             (~self.tau_tilde.grad).write(cp_path.relative("V_tau"))
             saved_list.extend(["tau", "V_tau"])
+        if self.lcao is None:
+            attrs["lcao"] = False
         return saved_list

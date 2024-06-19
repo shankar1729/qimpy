@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from qimpy import rc, log, TreeNode, MPI
-from qimpy.io import CheckpointPath
+from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import TaskDivision, ProcessGrid, BufferView, globalreduce
 from qimpy.math import ceildiv
 from qimpy.lattice import Lattice, Kpoints
@@ -164,65 +164,24 @@ class Basis(TreeNode):
             ke_cutoff_wavefunction=self.ke_cutoff,
         )
 
-        # Initialize basis:
-        self.iG = self.grid.get_mesh("H" if self.real_wavefunctions else "G").view(
-            -1, 3
-        )
-        within_cutoff = self.get_ke() < ke_cutoff  # mask of which iG to keep
-        # --- determine statistics of basis count across all k:
-        self.n = within_cutoff.count_nonzero(dim=1)
-        self.n_min = globalreduce.min(self.n, kpoints.comm)
-        self.n_max = globalreduce.max(self.n, kpoints.comm)
-        n_procs_b = self.comm.size
-        self.n_tot = ceildiv(self.n_max, n_procs_b) * n_procs_b
-        self.n_avg = globalreduce.sum(self.n * self.wk, kpoints.comm)
-        log.info(
-            f"n_basis:  min: {self.n_min}  max: {self.n_max}"
-            f"  avg: {self.n_avg:.3f}  ideal: {self.n_ideal:.3f}"
-        )
-        # --- create indices from basis set to FFT grid:
-        n_fft = self.iG.shape[0]  # number of points on FFT grid
-        assert self.n_tot <= n_fft  # make sure padding doesn't exceed grid
-        fft_range = torch.arange(n_fft, device=rc.device)
-        self.fft_index = (
-            torch.where(within_cutoff, 0, n_fft) + fft_range[None, :]
-        ).argsort(  # ke<cutoff to front
-            dim=1
-        )[
-            :, : self.n_tot
-        ]  # same count all k
-        self.iG = self.iG[self.fft_index]  # basis plane waves for each k
-        pad_index = torch.where(
-            fft_range[None, : self.n_tot] >= self.n[:, None]
-        )  # padded entries
-        self.pad_index = (
-            slice(None),
-            pad_index[0],
-            slice(None),
-            slice(None),
-            pad_index[1],
-        )  # add spin, band and spinor dims
+        # Initialize or read indices, along with process-grid-dependent padding:
+        # Both paths set iG, fft_index, n and its statistics (min, max, avg and tot)
+        if checkpoint_in:
+            self._read_indices(checkpoint_in)
+        else:
+            self._initialize_indices()
+        self.pad_index = self._get_pad_index(0, self.n_tot)
 
         # Divide basis on comm_b:
         div = TaskDivision(
             n_tot=self.n_tot,
-            n_procs=n_procs_b,
+            n_procs=self.comm.size,
             i_proc=self.comm.rank,
             name="padded basis",
         )
         self.division = div
         self.mine = slice(div.i_start, div.i_stop)
-        # --- initialize local pad index separately (not trivially sliceable):
-        pad_index = torch.where(
-            fft_range[None, div.i_start : div.i_stop] >= self.n[:, None]
-        )  # local padded entries
-        self.pad_index_mine = (
-            slice(None),
-            pad_index[0],
-            slice(None),
-            slice(None),
-            pad_index[1],
-        )  # add other dims
+        self.pad_index_mine = self._get_pad_index(div.i_start, div.i_stop)
 
         if self.real_wavefunctions and kpoints.division.n_mine:
             self.real = BasisReal(self)
@@ -342,3 +301,82 @@ class Basis(TreeNode):
         if self.division.n_procs > 1:
             rc.current_stream_synchronize()
             self.comm.Allreduce(MPI.IN_PLACE, BufferView(x), op)
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        attrs = cp_path.attrs
+        attrs["ke_cutoff"] = self.ke_cutoff
+        attrs["real_wavefunctions"] = self.real_wavefunctions
+        attrs["fft_block_size"] = self.fft_block_size
+        attrs["mpi_block_size"] = self.mpi_block_size
+
+        # Write basis count:
+        checkpoint, path = cp_path
+        kdiv = self.kpoints.division
+        dset = checkpoint.create_dataset_real(f"{path}/n", (kdiv.n_tot,), self.n.dtype)
+        checkpoint.write_slice(dset, (kdiv.i_start,), self.n)
+
+        # Write fft index:
+        dset = checkpoint.create_dataset_real(
+            f"{path}/fft_index", (kdiv.n_tot, self.n_max), self.fft_index.dtype
+        )
+        checkpoint.write_slice(dset, (kdiv.i_start, 0), self.fft_index[:, : self.n_max])
+        return [*attrs.keys(), "n", "fft_index"]
+
+    def _set_n(self, n: torch.Tensor) -> None:
+        """Set n and its stats (min, max, avg and tot)."""
+        comm = self.kpoints.comm
+        self.n = n
+        self.n_min = globalreduce.min(n, comm)
+        self.n_max = globalreduce.max(n, comm)
+        n_procs_b = self.comm.size
+        self.n_tot = ceildiv(self.n_max, n_procs_b) * n_procs_b
+        self.n_avg = globalreduce.sum(self.n * self.wk, comm)
+        log.info(
+            f"n_basis:  min: {self.n_min}  max: {self.n_max}"
+            f"  avg: {self.n_avg:.3f}  ideal: {self.n_ideal:.3f}"
+        )
+
+    def _initialize_indices(self) -> None:
+        """Initialize iG, fft_index, n and its stats based on ke_cutoff."""
+        iG = self.grid.get_mesh("H" if self.real_wavefunctions else "G").view(-1, 3)
+        self.iG = iG  # used by get_ke below
+        within_cutoff = self.get_ke() < self.ke_cutoff  # mask of which iG to keep
+        self._set_n(within_cutoff.count_nonzero(dim=1))
+        # Set indices from basis set to FFT grid, including padding up to n_tot:
+        n_fft = iG.shape[0]  # number of points on FFT grid
+        assert self.n_tot <= n_fft  # make sure padding doesn't exceed grid
+        fft_range = torch.arange(n_fft, device=rc.device)
+        priority = torch.where(within_cutoff, 0, n_fft) + fft_range[None, :]
+        self.fft_index = priority.argsort(dim=1)[:, : self.n_tot]  # ke<cutoff to front
+        self.iG = iG[self.fft_index]
+
+    def _read_indices(self, checkpoint_in: CheckpointPath) -> None:
+        """Read fft_index and n from checkpoint, and then set iG and n stats."""
+        # Read portion of n and fft_index belonging to this process
+        kdiv = self.kpoints.division
+        cp, path = checkpoint_in
+        n = cp.read_slice(cp[f"{path}/n"], (kdiv.i_start,), (kdiv.n_mine,))
+        self._set_n(n)
+        fft_index = cp.read_slice(
+            cp[f"{path}/fft_index"], (kdiv.i_start, 0), (kdiv.n_mine, self.n_max)
+        )
+        # Introduce padding from n_max to n_tot (which depends on parallelization)
+        iG = self.grid.get_mesh("H" if self.real_wavefunctions else "G").view(-1, 3)
+        n_fft = iG.shape[0]  # number of points on FFT grid
+        assert self.n_tot <= n_fft  # make sure padding doesn't exceed grid
+        # --- start out with high values in priority for all indices
+        # --- then replace the ones in fft_index such that they appear in order
+        priority = n_fft + torch.arange(n_fft, device=rc.device).repeat(kdiv.n_mine, 1)
+        ik = torch.arange(kdiv.n_mine, device=rc.device)[:, None]
+        priority[ik, fft_index] = torch.arange(self.n_max, device=rc.device)
+        self.fft_index = priority.argsort(dim=1)[:, : self.n_tot]
+        self.iG = iG[self.fft_index]
+
+    def _get_pad_index(self, index_start: int, index_stop: int) -> PadIndex:
+        """Get tuple for indexing padded entries in wavefunctions,
+        for range of basis indices, index_start to index_stop."""
+        indices = torch.arange(index_start, index_stop, device=rc.device)
+        pad_k, pad_G = torch.where(indices >= self.n[:, None])
+        return slice(None), pad_k, slice(None), slice(None), pad_G  # add s, b, spinor

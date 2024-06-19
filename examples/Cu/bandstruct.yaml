@@ -16,6 +16,7 @@ electrons:
     - [0.000, 0.000, 0.000, $\Gamma$]
     - [0.375, 0.750, 0.375, K]
 
+geometry: fixed
 checkpoint: null
 checkpoint-out: bandstruct.h5
 

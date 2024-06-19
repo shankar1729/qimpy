@@ -21,7 +21,7 @@ def main() -> None:
 
     bond_distances = []  # to be populated by analyze()
     system = qp.dft.System(
-        lattice=dict(system="cubic", modification="face-centered", a=14.0),
+        lattice=dict(system=dict(name="cubic", modification="face-centered", a=14.0)),
         ions=dict(
             pseudopotentials="SG15/$ID_ONCV_PBE.upf",
             coordinates=[["H", 0.0, 0.0, 0.0], ["H", 0.3, 0.2, 1.4]],

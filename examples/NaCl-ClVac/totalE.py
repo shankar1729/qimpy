@@ -9,11 +9,9 @@ qp.rc.init()
 # Create lattice object explicitly (eg. shared between two systems)
 n_sup = 2  # number of unit cells in each dimension
 lattice = qp.lattice.Lattice(
-    modification="face-centered",
-    system="cubic",
-    a=10.74,  # bohrs, for unit cell
+    system=dict(name="cubic", a=10.74, modification="face-centered"),
     scale=n_sup,
-)  # scaled for supercell
+)
 
 # Ion parameters:
 coords_mesh_1d = np.arange(n_sup) * (1.0 / n_sup)

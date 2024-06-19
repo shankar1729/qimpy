@@ -48,7 +48,7 @@ def main() -> None:
     ]
 
     system = qp.dft.System(
-        lattice=dict(system="cubic", a=float(Unit(5.43, "Å")), movable=True),
+        lattice=dict(system=dict(name="cubic", a=float(Unit(5.43, "Å"))), movable=True),
         ions=dict(
             pseudopotentials="SG15/$ID_ONCV_PBE.upf",
             coordinates=coordinates,

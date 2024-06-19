@@ -14,4 +14,4 @@ electrons:
     n-bands: 8
     n-bands-extra: 4
 
-checkpoint-out: null  # disable totalE.h5 output included from totalE.yaml
+checkpoint-out: bandstruct.h5

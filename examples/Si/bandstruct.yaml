@@ -1,7 +1,8 @@
 include: totalE.yaml
 
 lattice:
-  a: 10.3492926  # relaxed lattice constant
+  system:
+    a: 10.3492926  # relaxed lattice constant
 
 electrons:
   fixed-H: totalE.h5

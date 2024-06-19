@@ -115,12 +115,12 @@ class Ions(TreeNode):
         prefixes = [""]
         if "QIMPY_PSEUDO_DIR" in os.environ:
             prefixes.extend(os.environ["QIMPY_PSEUDO_DIR"].split(":"))
-        pseudopotential_filenames = [
+        self.pseudopotential_filenames = [
             self._get_pseudopotential_filename(symbol, pseudopotentials, prefixes)
             for symbol in self.symbols
         ]
         self.pseudopotentials = [
-            Pseudopotential(filename) for filename in pseudopotential_filenames
+            Pseudopotential(filename) for filename in self.pseudopotential_filenames
         ]
         self.beta_version = 0
 
@@ -346,11 +346,12 @@ class Ions(TreeNode):
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
-        # TODO: decide how / whether pseudopotentials are checkpoint'd
-        cp_path.attrs["symbols"] = ",".join(self.symbols)
-        saved_list = ["symbols"]
-        saved_list.append(cp_path.write("types", self.types))
-        saved_list.append(cp_path.write("positions", self.positions.detach()))
+        cp_path.attrs["pseudopotentials"] = self.pseudopotential_filenames
+        saved_list = [
+            cp_path.write_str("symbols", ",".join(self.symbols)),
+            cp_path.write("types", self.types),
+            cp_path.write("positions", self.positions.detach()),
+        ]
         if self.velocities is not None:
             saved_list.append(cp_path.write("velocities", self.velocities))
         if self.positions.grad is not None:
@@ -362,9 +363,7 @@ class Ions(TreeNode):
         return saved_list
 
     def _read_checkpoint(self, cp_path: CheckpointPath) -> None:
-        checkpoint, path = cp_path
-        assert checkpoint is not None
-        symbol_str = cp_path.attrs["symbols"]
+        symbol_str = cp_path.read_str("symbols")
         self.symbols = symbol_str.split(",") if symbol_str else list[str]()
         self.types = cp_path.read("types")
         self.positions = cp_path.read("positions")

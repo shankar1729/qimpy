@@ -10,9 +10,10 @@ Save the following to `Hatom.yaml`:
 .. code-block:: yaml
 
     lattice:
-      system: cubic
-      modification: face-centered
-      a: 20.  # bohrs
+      system:
+        name: cubic
+        modification: face-centered
+        a: 20.  # bohrs
 
     ions:
       pseudopotentials:

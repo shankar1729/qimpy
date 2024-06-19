@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from qimpy import rc, log, TreeNode
-from qimpy.io import CheckpointPath, fmt
+from qimpy.io import CheckpointPath, fmt, CheckpointContext
 from qimpy.lattice import Lattice
 from . import LabeledPositions
 from ._lattice import get_lattice_point_group, symmetrize_lattice, symmetrize_matrix
@@ -50,10 +50,8 @@ class Symmetries(TreeNode):
         ----------
         lattice
             Lattice vectors for determining point group.
-        positions
+        labeled_positions
             List of covariant coordinates of eg. atoms to deduce space group.
-        scalar_labels
-
         tolerance
             :yaml:`Threshold for detecting symmetries.`
         override
@@ -71,9 +69,14 @@ class Symmetries(TreeNode):
         self.labeled_positions = labeled_positions
         self.tolerance = tolerance
         log.info("\n--- Initializing Symmetries ---")
-        rot, trans, position_map = Symmetries.detect(
-            lattice, labeled_positions, axes, tolerance
-        )
+        if checkpoint_in:
+            rot = checkpoint_in.read("rot")
+            trans = checkpoint_in.read("trans")
+            position_map = checkpoint_in.read("position_map")
+        else:
+            rot, trans, position_map = Symmetries.detect(
+                lattice, labeled_positions, axes, tolerance
+            )
 
         # Down-select to manual symmetries (if any):
         if override is not None:
@@ -105,6 +108,17 @@ class Symmetries(TreeNode):
         )
         self.i_id = Symmetries.find_identity(rot, trans, tolerance)
         self.i_inv = Symmetries.find_inversion(rot, tolerance)
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        cp_path.attrs["tolerance"] = self.tolerance
+        return [
+            "tolerance",
+            cp_path.write("rot", self.rot),
+            cp_path.write("trans", self.trans),
+            cp_path.write("position_map", self.position_map),
+        ]
 
     @staticmethod
     def detect(
