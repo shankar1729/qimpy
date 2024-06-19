@@ -144,7 +144,7 @@ class Light(TreeNode):
             prefac = torch.sqrt(torch.sqrt(torch.pi / (8 * smearing**2)))
             exp_factor = -1.0 / (smearing**2)
             Nk, Nb = ab_initio.E.shape
-            dE = ab_initio.E.reshape([1, 1, Nk, Nb, 1]) - ab_initio.E.reshape([1, 1, Nk, 1, Nb])
+            dE = ab_initio.E[None, None, ..., None] - ab_initio.E[None, None, :, None, :]
             plus = prefac * amp_mat * torch.exp(
                 exp_factor * ((dE + omega[..., None, None, None]) ** 2)
             )

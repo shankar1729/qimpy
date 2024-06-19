@@ -255,7 +255,6 @@ class RelaxationTime(TreeNode):
             )  # indices that need to be limited by self.max_dbetamu
             dbetamu[limit_ind] = torch.sign(F[limit_ind]) * self.max_dbetamu
             betamu = betamu - dbetamu
-            # reshape = betamu.shape + (1,) * (4 - betamu.ndim) # handle broadcasting
             exp_beta_Emu = exp_betaE[None, None] / torch.exp(betamu).reshape(reshape)
             distribution = 1 / (exp_beta_Emu + 1)
             F = torch.einsum(sum_rule, distribution) - f_total
