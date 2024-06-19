@@ -244,7 +244,7 @@ class AbInitio(Material):
         if self.orbital_zeeman is not None:
             attrs["orbital_zeeman"] = self.orbital_zeeman
         if self.B is not None:
-            attrs["B"] = self.B
+            attrs["B"] = self.B.to(rc.cpu)
         attrs["observable_names"] = ",".join(self.observable_names)
         return list(attrs.keys())
 
