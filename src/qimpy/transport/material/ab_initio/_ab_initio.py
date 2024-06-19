@@ -208,6 +208,7 @@ class AbInitio(Material):
             observable_names = ["n"]  # Don't allow empty observables list for now
         dir_name_to_index = {"x": 0, "y": 1, "z": 2}
         match_j = re.compile("j[x-z]$")
+        match_jd = re.compile("jd[x-z]$")
         match_S = re.compile("S[x-z]$")
         match_j_S = re.compile("j[x-z]_S[x-z]$")
         observables = []
@@ -217,6 +218,9 @@ class AbInitio(Material):
                 observables.append(eye_bands.repeat(self.nk_mine, 1, 1))
             elif match_j.match(observable_name):
                 observables.append(self.P[:, dir_name_to_index[observable_name[1]]])
+            elif match_jd.match(observable_name):
+                P_diag = torch.diag_embed(torch.einsum("kibb -> kib", self.P))
+                observables.append(P_diag[:, dir_name_to_index[observable_name[2]]])
             elif match_S.match(observable_name):
                 if self.S is None:
                     raise InvalidInputException(f"{observable_name = } unavailable")
