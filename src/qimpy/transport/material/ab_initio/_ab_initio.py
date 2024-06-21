@@ -219,8 +219,13 @@ class AbInitio(Material):
             elif match_j.match(observable_name):
                 observables.append(self.P[:, dir_name_to_index[observable_name[1]]])
             elif match_jd.match(observable_name):
-                P_diag = torch.diag_embed(torch.einsum("kibb -> kib", self.P))
-                observables.append(P_diag[:, dir_name_to_index[observable_name[2]]])
+                P_diag = torch.diag_embed(
+                    torch.einsum(
+                        "kbb -> kb",
+                        self.P[:, dir_name_to_index[observable_name[2]]]
+                    )
+                )
+                observables.append(P_diag)
             elif match_S.match(observable_name):
                 if self.S is None:
                     raise InvalidInputException(f"{observable_name = } unavailable")
@@ -248,7 +253,7 @@ class AbInitio(Material):
         if self.orbital_zeeman is not None:
             attrs["orbital_zeeman"] = self.orbital_zeeman
         if self.B is not None:
-            attrs["B"] = self.B
+            attrs["B"] = self.B.to(rc.cpu)
         attrs["observable_names"] = ",".join(self.observable_names)
         return list(attrs.keys())
 
