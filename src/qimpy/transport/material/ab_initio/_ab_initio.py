@@ -220,10 +220,7 @@ class AbInitio(Material):
                 observables.append(self.P[:, dir_name_to_index[observable_name[1]]])
             elif match_jd.match(observable_name):
                 P_diag = torch.diag_embed(
-                    torch.einsum(
-                        "kbb -> kb",
-                        self.P[:, dir_name_to_index[observable_name[2]]]
-                    )
+                    self.v[:, :, dir_name_to_index[observable_name[2]]]
                 )
                 observables.append(P_diag)
             elif match_S.match(observable_name):
