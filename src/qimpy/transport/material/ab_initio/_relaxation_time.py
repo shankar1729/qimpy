@@ -20,6 +20,7 @@ class RelaxationTime(TreeNode):
     max_dmu: float  #: maximum change of mu in find_mu
     nv: int  #: number of valance bands
     eps: float
+    dmu_eps: float
     only_diagonal: bool
 
     constant_params: dict[str, torch.Tensor]  #: constant values of parameters
@@ -107,6 +108,7 @@ class RelaxationTime(TreeNode):
             2: "xykb -> xy", # electron or hole
             3: "xykb -> xyk", # recombination
         }
+        self.is_initial = True
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
@@ -144,19 +146,41 @@ class RelaxationTime(TreeNode):
         betamu0 = ab_initio.mu / ab_initio.T
         if torch.isfinite(tau_e):
             self.tau_e[patch_id] = tau_e
-            self.exp_betaEe[patch_id] = torch.exp(ab_initio.E[:, nv:] / ab_initio.T)
+            self.exp_betaEe[patch_id] = torch.exp(ab_initio.E[:, nv:] / ab_initio.T)[None, None]
             self.betamue0[patch_id] = torch.ones([1, 1]).to(rc.device) * betamu0
         if torch.isfinite(tau_h):
             self.tau_h[patch_id] = tau_h
-            self.exp_betaEh[patch_id] = torch.exp(-ab_initio.E[:, :nv] / ab_initio.T)
+            self.exp_betaEh[patch_id] = torch.exp(-ab_initio.E[:, :nv] / ab_initio.T)[None, None]
             self.betamuh0[patch_id] = -torch.ones([1, 1]).to(rc.device) * betamu0
         if torch.isfinite(tau_eh):
             self.tau_eh[patch_id] = tau_eh
         if torch.isfinite(tau_recomb):
             self.tau_recomb[patch_id] = tau_recomb
-            self.exp_betaE[patch_id] = torch.exp(ab_initio.E / ab_initio.T)
+            self.exp_betaE[patch_id] = torch.exp(ab_initio.E / ab_initio.T)[None, None]
             self.betamuk0[patch_id] = (
                 torch.ones([1, 1, ab_initio.E.shape[0]]).to(rc.device) * betamu0
+            )
+
+    def replicate_betamu(self, rho: torch.Tensor, patch_id: int) -> None:
+        # replicate betamu based on the shape of rho at the initial time
+        # to avoid reshaping during later running
+        if not self.is_initial:
+            return
+        self.is_initial = False
+        if patch_id in self.tau_e:
+            self.betamue0[patch_id] = torch.tile(
+                self.betamue0[patch_id],
+                rho.shape[:2],
+            )
+        if patch_id in self.tau_h:
+            self.betamuh0[patch_id] = torch.tile(
+                self.betamuh0[patch_id],
+                rho.shape[:2],
+            )
+        if patch_id in self.tau_recomb:
+            self.betamuk0[patch_id] = torch.tile(
+                self.betamuk0[patch_id],
+                rho.shape[:2] + (1,),
             )
 
     @stopwatch
@@ -164,22 +188,19 @@ class RelaxationTime(TreeNode):
         # rho.shape: (x,y,k,b)
         nv = self.nv
         result = torch.zeros_like(rho)
+        self.replicate_betamu(rho, patch_id)
 
         if patch_id in self.tau_e:
             nbands = self.nbands
-            fe = rho[..., range(nv, nbands), range(nv, nbands)].real
-            if self.betamue0[patch_id].shape != rho.shape[:2]:
-                self.betamue0[patch_id] = torch.tile(
-                    self.betamue0[patch_id],
-                    rho.shape[:2]
-                )
+            brange = range(nv, nbands)
+            fe = rho[..., brange, brange].real
             betamue, fe_eq = self.find_mu(
                 fe,
                 self.exp_betaEe[patch_id],
                 self.betamue0[patch_id],
             )
             if self.only_diagonal:
-                result[..., range(nv, nbands), range(nv, nbands)] -= (fe - fe_eq) / (
+                result[..., brange, brange] -= (fe - fe_eq) / (
                     2 * self.tau_e[patch_id]
                 )
             else:
@@ -189,12 +210,8 @@ class RelaxationTime(TreeNode):
             self.betamue0[patch_id] = betamue
 
         if patch_id in self.tau_h:
-            fh = rho[..., range(nv), range(nv)].real
-            if self.betamuh0[patch_id].shape != rho.shape[:2]:
-                self.betamuh0[patch_id] = torch.tile(
-                    self.betamuh0[patch_id],
-                    rho.shape[:2]
-                )
+            brange = range(nv)
+            fh = rho[..., brange, brange].real
             betamuh, fh_eq = self.find_mu(
                 1 - fh,
                 self.exp_betaEh[patch_id],
@@ -202,7 +219,7 @@ class RelaxationTime(TreeNode):
             )
             fh_eq = 1 - fh_eq
             if self.only_diagonal:
-                result[..., range(nv), range(nv)] -= (fh - fh_eq) / (
+                result[..., brange, brange] -= (fh - fh_eq) / (
                     2 * self.tau_h[patch_id]
                 )
             else:
@@ -218,17 +235,14 @@ class RelaxationTime(TreeNode):
 
         if patch_id in self.tau_recomb:
             fk = torch.einsum("...bb -> ...b", rho).real
-            if self.betamuk0[patch_id].shape[:2] != rho.shape[:2]:
-                self.betamuk0[patch_id] = torch.tile(
-                    self.betamuk0[patch_id],
-                    rho.shape[:2] + (1,)
-                )
             betamuk, fk_eq = self.find_mu(
                 fk,
                 self.exp_betaE[patch_id],
                 self.betamuk0[patch_id],
             )
-            result -= (rho - torch.diag_embed(fk_eq)) / (2 * self.tau_recomb[patch_id])
+            result -= (rho - torch.diag_embed(fk_eq)) / (
+                2 * self.tau_recomb[patch_id]
+            )
             self.betamuk0[patch_id] = betamuk
 
         return result
@@ -244,7 +258,7 @@ class RelaxationTime(TreeNode):
         f_total = torch.einsum(sum_rule, f)
         reshape = betamu.shape + (1,) * (4 - betamu.ndim)
         # Fermi-dirac distribution, shape (Nx, Ny, Nk, Nb)
-        exp_beta_Emu = exp_betaE[None, None] / torch.exp(betamu).reshape(reshape)
+        exp_beta_Emu = exp_betaE / torch.exp(betamu).reshape(reshape)
         distribution = 1 / (exp_beta_Emu + 1)
         F = torch.einsum(sum_rule, distribution) - f_total
         while torch.max(torch.abs(F)) > self.eps:
@@ -254,8 +268,8 @@ class RelaxationTime(TreeNode):
                 torch.abs(dbetamu) > self.max_dbetamu
             )  # indices that need to be limited by self.max_dbetamu
             dbetamu[limit_ind] = torch.sign(F[limit_ind]) * self.max_dbetamu
-            betamu = betamu - dbetamu
-            exp_beta_Emu = exp_betaE[None, None] / torch.exp(betamu).reshape(reshape)
+            betamu -= dbetamu
+            exp_beta_Emu = exp_betaE / torch.exp(betamu).reshape(reshape)
             distribution = 1 / (exp_beta_Emu + 1)
             F = torch.einsum(sum_rule, distribution) - f_total
             if torch.max(torch.abs(dbetamu)) < self.dbetamu_eps:
