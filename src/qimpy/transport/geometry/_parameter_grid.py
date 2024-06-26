@@ -84,8 +84,9 @@ class ParameterGrid(Geometry):
         if checkpoint_in:
             cp_parameters = checkpoint_in.relative("parameters")
             cp, path = cp_parameters
-            for name in cp[path].keys():
-                self.parameters[name] = cp_parameters.read(name)
+            if path in cp:
+                for name in cp[path].keys():
+                    self.parameters[name] = cp_parameters.read(name)
         else:
             for i_dim, dimension in enumerate([dimension1, dimension2]):
                 if dimension is not None:
