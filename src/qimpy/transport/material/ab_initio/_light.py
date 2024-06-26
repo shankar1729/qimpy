@@ -170,7 +170,7 @@ class Light(TreeNode):
 
         if self.coherent:
             omega = self.omega[patch_id]
-            prefac *= -0.5j * torch.exp(-1j * omega * t)  # Louiville, symmetrization
+            prefac = -0.5j * torch.exp(-1j * omega * t) * prefac  # Louiville, symmetrization
             interaction = prefac * self.amp_mat[patch_id]
             return (interaction - interaction.swapaxes(-2, -1).conj()) @ rho
         else:
