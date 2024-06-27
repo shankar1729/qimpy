@@ -1,13 +1,11 @@
 """Internal MGGA TPSS implementations."""
 # List exported symbols for doc generation
-__all__ = ["x_tpss"]  #, "c_tpss"]
+__all__ = ["x_tpss"]
 
 import numpy as np
 import torch
 
-from qimpy import rc
 from .functional import Functional
-from .lda import get_rs, _C_PW, SpinInterpolate1, SpinInterpolate3
 
 
 def x_tpss(rev: bool, scale_factor: float = 1.0) -> Functional:
@@ -21,6 +19,7 @@ def x_tpss(rev: bool, scale_factor: float = 1.0) -> Functional:
         scale_factor=scale_factor,
         _apply=torch.jit.script(SpinScaled(_X_TPSS, rev)),
     )
+
 
 # ----- Internal exchange/kinetic implementations -----
 
@@ -48,9 +47,10 @@ class SpinScaled(torch.nn.Module):
         tau.requires_grad_(requires_grad)
         rs = ((n_spins * 4.0 * np.pi / 3.0) * n) ** (-1.0 / 3)  # rs for each spin
         s2 = ((18.0 * np.pi) ** (-2.0 / 3)) * sigma[::2] * (rs / n).square()
-        q = ((18.0 * np.pi) ** (-2.0 / 3)) * lap * (rs.square() / n)  # not used
-        z = sigma[::2] / (8.0 * n * tau)  # put a check for z>1? # does it miss n_spins?
-        e = self.compute(rs, s2, q, z)
+        z = sigma[::2] / (8.0 * n * tau)
+        z = torch.clip(z, max=1.0)
+        y = 8.0 * ((18.0 * np.pi) ** (-2.0 / 3)) * tau * rs.square() / n  # y = s2 / z
+        e = self.compute(rs, s2, z, y)
         E = (e * n).sum() * scale_factor
         if requires_grad:
             E.backward()
@@ -75,38 +75,44 @@ class _X_TPSS(torch.nn.Module):
         self.mu = 0.14 if rev else 0.21951
         self.c = 2.35204 if rev else 1.59096
         self.e = 2.1677 if rev else 1.537
+        self.sqrt_e = np.sqrt(2.1677) if rev else np.sqrt(1.537)
         self.rev = rev
 
-    def forward(self, rs: torch.Tensor, s2: torch.Tensor,
-                q: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        rs: torch.Tensor,
+        s2: torch.Tensor,
+        z: torch.Tensor,
+        y: torch.Tensor,
+    ) -> torch.Tensor:
         # Eqn. (7) of ref
         b = 0.4
-        alphazmz = (5.0 / 3) * s2 * (1.0 - z) - z
-        qb_den = 1.0 / torch.sqrt(z ** 2 + b * alphazmz * (alphazmz + z))
-        qb = 0.45 * alphazmz * qb_den + (2.0 / 3) * s2
+        a = (5.0 / 3) * y * (1.0 - z) - 1.0  # a = alphazmz / z
+        qb_den = 1.0 / torch.sqrt(1.0 + b * a * (a + 1))
+        qb = 0.45 * a * qb_den + (2.0 / 3) * s2
         # Eqn. (10) of ref
         kappa = 0.804
-        z2 = z ** 2  # probably not needed
-        s4 = s2 ** 2  # probably not needed
+        z2 = z**2
+        s4 = s2**2
         # --- Term 1 of numerator
-        x_num_1 = (10.0 / 81 + self.c * (z2 * z if self.rev else z2) /
-                   ((1.0 + z2) ** 2)) * s2
-        # --- Term 3 of numerator
-        x_num_3 = (-73.0 / 405) * torch.sqrt(0.18 * z2 + 0.5 * s4) * qb
+        x_num_1 = (
+            10.0 / 81 + self.c * (z2 * z if self.rev else z2) / ((1.0 + z2) ** 2)
+        ) * s2
+        x_num_3 = (-73.0 / 405) * z * torch.sqrt(0.18 + 0.5 * y**2) * qb
         # --- Numerator
-        x_num = (x_num_1 + (146.0 / 2025) * qb ** 2
-                 + x_num_3 + (100.0 / (6561 * kappa)) * s4
-                 + (4.0 * torch.sqrt(torch.tensor(self.e, device=rc.device)) 
-                    / 45) * z2
-                 + (self.e * self.mu) * s4 * s2
-                 )
+        x_num = (
+            x_num_1
+            + (146.0 / 2025) * qb**2
+            + x_num_3
+            + (100.0 / (6561 * kappa)) * s4
+            + (4.0 * self.sqrt_e / 45) * z2
+            + (self.e * self.mu) * s4 * s2
+        )
         # --- Denominator
-        x_den = 1.0 / (1.0 +
-                       torch.sqrt(torch.tensor(self.e, device=rc.device)) * s2) ** 2
+        x_den = 1.0 / (1.0 + self.sqrt_e * s2) ** 2
         # --- Eqn (10) for x:
         x = x_num * x_den
         # TPSS Enhancement factor:
-        F = 1.0 + kappa - kappa ** 2 / (kappa + x)
+        F = 1.0 + kappa - kappa**2 / (kappa + x)
         # TPSS Exchange energy per particle:
         return F * get_e_slater(rs)
-
