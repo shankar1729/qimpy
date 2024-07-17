@@ -7,7 +7,7 @@ lattice:
 
 ions:
   pseudopotentials:
-    - SG15/$ID_ONCV_PBE.upf
+    - $ID_ONCV_PBE-1.0.upf
   coordinates:
     - [Cu, 0., 0., 0.]
 
@@ -22,9 +22,8 @@ electrons:
     size: [8, 8, 8]
   xc: 
     functional: gga-pbe
-    #plus-U:
-      #Cu:
-        #d: 0.080
+    #plus_U:
+    #  Cu d: 0.080 eV
   save-wavefunction: no  #keeps checkpoint small
 
 geometry:
