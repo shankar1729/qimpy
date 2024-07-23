@@ -28,7 +28,7 @@ class PlusU(TreeNode):
         """
         super().__init__()
         self.U_values = {}
-        for key, U in U_values:
+        for key, U in U_values.items():
             specie, orbital = key.split()
             # TODO: validate and map orbital codes, check against Ions
             log.info(f"  +U on {specie}: {U}")
