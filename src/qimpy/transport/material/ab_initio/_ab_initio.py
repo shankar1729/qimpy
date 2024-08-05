@@ -211,6 +211,8 @@ class AbInitio(Material):
         match_jd = re.compile("jd[x-z]$")
         match_S = re.compile("S[x-z]$")
         match_j_S = re.compile("j[x-z]_S[x-z]$")
+        match_L = re.compile("L[x-z]$")
+        match_j_L = re.compile("j[x-z]_L[x-z]$")
         observables = []
         for observable_name in observable_names:
             if observable_name == "n":
@@ -233,6 +235,16 @@ class AbInitio(Material):
                 Pi = self.P[:, dir_name_to_index[observable_name[1]]]
                 Sj = self.S[:, dir_name_to_index[observable_name[4]]]
                 observables.append(0.5 * (Pi @ Sj + Sj @ Pi))
+            elif match_L.match(observable_name):
+                if self.L is None:
+                    raise InvalidInputException(f"{observable_name = } unavailable")
+                observables.append(self.L[:, dir_name_to_index[observable_name[1]]])
+            elif match_j_L.match(observable_name):
+                if self.L is None:
+                    raise InvalidInputException(f"{observable_name = } unavailable")
+                Pi = self.P[:, dir_name_to_index[observable_name[1]]]
+                Lj = self.L[:, dir_name_to_index[observable_name[4]]]
+                observables.append(0.5 * (Pi @ Lj + Lj @ Pi))
             else:
                 raise InvalidInputException(f"{observable_name = } is not supported")
         self.observables = torch.stack(observables, dim=0)
