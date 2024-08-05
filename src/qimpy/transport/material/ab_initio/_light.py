@@ -32,7 +32,7 @@ class Light(TreeNode):
         gauge: str = "velocity",
         A0: Optional[list[complex]] = None,
         E0: Optional[list[complex]] = None,
-        omega: float,
+        omega: float = 0.0,
         t0: float = 0.0,
         sigma: float = 0.0,
         smearing: float = 0.001,
@@ -134,21 +134,23 @@ class Light(TreeNode):
                 "Parameter gauge should only be velocity or length"
             )
 
+        # reshape omega here for convinient broadcasting
+        omega = (omega * torch.ones([1,1]).to(rc.device))[..., None, None, None]
         self.t0[patch_id] = t0
         self.sigma[patch_id] = sigma
         if self.coherent:
-            self.amp_mat[patch_id] = amp_mat
+            self.amp_mat[patch_id] = amp_mat[None, None]
             self.omega[patch_id] = omega
         else:  #: lindblad version
             prefac = torch.sqrt(torch.sqrt(torch.pi / (8 * smearing**2)))
             exp_factor = -1.0 / (smearing**2)
             Nk, Nb = ab_initio.E.shape
-            dE = ab_initio.E.reshape([Nk, Nb, 1]) - ab_initio.E.reshape([Nk, 1, Nb])
+            dE = (ab_initio.E[..., None] - ab_initio.E[:, None, :])[None, None]
             plus = prefac * amp_mat * torch.exp(exp_factor * ((dE + omega) ** 2))
             minus = prefac * amp_mat * torch.exp(exp_factor * ((dE - omega) ** 2))
             plus_deg = plus.swapaxes(-2, -1).conj()
             minus_deg = minus.swapaxes(-2, -1).conj()
-            self.identity_mat = torch.tile(torch.eye(Nb), (1, Nk, 1, 1)).to(rc.device)
+            self.eye = torch.tile(torch.eye(Nb), (1, Nk, 1, 1)).to(rc.device)
             self.plus[patch_id] = plus
             self.plus_deg[patch_id] = plus_deg
             self.minus[patch_id] = minus
@@ -158,21 +160,22 @@ class Light(TreeNode):
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         t0 = self.t0[patch_id]
         sigma = self.sigma[patch_id]
+        # shape of prefac must be (Nx, Ny, 1, 1, 1)
         if sigma > 0:
-            prefac = torch.exp(-((t - t0) ** 2) / (2 * sigma**2)) / np.sqrt(
-                np.sqrt(np.pi) * sigma
-            )
+            prefac = torch.exp(-((t - t0) ** 2) / (2 * sigma**2)) / torch.sqrt(
+                torch.sqrt(np.pi * sigma**2)
+            ) * torch.ones(rho.shape[:2] + (1, 1, 1)).to(rc.device)
         else:
-            prefac = 1.0
+            prefac = torch.ones(rho.shape[:2] + (1, 1, 1)).to(rc.device)
 
         if self.coherent:
             omega = self.omega[patch_id]
-            prefac *= -0.5j * torch.exp(-1j * omega * t)  # Louiville, symmetrization
+            prefac = -0.5j * torch.exp(-1j * omega * t) * prefac  # Louiville, symmetrization
             interaction = prefac * self.amp_mat[patch_id]
             return (interaction - interaction.swapaxes(-2, -1).conj()) @ rho
         else:
             prefac = 0.5 * prefac**2
-            I_minus_rho = self.identity_mat - rho
+            I_minus_rho = self.eye - rho
             plus = self.plus[patch_id]
             minus = self.minus[patch_id]
             plus_deg = self.plus_deg[patch_id]
