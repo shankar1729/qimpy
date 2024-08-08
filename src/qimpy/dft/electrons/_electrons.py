@@ -361,7 +361,7 @@ class Electrons(TreeNode):
             self.n_tilde.grad += n_xc_tilde.grad
         # Hartree and local contributions:
         rho_tilde = self.n_tilde[0]  # total charge density
-        VH_tilde = system.coulomb(rho_tilde)  # Hartree potential
+        VH_tilde = system.coulomb.kernel(rho_tilde)  # Hartree potential
         system.energy["Ehartree"] = 0.5 * (rho_tilde ^ VH_tilde).item()
         system.energy["Eloc"] = (rho_tilde ^ system.ions.Vloc_tilde).item()
         if requires_grad:
@@ -411,7 +411,9 @@ class Electrons(TreeNode):
         # Coulomb / Local pseudootential:
         rho_tilde = self.n_tilde[0]  # total charge density
         if system.lattice.requires_grad:
-            system.lattice.grad += 0.5 * system.coulomb.stress(rho_tilde, rho_tilde)
+            system.lattice.grad += 0.5 * system.coulomb.kernel.stress(
+                rho_tilde, rho_tilde
+            )
         if system.ions.Vloc_tilde.requires_grad:
             system.ions.Vloc_tilde.grad += rho_tilde
 

@@ -8,7 +8,8 @@ from qimpy.io import Checkpoint, CheckpointPath
 from qimpy.mpi import ProcessGrid
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
-from qimpy.grid import Grid, Coulomb, Coulomb_Slab, Coulomb_Isolated
+from qimpy.grid import Grid
+from qimpy.grid.coulomb import Coulomb
 from .ions import Ions
 from .electrons import Electrons
 from .geometry import Geometry
@@ -39,6 +40,7 @@ class System(TreeNode):
         symmetries: Union[Symmetries, dict, None] = None,
         electrons: Union[Electrons, dict, None] = None,
         grid: Union[Grid, dict, None] = None,
+        coulomb: Union[Coulomb, dict, None] = None,
         geometry: Union[Geometry, dict, str, None] = None,
         export: Union[Export, dict, None] = None,
         checkpoint: Optional[str] = None,
@@ -62,6 +64,8 @@ class System(TreeNode):
             :yaml:`Electronic sub-system.`
         grid
             :yaml:`Charge-density grid.`
+        coulomb
+            :yaml:`Coulomb interactions.`
         geometry
             :yaml:`Geometry actions such as relaxation and dynamics.`
             Specify name of geometry action eg. 'relax' if using default options for
@@ -133,18 +137,16 @@ class System(TreeNode):
             comm=self.electrons.comm,  # Parallel
             ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff,
         )
-        periodic = self.lattice.periodic
-        if all(periodic):
-            log.info("Fully periodic calculation...running in _coulomb.py")
-            self.coulomb = Coulomb(self.grid, self.ions.n_ions)
-        elif all([not x for x in periodic]):
-            log.info("Fully isolated calculation...running in _coulombisolated.py")
-            self.coulomb = Coulomb_Isolated(self.grid, self.ions.n_ions)
-        else:
-            iDir = [i for (i, x) in enumerate(periodic) if not x]
-            log.info("Truncated calculation...running in _coulombslab.py")
-            log.info(f"number of ions {self.ions.n_ions}")
-            self.coulomb = Coulomb_Slab(self.grid, self.ions.n_ions, iDir[0])
+
+        self.add_child(
+            "coulomb",
+            Coulomb,
+            coulomb,
+            checkpoint_in,
+            grid=self.grid,
+            n_ions=self.ions.n_ions,
+        )
+
         self.add_child(
             "geometry",
             Geometry,

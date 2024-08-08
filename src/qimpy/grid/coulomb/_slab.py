@@ -2,83 +2,40 @@ from __future__ import annotations
 
 import numpy as np
 import torch
-from qimpy import log, grid, rc
 
-from . import Grid, FieldH
+from qimpy import log, rc
+from qimpy.lattice import Lattice
+from qimpy.grid import Grid, FieldH, coulomb
 
 
-class Coulomb_Slab:
-    """Coulomb interactions between fields and point charges in a truncated Slab geometry"""
+class KernelSlab:
+    """Coulomb interactions between fields in a truncated Slab geometry."""
 
     grid: Grid
-    ion_width: float
-    sigma: float
-    iDir: int  # Truncated direction (zero-based indexing)
-    iR: torch.Tensor  # Ewald real-space mesh points
-    iG: torch.Tensor  # Ewald reciprocal-space mesh points
+    i_dir: int  # Truncated direction (zero-based indexing)
+    radius: float  # Range of truncation
     _kernel: torch.Tensor  # Coulomb kernel
 
-    def __init__(self, grid: Grid, n_ions: int, iDir: int) -> None:
+    def __init__(self, coul: coulomb.Coulomb, i_dir: int) -> None:
         """Initialize truncated coulomb calculation"""
-        self.iDir = iDir  # Figure out where to initialize thi
-        self.grid = grid
-        h_max = (
-            (grid.lattice.Rbasis.norm(dim=0).to(rc.cpu) / torch.tensor(grid.shape))
-            .max()
-            .item()
-        )
-        self.ion_width = 2.2 * h_max  # Best balance from test_nyquist()
-        self.update_lattice_dependent(n_ions)
-
-    def update_lattice_dependent(self, n_ions: int) -> None:
-        grid = self.grid
-        iDir = self.iDir
-        lattice = grid.lattice
-
-        Rsq = (self.grid.lattice.Rbasis).square().sum(dim=0)
-
-        hlfL = torch.sqrt(Rsq[iDir]) / 2
-        self.hlfL = hlfL
-
+        self.grid = grid = coul.grid
+        self.i_dir = i_dir
+        if coul.radius:
+            self.radius = coul.radius
+        else:
+            self.radius = grid.lattice.Rbasis[:, i_dir].norm() * 0.5
         iG = grid.get_mesh("H").to(torch.double)
         Gi = iG @ grid.lattice.Gbasis.T
         Gsqi = Gi.square()
         Gsq = Gsqi.sum(dim=-1)
-        Gplane = torch.sqrt(Gsq - Gsqi[..., iDir])
+        Gplane = torch.sqrt(Gsq - Gsqi[..., i_dir])
         self._kernel = torch.where(
             Gsq == 0.0,
-            -2 * np.pi * hlfL**2,
+            -2 * np.pi * self.radius**2,
             (4 * np.pi)
-            * (1 - torch.exp(-Gplane * hlfL) * torch.cos(np.pi * iG[..., iDir]))
+            * (1 - torch.exp(-Gplane * self.radius) * torch.cos(np.pi * iG[..., i_dir]))
             / Gsq,
         )
-        # Calculate the Gaussian width for the Ewald sums:
-        self.sigma = (
-            5 * lattice.volume**2 / ((2 * np.pi) ** 2 * (2 * hlfL) ** 2)
-        ) ** (1.0 / 4)
-
-        self.iR = get_mesh(
-            self.sigma,
-            lattice.Rbasis,
-            lattice.Gbasis,
-            iDir,
-            include_margin=True,
-            exclude_zero=False,
-        )
-        self.iG = get_mesh(
-            1.0 / self.sigma,  # flip sigma <-> 1/sigma for reciprocal
-            lattice.Gbasis,  # flip R <-> G for reciprocal
-            lattice.Rbasis,  # flip R <-> G for reciprocal
-            iDir,
-            include_margin=False,
-            exclude_zero=True,
-        )
-
-        log.info(
-            f"Ewald:  sigma: {self.sigma:f}"
-            f"  nR: {self.iR.shape[0]}  nG: {self.iG.shape[0]}"
-        )
-        log.info(f"Ewald iR shape: {self.iR.shape}\n Ewald iG shape: {self.iG.shape}")
 
     def __call__(self, rho: FieldH, correct_G0_width: bool = False) -> FieldH:
         """Apply coulomb operator on charge density `rho`.
@@ -90,41 +47,41 @@ class Coulomb_Slab:
         return result
 
     def stress(self, rho1: FieldH, rho2: FieldH) -> torch.Tensor:
-        hlfL = self.hlfL
+        radius = self.radius
         iG = self.grid.get_mesh("H").to(torch.double)
         G = self.grid.get_mesh("H").to(torch.double) @ self.grid.lattice.Gbasis.T
         Gplane = G.clone()
-        Gplane[..., self.iDir] = 0  # Set perpendicular direction elements to zero
+        Gplane[..., self.i_dir] = 0  # Set perpendicular direction elements to zero
 
         iGplane = iG.clone()
-        iGplane[..., self.iDir] = 0  # Set perpendicular direction elements to zero
+        iGplane[..., self.i_dir] = 0  # Set perpendicular direction elements to zero
 
-        iGperp = iG[..., self.iDir]
+        iGperp = iG[..., self.i_dir]
         Gplaneabs = (Gplane.square().sum(dim=-1)).sqrt()
         Gplaneabsinv = torch.where(Gplaneabs == 0, 0, 1 / Gplaneabs)
         Gsq = G.square().sum(dim=-1)
 
-        expCosTerm = torch.exp(-Gplaneabs * hlfL) * torch.cos(np.pi * iGperp)
+        expCosTerm = torch.exp(-Gplaneabs * radius) * torch.cos(np.pi * iGperp)
         Gsqinv = torch.where(Gsq == 0, 0, 1 / Gsq)
         prefac1 = 2 * (1 - expCosTerm) * Gsqinv
         stress_kernel = torch.einsum(
             "ijk, ijkl, ijkm->lmijk",
-            4 * np.pi * Gsqinv * (prefac1 - expCosTerm * hlfL * Gplaneabsinv),
+            4 * np.pi * Gsqinv * (prefac1 - expCosTerm * radius * Gplaneabsinv),
             Gplane,
             Gplane,
         )
-        GGT_idir_idir = self.grid.lattice.Gbasis[self.iDir, self.iDir] ** 2
+        GGT_idir_idir = self.grid.lattice.Gbasis[self.i_dir, self.i_dir] ** 2
 
-        stress_kernel[self.iDir, self.iDir, ...] = (
+        stress_kernel[self.i_dir, self.i_dir, ...] = (
             4
             * np.pi
             * torch.where(
                 Gsq == 0,
-                -(hlfL**2),
+                -(radius**2),
                 Gsqinv
                 * (
-                    prefac1 * GGT_idir_idir * iG[..., self.iDir] ** 2
-                    + expCosTerm * hlfL * Gplaneabs
+                    prefac1 * GGT_idir_idir * iG[..., self.i_dir] ** 2
+                    + expCosTerm * radius * Gplaneabs
                 ),
             )
         )
@@ -132,14 +89,57 @@ class Coulomb_Slab:
         stress_rho2 = FieldH(self.grid, data=(stress_kernel * rho2.data))
         return rho1 ^ stress_rho2
 
-    def ewald(self, positions: torch.Tensor, Z: torch.Tensor) -> float:
+
+class EwaldSlab:
+    """Coulomb interactions between point charges in a truncated Slab geometry."""
+
+    lattice: Lattice
+    i_dir: int  # Truncated direction (zero-based indexing)
+    area: float  #: Area of periodic dimensions
+    sigma: float  #: Ewald range-separation parameter
+    iR: torch.Tensor  #: Ewald real-space mesh points
+    iG: torch.Tensor  #: Ewald reciprocal-space mesh points
+
+    def __init__(self, lattice: Lattice, i_dir: int) -> None:
+        self.lattice = lattice
+        self.i_dir = i_dir
+        self.area = lattice.volume / lattice.Rbasis[:, i_dir].norm().item()
+
+        # Calculate the Gaussian width for the Ewald sums:
+        self.sigma = (5 * (self.area / (2 * np.pi)) ** 2) ** (1.0 / 4)
+
+        self.iR = get_mesh(
+            self.sigma,
+            lattice.Rbasis,
+            lattice.Gbasis,
+            i_dir,
+            include_margin=True,
+            exclude_zero=False,
+        )
+        self.iG = get_mesh(
+            1.0 / self.sigma,  # flip sigma <-> 1/sigma for reciprocal
+            lattice.Gbasis,  # flip R <-> G for reciprocal
+            lattice.Rbasis,  # flip R <-> G for reciprocal
+            i_dir,
+            include_margin=False,
+            exclude_zero=True,
+        )
+
+        log.info(
+            f"Ewald:  sigma: {self.sigma:f}"
+            f"  nR: {self.iR.shape[0]}  nG: {self.iG.shape[0]}"
+        )
+        log.info(f"Ewald iR shape: {self.iR.shape}\n Ewald iG shape: {self.iG.shape}")
+
+    def __call__(self, positions: torch.Tensor, Z: torch.Tensor) -> float:
+        lattice = self.lattice
+        Lz = lattice.volume / self.area
         sigma = self.sigma
         sigmaSq = sigma**2
         eta = np.sqrt(0.5) / sigma
         etaSqrtPiInv = 1 / (eta * np.sqrt(np.pi))
         etaSq = eta**2
 
-        lattice = self.grid.lattice
         # Position independent terms:
         ZsqTot = (Z**2).sum()
         Zprod = Z.view(-1, 1) * Z.view(1, -1)
@@ -151,8 +151,8 @@ class Coulomb_Slab:
 
         rCut = 1e-6  # cutoff to detect self-term
         pos0 = torch.tensor((0, 0, 0))
-        pos0[self.iDir] = positions[
-            0, self.iDir
+        pos0[self.i_dir] = positions[
+            0, self.i_dir
         ]  # The coordinate in the truncated direction for the first atom in the system.
         pos = positions - torch.floor(
             0.5 + positions - pos0
@@ -160,7 +160,7 @@ class Coulomb_Slab:
         x = self.iR.view(1, 1, -1, 3) + (pos.view(-1, 1, 1, 3) - pos.view(1, -1, 1, 3))
         rVec = x @ lattice.Rbasis.T  # Cartesian separations for all pairs
         r = rVec.norm(dim=-1)
-        r[torch.where(r < rCut)] = grid.N_SIGMAS_PER_WIDTH * sigma
+        r[torch.where(r < rCut)] = coulomb.N_SIGMAS_PER_WIDTH * sigma
         Eterm = 0.5 * torch.einsum("ij, ijk -> ", Zprod, torch.erfc(eta * r) / r)
         E += Eterm
 
@@ -171,13 +171,10 @@ class Coulomb_Slab:
             + (2.0 * eta / np.sqrt(np.pi)) * torch.exp(-((eta * r) ** 2)) / (r**2),
         )
         # Next calculate reciprocal space sum
-        volPrefac = np.pi * 2 * self.hlfL / lattice.volume
-        prefac = (
-            volPrefac * Zprod
-        )  # Factor of two above is to convert halfL to full length in the truncated direction
+        prefac = Zprod * np.pi / self.area
         r12 = pos.view(-1, 1, 3) - pos.view(1, -1, 3)
-        z12 = r12[..., self.iDir]
-        z12 *= 2 * self.hlfL
+        z12 = r12[..., self.i_dir]
+        z12 *= Lz
         G = ((self.iG @ lattice.Gbasis.T).square().sum(dim=-1)).sqrt()
 
         expPlus = torch.exp(torch.einsum("i, jk -> jki", G, z12))
@@ -209,13 +206,11 @@ class Coulomb_Slab:
             * np.pi
             * torch.einsum("ij, ijl, ijl, lm -> im ", prefac, -s, zTerm_force, self.iG)
         )
-        E12_r12[:, self.iDir] += (
-            2 * self.hlfL * torch.einsum("ij, ijl, ijl -> i", prefac, c, zTerm_prime)
+        E12_r12[:, self.i_dir] += Lz * torch.einsum(
+            "ij, ijl, ijl -> i", prefac, c, zTerm_prime
         )
-        E12_r12[:, self.iDir] += (
-            2
-            * self.hlfL
-            * torch.einsum("ij, ij -> i", prefac, -2 * torch.erf(z12 * eta))
+        E12_r12[:, self.i_dir] += Lz * torch.einsum(
+            "ij, ij -> i", prefac, -2 * torch.erf(z12 * eta)
         )
 
         if positions.requires_grad:
@@ -237,7 +232,7 @@ class Coulomb_Slab:
             lattice.grad += real_sum_stress
 
             zHat = torch.zeros((3, 3))
-            zHat[self.iDir, self.iDir] = 1
+            zHat[self.i_dir, self.i_dir] = 1
             E_RRTzz = (
                 torch.einsum(
                     "ij, ijl, ijl, ij -> ", prefac, c, 1 / 2 * zTerm_prime, z12
@@ -284,22 +279,22 @@ def get_mesh(
     sigma: float,
     Rbasis: torch.Tensor,
     Gbasis: torch.Tensor,
-    iDir: int,
+    i_dir: int,
     include_margin: bool,
     exclude_zero: bool,
 ) -> torch.Tensor:
     """Create mesh to cover non-negligible terms of Gaussian with width `sigma`.
     The mesh is integral in the coordinates specified by `Rbasis`,
     with `Gbasis` being the corresponding reciprocal basis.
-    Negligible is defined at double precision using `grid.N_SIGMAS_PER_WIDTH`.
+    Negligible is defined at double precision using `coulomb.N_SIGMAS_PER_WIDTH`.
     Optionally, include a margin of 1 in grid units if `include_margin`.
     Optionally, exclude the zero (origin) point if `exclude_zero`."""
-    Rcut = grid.N_SIGMAS_PER_WIDTH * sigma
+    Rcut = coulomb.N_SIGMAS_PER_WIDTH * sigma
 
     # Create parallelopiped mesh:
     RlengthInv = Gbasis.norm(dim=0).to(rc.cpu) / (2 * np.pi)
     Ncut = 1 + torch.ceil(Rcut * RlengthInv).to(torch.int)
-    Ncut[iDir] = 0  # Do not sum over truncated direction
+    Ncut[i_dir] = 0  # Do not sum over truncated direction
     iRgrids = tuple(
         torch.arange(-N, N + 1, device=rc.device, dtype=torch.double) for N in Ncut
     )

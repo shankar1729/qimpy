@@ -3,47 +3,62 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from qimpy import log, rc, grid
-from . import Grid, FieldH
+from qimpy import log, rc
+from qimpy.lattice import Lattice
+from qimpy.grid import Grid, FieldH, coulomb
 
 
-class Coulomb:
-    """Coulomb interactions between fields and point charges.
-    TODO: support non-periodic geometries (truncation)."""
+class KernelPeriodic:
+    """Coulomb interactions between fields in a periodic geometry."""
 
     grid: Grid  #: Grid associated with fields for coulomb interaction
-    ion_width: float  #: Ion-charge gaussian width for embedding and solvation
+    _kernel: torch.Tensor  #: Cached coulomb kernel
+    _G0_correction: float  #: G=0 correction to kernel for ion width
+
+    def __init__(self, coul: coulomb.Coulomb) -> None:
+        self.grid = grid = coul.grid
+        iG = grid.get_mesh("H").to(torch.double)  # half-space
+        Gsq = (iG @ grid.lattice.Gbasis.T).square().sum(dim=-1)
+        self._kernel = torch.where(Gsq == 0.0, 0.0, (4 * np.pi) / Gsq)
+        self._G0_correction = 4 * np.pi * (-0.5 * (coul.ion_width**2))
+
+    def __call__(self, rho: FieldH, correct_G0_width: bool = False) -> FieldH:
+        """Apply coulomb operator on charge density `rho`.
+        If correct_G0_width = True, rho is a point charge distribution
+        widened by `ion_width` and needs a corresponding G=0 correction.
+        """
+        assert self.grid is rho.grid
+        result = FieldH(self.grid, data=(self._kernel * rho.data))
+        if correct_G0_width:
+            result.o += rho.o * self._G0_correction
+        return result
+
+    def stress(self, rho1: FieldH, rho2: FieldH) -> torch.Tensor:
+        """Return stress due to Coulomb interaction between `rho1` and `rho2`.
+        The result has dimensions of energy, appropriate for adding to `lattice.grad`.
+        """
+        G = self.grid.get_mesh("H").to(torch.double) @ self.grid.lattice.Gbasis.T
+        Gsq = G.square().sum(dim=-1)
+        G = G.permute(3, 0, 1, 2)  # bring gradient direction to front
+        stress_kernel = (
+            torch.where(Gsq == 0.0, 0.0, (8 * np.pi) / (Gsq * Gsq))
+            * G[None]
+            * G[:, None]
+        )
+        stress_rho2 = FieldH(self.grid, data=(stress_kernel * rho2.data))
+        return rho1 ^ stress_rho2
+
+
+class EwaldPeriodic:
+    """Coulomb interactions between point charges in a periodic geometry."""
+
+    lattice: Lattice
     sigma: float  #: Ewald range-separation parameter
     iR: torch.Tensor  #: Ewald real-space mesh points
     iG: torch.Tensor  #: Ewald reciprocal-space mesh points
-    _kernel: torch.Tensor  #: Cached coulomb kernel
 
-    def __init__(self, grid: Grid, n_ions: int) -> None:
-        """Initialize coulomb interactions.
-
-        Parameters
-        ----------
-        grid
-            Fields for coulomb interaction will be on this grid.
-        n_ions
-            Number of point charges to optimize Ewald sums for.
-        """
-        self.grid = grid
-
-        # Determine ionic width from maximum grid spacing
-        h_max = (
-            (grid.lattice.Rbasis.norm(dim=0).to(rc.cpu) / torch.tensor(grid.shape))
-            .max()
-            .item()
-        )
-        self.ion_width = 2.2 * h_max  # Best balance from test_nyquist()
-        log.info(f"Ionic width for embedding / fluids: {self.ion_width:f}")
-        self.update_lattice_dependent(n_ions)
-
-    def update_lattice_dependent(self, n_ions: int) -> None:
-        """Update all members that depend on lattice vectors."""
-        grid = self.grid
-        lattice = grid.lattice
+    def __init__(self, lattice: Lattice, n_ions: int) -> None:
+        self.lattice = lattice
 
         # Determine optimum gaussian width for Ewald sums:
         # Uses fact that number of reciprocal cells is proportional to lattice
@@ -74,59 +89,11 @@ class Coulomb:
             f"  nR: {self.iR.shape[0]}  nG: {self.iG.shape[0]}"
         )
 
-        # Set up kernel:
-        iG = grid.get_mesh("H").to(torch.double)  # half-space
-        Gsq = (iG @ grid.lattice.Gbasis.T).square().sum(dim=-1)
-        self._kernel = torch.where(Gsq == 0.0, 0.0, (4 * np.pi) / Gsq)
-
-    def __call__(self, rho: FieldH, correct_G0_width: bool = False) -> FieldH:
-        """Apply coulomb operator on charge density `rho`.
-        If correct_G0_width = True, rho is a point charge distribution
-        widened by `ion_width` and needs a corresponding G=0 correction.
-        """
-        assert self.grid is rho.grid
-        result = FieldH(self.grid, data=(self._kernel * rho.data))
-        if correct_G0_width:
-            result.o += rho.o * (4 * np.pi * (-0.5 * (self.ion_width**2)))
-        return result
-
-    def stress(self, rho1: FieldH, rho2: FieldH) -> torch.Tensor:
-        """Return stress due to Coulomb interaction between `rho1` and `rho2`.
-        The result has dimensions of energy, appropriate for adding to `lattice.grad`.
-        """
-        G = self.grid.get_mesh("H").to(torch.double) @ self.grid.lattice.Gbasis.T
-        Gsq = G.square().sum(dim=-1)
-        G = G.permute(3, 0, 1, 2)  # bring gradient direction to front
-        stress_kernel = (
-            torch.where(Gsq == 0.0, 0.0, (8 * np.pi) / (Gsq * Gsq))
-            * G[None]
-            * G[:, None]
-        )
-        stress_rho2 = FieldH(self.grid, data=(stress_kernel * rho2.data))
-        return rho1 ^ stress_rho2
-
-    def ewald(
-        self,
-        positions: torch.Tensor,
-        Z: torch.Tensor,
-    ) -> float:
-        """Compute Ewald energy, and optionally accumulate gradients.
-        Each gradient contribution is accumulated to a `grad` attribute,
-        only if the corresponding `requires_grad` is enabled.
-        Force contributions are collected in `positions.grad`.
-        Stress contributions are collected in `self.grid.lattice.grad`.
-
-        Parameters
-        ----------
-        positions
-            Positions (fractional coordinates) of point charges
-        Z
-            Charges of each point charge
-        """
+    def __call__(self, positions: torch.Tensor, Z: torch.Tensor) -> float:
         sigma = self.sigma
         sigmaSq = sigma**2
         eta = np.sqrt(0.5) / sigma
-        lattice = self.grid.lattice
+        lattice = self.lattice
 
         # Position independent terms:
         Ztot = Z.sum()
@@ -143,7 +110,7 @@ class Coulomb:
         x = self.iR.view(1, 1, -1, 3) + (pos.view(-1, 1, 1, 3) - pos.view(1, -1, 1, 3))
         rVec = x @ lattice.Rbasis.T  # Cartesian separations for all pairs
         r = rVec.norm(dim=-1)
-        r[torch.where(r < rCut)] = grid.N_SIGMAS_PER_WIDTH * sigma
+        r[torch.where(r < rCut)] = coulomb.N_SIGMAS_PER_WIDTH * sigma
         Zprod = Z.view(-1, 1, 1) * Z.view(1, -1, 1)
         Eterm = Zprod * torch.erfc(eta * r) / r
         minus_E_r_by_r = (
@@ -197,10 +164,10 @@ def get_mesh(
     """Create mesh to cover non-negligible terms of Gaussian with width `sigma`.
     The mesh is integral in the coordinates specified by `Rbasis`,
     with `Gbasis` being the corresponding reciprocal basis.
-    Negligible is defined at double precision using `grid.N_SIGMAS_PER_WIDTH`.
+    Negligible is defined at double precision using `N_SIGMAS_PER_WIDTH`.
     Optionally, include a margin of 1 in grid units if `include_margin`.
     Optionally, exclude the zero (origin) point if `exclude_zero`."""
-    Rcut = grid.N_SIGMAS_PER_WIDTH * sigma
+    Rcut = coulomb.N_SIGMAS_PER_WIDTH * sigma
 
     # Create parallelopiped mesh:
     RlengthInv = Gbasis.norm(dim=0).to(rc.cpu) / (2 * np.pi)
