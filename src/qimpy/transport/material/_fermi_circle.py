@@ -92,14 +92,9 @@ class FermiCircle(Material):
         pass  # No spatially-varying / parameter sweep fields yet
 
     def get_contactor(
-        self, n: torch.Tensor, *, dmu: float = 0.0, vD: float = 0.0
+        self, n: torch.Tensor, **kwargs
     ) -> Callable[[float], torch.Tensor]:
-        """Return contact distribution function for specified chemical potential
-        shift and drift velocity. Note that positive vD corresponds to current
-        flowing into the device (along -n), while negative vD flows out (along +n)."""
-        v_hat = self.transport_velocity / self.vF
-        rho_contact = dmu - (n @ v_hat.T) * (vD / self.vF)  # TODO: check
-        return lambda t: rho_contact  # TODO: add time-dependence options
+        return Contactor(self, n, **kwargs)
 
     def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
         return SpecularReflector(n, self.v_all, self.comm, self.k_division)
@@ -139,6 +134,23 @@ class FermiCircle(Material):
             ),
             dim=0,
         )
+
+
+class Contactor:
+    rho_contact: torch.Tensor  #: Cached constant contact distribution
+
+    def __init__(
+        self, fc: FermiCircle, n: torch.Tensor, *, dmu: float = 0.0, vD: float = 0.0
+    ) -> None:
+        """Return contact distribution function for specified chemical potential
+        shift and drift velocity. Note that positive vD corresponds to current
+        flowing into the device (along -n), while negative vD flows out (along +n)."""
+        v_hat = fc.transport_velocity / fc.vF
+        self.rho_contact = dmu - (n @ v_hat.T) * (vD / fc.vF)  # TODO: check
+
+    def __call__(self, t):
+        # TODO: add time dependence options
+        return self.rho_contact
 
 
 class SpecularReflector:

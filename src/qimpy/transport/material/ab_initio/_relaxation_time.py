@@ -24,6 +24,12 @@ class RelaxationTime(TreeNode):
     only_diagonal: bool
 
     constant_params: dict[str, torch.Tensor]  #: constant values of parameters
+    exp_betaEe: dict[int, torch.Tensor]  #: TODO: document
+    betamue0: dict[int, torch.Tensor]  #: TODO: document
+    exp_betaEh: dict[int, torch.Tensor]  #: TODO: document
+    betamuh0: dict[int, torch.Tensor]  #: TODO: document
+    exp_betaE: dict[int, torch.Tensor]  #: TODO: document
+    betamuk0: dict[int, torch.Tensor]  #: TODO: document
 
     def __init__(
         self,
@@ -105,8 +111,8 @@ class RelaxationTime(TreeNode):
         self.dmu_eps = float(dmu_eps)
         self.only_diagonal = only_diagonal
         self.sum_rules = {
-            2: "xykb -> xy", # electron or hole
-            3: "xykb -> xyk", # recombination
+            2: "xykb -> xy",  # electron or hole
+            3: "xykb -> xyk",  # recombination
         }
         self.is_initial = True
 
@@ -146,11 +152,15 @@ class RelaxationTime(TreeNode):
         betamu0 = ab_initio.mu / ab_initio.T
         if torch.isfinite(tau_e):
             self.tau_e[patch_id] = tau_e
-            self.exp_betaEe[patch_id] = torch.exp(ab_initio.E[:, nv:] / ab_initio.T)[None, None]
+            self.exp_betaEe[patch_id] = torch.exp(ab_initio.E[:, nv:] / ab_initio.T)[
+                None, None
+            ]
             self.betamue0[patch_id] = torch.ones([1, 1]).to(rc.device) * betamu0
         if torch.isfinite(tau_h):
             self.tau_h[patch_id] = tau_h
-            self.exp_betaEh[patch_id] = torch.exp(-ab_initio.E[:, :nv] / ab_initio.T)[None, None]
+            self.exp_betaEh[patch_id] = torch.exp(-ab_initio.E[:, :nv] / ab_initio.T)[
+                None, None
+            ]
             self.betamuh0[patch_id] = -torch.ones([1, 1]).to(rc.device) * betamu0
         if torch.isfinite(tau_eh):
             self.tau_eh[patch_id] = tau_eh
@@ -200,9 +210,7 @@ class RelaxationTime(TreeNode):
                 self.betamue0[patch_id],
             )
             if self.only_diagonal:
-                result[..., brange, brange] -= (fe - fe_eq) / (
-                    2 * self.tau_e[patch_id]
-                )
+                result[..., brange, brange] -= (fe - fe_eq) / (2 * self.tau_e[patch_id])
             else:
                 result[..., nv:, nv:] -= (
                     rho[..., nv:, nv:] - torch.diag_embed(fe_eq)
@@ -219,9 +227,7 @@ class RelaxationTime(TreeNode):
             )
             fh_eq = 1 - fh_eq
             if self.only_diagonal:
-                result[..., brange, brange] -= (fh - fh_eq) / (
-                    2 * self.tau_h[patch_id]
-                )
+                result[..., brange, brange] -= (fh - fh_eq) / (2 * self.tau_h[patch_id])
             else:
                 result[..., :nv, :nv] -= (
                     rho[..., :nv, :nv] - torch.diag_embed(fh_eq)
@@ -240,9 +246,7 @@ class RelaxationTime(TreeNode):
                 self.exp_betaE[patch_id],
                 self.betamuk0[patch_id],
             )
-            result -= (rho - torch.diag_embed(fk_eq)) / (
-                2 * self.tau_recomb[patch_id]
-            )
+            result -= (rho - torch.diag_embed(fk_eq)) / (2 * self.tau_recomb[patch_id])
             self.betamuk0[patch_id] = betamuk
 
         return result

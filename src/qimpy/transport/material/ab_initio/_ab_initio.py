@@ -45,9 +45,11 @@ class AbInitio(Material):
     P: torch.Tensor  #: Momentum matrix elements
     S: Optional[torch.Tensor]  #: Spin matrix elements
     L: Optional[torch.Tensor]  #: Angular momentum matrix elements
+    R: Optional[torch.Tensor]  #: Position matrix elements (TODO: yet to be added)
     B: Optional[torch.Tensor]  #: Constant applied external field
     evecs: Optional[torch.Tensor]  #: Unitary rotations w.r.t data due to B, if any
-    scattering: DynamicsTerm  #: scattering functional
+    lindblad: Lindblad  #: ab-initio Lindblad scattering
+    relaxation_time: RelaxationTime  #: semi-empirical relaxation time scattering
     light: Light  #: light-matter interactions
     pulseB: PulseB  #: magnetic field pulses
     observables: torch.Tensor  #: Observable matrix elements in Schrodinger picture
@@ -316,6 +318,7 @@ class AbInitio(Material):
         """Apply transformation by `evecs` to final two band dimensions.
         For convenience, handles optional tensors = None correctly."""
         if M is not None:
+            assert self.evecs is not None
             M[:] = torch.einsum(
                 "kba, k...bc, kcd -> k...ad", self.evecs.conj(), M, self.evecs
             )
@@ -328,7 +331,7 @@ class AbInitio(Material):
     def zeemanH(self, B: torch.Tensor) -> torch.Tensor:
         """Get Zeeman Hamiltonian due to specified external magnetic fields."""
         g_e = Unit.MAP["g_e"]  # spin gyromagnetic ratio magnitude
-        muB_B = (B * Unit.MAP["mu_B"]).to(self.S.dtype)
+        muB_B = (B * Unit.MAP["mu_B"]).to(torch.complex128)
         H = torch.einsum("...i, kiab -> ...kab", muB_B * g_e * 0.5, self.S)
         if self.L is not None:
             H += torch.einsum("...i, kiab -> ...kab", muB_B, self.L)

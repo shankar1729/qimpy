@@ -109,16 +109,20 @@ def subdivide(quad_set: QuadSet, grid_size_max: int) -> SubQuadSet:
             if j_quad >= 0 and divisions[j_quad][j_edge % 2] is None:
                 propagate_division(j_quad, j_edge, division_equiv)
 
-    for i_quad_cur, quad_divisions in enumerate(divisions):
+    for i_quad_cur, quad_divisions_i in enumerate(divisions):
         for i_edge_cur in range(2):
-            if quad_divisions[i_edge_cur] is None:
+            if quad_divisions_i[i_edge_cur] is None:
                 # Not yet divided: determine and propagate division:
                 grid_size_cur = quad_set.grid_size[i_quad_cur, i_edge_cur]
                 division_cur = split_evenly(grid_size_cur, grid_size_max)
                 propagate_division(i_quad_cur, i_edge_cur, division_cur)
 
     # Divide quads
-    quad_divisions = np.array([(len(div0), len(div1)) for div0, div1 in divisions])
+    quad_divisions = np.zeros((len(divisions), 2), dtype=int)
+    for i_div, divisions_i in enumerate(divisions):
+        for j_div, division_ij in enumerate(divisions_i):
+            assert division_ij is not None
+            quad_divisions[i_div, j_div] = len(division_ij)
     n_sub_quads = np.prod(quad_divisions, axis=1)
     n_sub_quads_prev = np.concatenate(([0], np.cumsum(n_sub_quads)))
     n_sub_quads_tot = n_sub_quads_prev[-1]
@@ -131,8 +135,10 @@ def subdivide(quad_set: QuadSet, grid_size_max: int) -> SubQuadSet:
         cur_slice = slice(n_sub_quads_prev[i_quad], n_sub_quads_prev[i_quad + 1])
         quad_index[cur_slice] = i_quad
         # Grid ranges within quad
-        grid_splits0 = np.concatenate(([0], np.cumsum(div0)))
-        grid_splits1 = np.concatenate(([0], np.cumsum(div1)))
+        assert div0 is not None
+        assert div1 is not None
+        grid_splits0 = np.concatenate((np.zeros(1, dtype=int), np.cumsum(div0)))
+        grid_splits1 = np.concatenate((np.zeros(1, dtype=int), np.cumsum(div1)))
         grid_splits = np.stack(
             np.meshgrid(grid_splits0, grid_splits1, indexing="ij"), axis=2
         )
@@ -147,19 +153,19 @@ def subdivide(quad_set: QuadSet, grid_size_max: int) -> SubQuadSet:
         )
         for i_edge, i_slice in enumerate(INTERIOR_SLICES):
             j_edge = (i_edge + 2) % 4  # 0-edges connect to 2-edges etc.
-            j_slice = INTERIOR_SLICES[j_edge]
-            adjacency_slice[i_slice + (i_edge, 0)] = i_sub_quads[j_slice]
+            j_slice_int = INTERIOR_SLICES[j_edge]
+            adjacency_slice[i_slice + (i_edge, 0)] = i_sub_quads[j_slice_int]
             adjacency_slice[i_slice + (i_edge, 1)] = j_edge
 
         # Adjacency between quads:
         for i_edge, (j_quad, j_edge) in enumerate(quad_set.adjacency[i_quad]):
             i_slice_edge = BOUNDARY_SLICES[i_edge] + (i_edge,)
             if j_quad >= 0:
-                j_slice = BOUNDARY_SLICES[j_edge]
+                j_slice_ext = BOUNDARY_SLICES[j_edge]
                 j_sub_quads = np.arange(
                     n_sub_quads_prev[j_quad], n_sub_quads_prev[j_quad + 1]
                 ).reshape(*quad_divisions[j_quad])
-                adjacency_slice[i_slice_edge + (0,)] = j_sub_quads[j_slice][::-1]
+                adjacency_slice[i_slice_edge + (0,)] = j_sub_quads[j_slice_ext][::-1]
                 adjacency_slice[i_slice_edge + (1,)] = j_edge
             has_apertures_slice[i_slice_edge] = quad_set.has_apertures[i_quad, i_edge]
         adjacency[cur_slice] = adjacency_slice.reshape(-1, 4, 2)

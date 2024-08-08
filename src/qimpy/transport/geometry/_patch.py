@@ -24,7 +24,7 @@ class Patch:
 
     q: torch.Tensor  #: Nx x Ny x 2 Cartesian coordinates
     g: torch.Tensor  #: Nx x Ny x 1 sqrt(metric), with extra dimensipm for broadcasting
-    v: torch.tensor  #: Nkbb x 2 Cartesian velocities (where Nkbb is flattened k, b, b')
+    v: torch.Tensor  #: Nkbb x 2 Cartesian velocities (where Nkbb is flattened k, b, b')
     V: torch.Tensor  #: Nx x Ny x Nkbb x 2 mesh coordinate velocities
     dt_max: float  #: Maximum stable time step
     wk: float  #: Integration weight for the flattened density matrix dimensions
@@ -39,15 +39,15 @@ class Patch:
     reflectors: list[
         Optional[Callable[[torch.Tensor], torch.Tensor]]
     ]  #: Material-dependent reflector for each edge that needs one
-    contactors: list[list[Contact]]  #: Contact calculators (multiple possibly) by edge
+    contacts: list[list[Contact]]  #: Contact calculators (multiple possibly) by edge
 
     N_GHOST: int = 2  #: currently a constant, but could depend on slope method later
 
     # Initialize slices for accessing ghost regions in padded version:
     # These are also the slices for the boundary region in non-padded version
-    NON_GHOST = slice(N_GHOST, -N_GHOST)
-    GHOST_L = slice(0, N_GHOST)  #: ghost indices on left/bottom
-    GHOST_R = slice(-N_GHOST, None)  #: ghost indices on right/top side
+    NON_GHOST: slice = slice(N_GHOST, -N_GHOST)
+    GHOST_L: slice = slice(0, N_GHOST)  #: ghost indices on left/bottom
+    GHOST_R: slice = slice(-N_GHOST, None)  #: ghost indices on right/top side
 
     def __init__(
         self,
@@ -110,6 +110,7 @@ class Patch:
         self.rho_padded_shape = (N[0] + padding, N[1] + padding, Nkbb)
         if checkpoint_in:
             checkpoint, path = checkpoint_in.relative("rho")
+            assert checkpoint is not None
             self.rho = checkpoint.read_slice(
                 checkpoint[path], self.rho_offset, self.rho_shape
             )

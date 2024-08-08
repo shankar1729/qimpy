@@ -69,7 +69,7 @@ class PatchSet(Geometry):
         )
 
         # Initialize spatially-dependent fields, if any:
-        field_params = {}  # TODO: mechanism for input of spatially-varying fields
+        field_params: dict[str, torch.Tensor] = {}  # TODO: fields varying in space
         for patch in self.patches:
             material.initialize_fields(patch.rho, field_params, id(patch))
 
@@ -98,16 +98,17 @@ class PatchSet(Geometry):
         """Apply all boundary conditions to `rho` at time `t` and produce
         ghost-padded version. The list contains the data for each patch."""
         # Create padded version for all patches:
-        out_list = TensorList()
-        for patch, rho in zip(self.patches, rho_list):
-            out = torch.zeros(patch.rho_padded_shape, device=rc.device)
+        out_list = TensorList(
+            torch.zeros(patch.rho_padded_shape, device=rc.device)
+            for patch in self.patches
+        )
+        for out, rho in zip(out_list, rho_list):
             out[Patch.NON_GHOST, Patch.NON_GHOST] = rho
-            out_list.append(out)
 
         # Populate ghost zones across patches where needed:
         requests = []
         pending_reads = []  # keep reference to data so that it doesn't deallocate
-        pending_writes = []  # keep plans for writes till transfers complete
+        pending_writes = list[tuple[int, int, torch.Tensor, Optional[torch.Tensor]]]()
         for i_patch, adjacency in enumerate(self.sub_quad_set.adjacency):
             for i_edge, (other_patch, other_edge) in enumerate(adjacency):
                 # Reflections (always local):
@@ -169,7 +170,7 @@ class PatchSet(Geometry):
                                 self.comm.Irecv(BufferView(ghost_data), read_whose, tag)
                             )
                             pending_writes.append(
-                                [i_patch_mine, i_edge, ghost_data, mask]
+                                (i_patch_mine, i_edge, ghost_data, mask)
                             )
 
         # Finish pending data transfers and writes:

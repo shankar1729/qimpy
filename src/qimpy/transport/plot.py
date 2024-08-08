@@ -170,7 +170,7 @@ def plot_streamlines(
     kwargs = dict(color="k", linewidth=1, arrowsize=0.7)  # defaults
     kwargs.update(**stream_kwargs)
     if transparency:
-        v_mag = np.hypot(vx, vy).filled(0.0)
+        v_mag = np.hypot(vx, vy).filled(0.0)  # type: ignore
         v_rel = np.sqrt(v_mag / v_mag.max())  # partially suppress low v
         colors = np.zeros((256, 4))
         colors[:, -1] = np.linspace(v_rel.min(), 1.0, len(colors))
@@ -216,7 +216,7 @@ class PlotGeometry:
                 g_list_flat.append(np.array(cp[f"{prefix}/g"]).flatten())
                 q_list.append(np.array(cp[f"{prefix}/q"]))
                 grid_size = q_list[-1].shape[:-1]
-                n_points = np.prod(grid_size)
+                n_points = int(np.prod(grid_size))
                 indices = n_points_prev + np.arange(n_points).reshape(grid_size)
                 triangles.append(
                     np.stack(
