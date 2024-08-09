@@ -1,5 +1,4 @@
 from typing import Union, TypeVar, Type, final
-from abc import abstractmethod
 
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.io.dict import key_cleanup
@@ -45,7 +44,6 @@ class TreeNode:
                     cp_path.relative(child_name), context
                 )
 
-    @abstractmethod
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
@@ -53,7 +51,9 @@ class TreeNode:
         Input-equivalent quantities should be stored to attributes, and these
         will be converted to keyword arguments when continuing from checkpoint.
         Everything else should be stored as datasets within cp_path.
-        Return names of objects saved (for logging)."""
+        Return names of objects saved (for logging).
+        The default version only works when no required keyword arguments in input."""
+        return []
 
     def add_child(
         self,

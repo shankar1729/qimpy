@@ -313,6 +313,7 @@ class Basis(TreeNode):
 
         # Write basis count:
         checkpoint, path = cp_path
+        assert checkpoint is not None
         kdiv = self.kpoints.division
         dset = checkpoint.create_dataset_real(f"{path}/n", (kdiv.n_tot,), self.n.dtype)
         checkpoint.write_slice(dset, (kdiv.i_start,), self.n)
@@ -357,6 +358,7 @@ class Basis(TreeNode):
         # Read portion of n and fft_index belonging to this process
         kdiv = self.kpoints.division
         cp, path = checkpoint_in
+        assert cp is not None
         n = cp.read_slice(cp[f"{path}/n"], (kdiv.i_start,), (kdiv.n_mine,))
         self._set_n(n)
         fft_index = cp.read_slice(

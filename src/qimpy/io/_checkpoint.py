@@ -234,12 +234,12 @@ class CheckpointPath(NamedTuple):
         assert checkpoint is not None
         return str(np.bytes_(checkpoint[path]).decode())
 
-    def __getitem__(self, key: str) -> Any:
+    def __getitem__(self, key) -> Any:
         checkpoint, path = self.relative(key)
         assert checkpoint is not None
         return checkpoint[path]
 
-    def __setitem__(self, key: str, value: Any) -> None:
+    def __setitem__(self, key, value: Any) -> None:
         checkpoint, path = self.relative(key)
         assert checkpoint is not None
         checkpoint[path] = value

@@ -47,12 +47,7 @@ def extend_grid(
     Sorig = torch.tensor(gridOrig.shape)
     RbasisOrig = gridOrig.lattice.Rbasis
     dimScale = (1, 1, 1) + np.where(periodic, 0, 1)  # extend in non-periodic directions
-    v1, v2, v3 = (RbasisOrig @ np.diag(dimScale)).T
-    latticeEmbed = Lattice(
-        vector1=(v1[0], v1[1], v1[2]),
-        vector2=(v2[0], v2[1], v2[2]),
-        vector3=(v3[0], v3[1], v3[2]),
-    )
+    latticeEmbed = Lattice(Rbasis=(RbasisOrig @ np.diag(dimScale)))
     gridEmbed = Grid(
         lattice=latticeEmbed,
         symmetries=Symmetries(lattice=latticeEmbed),

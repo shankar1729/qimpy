@@ -109,4 +109,4 @@ class EwaldIsolated:
             )
             log.info(f"Stresses in Coulomb_Isolted.ewald: {real_sum_stress}")
             lattice.grad -= real_sum_stress
-        return E
+        return E.item()

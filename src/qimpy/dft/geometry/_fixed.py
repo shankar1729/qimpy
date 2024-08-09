@@ -37,4 +37,4 @@ class Fixed(Relax):
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
-        pass  # just need to bypass setting incompatible attributes from Relax
+        return []  # just need to bypass setting incompatible attributes from Relax

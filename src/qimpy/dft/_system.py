@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from qimpy import rc, log, TreeNode, Energy, MPI
-from qimpy.io import Checkpoint, CheckpointPath, CheckpointContext
+from qimpy.io import Checkpoint, CheckpointPath
 from qimpy.mpi import ProcessGrid
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
@@ -163,11 +163,6 @@ class System(TreeNode):
         self.ions.update(self)
 
         log.info(f"\nInitialization completed at t[s]: {rc.clock():.2f}\n")
-
-    def _save_checkpoint(
-        self, cp_path: CheckpointPath, context: CheckpointContext
-    ) -> list[str]:
-        return []
 
     def geometry_grad(self) -> None:
         """Update geometric gradients i.e. forces and optionally, stresses."""

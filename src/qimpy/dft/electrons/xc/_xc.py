@@ -362,3 +362,4 @@ def _get_functionals(name: str, scale_factor: float) -> list[Union[Functional, s
             if (key_x in libxc_names) and (key_c in libxc_names):
                 return [key_x, key_c]
         raise KeyError(f"Unknown XC functional {name}")
+    return []  # should never be reached, but avoids type-check error

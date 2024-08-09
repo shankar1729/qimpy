@@ -3,6 +3,18 @@ import numpy as np
 
 from qimpy import rc
 from qimpy.io import log_config
+from qimpy.grid.test_common import get_sequential_grid, get_reference_field
+from qimpy.grid import FieldH
+from . import Coulomb
+
+
+def test_energy():
+    grid = get_sequential_grid((10, 10, 10))  # need to add 'periodic' selection here
+    coulomb = Coulomb(grid=grid)  # currently only fully periodic
+    fieldh = get_reference_field(FieldH, grid)
+    result = coulomb.kernel(fieldh)
+    # TODO: make this an actual test by checking a known result
+    return result
 
 
 def plot_nyquist():

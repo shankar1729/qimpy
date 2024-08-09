@@ -47,7 +47,7 @@ class Stepper:
                 lattice.Rbasis + step_size * (direction.lattice @ lattice.Rbasis),
                 report_change=False,
             )
-            self.system.coulomb.update_lattice_dependent(self.system.ions.n_ions)
+            self.system.coulomb.update_lattice_dependent()
 
         if self.drag_wavefunctions:
             assert self._lowdin is not None
