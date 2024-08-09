@@ -124,3 +124,8 @@ class Transport(TreeNode):
             filename = self.checkpoint_out.format(i_step)
             with Checkpoint(filename, writable=True, rotate=False) as cp:
                 self.save_checkpoint(CheckpointPath(cp), CheckpointContext(""))
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        return []

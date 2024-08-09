@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Any
+from typing import Optional, Any, Union
 import argparse
 import glob
 import logging
@@ -234,7 +234,9 @@ class PlotGeometry:
                 n_points_prev += n_points
 
                 # Store edge indices for triangulating between patches:
-                edge_indices.append([indices[boundary] for boundary in BOUNDARY_SLICES])
+                edge_indices.append(
+                    [indices[boundary] for boundary in BOUNDARY_SLICES]  # type: ignore
+                )
             self.g_flat = np.concatenate(g_list_flat)
 
         # Add triangles between adjacent segments and collect exterior splines:
@@ -258,15 +260,17 @@ class PlotGeometry:
                 circle_names = contact_names if is_exterior else aperture_names
                 within_each = within_circles_np(circles, points_mid)
                 within_any = np.any(within_each, axis=0)
-                triangle_selection = slice(None)
+                triangle_selection: Union[slice, np.ndarray] = slice(None)
                 if np.count_nonzero(within_any):
                     # Draw partial boundary due to contacts or apertures:
                     sel_blocked = np.where(np.logical_not(within_any))[0]
                     if len(sel_blocked):  # otherwise no boundary left to draw
                         i_breaks = np.where(sel_blocked[:-1] + 1 != sel_blocked[1:])[0]
-                        i_starts = np.concatenate(([0], sel_blocked[i_breaks + 1]))
+                        i_starts = np.concatenate(
+                            (np.zeros(1, dtype=int), sel_blocked[i_breaks + 1])
+                        )
                         i_stops = np.concatenate(
-                            (sel_blocked[i_breaks] + 2, [Npoints + 1])
+                            (sel_blocked[i_breaks] + 2, np.array([Npoints + 1]))
                         )
                         for i_start, i_stop in zip(i_starts, i_stops):
                             plt.plot(*points[i_start:i_stop].T, "k", ls=linestyle)

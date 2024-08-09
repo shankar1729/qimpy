@@ -3,7 +3,7 @@ lattice:
     name: cubic
     a: 10.  # bohrs
   compute-stress: yes
-  periodic: [yes, yes, no]
+  periodic: [no, no, no]
   center: [0., 0., 0.1]
 
 ions:
@@ -27,6 +27,10 @@ geometry:
   relax:
     n-iterations: 10
 
-# checkpoint: null  # disable reading checkpoint
+checkpoint: null  # disable reading checkpoint
 # checkpoint-out: H2O.h5
+
+coulomb:
+  analytic: yes
+  radius: 5.0
 
