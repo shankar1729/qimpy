@@ -13,8 +13,7 @@ def test_energy():
     coulomb = Coulomb(grid=grid)  # currently only fully periodic
     fieldh = get_reference_field(FieldH, grid)
     result = coulomb.kernel(fieldh)
-    # TODO: make this an actual test by checking a known result
-    return result
+    assert result  # TODO: make this an actual test by checking a known result
 
 
 def plot_nyquist():

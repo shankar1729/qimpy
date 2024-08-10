@@ -72,7 +72,7 @@ def extend_grid(
     # Setup mapping between original and embedding meshes
     ivEmbed = gridEmbed.get_mesh("R", mine=True).reshape(-1, 3)
     diagSembedInv = torch.diag(1 / torch.tensor(gridEmbed.shape))
-    ivEmbed_wsOrig = wsEmbed.reduceIndex(ivEmbed, Sembed)
+    ivEmbed_wsOrig = wsEmbed.reduce_index(ivEmbed, Sembed)
     ivEquivOrig = (ivEmbed_wsOrig + shifts) % Sorig[None, :]
     iEmbed = ivEmbed[:, 2] + Sembed[2] * (ivEmbed[:, 1] + Sembed[1] * ivEmbed[:, 0])
     iEquivOrig = ivEquivOrig[:, 2] + Sorig[2] * (

@@ -68,7 +68,7 @@ class CoulombEmbedder:
         wsEmbed = WignerSeitz(gridEmbed.lattice.Rbasis)
         # Reduce indices of embedded mesh with respect to its Wigner-Seitz cell
         ivEmbed = gridEmbed.get_mesh("R", mine=True).reshape(-1, 3)
-        ivEmbed_wsOrig = wsEmbed.reduceIndex(ivEmbed, Sembed)
+        ivEmbed_wsOrig = wsEmbed.reduce_index(ivEmbed, Sembed)
         # Shift original mesh to be centered about the origin
         shifts = torch.round(latticeCenter * torch.tensor(meshOrig.shape[0:3])).to(int)
         ivEquivOrig = (ivEmbed_wsOrig + shifts) % Sorig[None, :]
