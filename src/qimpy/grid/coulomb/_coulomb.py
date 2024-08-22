@@ -84,6 +84,10 @@ class Coulomb(TreeNode):
             This only matters when 0 or 1 directions are periodic:
             selecting spherical or cylindrical truncation when True,
             and the numerical Wigner-Seitz kernel otherwise (default).
+        radius
+            :yaml:`Length-scale for analytic truncation scheme.`
+            If zero (default), use the in-radius of the Wigner-Seitz cell
+            along the truncated directions.
         """
         super().__init__()
         self.grid = grid
