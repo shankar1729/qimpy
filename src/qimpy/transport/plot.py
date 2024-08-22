@@ -9,11 +9,10 @@ import matplotlib.tri as mtri
 from matplotlib.colors import ListedColormap, SymLogNorm
 from matplotlib.patches import FancyArrowPatch
 import numpy as np
-import h5py
 
 from qimpy import rc, log, io
 from qimpy.profiler import stopwatch, StopWatch
-from qimpy.io import log_config
+from qimpy.io import log_config, Checkpoint, CheckpointPath
 from .geometry import BOUNDARY_SLICES, evaluate_spline, within_circles_np
 
 
@@ -59,17 +58,17 @@ def run(
         rho_list = []
         vx_list = []
         vy_list = []
-        with h5py.File(checkpoint_file, "r") as cp:
+        with Checkpoint(checkpoint_file) as cp:
             cp_geom = cp["/geometry"]
             n_quads = cp_geom["quads"].shape[0]
-            i_step_list = np.array(cp_geom.attrs["i_step"])[mine]
-            t_list = np.array(cp_geom.attrs["t"])[mine]
+            i_step_list = np.array(cp_geom["i_step"])[mine]
+            t_list = np.array(cp_geom["t"])[mine]
             for i_quad in range(n_quads):
                 cp_quad = cp_geom[f"quad{i_quad}"]
-                rho_list.append(np.array(cp_quad["density"][mine][..., 0]))
-                v = np.array(cp_quad["flux"][mine][..., 0, :])
-                vx_list.append(v[..., 0])
-                vy_list.append(v[..., 1])
+                observables = np.array(cp_quad["observables"][mine])
+                rho_list.append(observables[..., 0])  # TODO: handle ab_initio cases
+                vx_list.append(observables[..., 1])
+                vy_list.append(observables[..., 2])
 
         # Plot each frame:
         for i_frame_mine, (i_step, t) in enumerate(zip(i_step_list, t_list)):
@@ -196,10 +195,11 @@ class PlotGeometry:
         q_list = []
         triangles = []
         edge_indices = []
-        with h5py.File(checkpoint_file, "r") as cp:
-            grid_spacing = float(cp["/geometry"].attrs["grid_spacing"])
-            contact_names = split_names(str(cp["/geometry"].attrs["contact_names"]))
-            aperture_names = split_names(str(cp["/geometry"].attrs["aperture_names"]))
+        with Checkpoint(checkpoint_file) as cp:
+            cp_geom = CheckpointPath(cp, "/geometry")
+            grid_spacing = float(cp_geom.attrs["grid_spacing"])
+            contact_names = split_names(cp_geom.read_str("contact_names"))
+            aperture_names = split_names(cp_geom.read_str("aperture_names"))
             contacts = np.array(cp["/geometry/contacts"])
             apertures = np.array(cp["/geometry/apertures"])
             vertices = np.array(cp["/geometry/vertices"])
