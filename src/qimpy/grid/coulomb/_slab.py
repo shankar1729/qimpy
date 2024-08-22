@@ -129,7 +129,6 @@ class EwaldSlab:
             f"Ewald:  sigma: {self.sigma:f}"
             f"  nR: {self.iR.shape[0]}  nG: {self.iG.shape[0]}"
         )
-        log.info(f"Ewald iR shape: {self.iR.shape}\n Ewald iG shape: {self.iG.shape}")
 
     def __call__(self, positions: torch.Tensor, Z: torch.Tensor) -> float:
         lattice = self.lattice
@@ -219,8 +218,6 @@ class EwaldSlab:
             ).sum(dim=(1, 2))
             reciprocal_sum_forces = E12_r12
             positions.grad += real_sum_forces + reciprocal_sum_forces
-            torch.set_printoptions(19)
-
         if lattice.requires_grad:
             real_sum_stress = -0.5 * torch.einsum(
                 "rij, rija, rijb -> ab",
