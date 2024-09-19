@@ -85,6 +85,7 @@ class WignerSeitz:
     def reduce_vector(self, r, tol=1.0e-8):
         """Find the point within the Wigner-Seitz cell equivalent to x
         (Cartesian coords)."""
+        # TODO: vectorize this function and reduce_index function
         changed = True
         while changed:
             changed = False
