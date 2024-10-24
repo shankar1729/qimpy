@@ -50,11 +50,11 @@ class CoulombEmbedder:
         )
         Sembed = torch.tensor(gridEmbed.shape)
         # Report embedding center in various coordinate systems:
-        latticeCenter = torch.tensor(grid.lattice.center, device=rc.device)
-        rCenter = RbasisOrig @ latticeCenter
-        ivCenter = torch.round(
-            latticeCenter @ (1.0 * torch.diag(torch.tensor(gridOrig.shape)))
-        ).to(int)
+        latticeCenter = np.array(grid.lattice.center)
+        rCenter = RbasisOrig.cpu() @ latticeCenter
+        ivCenter = np.round(
+            latticeCenter @ (1.0 * np.diag(gridOrig.shape))
+        ).astype(int)
         print("Integer grid location selected as the embedding center:")
         print("\tGrid: {:6} {:6} {:6}".format(*tuple(ivCenter)))
         print("\tLattice: {:6.3f} {:6.3f} {:6.3f}".format(*tuple(latticeCenter)))
@@ -66,7 +66,7 @@ class CoulombEmbedder:
         ivEmbed = gridEmbed.get_mesh("R", mine=True).reshape(-1, 3)
         ivEmbed_wsOrig = wsEmbed.reduce_index(ivEmbed, Sembed)
         # Shift original mesh to be centered about the origin
-        shifts = torch.round(latticeCenter * torch.tensor(meshOrig.shape[0:3])).to(int)
+        shifts = np.round(latticeCenter * meshOrig.shape[0:3]).astype(int)
         ivEquivOrig = (ivEmbed_wsOrig + shifts) % Sorig[None, :]
         # Setup mapping between original and embedding meshes
         iEmbed = ivEmbed[:, 2] + Sembed[2] * (ivEmbed[:, 1] + Sembed[1] * ivEmbed[:, 0])
@@ -74,7 +74,7 @@ class CoulombEmbedder:
             ivEquivOrig[:, 1] + Sorig[1] * ivEquivOrig[:, 0]
         )
         # Symmetrize points on boundary using weight function "smoothTheta" function
-        diagSembedInv = torch.diag(1 / torch.tensor(gridEmbed.shape))
+        diagSembedInv = torch.diag(1 / torch.tensor(gridEmbed.shape, device=rc.device))
         xWS = (1.0 * ivEmbed_wsOrig @ diagSembedInv) @ gridEmbed.lattice.Rbasis.T
         weights = smoothTheta(wsOrig.ws_boundary_distance(xWS))
         self.bMap = torch.sparse_coo_tensor(
