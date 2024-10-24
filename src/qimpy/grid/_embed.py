@@ -67,7 +67,7 @@ class CoulombEmbedder:
         ivEmbed_wsOrig = wsEmbed.reduce_index(ivEmbed, Sembed)
         # Shift original mesh to be centered about the origin
         shifts = np.round(latticeCenter * meshOrig.shape[0:3]).astype(int)
-        ivEquivOrig = (ivEmbed_wsOrig + shifts) % Sorig[None, :]
+        ivEquivOrig = (ivEmbed_wsOrig.cpu() + shifts) % Sorig[None, :]
         # Setup mapping between original and embedding meshes
         iEmbed = ivEmbed[:, 2] + Sembed[2] * (ivEmbed[:, 1] + Sembed[1] * ivEmbed[:, 0])
         iEquivOrig = ivEquivOrig[:, 2] + Sorig[2] * (
