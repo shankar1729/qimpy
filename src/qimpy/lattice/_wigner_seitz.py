@@ -56,7 +56,7 @@ class WignerSeitz:
         n_vertices = len(vertices)
 
         # Find edges of WS boundary:
-        i_vertex_pairs = get_combinations(n_vertices, 2)
+        i_vertex_pairs = get_combinations(n_vertices, 2).to(v_basis.device)
         edge_midpoints = vertices[i_vertex_pairs].mean(axis=1)
         on_boundary = self.ws_plane_count(edge_midpoints) == 2
         edges = i_vertex_pairs[on_boundary]
