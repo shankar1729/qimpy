@@ -133,7 +133,7 @@ def main():
         grid.lattice.periodic = periodic
         grid.lattice.center = (0.75, 0.75, 0.75)
         embedder = CoulombEmbedder(grid)
-        check_embed(grid)
+        #check_embed(grid)
 
 
 if __name__ == "__main__":

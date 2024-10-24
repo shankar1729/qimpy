@@ -14,7 +14,6 @@ class CoulombEmbedder:
     """Class for embedding a center for truncated Coulomb interactions"""
 
     periodic: tuple[bool, bool, bool]  #: Periodicity of each lattice vector
-    center: torch.Tensor  #: 'center' of the system in lattice coordinates
     gridOrig: Grid  #: Original grid
     gridEmbed: Grid  #: Embedded grid
     bMap: torch.Tensor  #: Transformation matrix from original --> embedding grid
@@ -33,7 +32,6 @@ class CoulombEmbedder:
 
         self.gridOrig = grid
         self.periodic = grid.lattice.periodic
-        self.center = grid.lattice.center
 
         gridOrig = self.gridOrig
 
@@ -43,7 +41,7 @@ class CoulombEmbedder:
         RbasisOrig = gridOrig.lattice.Rbasis
         # Extend cell in non-periodic directions
         dimScale = np.where(self.periodic, 1, 2)
-        latticeEmbed = Lattice(Rbasis=(RbasisOrig @ np.diag(dimScale)))
+        latticeEmbed = Lattice(Rbasis=(RbasisOrig.cpu() @ np.diag(dimScale)))
         gridEmbed = Grid(
             lattice=latticeEmbed,
             symmetries=Symmetries(lattice=latticeEmbed),
@@ -52,7 +50,7 @@ class CoulombEmbedder:
         )
         Sembed = torch.tensor(gridEmbed.shape)
         # Report embedding center in various coordinate systems:
-        latticeCenter = torch.tensor(self.center)
+        latticeCenter = torch.tensor(grid.lattice.center, device=rc.device)
         rCenter = RbasisOrig @ latticeCenter
         ivCenter = torch.round(
             latticeCenter @ (1.0 * torch.diag(torch.tensor(gridOrig.shape)))
