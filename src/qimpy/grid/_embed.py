@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 import numpy as np
 
-from . import Grid, Coulomb, FieldR
+from . import Grid, FieldR
 from qimpy import rc
 from qimpy.symmetries import Symmetries
 from qimpy.lattice import Lattice
@@ -13,15 +13,14 @@ from qimpy.lattice._wigner_seitz import WignerSeitz
 class CoulombEmbedder:
     """Class for embedding a center for truncated Coulomb interactions"""
 
-    embed: bool  #: whether to embed a center to compute truncated Coulomb interactions
-    periodic: tuple[bool, ...]  #: Whether each direction is periodic
+    periodic: tuple[bool, bool, bool]  #: Periodicity of each lattice vector
     center: torch.Tensor  #: 'center' of the system in lattice coordinates
     gridOrig: Grid  #: Original grid
     gridEmbed: Grid  #: Embedded grid
     bMap: torch.Tensor  #: Transformation matrix from original --> embedding grid
-    ion_width: float  #: Ion-charge gaussian width for embedding TODO: implement
+    #ion_width: float  #: Ion-charge gaussian width for embedding TODO: implement
 
-    def __init__(self, grid: Grid, coulomb: Coulomb) -> None:
+    def __init__(self, grid: Grid) -> None:
         """Initialize coulomb embedding.
 
         Parameters
@@ -35,7 +34,6 @@ class CoulombEmbedder:
         self.gridOrig = grid
         self.periodic = grid.lattice.periodic
         self.center = grid.lattice.center
-        self.ion_width = coulomb.ion_width
 
         gridOrig = self.gridOrig
 

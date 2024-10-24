@@ -27,7 +27,6 @@ class WignerSeitz:
         self.v_basis = v_basis
         self.tol = tol
         self.i_faces, self.faces = get_grid(v_basis, tol)  # initial guess
-
         # Down-select to planes that lie on WS boundary:
         touchWS = torch.where(self.ws_boundary_distance(0.5 * self.faces) < tol)[0]
         self.faces = self.faces[touchWS]
@@ -223,8 +222,8 @@ def get_grid(v_basis: torch.Tensor, tol: float) -> tuple[torch.Tensor, ...]:
     i_grid = torch.stack(torch.meshgrid(*i_grids_1d, indexing="ij"), dim=-1).flatten(
         0, -2
     )
-    i_grid = i_grid[torch.abs(i_grid).sum(dim=-1) > 0.0]  # eliminate origin
-    return i_grid, i_grid.to(v_basis.dtype) @ v_basis.T
+    i_grid = i_grid[torch.abs(i_grid).sum(dim=-1) > 0.0].to(v_basis.dtype)  # eliminate origin
+    return i_grid, i_grid @ v_basis.T
 
 
 def metric_length_squared(M, v) -> torch.Tensor:

@@ -10,12 +10,13 @@ from qimpy.grid import Grid
 from qimpy.symmetries import Symmetries
 from qimpy.io import log_config
 from qimpy.lattice._wigner_seitz import WignerSeitz
+from qimpy.grid._embed import CoulombEmbedder
 
 
-def check_embed(
-    grid: Grid, latticeCenter: Sequence[float], periodic: np.ndarray
-) -> None:
+def check_embed(grid: Grid) -> None:
     """Check Coulomb embedding procedure on test system"""
+    periodic = grid.lattice.periodic
+    latticeCenter = grid.lattice.center
     # Create fake data
     r = get_r(grid, torch.eye(3), space="R")  # In mesh coords
     sigma_r = 0.005
@@ -118,11 +119,10 @@ def main():
     log_config()
     rc.init()
     if rc.is_head:
-        shape = (48, 48, 48)
-        lattice = Lattice(
-            system=dict(name="cubic", modification="body-centered", a=3.3)
-        )
-        # lattice = Lattice(system=dict(name="cubic", a=3.3))
+        shape = (24, 24, 126)
+        lattice = Lattice(system=dict(name='tetragonal', a=3.3, c=15.1))
+        #shape = (48, 48, 48)
+        #lattice = Lattice(system=dict(name="cubic", modification="body-centered", a=3.3))
         grid = Grid(
             lattice=lattice,
             symmetries=Symmetries(lattice=lattice),
@@ -130,8 +130,10 @@ def main():
             comm=rc.comm,
         )
         periodic = np.array([True, True, False])
-        latticeCenter = (0.75, 0.75, 0.75)
-        check_embed(grid, latticeCenter, periodic)
+        grid.lattice.periodic = periodic
+        grid.lattice.center = (0.75, 0.75, 0.75)
+        embedder = CoulombEmbedder(grid)
+        check_embed(grid)
 
 
 if __name__ == "__main__":
