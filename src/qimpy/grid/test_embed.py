@@ -6,7 +6,7 @@ from typing import Sequence
 
 from qimpy import rc
 from qimpy.lattice import Lattice
-from qimpy.grid import Grid
+from qimpy.grid import Grid, FieldR
 from qimpy.symmetries import Symmetries
 from qimpy.io import log_config
 from qimpy.lattice._wigner_seitz import WignerSeitz
@@ -17,6 +17,7 @@ def check_embed(grid: Grid) -> None:
     """Check Coulomb embedding procedure on test system"""
     periodic = grid.lattice.periodic
     latticeCenter = grid.lattice.center
+    embedder = CoulombEmbedder(grid)
     # Create fake data
     r = get_r(grid, torch.eye(3), space="R")  # In mesh coords
     sigma_r = 0.005
@@ -24,14 +25,16 @@ def check_embed(grid: Grid) -> None:
         -torch.sum((r - torch.tensor(latticeCenter)) ** 2, dim=-1) / (2 * sigma_r)
     )
     blob /= np.sqrt(2 * np.pi * sigma_r**2)
-
-    data1, data2, data3 = extend_grid(blob, grid, periodic, torch.tensor(latticeCenter))
+    field1 = FieldR(grid, data=blob)
+    field2 = embedder.embedExpand(field1)
+    field3 = embedder.embedShrink(field2)
+    #data1, data2, data3 = extend_grid(blob, grid, periodic, torch.tensor(latticeCenter))
 
     fig, axs = plt.subplots(1, 3)
     im = []
-    im.append(show(axs[0], data1.sum(axis=0), "Original data"))
-    im.append(show(axs[1], data2.sum(axis=0), "Embedded data"))
-    im.append(show(axs[2], data3.sum(axis=0), "Embedded->Original data"))
+    im.append(show(axs[0], field1.data.sum(axis=0), "Original data"))
+    im.append(show(axs[1], field2.data.sum(axis=0), "Embedded data"))
+    im.append(show(axs[2], field3.data.sum(axis=0), "Embedded->Original data"))
     for _im in im:
         fig.colorbar(_im, orientation="horizontal")
     plt.show()
@@ -132,7 +135,6 @@ def main():
         periodic = np.array([True, True, False])
         grid.lattice.periodic = periodic
         grid.lattice.center = (0.75, 0.75, 0.75)
-        embedder = CoulombEmbedder(grid)
         check_embed(grid)
 
 

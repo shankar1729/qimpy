@@ -48,6 +48,7 @@ class CoulombEmbedder:
             shape=tuple(dimScale * gridOrig.shape),
             comm=rc.comm,
         )
+        self.gridEmbed = gridEmbed
         Sembed = torch.tensor(gridEmbed.shape, device=rc.device)
         # Report embedding center in various coordinate systems:
         latticeCenter = np.array(grid.lattice.center)
@@ -77,14 +78,14 @@ class CoulombEmbedder:
         diagSembedInv = torch.diag(1 / torch.tensor(gridEmbed.shape, device=rc.device))
         xWS = (1.0 * ivEmbed_wsOrig @ diagSembedInv) @ gridEmbed.lattice.Rbasis.T
         weights = smoothTheta(wsOrig.ws_boundary_distance(xWS))
-        self.bMap = torch.sparse_coo_tensor(
+        bMap = torch.sparse_coo_tensor(
             np.array([iEquivOrig, iEmbed.cpu()]), weights, device=rc.device
         )
-        colSums = torch.sparse.sum(self.bMap, dim=1).to_dense()
+        colSums = torch.sparse.sum(bMap, dim=1).to_dense()
         colNorms = torch.sparse.spdiags(
             1.0 / colSums, offsets=torch.tensor([0]), shape=(Sorig.prod(), Sorig.prod())
         )
-        self.bMap = torch.sparse.mm(colNorms, self.bMap)
+        self.bMap = torch.sparse.mm(colNorms, bMap)
 
     def embedExpand(self, fieldOrig: FieldR) -> FieldR:
         """Expand real-space field 'fieldOrig' within larger embedding cell."""
