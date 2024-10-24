@@ -78,7 +78,7 @@ class CoulombEmbedder:
         xWS = (1.0 * ivEmbed_wsOrig @ diagSembedInv) @ gridEmbed.lattice.Rbasis.T
         weights = smoothTheta(wsOrig.ws_boundary_distance(xWS))
         self.bMap = torch.sparse_coo_tensor(
-            np.array([iEquivOrig, iEmbed]), weights, device=rc.device
+            np.array([iEquivOrig, iEmbed.cpu()]), weights, device=rc.device
         )
         colSums = torch.sparse.sum(self.bMap, dim=1).to_dense()
         colNorms = torch.sparse.spdiags(
