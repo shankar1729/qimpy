@@ -48,7 +48,7 @@ class CoulombEmbedder:
             shape=tuple(dimScale * gridOrig.shape),
             comm=rc.comm,
         )
-        Sembed = torch.tensor(gridEmbed.shape)
+        Sembed = torch.tensor(gridEmbed.shape, device=rc.device)
         # Report embedding center in various coordinate systems:
         latticeCenter = np.array(grid.lattice.center)
         rCenter = RbasisOrig.cpu() @ latticeCenter
