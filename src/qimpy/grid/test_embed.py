@@ -2,8 +2,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from typing import Sequence
-
 from qimpy import rc
 from qimpy.lattice import Lattice
 from qimpy.grid import Grid, FieldR
@@ -15,26 +13,23 @@ from qimpy.grid._embed import CoulombEmbedder
 
 def check_embed(grid: Grid) -> None:
     """Check Coulomb embedding procedure on test system"""
-    periodic = grid.lattice.periodic
-    latticeCenter = grid.lattice.center
+    lattice_center = grid.lattice.center
     embedder = CoulombEmbedder(grid)
     # Create fake data
-    r = get_r(grid, torch.eye(3), space="R")  # In mesh coords
+    r = get_r(grid, torch.eye(3, device=rc.device), space="R")  # In mesh coords
     sigma_r = 0.005
-    blob = torch.exp(
-        -torch.sum((r - torch.tensor(latticeCenter)) ** 2, dim=-1) / (2 * sigma_r)
-    )
+    blob = torch.exp(-torch.sum((r - lattice_center) ** 2, dim=-1) / (2 * sigma_r))
     blob /= np.sqrt(2 * np.pi * sigma_r**2)
     field1 = FieldR(grid, data=blob)
     field2 = embedder.embedExpand(field1)
     field3 = embedder.embedShrink(field2)
-    #data1, data2, data3 = extend_grid(blob, grid, periodic, torch.tensor(latticeCenter))
+    # data1, data2, data3 = extend_grid(blob, grid, periodic, torch.tensor(latticeCenter))
 
     fig, axs = plt.subplots(1, 3)
     im = []
-    im.append(show(axs[0], field1.data.sum(axis=0), "Original data"))
-    im.append(show(axs[1], field2.data.sum(axis=0), "Embedded data"))
-    im.append(show(axs[2], field3.data.sum(axis=0), "Embedded->Original data"))
+    im.append(show(axs[0], field1.data.sum(dim=0), "Original data"))
+    im.append(show(axs[1], field2.data.sum(dim=0), "Embedded data"))
+    im.append(show(axs[2], field3.data.sum(dim=0), "Embedded->Original data"))
     for _im in im:
         fig.colorbar(_im, orientation="horizontal")
     plt.show()
@@ -106,8 +101,8 @@ def smoothTheta(x) -> torch.Tensor:
 
 def get_r(grid, R, space="R"):
     mesh = grid.get_mesh(space, mine=True)
-    diagSinv = torch.diag(1 / torch.tensor(mesh.shape[0:3]))
-    M = torch.tensor(mesh, dtype=torch.double)
+    diagSinv = torch.diag(1 / torch.tensor(mesh.shape[0:3], device=rc.device))
+    M = mesh.to(torch.double)
     return M @ diagSinv @ R.T
 
 
@@ -115,7 +110,7 @@ def show(ax, data, title=None):
     # ax.plot(center[1] * data.shape[0], center[2] * data.shape[1], 'rx')
     if title:
         ax.set_title(title)
-    return ax.imshow(data, origin="lower")
+    return ax.imshow(data.to(rc.cpu).numpy(), origin="lower")
 
 
 def main():
@@ -123,18 +118,17 @@ def main():
     rc.init()
     if rc.is_head:
         shape = (24, 24, 126)
-        lattice = Lattice(system=dict(name='tetragonal', a=3.3, c=15.1))
-        #shape = (48, 48, 48)
-        #lattice = Lattice(system=dict(name="cubic", modification="body-centered", a=3.3))
+        lattice = Lattice(
+            system=dict(name="tetragonal", a=3.3, c=15.1),
+            periodic=(True, True, False),
+            center=(0.75, 0.75, 0.75),
+        )
         grid = Grid(
             lattice=lattice,
-            symmetries=Symmetries(lattice=lattice),
+            symmetries=Symmetries(lattice=lattice, override="identity"),
             shape=shape,
             comm=rc.comm,
         )
-        periodic = np.array([True, True, False])
-        grid.lattice.periodic = periodic
-        grid.lattice.center = (0.75, 0.75, 0.75)
         check_embed(grid)
 
 
