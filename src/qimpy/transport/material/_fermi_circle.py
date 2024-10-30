@@ -19,6 +19,8 @@ class FermiCircle(Material):
     vF: float  #: Fermi velocity
     tau_inv_p: float  #: Momentum relaxation rate
     tau_inv_ee: float  #: Electron internal scattering rate (momentum-conserving)
+    theta0: float  #: Initial angle in fermi circle grid
+    specularity: float  #: Specularity of reflection at all boundaries
 
     def __init__(
         self,
@@ -29,6 +31,7 @@ class FermiCircle(Material):
         tau_p: float,
         tau_ee: float,
         theta0: float = 0.0,
+        specularity: float = 1.0,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
@@ -45,6 +48,10 @@ class FermiCircle(Material):
             :yaml:`Number of k along Fermi circle.`
         theta0
             :yaml:`Angle of first k-point.`
+        specularity
+            :yaml:`Specularity of reflection at all surfaces.`
+            Should be in the range of 0 for fully diffuse scattering,
+            to 1 for perfectly specular reflection.
         """
         self.kF = kF
         self.vF = vF
@@ -67,6 +74,7 @@ class FermiCircle(Material):
         self.k[:] = k_hat[self.k_mine] * kF
         self.v[:] = self.v_all[self.k_mine]
         self.theta0 = theta0
+        self.specularity = specularity
 
         # Cached normalizations for collision intergal
         self.nk_inv = 1.0 / N_theta
@@ -84,6 +92,7 @@ class FermiCircle(Material):
         attrs["tau_p"] = (1.0 / self.tau_inv_p) if self.tau_inv_p else np.inf
         attrs["tau_ee"] = (1.0 / self.tau_inv_ee) if self.tau_inv_ee else np.inf
         attrs["theta0"] = self.theta0
+        attrs["specularity"] = self.specularity
         return list(attrs.keys())
 
     def initialize_fields(
@@ -97,7 +106,9 @@ class FermiCircle(Material):
         return Contactor(self, n, **kwargs)
 
     def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
-        return SpecularReflector(n, self.v_all, self.comm, self.k_division)
+        return SpecularReflector(
+            n, self.v_all, self.comm, self.k_division, self.specularity
+        )
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
@@ -157,7 +168,12 @@ class SpecularReflector:
     """Reflect velocities specularly i.e. with reflection angle = incidence angle."""
 
     def __init__(
-        self, n: torch.Tensor, v: torch.Tensor, comm: MPI.Comm, k_division: TaskDivision
+        self,
+        n: torch.Tensor,
+        v: torch.Tensor,
+        comm: MPI.Comm,
+        k_division: TaskDivision,
+        specularity: float,
     ) -> None:
         assert v.shape[1] == 1  # only for single-band case
         # Find which theta reflects into the first one:
@@ -192,6 +208,28 @@ class SpecularReflector:
             self.send_counts, self.send_offsets = get_counts_offsets(j_proc, comm.size)
             self.send_index = send_sel_index_mine[j_proc.argsort(stable=True)]
 
+        # Prepare input and output projectors for diffuse scattering
+        self.specularity = specularity
+        if specularity != 1.0:
+            # Select outgoing and incoming states at each boundary point:
+            outwards = torch.einsum("ri, ki -> rk", n, v[:, 0]) >= 0.0
+            out_r, out_k = torch.nonzero(outwards, as_tuple=True)
+            in_r, in_k = torch.nonzero(torch.logical_not(outwards), as_tuple=True)
+
+            # Select flattened indices local to current process:
+            ik_start = k_division.i_start
+            nk_mine = k_division.n_mine
+            sel = torch.nonzero(out_k // k_division.n_each == comm.rank).flatten()
+            self.diffuse_out_r = out_r[sel]
+            self.diffuse_out_rk = self.diffuse_out_r * nk_mine + out_k[sel] - ik_start
+            sel = torch.nonzero(in_k // k_division.n_each == comm.rank).flatten()
+            self.diffuse_in_r = in_r[sel]
+            self.diffuse_in_rk = self.diffuse_in_r * nk_mine + in_k[sel] - ik_start
+
+            # Compute normalization factor for projections:
+            _, in_counts = torch.unique_consecutive(in_r, return_counts=True)
+            self.diffuse_normalization = (1.0 - specularity) / in_counts
+
     def __call__(self, rho: torch.Tensor) -> torch.Tensor:
         rho_flat = rho.flatten(1, 2)  # flatten r and k indices
         comm = self.comm
@@ -211,6 +249,27 @@ class SpecularReflector:
                 (BufferView(recv_buf), recv_counts, recv_offsets, mpi_type),
             )
             out_flat = recv_buf[self.recv_index].T
+
+        # Optionally account for diffuse contributions:
+        if self.specularity != 1.0:
+            out_flat *= self.specularity
+
+            # Collect total outgoing rho:
+            rho_out_sum = torch.zeros(rho.shape[:2], device=rc.device)
+            rho_out_sum.index_add_(
+                1, self.diffuse_out_r, rho_flat[:, self.diffuse_out_rk]
+            )
+            if comm.size > 1:
+                comm.Allreduce(MPI.IN_PLACE, BufferView(rho_out_sum))
+
+            # Accumulate to incoming rho with normalization:
+            rho_out_sum *= self.diffuse_normalization
+            out_flat.index_add_(
+                1,
+                self.diffuse_in_rk,
+                rho_out_sum[:, self.diffuse_in_r],
+            )
+
         return out_flat.unflatten(1, rho.shape[1:])  # restore r and k
 
 
