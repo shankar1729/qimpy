@@ -1,0 +1,1 @@
+python -m qimpy.transport.geometry.test_svg rect-domain.svg 1 --grid_spacing 0.01
