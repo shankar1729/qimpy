@@ -11,7 +11,6 @@ from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext
 from . import Material
 
-
 class FermiCircle(Material):
     """Fermi-circle representation suitable for graphene and 2DEGs."""
 
@@ -21,6 +20,7 @@ class FermiCircle(Material):
     tau_inv_ee: float  #: Electron internal scattering rate (momentum-conserving)
     theta0: float  #: Initial angle in fermi circle grid
     specularity: float  #: Specularity of reflection at all boundaries
+    r_c: float #: Cyclotron radius
 
     def __init__(
         self,
@@ -30,6 +30,7 @@ class FermiCircle(Material):
         N_theta: int,
         tau_p: float,
         tau_ee: float,
+        r_c: float,
         theta0: float = 0.0,
         specularity: float = 1.0,
         process_grid: ProcessGrid,
@@ -48,6 +49,8 @@ class FermiCircle(Material):
             :yaml:`Number of k along Fermi circle.`
         theta0
             :yaml:`Angle of first k-point.`
+        r_c
+            :yaml:`Cyclotron radius.`
         specularity
             :yaml:`Specularity of reflection at all surfaces.`
             Should be in the range of 0 for fully diffuse scattering,
@@ -55,6 +58,7 @@ class FermiCircle(Material):
         """
         self.kF = kF
         self.vF = vF
+        self.r_c = r_c
         self.tau_inv_p = 1.0 / tau_p
         self.tau_inv_ee = 1.0 / tau_ee
         super().__init__(
@@ -112,6 +116,12 @@ class FermiCircle(Material):
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
+        # k-space advection due to magnetic fields
+        # (1/r_c) * df/dtheta
+        F_df_dk = 0
+        if not (1/self.r_c): #TODO: this assumes r_c is spatially constant
+            F_df_dk = self.v_prime(rho, torch.tensor([self.vF/self.r_c]), axis=-1)
+
         if not (self.tau_inv_p or self.tau_inv_ee):
             return torch.zeros_like(rho)  # no scattering
 
@@ -120,7 +130,7 @@ class FermiCircle(Material):
         if self.comm.size > 1:
             self.comm.Allreduce(MPI.IN_PLACE, BufferView(rho_sum))
         rho_0 = self.nk_inv * rho_sum[..., None]
-        result = (rho_0 - rho) * (self.tau_inv_p + self.tau_inv_ee)
+        collisions = (rho_0 - rho) * (self.tau_inv_p + self.tau_inv_ee)
 
         # Compute moving equlibrium carrier density if needed:
         if self.tau_inv_ee:
@@ -129,9 +139,9 @@ class FermiCircle(Material):
             if self.comm.size > 1:
                 self.comm.Allreduce(MPI.IN_PLACE, BufferView(rho_v_sum))
             rho_v = torch.einsum("...i, ij, kj -> ...k", rho_v_sum, self.vv_inv, v)
-            result += rho_v * self.tau_inv_ee  # combines with rho_0 - rho above
+            collisions += rho_v * self.tau_inv_ee  # combines with rho_0 - rho above
 
-        return result
+        return collisions - F_df_dk
 
     def get_observable_names(self) -> list[str]:
         return ["n", "jx", "jy"]  # density and fluxes
