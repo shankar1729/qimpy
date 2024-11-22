@@ -1,1 +1,0 @@
-time mpirun -np 8 python -m qimpy.transport.plot plot.yaml
