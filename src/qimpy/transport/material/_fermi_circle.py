@@ -119,7 +119,7 @@ class FermiCircle(Material):
         # k-space advection due to magnetic fields
         # (1/r_c) * df/dtheta
         F_df_dk = 0
-        if not (1/self.r_c): #TODO: this assumes r_c is spatially constant
+        if (1/self.r_c): #TODO: this assumes r_c is spatially constant
             F_df_dk = self.v_prime(rho, torch.tensor([self.vF/self.r_c]), axis=-1)
 
         if not (self.tau_inv_p or self.tau_inv_ee):
