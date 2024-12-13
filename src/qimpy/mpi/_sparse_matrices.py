@@ -42,7 +42,6 @@ class SparseMatrixRight:
         self.split = TaskDivision(
             n_tot=self.size[1].cpu(), n_procs=self.n_procs, i_proc=self.i_proc
         )
-        print("HELLO")
         split = self.split
         sel = torch.nonzero(
             torch.logical_and(iCol >= split.i_start, iCol < split.i_stop)).flatten()

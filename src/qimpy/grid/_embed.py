@@ -71,7 +71,7 @@ class CoulombEmbedder:
         # Shift original mesh to be centered about the origin
         shifts = torch.round(lattice_center * Sorig).to(torch.int)
         ivEquivOrig = (ivEmbed_wsOrig + shifts) % Sorig
-        print("ivEquivOrig.shape", ivEquivOrig.shape)
+
         # Setup mapping between original and embedding meshes
         iEmbed = ivEmbed[:, 2] + Sembed[2] * (ivEmbed[:, 1] + Sembed[1] * ivEmbed[:, 0])
         iEquivOrig = ivEquivOrig[:, 2] + Sorig[2] * (
