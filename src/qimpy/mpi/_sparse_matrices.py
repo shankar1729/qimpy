@@ -60,34 +60,11 @@ class SparseMatrixRight:
         return sparse_coo_tensor(self.indices, self.values,
                                  device=rc.device)#.to_sparse_csr()
 
-    def vecTimesMatrix(self, vec_mine: torch.Tensor, grid: Grid = None) -> torch.Tensor:
+    def vecTimesMatrix(self, vec: torch.Tensor) -> torch.Tensor:
         if self.n_procs == 1:
-            return vec_mine @ self.M_mine
-        #assert len(vec_mine.shape) == 1, "Need to pass 1D vector to vecTimesMatrix"
-        if grid is None:
-            vec = vec_mine # vector is not parallelized
-        else:
-            """counts = np.diff(grid.split0.n_prev)*np.prod(grid.shape[1:])
-            disps = np.array(grid.split0.n_prev[:-1]*np.prod(grid.shape[1:]))
-
-            vec = torch.empty(self.size[0], dtype=vec_mine.dtype, device=rc.device)
-            print("vec sizes:", vec_mine.shape, vec.shape)
-            print(counts, disps)
-
-            mpi_type = rc.mpi_type[vec_mine.dtype]
-            rc.current_stream_synchronize()
-            grid.comm.Allgatherv(
-                    (BufferView(vec_mine.contiguous()), vec_mine.shape[0],0, mpi_type),
-                    (BufferView(vec), counts, disps, mpi_type))
-            ### CODE HANGS HERE ###"""
-            print(vec_mine.shape)
-            print(grid.split0.n_mine, grid.split0.n_tot)
-            print("hi...")
-            vec = gather(vec_mine, grid.split0, grid.comm, 0).reshape(-1)
-            print('Vector successfully gathered.')
-
+            return vec @ self.M_mine
+        assert len(vec.shape) == 1, "Need to pass 1D vector to vecTimesMatrix"
         result_mine = vec @ self.M_mine
-
         mpi_type = rc.mpi_type[self.M_mine.dtype]
         result = torch.empty(self.size[1], dtype=self.M_mine.dtype, device=rc.device)
         # casting self.split.n_prev[:-1] to np.array below was necessary on my laptop

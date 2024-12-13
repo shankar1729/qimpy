@@ -20,23 +20,19 @@ def check_embed(grid: Grid) -> None:
     sigma_r = 0.005
     blob = torch.exp(-torch.sum((r - lattice_center) ** 2, dim=-1) / (2 * sigma_r))
     blob /= np.sqrt(2 * np.pi * sigma_r**2)
-    print("BLOB", blob.shape, np.prod(blob.shape))
-    field1 = FieldR(grid, data=torch.tensor(blob, device=rc.device))
-    print("Expanding...")
+    field1 = FieldR(grid, data=blob)
     field2 = embedder.embedExpand(field1)
-    print("Expanded. Shrinking...")
     field3 = embedder.embedShrink(field2)
-    print("Shrunk.")
     # data1, data2, data3 = extend_grid(blob, grid, periodic, torch.tensor(latticeCenter))
-
-    fig, axs = plt.subplots(1, 3)
-    im = []
-    im.append(show(axs[0], field1.data.sum(dim=0), "Original data"))
-    im.append(show(axs[1], field2.data.sum(dim=0), "Embedded data"))
-    im.append(show(axs[2], field3.data.sum(dim=0), "Embedded->Original data"))
-    for _im in im:
-        fig.colorbar(_im, orientation="horizontal")
-    plt.show()
+    if rc.is_head:
+        fig, axs = plt.subplots(1, 3)
+        im = []
+        im.append(show(axs[0], field1.data.sum(dim=0), "Original data"))
+        im.append(show(axs[1], field2.data.sum(dim=0), "Embedded data"))
+        im.append(show(axs[2], field3.data.sum(dim=0), "Embedded->Original data"))
+        for _im in im:
+            fig.colorbar(_im, orientation="horizontal")
+        plt.show()
 
 
 def extend_grid(
@@ -120,20 +116,20 @@ def show(ax, data, title=None):
 def main():
     log_config()
     rc.init()
-    if rc.is_head:
-        shape = (24, 24, 126)
-        lattice = Lattice(
-            system=dict(name="tetragonal", a=3.3, c=15.1),
-            periodic=(True, True, False),
-            center=(0.75, 0.75, 0.75),
-        )
-        grid = Grid(
-            lattice=lattice,
-            symmetries=Symmetries(lattice=lattice, override="identity"),
-            shape=shape,
-            comm=rc.comm,
-        )
-        check_embed(grid)
+
+    shape = (24, 24, 126)
+    lattice = Lattice(
+        system=dict(name="tetragonal", a=3.3, c=15.1),
+        periodic=(True, True, False),
+        center=(0.75, 0.75, 0.75),
+    )
+    grid = Grid(
+        lattice=lattice,
+        symmetries=Symmetries(lattice=lattice, override="identity"),
+        shape=shape,
+        comm=rc.comm,
+    )
+    check_embed(grid)
 
 
 if __name__ == "__main__":

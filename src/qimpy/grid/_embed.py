@@ -9,6 +9,7 @@ from qimpy.mpi._sparse_matrices import SparseMatrixRight
 from qimpy.symmetries import Symmetries
 from qimpy.lattice import Lattice
 from qimpy.lattice._wigner_seitz import WignerSeitz
+from qimpy.grid._change import gather, scatter
 
 
 class CoulombEmbedder:
@@ -84,31 +85,31 @@ class CoulombEmbedder:
         weight_sum = torch.zeros(Sorig.prod(), device=rc.device)
         weight_sum.index_add_(0, iEquivOrig, weights)
         weights *= 1.0 / weight_sum[iEquivOrig]
-        print("iEquivOrig[0].max()", iEquivOrig.max())
+
         self.bMap = SparseMatrixRight(torch.stack([iEquivOrig, iEmbed]), weights,
                                       comm=gridOrig.comm)
         self.bMapT = SparseMatrixRight(torch.stack([iEmbed, iEquivOrig]), weights,
                                       comm=gridOrig.comm)
-        print(self.bMap.size, self.bMap.M_mine.shape)
-        #self.bMap = torch.sparse_coo_tensor(
-        #    torch.stack([iEquivOrig, iEmbed]), weights, device=rc.device
-        #)
+
 
     def embedExpand(self, fieldOrig: FieldR) -> FieldR:
         """Expand real-space field 'fieldOrig' within larger embedding cell."""
-        dataOrig = fieldOrig.data
-        print("grids:", self.gridEmbed.shapeR_mine, self.gridOrig.shapeR_mine)
         #dataEmbed = (dataOrig.reshape(-1) @ self.bMap).reshape(self.gridEmbed.shape)
-        dataEmbed = self.bMap.vecTimesMatrix(dataOrig, grid=fieldOrig.grid)
-        return FieldR(self.gridEmbed, data=dataEmbed.reshape(self.gridEmbed.shape))
+        dataOrig = gather(fieldOrig.data, self.gridOrig.split0, self.gridOrig.comm, 0)
+        dataEmbed = self.bMap.vecTimesMatrix(dataOrig.reshape(-1))
+        dataEmbedMine = scatter(dataEmbed.reshape(self.gridEmbed.shape),
+                                     self.gridEmbed.split0, 0)
+        return FieldR(self.gridEmbed, data=dataEmbedMine)
 
     def embedShrink(self, fieldEmbed: FieldR) -> FieldR:
         """Shrink real-space field 'fieldEmbed' to original cell"""
-        dataEmbed = fieldEmbed.data
+        dataEmbed = gather(fieldEmbed.data, self.gridEmbed.split0, self.gridEmbed.comm, 0)
         # Shrink operation is dagger of embedExpand (bMap is real-valued)
         #dataOrig = (dataEmbed.reshape(-1) @ self.bMap.T).reshape(self.gridOrig.shape)
-        dataOrig = self.bMapT.vecTimesMatrix(dataEmbed, grid=self.gridEmbed)
-        return FieldR(self.gridOrig, data=dataOrig.reshape(self.gridOrig.shape))
+        dataOrig = self.bMapT.vecTimesMatrix(dataEmbed.reshape(-1))
+        dataOrigMine = scatter(dataOrig.reshape(self.gridOrig.shape),
+                                self.gridOrig.split0, 0)
+        return FieldR(self.gridOrig, data=dataOrigMine)
 
 
 def smoothTheta(x: torch.Tensor) -> torch.Tensor:
