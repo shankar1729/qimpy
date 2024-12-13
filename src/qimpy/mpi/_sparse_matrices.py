@@ -40,7 +40,7 @@ class SparseMatrixRight:
         iRow, iCol = indices
         self.size = (iRow.max() + 1, iCol.max() + 1)
         self.split = TaskDivision(
-            n_tot=self.size[1], n_procs=self.n_procs, i_proc=self.i_proc
+            n_tot=self.size[1].cpu(), n_procs=self.n_procs, i_proc=self.i_proc
         )
         print("HELLO")
         split = self.split
