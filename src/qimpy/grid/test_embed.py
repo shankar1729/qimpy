@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from qimpy import rc
+from qimpy import rc, MPI
 from qimpy.lattice import Lattice
 from qimpy.grid import Grid, FieldR
 from qimpy.symmetries import Symmetries
@@ -20,9 +20,13 @@ def check_embed(grid: Grid) -> None:
     sigma_r = 0.005
     blob = torch.exp(-torch.sum((r - lattice_center) ** 2, dim=-1) / (2 * sigma_r))
     blob /= np.sqrt(2 * np.pi * sigma_r**2)
-    field1 = FieldR(grid, data=blob)
+    print("BLOB", blob.shape, np.prod(blob.shape))
+    field1 = FieldR(grid, data=torch.tensor(blob, device=rc.device))
+    print("Expanding...")
     field2 = embedder.embedExpand(field1)
+    print("Expanded. Shrinking...")
     field3 = embedder.embedShrink(field2)
+    print("Shrunk.")
     # data1, data2, data3 = extend_grid(blob, grid, periodic, torch.tensor(latticeCenter))
 
     fig, axs = plt.subplots(1, 3)
