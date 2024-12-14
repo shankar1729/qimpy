@@ -58,23 +58,19 @@ def _randomize(
 
     # Initialize random number state based on global coeff index and seed:
     def init_state(basis_index: torch.Tensor) -> torch.Tensor:
-        i_spinor = torch.arange(basis.n_spinor, device=self.coeff.device).view(
-            1, 1, -1, 1
-        )
+        n_spinor = basis.n_spinor
+        i_spinor = torch.arange(n_spinor, device=self.coeff.device).view(1, 1, -1, 1)
+        k_division = basis.kpoints.division
         i_k = torch.arange(
-            basis.kpoints.division.i_start,
-            basis.kpoints.division.i_stop,
-            device=self.coeff.device,
+            k_division.i_start, k_division.i_stop, device=self.coeff.device
         ).view(1, -1, 1, 1)
-        i_spin = torch.arange(basis.n_spins, device=self.coeff.device).view(-1, 1, 1, 1)
+        n_spins = basis.n_spins
+        i_spin = torch.arange(n_spins, device=self.coeff.device).view(-1, 1, 1, 1)
+        n_per_band = n_spins * k_division.n_tot * n_spinor * basis.n_max
         return (
-            (1 + seed)
+            (1 + seed * n_per_band)
             + basis_index.view(1, 1, 1, -1)
-            + basis.n_max
-            * (
-                i_spinor
-                + basis.n_spinor * (i_k + basis.kpoints.division.n_tot * i_spin)
-            )
+            + basis.n_max * (i_spinor + n_spinor * (i_k + k_division.n_tot * i_spin))
         )
 
     # Create random complex numbers for each band with index-based seed:
@@ -130,9 +126,11 @@ def _randomize_selected(
     # Initialize random number state based on global coeff index and seed:
     def init_state(basis_index: torch.Tensor) -> torch.Tensor:
         i_spinor = torch.arange(basis.n_spinor, device=self.coeff.device).view(1, -1, 1)
-        i_k_global = (basis.kpoints.division.i_start + i_k).view(-1, 1, 1)
+        k_division = basis.kpoints.division
+        i_k_global = (k_division.i_start + i_k).view(-1, 1, 1)
+        n_per_band = basis.n_spins * k_division.n_tot * basis.n_spinor * basis.n_max
         return (
-            (1 + seed)
+            (1 + seed * n_per_band)
             + basis_index.view(1, 1, -1)
             + basis.n_max
             * (
@@ -140,11 +138,7 @@ def _randomize_selected(
                 + basis.n_spinor
                 * (
                     i_band.view(-1, 1, 1)
-                    + n_bands
-                    * (
-                        i_k_global
-                        + basis.kpoints.division.n_tot * i_spin.view(-1, 1, 1)
-                    )
+                    + n_bands * (i_k_global + k_division.n_tot * i_spin.view(-1, 1, 1))
                 )
             )
         )
