@@ -6,7 +6,7 @@ import torch
 
 from qimpy.profiler import stopwatch
 from qimpy.dft import electrons
-from qimpy.math.random import randn
+from qimpy.math import random
 
 
 @stopwatch(name="Wavefunction.randomize")
@@ -76,10 +76,11 @@ def _randomize(
     # Create random complex numbers for each band with index-based seed:
     i_basis = torch.arange(basis_start, basis_stop, device=self.coeff.device)
     x = init_state(i_basis)
-    for i_discard in range(n_bands_prev + 1):
-        randn(x)  # get RNG to position appropriate for starting band
+    random.initialize_state(x)
+    for i_discard in range(n_bands_prev):
+        random.randn(x)  # get RNG to position appropriate for starting band
     for b_local in range(b_stop_local - b_start_local):
-        coeff_cur[:, :, b_local] = randn(x)
+        coeff_cur[:, :, b_local] = random.randn(x)
 
     # Enforce Hermitian symmetry in real case:
     if basis.real_wavefunctions:
@@ -92,10 +93,11 @@ def _randomize(
             iz0_conj = basis.real.iz0_conj
         # Create random complex numbers based on conjugate-index seed:
         x = init_state(iz0_conj)
-        for i_discard in range(n_bands_prev + 1):
-            randn(x)  # get RNG to position appropriate for starting band
+        random.initialize_state(x)
+        for i_discard in range(n_bands_prev):
+            random.randn(x)  # get RNG to position appropriate for starting band
         for b_local in range(b_stop_local - b_start_local):
-            coeff_cur[:, :, b_local, :, iz0] += randn(x).conj()
+            coeff_cur[:, :, b_local, :, iz0] += random.randn(x).conj()
         coeff_cur[..., iz0] *= np.sqrt(0.5)  # keep variance = 1
 
     # Mask out inactive basis elements:
@@ -148,16 +150,16 @@ def _randomize_selected(
         basis.division.i_start, basis.division.i_stop, device=self.coeff.device
     )
     x = init_state(i_basis)
-    randn(x)  # warm-up RNG: discard one output after seed
-    self.coeff[(i_spin, i_k, i_band)] = randn(x)
+    random.initialize_state(x)
+    self.coeff[(i_spin, i_k, i_band)] = random.randn(x)
 
     # Enforce Hermitian symmetry in real case:
     if basis.real_wavefunctions:
         # Create random complex numbers based on conjugate-index seed:
         iz0_local = basis.real.iz0_mine_local
         x = init_state(basis.real.iz0_mine_conj)
-        randn(x)  # warm-up RNG: discard one output after seed
-        self.coeff[(i_spin, i_k, i_band)][..., iz0_local] += randn(x).conj()
+        random.initialize_state(x)
+        self.coeff[(i_spin, i_k, i_band)][..., iz0_local] += random.randn(x).conj()
 
     # Mask out inactive basis elements:
     self.coeff[basis.pad_index_mine] = 0.0

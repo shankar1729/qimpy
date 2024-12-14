@@ -1,14 +1,11 @@
 from typing import Type, Sequence
 from functools import cache
 
-import numpy as np
-import torch
-
 from qimpy import rc
 from qimpy.io import Unit
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
-from . import Grid, FieldH, FieldG
+from . import Grid
 from ._field import FieldType
 
 
@@ -30,29 +27,7 @@ def get_reference_field(
 ) -> FieldType:
     """MPI-reproducible field of specified type on given `grid`."""
     result = cls(grid, shape_batch=shape_batch)  # all zeroes
-    shape_mine = result.data.shape
-    shape_full = shape_batch + grid.shape  # without split or H symmetry
-    offsets = [0] * len(shape_full)
-    if cls is FieldH:
-        offsets[-1] = grid.split2H.i_start
-    elif cls is FieldG:
-        offsets[-1] = grid.split2.i_start
-    else:
-        offsets[-3] = grid.split0.i_start
-    # Make each entry unique:
-    for i_dim, offset in enumerate(offsets):
-        cur_offset = torch.arange(shape_mine[i_dim], device=rc.device) + offset
-        stride = np.prod(shape_full[i_dim + 1 :])
-        bcast_shape = [1] * len(shape_full)
-        bcast_shape[i_dim] = -1
-        result.data += stride * cur_offset.view(bcast_shape)
-    # Introduce imaginary parts where not zero in general:
-    if result.dtype().is_complex:
-        result.data *= 1 + 0.1j
-        if cls is FieldH:
-            i2_real = torch.where(grid.weight2H == 1.0)[0]
-            for i2 in i2_real.tolist():
-                result.data[..., i2] = result.data[..., i2].real
+    result.randomize(seed=0)
     return result
 
 

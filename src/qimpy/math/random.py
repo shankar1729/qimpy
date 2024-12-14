@@ -1,9 +1,20 @@
 """Fast random numbers for reproducible initialization."""
 # List exported symbols for doc generation
-__all__ = ["rand", "randn"]
+__all__ = ["initialize_state", "rand", "randn"]
 
 import torch
 import numpy as np
+
+
+def initialize_state(state: torch.Tensor) -> None:
+    """Improve initial state randomness using split-mix-64 method."""
+    assert state.dtype is torch.int64
+    state += -7046029254386353131
+    state ^= state >> 30
+    state *= -4658895280553007687
+    state ^= state >> 27
+    state *= -7723592293110705685
+    state ^= state >> 31
 
 
 def rand(state: torch.Tensor) -> torch.Tensor:
