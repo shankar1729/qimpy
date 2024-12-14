@@ -37,11 +37,13 @@ def gaussian_blob_error(
 
 def run(
     *,
+    specularity: float,
     grid_spacing: float,
     N_theta: int,
     sigma: float,
     q0: torch.Tensor,
     v0: torch.Tensor,
+    dt_save: float,
     t_max: float,
     svg_file: str,
     save_frames: bool = False,
@@ -52,7 +54,9 @@ def run(
     # Initialize transport system:
     vF = v0.norm().item()
     init_angle = torch.atan2(v0[1], v0[0]).item()
-    dt_save = (0.01 if save_frames else 2) * t_max
+    dt_save_ = 2*t_max
+    if save_frames:
+        dt_save_ =  dt_save
     transport = Transport(
         fermi_circle=dict(
             kF=1.0,
@@ -61,9 +65,10 @@ def run(
             theta0=init_angle,
             tau_p=np.inf,
             tau_ee=np.inf,
+            specularity=specularity
         ),
         patch_set=dict(svg_file=svg_file, grid_spacing=grid_spacing, contacts={}),
-        time_evolution=dict(t_max=t_max, dt_save=dt_save, n_collate=10),
+        time_evolution=dict(t_max=t_max, dt_save=dt_save_, n_collate=10),
         checkpoint_out="animation/advect_{:04d}.h5",
         process_grid_shape=process_grid_shape,
     )
@@ -133,10 +138,12 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--h", help="grid spacing", type=float, required=True)
+    parser.add_argument("--specularity", help="boundary specularity", type=float, required=True)
     parser.add_argument("--Ntheta", help="angular resolution", type=int, required=True)
     parser.add_argument("--sigma", help="gaussian width", type=float, required=True)
     parser.add_argument("--q0", help="origin", nargs=2, type=float, required=True)
     parser.add_argument("--v0", help="velocity", nargs=2, type=float, required=True)
+    parser.add_argument("--dt_save", help="save frames every dt", type=float, required=True)
     parser.add_argument("--t_max", help="stopping time", type=float, required=True)
     parser.add_argument("--h_max", help="max spacing for convergence test", type=float)
     parser.add_argument("--svg", help="SVG geometry file", type=str, required=True)
@@ -153,8 +160,10 @@ def main():
     run_args = dict(
         N_theta=args.Ntheta,
         sigma=args.sigma,
+        specularity=args.specularity,
         q0=torch.tensor(args.q0, device=rc.device),
         v0=torch.tensor(args.v0, device=rc.device),
+        dt_save=args.dt_save,
         t_max=args.t_max,
         svg_file=args.svg,
         process_grid_shape=args.process_grid,
