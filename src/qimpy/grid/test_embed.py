@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from qimpy import rc
+from qimpy import rc, MPI
 from qimpy.lattice import Lattice
 from qimpy.grid import Grid, FieldR
 from qimpy.symmetries import Symmetries
@@ -24,15 +24,20 @@ def check_embed(grid: Grid) -> None:
     field2 = embedder.embedExpand(field1)
     field3 = embedder.embedShrink(field2)
     # data1, data2, data3 = extend_grid(blob, grid, periodic, torch.tensor(latticeCenter))
-
-    fig, axs = plt.subplots(1, 3)
-    im = []
-    im.append(show(axs[0], field1.data.sum(dim=0), "Original data"))
-    im.append(show(axs[1], field2.data.sum(dim=0), "Embedded data"))
-    im.append(show(axs[2], field3.data.sum(dim=0), "Embedded->Original data"))
-    for _im in im:
-        fig.colorbar(_im, orientation="horizontal")
-    plt.show()
+    if rc.is_head:
+        fig, axs = plt.subplots(1, 3)
+        im = []
+        im.append(show(axs[0], field1.data.sum(dim=0), "Original data"))
+        im.append(show(axs[1], field2.data.sum(dim=0), "Embedded data"))
+        im.append(show(axs[2], field3.data.sum(dim=0), "Embedded->Original data"))
+        for _im in im:
+            fig.colorbar(_im, orientation="horizontal")
+        plt.show()
+        err = torch.abs(field1.data - field3.data)
+        perr = torch.abs(field1.data - field3.data) / field1.data
+        print("max abs|% error:", err.max(), perr.max())
+        #print("sum % error:", (err / field1.data).sum() / np.prod(err.shape))
+        #print(err.shape, len(err))
 
 
 def extend_grid(
@@ -116,20 +121,20 @@ def show(ax, data, title=None):
 def main():
     log_config()
     rc.init()
-    if rc.is_head:
-        shape = (24, 24, 126)
-        lattice = Lattice(
-            system=dict(name="tetragonal", a=3.3, c=15.1),
-            periodic=(True, True, False),
-            center=(0.75, 0.75, 0.75),
-        )
-        grid = Grid(
-            lattice=lattice,
-            symmetries=Symmetries(lattice=lattice, override="identity"),
-            shape=shape,
-            comm=rc.comm,
-        )
-        check_embed(grid)
+
+    shape = (24, 24, 126)
+    lattice = Lattice(
+        system=dict(name="tetragonal", a=3.3, c=15.1),
+        periodic=(True, True, False),
+        center=(0.75, 0.75, 0.75),
+    )
+    grid = Grid(
+        lattice=lattice,
+        symmetries=Symmetries(lattice=lattice, override="identity"),
+        shape=shape,
+        comm=rc.comm,
+    )
+    check_embed(grid)
 
 
 if __name__ == "__main__":
