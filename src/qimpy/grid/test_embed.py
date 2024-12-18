@@ -33,6 +33,11 @@ def check_embed(grid: Grid) -> None:
         for _im in im:
             fig.colorbar(_im, orientation="horizontal")
         plt.show()
+        err = torch.abs(field1.data - field3.data)
+        perr = torch.abs(field1.data - field3.data) / field1.data
+        print("max abs|% error:", err.max(), perr.max())
+        #print("sum % error:", (err / field1.data).sum() / np.prod(err.shape))
+        #print(err.shape, len(err))
 
 
 def extend_grid(
