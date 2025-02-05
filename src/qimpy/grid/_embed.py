@@ -95,7 +95,10 @@ class CoulombEmbedder:
     def embedExpand(self, fieldOrig: FieldR) -> FieldR:
         """Expand real-space field 'fieldOrig' within larger embedding cell."""
         #dataEmbed = (dataOrig.reshape(-1) @ self.bMap).reshape(self.gridEmbed.shape)
-        dataOrig = gather(fieldOrig.data, self.gridOrig.split0, self.gridOrig.comm, 0)
+        if fieldOrig.grid.comm is None:
+            dataOrig = fieldOrig.data
+        else:
+            dataOrig = gather(fieldOrig.data, self.gridOrig.split0, self.gridOrig.comm, 0)
         dataEmbed = self.bMap.vecTimesMatrix(dataOrig.reshape(-1))
         dataEmbedMine = scatter(dataEmbed.reshape(self.gridEmbed.shape),
                                      self.gridEmbed.split0, 0)
@@ -103,7 +106,10 @@ class CoulombEmbedder:
 
     def embedShrink(self, fieldEmbed: FieldR) -> FieldR:
         """Shrink real-space field 'fieldEmbed' to original cell"""
-        dataEmbed = gather(fieldEmbed.data, self.gridEmbed.split0, self.gridEmbed.comm, 0)
+        if fieldEmbed.grid.comm is None:
+            dataEmbed = fieldEmbed.data
+        else:
+            dataEmbed = gather(fieldEmbed.data, self.gridEmbed.split0, self.gridEmbed.comm, 0)
         # Shrink operation is dagger of embedExpand (bMap is real-valued)
         #dataOrig = (dataEmbed.reshape(-1) @ self.bMap.T).reshape(self.gridOrig.shape)
         dataOrig = self.bMapT.vecTimesMatrix(dataEmbed.reshape(-1))
