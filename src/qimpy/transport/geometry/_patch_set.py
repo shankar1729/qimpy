@@ -25,6 +25,7 @@ class PatchSet(Geometry):
         contacts: dict[str, dict],
         grid_size_max: int = 0,
         save_rho: bool = False,
+        cent_diff_deriv: bool = False,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
@@ -53,6 +54,9 @@ class PatchSet(Geometry):
         save_rho
             :yaml:`Whether to write the full density matrices to the checkpoint file.`
             If not (default), only observables are written to the checkpoint file.
+        cent_diff_deriv
+            :yaml:`Whether to use the simple central-difference derivative operator.`
+            The default is choosing from the backward, central or forward derivative.
         """
         self.svg_file = svg_file
         self.svg_unit = svg_unit
@@ -65,6 +69,7 @@ class PatchSet(Geometry):
             grid_size_max=grid_size_max,
             quad_set=parse_svg(svg_file, svg_unit, grid_spacing, list(contacts.keys())),
             save_rho=save_rho,
+            cent_diff_deriv=cent_diff_deriv,
             checkpoint_in=checkpoint_in,
         )
 
@@ -83,6 +88,7 @@ class PatchSet(Geometry):
         # attrs["contacts"] = self.contacts  # TODO: serialize contacts
         attrs["grid_size_max"] = self.grid_spacing_max
         attrs["save_rho"] = self.save_rho
+        attrs["cent_diff_deriv"] = self.cent_diff_deriv
         return list(attrs.keys()) + super()._save_checkpoint(cp_path, context)
 
     def rho_dot(self, rho: TensorList, t: float) -> TensorList:

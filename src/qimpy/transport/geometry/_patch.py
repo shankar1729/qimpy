@@ -33,6 +33,7 @@ class Patch:
     rho_padded_shape: tuple[int, ...]  #: Shape of density matrix with ghost padding
     rho: torch.Tensor  #: current density matrix on this patch
     v_prime: torch.jit.ScriptModule  #: Underlying advection logic
+    cent_diff_deriv: bool  # using simple central difference operator
 
     material: Material
     aperture_selections: list[Optional[torch.Tensor]]  #: Aperture indices for each edge
@@ -62,6 +63,7 @@ class Patch:
         contact_circles: torch.Tensor,
         contact_params: list[dict],
         material: Material,
+        cent_diff_deriv: bool,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         # Initialize mesh:
@@ -118,7 +120,7 @@ class Patch:
             self.rho = torch.tile(material.rho0.flatten(), (N[0], N[1], 1))
 
         # Initialize v*drho/dx calculator:
-        self.v_prime = torch.jit.script(Vprime())
+        self.v_prime = torch.jit.script(Vprime(cent_diff_deriv=cent_diff_deriv))
 
         # Initialize reflectors if needed:
         self.material = material
@@ -223,7 +225,7 @@ def minmod(f: torch.Tensor, axis: int) -> torch.Tensor:
 
 
 class Vprime(torch.nn.Module):
-    def __init__(self, slope_lim_theta: float = 2.0):
+    def __init__(self, slope_lim_theta: float = 2.0, cent_diff_deriv: bool = False):
         # Initialize convolution that computes slopes using 3 difference formulae.
         # Here, `slope_lim_theta` controls the scaling of the forward/backward
         # difference formulae relative to the central difference one.
@@ -231,17 +233,21 @@ class Vprime(torch.nn.Module):
         # dimensions Nbatch x 3 x (N-2), containing backward, central and forward
         # difference computations of the slope.
         super().__init__()
-        self.slope_conv = torch.nn.Conv1d(1, 3, 3, bias=False)
-        self.slope_conv.weight.data = torch.tensor(
+        weight_data = torch.tensor(
             [
                 [-slope_lim_theta, slope_lim_theta, 0.0],
                 [-0.5, 0.0, 0.5],
                 [0.0, -slope_lim_theta, slope_lim_theta],
             ],
             device=rc.device,
-        ).view(
-            3, 1, 3
-        )  # add singleton in_channels dim
+        )
+        if cent_diff_deriv:
+            self.slope_conv = torch.nn.Conv1d(1, 1, 1, bias=False)
+            weight_data = weight_data[1]
+        else:
+            self.slope_conv = torch.nn.Conv1d(1, 3, 3, bias=False)
+        # add singleton in_channels dim
+        self.slope_conv.weight.data = weight_data.view(-1, 1, 3)
         self.slope_conv.weight.requires_grad = False
 
     def slope_minmod(self, f: torch.Tensor) -> torch.Tensor:
@@ -258,6 +264,10 @@ class Vprime(torch.nn.Module):
         # Bring active axis to end
         rho = rho.swapaxes(axis, -1)
         v = v.swapaxes(axis, -1)
+
+        # #HACK
+        # delta_rho = 0.5*(rho[..., 3:-1] - rho[..., 1:-3])
+        # return (v * delta_rho).swapaxes(axis, -1)  # original axis order
 
         # Reconstruction
         half_slope = 0.5 * self.slope_minmod(rho)

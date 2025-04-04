@@ -164,7 +164,9 @@ class SpinUnpolarized(torch.nn.Module):
         t2_up = 2 * t2
         t2_dn = t2_up.clone()  # or a copy? any changes to t2_up will change t2_dn
         zi2 = torch.zeros_like(rs)
-        z = sigma_tot / (8.0 * n_tot * tau_tot)  # check jdftx and qimpy exchange z and this z
+        z = sigma_tot / (
+            8.0 * n_tot * tau_tot
+        )  # check jdftx and qimpy exchange z and this z
         z = torch.clip(z, max=1.0)
         # Compute energy:
         ec = self.get_ec(rs, zeta, g, t2, t2_up, t2_dn, zi2, z)
@@ -205,11 +207,15 @@ class SpinPolarized(torch.nn.Module):
         t2 = ((np.pi / 96) ** (2.0 / 3)) * sigma_tot * rs / (g * n_tot).square()
         t2_up = ((np.pi / 48) ** (2.0 / 3)) * sigma[0] * rs_up / n[0].square()
         t2_dn = ((np.pi / 48) ** (2.0 / 3)) * sigma[2] * rs_dn / n[1].square()
-        sigma_diff = (n[1].square() * sigma[0]
-                      - 2.0 * n[0] * n[1] * sigma[1]
-                      + n[0].square() * sigma[2])
-        zi2 = ((9.0 * np.pi / 4) ** (-2.0 / 3)) * rs.square() * sigma_diff / n_tot ** 4
-        z = sigma_tot / (8.0 * n_tot * tau_tot)  # check jdftx and qimpy exchange z and this z
+        sigma_diff = (
+            n[1].square() * sigma[0]
+            - 2.0 * n[0] * n[1] * sigma[1]
+            + n[0].square() * sigma[2]
+        )
+        zi2 = ((9.0 * np.pi / 4) ** (-2.0 / 3)) * rs.square() * sigma_diff / n_tot**4
+        z = sigma_tot / (
+            8.0 * n_tot * tau_tot
+        )  # check jdftx and qimpy exchange z and this z
         z = torch.clip(z, max=1.0)
         # Compute per-particle energy and total:
         ec = self.get_ec(rs, zeta, g, t2, t2_up, t2_dn, zi2, z)
@@ -220,7 +226,11 @@ class SpinPolarized(torch.nn.Module):
 
 
 def PW91_H0(
-    gamma: float, beta: torch.Tensor, g3: torch.Tensor, t2: torch.Tensor, ec_unif: torch.Tensor
+    gamma: float,
+    beta: torch.Tensor,
+    g3: torch.Tensor,
+    t2: torch.Tensor,
+    ec_unif: torch.Tensor,
 ) -> torch.Tensor:
     """H0 function (equations 13, 14) of PW91.
     Same as the H function (equations 7, 8) of PBE.
@@ -246,8 +256,15 @@ class _C_TPSS(torch.nn.Module):
         self.rev = rev
 
     def forward(
-        self, rs: torch.Tensor, zeta: torch.Tensor, g: torch.Tensor, t2: torch.Tensor,
-        t2_up: torch.Tensor, t2_dn: torch.Tensor, zi2: torch.Tensor, z: torch.Tensor
+        self,
+        rs: torch.Tensor,
+        zeta: torch.Tensor,
+        g: torch.Tensor,
+        t2: torch.Tensor,
+        t2_up: torch.Tensor,
+        t2_dn: torch.Tensor,
+        zi2: torch.Tensor,
+        z: torch.Tensor,
     ) -> torch.Tensor:
         # Compute C(zeta,0) (eqn (13))
         C0 = 0.59 if self.rev else 0.53
@@ -261,22 +278,34 @@ class _C_TPSS(torch.nn.Module):
         C_num = (zeta_p * zeta_m) ** (4.0 / 3)
         C_den = C_num + 0.5 * zi2 * (zeta_p ** (4.0 / 3) + zeta_m ** (4.0 / 3))
         # if(!Cnum && !Cden) { C=Czeta0 } //Avoid 0/0 error
-        C_num_den = torch.where(torch.logical_and(C_num == 0., C_den == 0.), 1., C_num / C_den)
+        C_num_den = torch.where(
+            torch.logical_and(C_num == 0.0, C_den == 0.0), 1.0, C_num / C_den
+        )
         C = C_zeta_0 * C_num_den**4
         # Ingredients for eqn (12):
         # PBE correlation at target spin densities:
-        beta = 0.066725 * (1.0 + 0.1 * rs) / (
-                1.0 + 0.1778 * rs) if self.rev else 0.06672455060314922 * torch.ones_like(rs)
+        beta = (
+            0.066725 * (1.0 + 0.1 * rs) / (1.0 + 0.1778 * rs)
+            if self.rev
+            else 0.06672455060314922 * torch.ones_like(rs)
+        )
         ec_unif = self.ec_pw(rs, zeta)  # underlying LDA correlation
         H = PW91_H0(self.gamma, beta, g**3, t2, ec_unif)
         ec = ec_unif + H
         g_pol = 2.0 ** (-1.0 / 3)
         # PBE correlation with up-spins alone:
         rs_up = rs / (g_pol * zeta_p ** (1.0 / 3))
-        beta_up = 0.066725 * (1.0 + 0.1 * rs_up) / (
-            1.0 + 0.1778 * rs_up) if self.rev else 0.06672455060314922 * torch.ones_like(rs_up)
-        ec_up_unif = self.ec_pw(rs_up, torch.ones_like(zeta))  # underlying LDA correlation
-        H_up = PW91_H0(self.gamma, beta_up, g_pol**3 * torch.ones_like(g), t2_up, ec_up_unif)
+        beta_up = (
+            0.066725 * (1.0 + 0.1 * rs_up) / (1.0 + 0.1778 * rs_up)
+            if self.rev
+            else 0.06672455060314922 * torch.ones_like(rs_up)
+        )
+        ec_up_unif = self.ec_pw(
+            rs_up, torch.ones_like(zeta)
+        )  # underlying LDA correlation
+        H_up = PW91_H0(
+            self.gamma, beta_up, g_pol**3 * torch.ones_like(g), t2_up, ec_up_unif
+        )
         ec_up = ec_up_unif + H_up
         # PBE correlation with down-spins alone:
         # if(!zeta && t2up==t2dn) ec_dn=ec_up -> is it worth it to implement here?
@@ -284,10 +313,21 @@ class _C_TPSS(torch.nn.Module):
             ec_dn = ec_up
         else:
             rs_dn = rs / (g_pol * zeta_m ** (1.0 / 3))
-            beta_dn = 0.066725 * (1.0 + 0.1 * rs_dn) / (
-                1.0 + 0.1778 * rs_dn) if self.rev else 0.06672455060314922 * torch.ones_like(rs_dn)
-            ec_dn_unif = self.ec_pw(rs_dn, torch.ones_like(zeta))  # underlying LDA correlation
-            ec_dn = ec_dn_unif + PW91_H0(self.gamma, beta_dn, (g_pol * torch.ones_like(g)) ** 3, t2_dn, ec_dn_unif)
+            beta_dn = (
+                0.066725 * (1.0 + 0.1 * rs_dn) / (1.0 + 0.1778 * rs_dn)
+                if self.rev
+                else 0.06672455060314922 * torch.ones_like(rs_dn)
+            )
+            ec_dn_unif = self.ec_pw(
+                rs_dn, torch.ones_like(zeta)
+            )  # underlying LDA correlation
+            ec_dn = ec_dn_unif + PW91_H0(
+                self.gamma,
+                beta_dn,
+                (g_pol * torch.ones_like(g)) ** 3,
+                t2_dn,
+                ec_dn_unif,
+            )
         # Compute ecTilde = 0.5*(1+zeta) max(ec, ecUp) + 0.5*(1-zeta) max(ec, ecDn):
         ec_max_up = torch.where(ec > ec_up, ec, ec_up)
         ec_max_dn = torch.where(ec > ec_dn, ec, ec_dn)
@@ -297,5 +337,3 @@ class _C_TPSS(torch.nn.Module):
         # Put together the final correlation energy (eqn. (11)):
         d = 2.8
         return ec_PKZB * (1.0 + d * ec_PKZB * z**3)
-
-    # rename x and c for mgga
