@@ -162,11 +162,9 @@ class SpinUnpolarized(torch.nn.Module):
         g = torch.ones_like(rs)
         t2 = ((np.pi / 96) ** (2.0 / 3)) * sigma_tot * rs / n_tot.square()
         t2_up = 2 * t2
-        t2_dn = t2_up.clone()  # or a copy? any changes to t2_up will change t2_dn
+        t2_dn = t2_up.clone()
         zi2 = torch.zeros_like(rs)
-        z = sigma_tot / (
-            8.0 * n_tot * tau_tot
-        )  # check jdftx and qimpy exchange z and this z
+        z = sigma_tot / (8.0 * n_tot * tau_tot)
         z = torch.clip(z, max=1.0)
         # Compute energy:
         ec = self.get_ec(rs, zeta, g, t2, t2_up, t2_dn, zi2, z)
@@ -213,9 +211,7 @@ class SpinPolarized(torch.nn.Module):
             + n[0].square() * sigma[2]
         )
         zi2 = ((9.0 * np.pi / 4) ** (-2.0 / 3)) * rs.square() * sigma_diff / n_tot**4
-        z = sigma_tot / (
-            8.0 * n_tot * tau_tot
-        )  # check jdftx and qimpy exchange z and this z
+        z = sigma_tot / (8.0 * n_tot * tau_tot)
         z = torch.clip(z, max=1.0)
         # Compute per-particle energy and total:
         ec = self.get_ec(rs, zeta, g, t2, t2_up, t2_dn, zi2, z)
@@ -277,7 +273,7 @@ class _C_TPSS(torch.nn.Module):
         zeta_m = 1.0 - zeta
         C_num = (zeta_p * zeta_m) ** (4.0 / 3)
         C_den = C_num + 0.5 * zi2 * (zeta_p ** (4.0 / 3) + zeta_m ** (4.0 / 3))
-        # if(!Cnum && !Cden) { C=Czeta0 } //Avoid 0/0 error
+        # Avoid 0/0 error
         C_num_den = torch.where(
             torch.logical_and(C_num == 0.0, C_den == 0.0), 1.0, C_num / C_den
         )
@@ -308,7 +304,6 @@ class _C_TPSS(torch.nn.Module):
         )
         ec_up = ec_up_unif + H_up
         # PBE correlation with down-spins alone:
-        # if(!zeta && t2up==t2dn) ec_dn=ec_up -> is it worth it to implement here?
         if torch.equal(t2_up, t2_dn) and torch.equal(zeta, torch.zeros_like(zeta)):
             ec_dn = ec_up
         else:
