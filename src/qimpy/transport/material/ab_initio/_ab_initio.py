@@ -251,6 +251,7 @@ class AbInitio(Material):
                 raise InvalidInputException(f"{observable_name = } is not supported")
         self.observables = torch.stack(observables, dim=0)
         self.observable_names = list(observable_names)
+        self.include_coherent = False
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
@@ -360,7 +361,7 @@ class AbInitio(Material):
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         """Overall drho/dt in interaction picture.
         Input and output rho are in packed (real) form."""
-        if not self.dynamics_terms:
+        if not self.dynamics_terms and not self.include_coherent:
             return torch.zeros_like(rho)
         watch = StopWatch("AbInitio.rho_dot_pre")
         rho = rho.unflatten(-1, (self.nk_mine, self.n_bands, self.n_bands))
@@ -374,6 +375,8 @@ class AbInitio(Material):
 
         # Compute rho_dot (upto an overall +h.c.) in Schrodinger picture:
         rho_dot_S = torch.zeros_like(rho_S)
+        if self.include_coherent:
+            rho_dot_S += 1j * torch.einsum("...kab, kb -> ...kab", rho_S, self.E)
         for dynamics_term in self.dynamics_terms.values():
             rho_dot_S += dynamics_term.rho_dot(rho_S, t, patch_id)
 

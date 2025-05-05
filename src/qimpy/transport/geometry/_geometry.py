@@ -33,6 +33,7 @@ class Geometry(TreeNode):
     stash: ResultStash  #: Saved results for collating into fewer checkpoints
     dt_max: float  #: Maximum stable time step
     save_rho: bool  #: whether to write rho to checkpoint file
+    cent_diff_deriv: bool  # using simple central difference derivative
 
     def __init__(
         self,
@@ -43,6 +44,7 @@ class Geometry(TreeNode):
         contacts: dict[str, dict],
         grid_size_max: int,
         save_rho: bool = False,
+        cent_diff_deriv: bool = False,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
@@ -69,12 +71,16 @@ class Geometry(TreeNode):
         save_rho
             :yaml:`Whether to write the full density matrices to the checkpoint file.`
             If not (default), only observables are written to the checkpoint file.
+        cent_diff_deriv
+            :yaml:`Whether to use the simple central-difference derivative operator.`
+            The default is choosing from the backward, central or forward derivative.
         """
         super().__init__()
         self.comm = process_grid.get_comm("r")
         self.material = material
         self.quad_set = quad_set
         self.grid_spacing = grid_spacing
+        self.cent_diff_deriv = cent_diff_deriv
         self.contacts = contacts
         aperture_circles = torch.from_numpy(quad_set.apertures).to(rc.device)
         contact_circles = torch.from_numpy(quad_set.contacts).to(rc.device)
@@ -115,6 +121,7 @@ class Geometry(TreeNode):
                     grid_size_tot=tuple(quad_set.grid_size[i_quad]),
                     grid_start=grid_start,
                     grid_stop=grid_stop,
+                    cent_diff_deriv=self.cent_diff_deriv,
                     material=material,
                     is_reflective=(adjacency[:, 0] == -1),
                     has_apertures=has_apertures,

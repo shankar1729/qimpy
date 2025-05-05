@@ -277,8 +277,8 @@ INTERNAL_FUNCTIONAL_NAMES = {
     "lda_teter",
     "gga_pbe",
     "gga_pbesol",
-    "mgga_tpss_x",
-    "mgga_revtpss_x",
+    "mgga_tpss",
+    "mgga_revtpss",
 }
 
 
@@ -331,10 +331,16 @@ def _get_functionals(name: str, scale_factor: float) -> list[Union[Functional, s
                 gga.x_pbe(scale_factor=scale_factor, sol=True),
                 gga.c_pbe(scale_factor=scale_factor, sol=True),
             ]
-        elif key == "mgga_tpss_x":
-            return [mgga.x_tpss(scale_factor=scale_factor, rev=False)]
-        elif key == "mgga_revtpss_x":
-            return [mgga.x_tpss(scale_factor=scale_factor, rev=True)]
+        elif key == "mgga_tpss":
+            return [
+                mgga.x_tpss(scale_factor=scale_factor, rev=False),
+                mgga.c_tpss(scale_factor=scale_factor, rev=False),
+            ]
+        elif key == "mgga_revtpss":
+            return [
+                mgga.x_tpss(scale_factor=scale_factor, rev=True),
+                mgga.c_tpss(scale_factor=scale_factor, rev=True),
+            ]
     else:
         # Check LibXC functionals:
         libxc_names = get_libxc_functional_names()

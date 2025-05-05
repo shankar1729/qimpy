@@ -14,6 +14,7 @@ __all__ = (
     "spherical_harmonics",
     "spherical_bessel",
     "quintic_spline",
+    "random",
     "RadialFunction",
 )
 
@@ -27,5 +28,5 @@ from ._linalg import (
     ortho_matrix,
     eighg,
 )
-from . import spherical_harmonics, spherical_bessel, quintic_spline
+from . import spherical_harmonics, spherical_bessel, quintic_spline, random
 from ._radial_function import RadialFunction

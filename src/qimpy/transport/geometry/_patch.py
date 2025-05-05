@@ -12,6 +12,7 @@ from qimpy.transport.material import Material
 from qimpy.transport.advection import Vprime
 from . import within_circles
 
+
 class Contact(NamedTuple):
     """Definition of a contact."""
 
@@ -33,6 +34,7 @@ class Patch:
     rho_padded_shape: tuple[int, ...]  #: Shape of density matrix with ghost padding
     rho: torch.Tensor  #: current density matrix on this patch
     v_prime: torch.jit.ScriptModule  #: Underlying advection logic
+    cent_diff_deriv: bool  # using simple central difference operator
 
     material: Material
     aperture_selections: list[Optional[torch.Tensor]]  #: Aperture indices for each edge
@@ -54,6 +56,7 @@ class Patch:
         contact_circles: torch.Tensor,
         contact_params: list[dict],
         material: Material,
+        cent_diff_deriv: bool,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         # Initialize mesh:
@@ -92,9 +95,6 @@ class Patch:
         self.dt_max = 0.5 / globalreduce.max(self.V.abs(), material.comm)
         self.wk = material.wk
 
-        # Initialize v*drho/dx calculator:
-        self.v_prime = Vprime() #torch.jit.script(Vprime()): TODO: this gives an error
-
         # Initialize distribution function:
         Nkbb = self.v.shape[0]  # flattened density-matrix count (Nkbb_mine of material)
         nk_prev = material.k_division.n_prev[material.comm.rank]
@@ -111,6 +111,9 @@ class Patch:
             )
         else:
             self.rho = torch.tile(material.rho0.flatten(), (N[0], N[1], 1))
+
+        # Initialize v*drho/dx calculator:
+        self.v_prime = torch.jit.script(Vprime(cent_diff_deriv=cent_diff_deriv))
 
         # Initialize reflectors if needed:
         self.material = material

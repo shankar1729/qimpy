@@ -2,10 +2,12 @@ from __future__ import annotations
 from typing import TypeVar, Any, Union, Optional, Sequence
 from abc import abstractmethod
 
+import numpy as np
 import torch
 
 from qimpy import rc, MPI
 from qimpy.algorithms import Gradable
+from qimpy.math import random
 from qimpy.mpi import BufferView
 from qimpy.io import CheckpointPath
 from . import Grid
@@ -179,7 +181,7 @@ class Field(Gradable[FieldType]):
                 if (grid.i_proc == 0)
                 else torch.zeros(data.shape[:-3], device=data.device, dtype=data.dtype)
             )
-            if type(self) == FieldH:
+            if isinstance(self, FieldH):
                 result = result.real  # due to Hermitian symmetry
         else:
             result = data.sum(dim=(-3, -2, -1)) * grid.dV
@@ -201,7 +203,7 @@ class Field(Gradable[FieldType]):
         assert self.grid is other.grid
         data1 = self.data.conj() if self.data.is_complex() else self.data
         data2 = other.data
-        if type(self) == FieldH:
+        if isinstance(self, FieldH):
             result = (data1 * data2).sum(dim=(-3, -2)).real @ self.grid.weight2H
         else:
             result = (data1 * data2).sum(dim=(-3, -2, -1))
@@ -346,6 +348,53 @@ class Field(Gradable[FieldType]):
         else:
             dset = checkpoint.create_dataset_real(path, shape=shape, dtype=dtype)
             checkpoint.write_slice(dset, offset, self.data)
+
+    def randomize(self, seed: int = 0) -> None:
+        """Initialize to MPI-reproducible standard-normal numbers, based on `seed`."""
+        # Initialize reproducible, split-independent random number state:
+        # Ignore penultimate (y) dimension in state, since it is looped over later.
+        # (The y direction is picked for looping since it is never split.)
+        grid = self.grid
+        shape_mine = self.data.shape
+        shape_full = shape_mine[:-3] + grid.shape  # without split or H symmetry
+        shape_mine = shape_mine[:-2] + shape_mine[-1:]  # drop y
+        shape_full = shape_full[:-2] + shape_full[-1:]  # drop y
+        offsets = [0] * len(shape_full)
+        if self.is_tilde:
+            offsets[-1] = (
+                grid.split2.i_start if self.is_complex else grid.split2H.i_start
+            )
+        else:
+            offsets[-2] = grid.split0.i_start  # note that dim 1 already removed
+        seed_offset = 1 + seed * np.prod(shape_full)
+        state = torch.full(shape_mine, seed_offset, device=rc.device, dtype=torch.int64)
+        for i_dim, offset in enumerate(offsets):
+            cur_offset = torch.arange(shape_mine[i_dim], device=rc.device) + offset
+            stride = int(np.prod(shape_full[i_dim + 1 :]))
+            bcast_shape = [1] * len(shape_full)
+            bcast_shape[i_dim] = -1
+            state += stride * cur_offset.view(bcast_shape)
+        random.initialize_state(state)
+
+        # Assign random numbers one slice of y at a time:
+        n1 = grid.shape[1]
+        if self.dtype().is_complex:
+            for i1 in range(n1):
+                self.data[..., i1, :] = random.randn(state)
+        else:
+            for i1 in range(0, n1, 2):
+                data_complex = random.randn(state)
+                self.data[..., i1, :] = data_complex.real
+                if i1 + 1 < n1:
+                    self.data[..., i1 + 1, :] = data_complex.imag
+
+        # Enforce hermitian symmetry for FieldH:
+        if self.is_tilde and (not self.is_complex):
+            if grid.split2H.is_mine(0):
+                self.data[..., 0].imag.zero_()
+            half_n2 = grid.shape[2] // 2
+            if (2 * half_n2 == grid.shape[2]) and grid.split2H.is_mine(half_n2):
+                self.data[..., half_n2 - grid.split2H.i_start].imag.zero_()
 
 
 class FieldR(Field["FieldR"]):

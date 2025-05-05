@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 from qimpy import rc
 
+
 class Vprime(torch.nn.Module):
 
     N_GHOST: int = 2  #: currently a constant, but could depend on slope method later
@@ -13,7 +14,7 @@ class Vprime(torch.nn.Module):
     GHOST_L: slice = slice(0, N_GHOST)  #: ghost indices on left/bottom
     GHOST_R: slice = slice(-N_GHOST, None)  #: ghost indices on right/top side
 
-    def __init__(self, slope_lim_theta: float = 2.0):
+    def __init__(self, slope_lim_theta: float = 2.0, cent_diff_deriv: bool = False):
         # Initialize convolution that computes slopes using 3 difference formulae.
         # Here, `slope_lim_theta` controls the scaling of the forward/backward
         # difference formulae relative to the central difference one.
@@ -21,18 +22,20 @@ class Vprime(torch.nn.Module):
         # dimensions Nbatch x 3 x (N-2), containing backward, central and forward
         # difference computations of the slope.
         super().__init__()
-        self.slope_conv = torch.nn.Conv1d(1, 3, 3, bias=False)
-
-        self.slope_conv.weight.data = torch.tensor(
+        weight_data = torch.tensor(
             [
                 [-slope_lim_theta, slope_lim_theta, 0.0],
                 [-0.5, 0.0, 0.5],
                 [0.0, -slope_lim_theta, slope_lim_theta],
             ],
             device=rc.device,
-        ).view(
-            3, 1, 3
-        )  # add singleton in_channels dim
+        )
+        if cent_diff_deriv:
+            self.slope_conv = torch.nn.Conv1d(1, 1, 1, bias=False)
+            weight_data = weight_data[1]
+        else:
+            self.slope_conv = torch.nn.Conv1d(1, 3, 3, bias=False)
+        self.slope_conv.weight.data = weight_data.view(-1, 1, 3)  # add in_channels dim
         self.slope_conv.weight.requires_grad = False
 
     def slope_minmod(self, f: torch.Tensor) -> torch.Tensor:
@@ -60,6 +63,7 @@ class Vprime(torch.nn.Module):
         result_plus = (rho_diff + half_slope_diff)[..., :-1]
         delta_rho = torch.where(v < 0.0, result_minus, result_plus)
         return (v * delta_rho).swapaxes(axis, -1)  # original axis order
+
 
 def minmod(f: torch.Tensor, axis: int) -> torch.Tensor:
     """Return min|`f`| along `axis` when all same sign, and 0 otherwise."""
