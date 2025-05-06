@@ -141,13 +141,28 @@ class FermiCircle(Material):
         """Pad by ghost zones for monetum-space advection."""
         assert self.nk_mine >= N_GHOST
         nk_mine_padded = self.nk_mine + 2 * N_GHOST
-        rho_padded = torch.zeros(rho.shape[:-1] + (nk_mine_padded,))
+        rho_padded = torch.zeros(rho.shape[:-1] + (nk_mine_padded,), device=rc.device)
         rho_padded[..., NON_GHOST] = rho
         if self.comm.size == 1:
             rho_padded[..., GHOST_L] = rho[..., GHOST_R]
             rho_padded[..., GHOST_R] = rho[..., GHOST_L]
         else:
-            raise NotImplementedError
+            rank = self.comm.rank
+            rank_l = (rank - 1) % self.comm.size  # rank of k domain to the "left"
+            rank_r = (rank + 1) % self.comm.size  # rank of k domain to the "right"
+            send_buf_l = rho[..., GHOST_L].contiguous()
+            send_buf_r = rho[..., GHOST_R].contiguous()
+            recv_buf_l = torch.zeros(rho.shape[:-1] + (N_GHOST,), device=rc.device)
+            recv_buf_r = torch.zeros(rho.shape[:-1] + (N_GHOST,), device=rc.device)
+            requests = [
+                self.comm.Isend(BufferView(send_buf_r), rank_r, 1),
+                self.comm.Isend(BufferView(send_buf_l), rank_l, 2),
+                self.comm.Irecv(BufferView(recv_buf_l), rank_l, 1),
+                self.comm.Irecv(BufferView(recv_buf_r), rank_r, 2),
+            ]
+            MPI.Request.Waitall(requests)  # finish all async communications
+            rho_padded[..., GHOST_L] = recv_buf_l
+            rho_padded[..., GHOST_R] = recv_buf_r
         return rho_padded
 
     def rho_dot_collisions(self, rho: torch.Tensor) -> torch.Tensor:
