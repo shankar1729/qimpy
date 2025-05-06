@@ -9,7 +9,7 @@ from qimpy import rc, MPI
 from qimpy.mpi import ProcessGrid, BufferView, TaskDivision
 from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext
-from qimpy.transport.advection import Vprime
+from qimpy.transport.advect import Advect
 from . import Material
 
 
@@ -23,7 +23,7 @@ class FermiCircle(Material):
     theta0: float  #: Initial angle in fermi circle grid
     specularity: float  #: Specularity of reflection at all boundaries
     r_c: float  #: Cyclotron radius for extenral magnetic field (disabled if infinity)
-    v_prime: torch.jit.ScriptModule  #: Momentum-space advection logic
+    advect: torch.jit.ScriptModule  #: Momentum-space advection logic
 
     def __init__(
         self,
@@ -92,7 +92,7 @@ class FermiCircle(Material):
 
         # Initialize F*drho/dk calculator, if needed:
         if np.isfinite(r_c):
-            self.v_prime = torch.jit.script(Vprime())
+            self.advect = torch.jit.script(Advect())
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
@@ -127,9 +127,8 @@ class FermiCircle(Material):
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         result = self.rho_dot_collisions(rho)
         if np.isfinite(self.r_c):
-            # k-space advection due to magnetic fields
-            # (1/r_c) * df/dtheta
-            result -= self.v_prime(rho, torch.tensor([self.vF / self.r_c]), axis=-1)
+            # k-space advection (1/r_c) * df/dtheta due to magnetic fields:
+            result += self.advect(rho, torch.tensor([self.vF / self.r_c]), axis=-1)
         return result
 
     def rho_dot_collisions(self, rho: torch.Tensor) -> torch.Tensor:

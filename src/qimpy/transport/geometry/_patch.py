@@ -9,7 +9,7 @@ from qimpy.io import CheckpointPath
 from qimpy.mpi import globalreduce
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
-from qimpy.transport.advection import Vprime, VprimeParams
+from qimpy.transport.advect import Advect, N_GHOST, NON_GHOST
 from . import within_circles
 
 
@@ -33,7 +33,7 @@ class Patch:
     rho_shape: tuple[int, ...]  #: Shape of density matrix on patch
     rho_padded_shape: tuple[int, ...]  #: Shape of density matrix with ghost padding
     rho: torch.Tensor  #: current density matrix on this patch
-    v_prime: torch.jit.ScriptModule  #: Underlying advection logic
+    advect: torch.jit.ScriptModule  #: Underlying advection logic
     cent_diff_deriv: bool  # using simple central difference operator
 
     material: Material
@@ -99,7 +99,7 @@ class Patch:
         Nkbb = self.v.shape[0]  # flattened density-matrix count (Nkbb_mine of material)
         nk_prev = material.k_division.n_prev[material.comm.rank]
         Nkbb_offset = nk_prev * (material.n_bands**2)
-        padding = 2 * VprimeParams.N_GHOST
+        padding = 2 * N_GHOST
         self.rho_offset = tuple(grid_start) + (Nkbb_offset,)
         self.rho_shape = (N[0], N[1], Nkbb)
         self.rho_padded_shape = (N[0] + padding, N[1] + padding, Nkbb)
@@ -113,7 +113,7 @@ class Patch:
             self.rho = torch.tile(material.rho0.flatten(), (N[0], N[1], 1))
 
         # Initialize v*drho/dx calculator:
-        self.v_prime = torch.jit.script(Vprime(cent_diff_deriv=cent_diff_deriv))
+        self.advect = torch.jit.script(Advect(cent_diff_deriv=cent_diff_deriv))
 
         # Initialize reflectors if needed:
         self.material = material
@@ -196,9 +196,8 @@ class Patch:
     @stopwatch
     def rho_dot(self, rho: torch.Tensor) -> torch.Tensor:
         """Compute rho_dot, given current rho."""
-        return -1.0 * (
-            self.v_prime(rho[:, VprimeParams.NON_GHOST], self.V[..., 0], axis=0)
-            + self.v_prime(rho[VprimeParams.NON_GHOST, :], self.V[..., 1], axis=1)
+        return self.advect(rho[:, NON_GHOST], self.V[..., 0], axis=0) + self.advect(
+            rho[NON_GHOST, :], self.V[..., 1], axis=1
         )
 
 

@@ -4,18 +4,16 @@ import torch
 from qimpy import rc
 
 
-class VprimeParams:
+N_GHOST: int = 2  #: currently a constant, but could depend on slope method later
 
-    N_GHOST: int = 2  #: currently a constant, but could depend on slope method later
-
-    # Initialize slices for accessing ghost regions in padded version:
-    # These are also the slices for the boundary region in non-padded version
-    NON_GHOST: slice = slice(N_GHOST, -N_GHOST)
-    GHOST_L: slice = slice(0, N_GHOST)  #: ghost indices on left/bottom
-    GHOST_R: slice = slice(-N_GHOST, None)  #: ghost indices on right/top side
+# Initialize slices for accessing ghost regions in padded version:
+# These are also the slices for the boundary region in non-padded version
+NON_GHOST: slice = slice(N_GHOST, -N_GHOST)
+GHOST_L: slice = slice(0, N_GHOST)  #: ghost indices on left/bottom
+GHOST_R: slice = slice(-N_GHOST, None)  #: ghost indices on right/top side
 
 
-class Vprime(torch.nn.Module):
+class Advect(torch.nn.Module):
     def __init__(self, slope_lim_theta: float = 2.0, cent_diff_deriv: bool = False):
         # Initialize convolution that computes slopes using 3 difference formulae.
         # Here, `slope_lim_theta` controls the scaling of the forward/backward
@@ -64,7 +62,7 @@ class Vprime(torch.nn.Module):
         result_minus = (rho_diff - half_slope_diff)[..., 1:]
         result_plus = (rho_diff + half_slope_diff)[..., :-1]
         delta_rho = torch.where(v < 0.0, result_minus, result_plus)
-        return (v * delta_rho).swapaxes(axis, -1)  # original axis order
+        return -(v * delta_rho).swapaxes(axis, -1)  # original axis order; overall sign
 
 
 def minmod(f: torch.Tensor, axis: int) -> torch.Tensor:
