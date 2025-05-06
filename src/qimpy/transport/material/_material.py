@@ -3,6 +3,7 @@ from typing import Callable
 from abc import abstractmethod
 
 import torch
+import numpy as np
 
 from qimpy import TreeNode, MPI, rc
 from qimpy.mpi import ProcessGrid, TaskDivision, BufferView
@@ -23,6 +24,7 @@ class Material(TreeNode):
     E: torch.Tensor  #: nk_mine x n_bands energies
     v: torch.Tensor  #: nk_mine x n_bands x n_dim velocities in plane
     rho0: torch.Tensor  #: nk_mine x n_bands x n_bands initial density matrix
+    dt_max: float  #: maximum stable time-step (set to inf if not available)
 
     def __init__(
         self,
@@ -49,6 +51,7 @@ class Material(TreeNode):
         self.E = torch.zeros((self.nk_mine, n_bands), device=rc.device)
         self.v = torch.zeros((self.nk_mine, n_bands, n_dim), device=rc.device)
         self.rho0 = torch.zeros((self.nk_mine, n_bands, n_bands), device=rc.device)
+        self.dt_max = np.inf
 
     @abstractmethod
     def initialize_fields(

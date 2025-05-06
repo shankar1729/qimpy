@@ -8,7 +8,8 @@ from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import ProcessGrid, BufferView
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
-from . import TensorList, Geometry, Patch, parse_svg
+from qimpy.transport.advect import NON_GHOST, GHOST_L, GHOST_R
+from . import TensorList, Geometry, parse_svg
 
 
 class PatchSet(Geometry):
@@ -109,7 +110,7 @@ class PatchSet(Geometry):
             for patch in self.patches
         )
         for out, rho in zip(out_list, rho_list):
-            out[Patch.NON_GHOST, Patch.NON_GHOST] = rho
+            out[NON_GHOST, NON_GHOST] = rho
 
         # Populate ghost zones across patches where needed:
         requests = []
@@ -189,17 +190,17 @@ class PatchSet(Geometry):
 
 # Constants for edge data transfer:
 IN_SLICES = [
-    (slice(None), Patch.GHOST_L),
-    (Patch.GHOST_R, slice(None)),
-    (slice(None), Patch.GHOST_R),
-    (Patch.GHOST_L, slice(None)),
+    (slice(None), GHOST_L),
+    (GHOST_R, slice(None)),
+    (slice(None), GHOST_R),
+    (GHOST_L, slice(None)),
 ]  #: input slice for each edge orientation during edge communication
 
 OUT_SLICES = [
-    (Patch.NON_GHOST, Patch.GHOST_L),
-    (Patch.GHOST_R, Patch.NON_GHOST),
-    (Patch.NON_GHOST, Patch.GHOST_R),
-    (Patch.GHOST_L, Patch.NON_GHOST),
+    (NON_GHOST, GHOST_L),
+    (GHOST_R, NON_GHOST),
+    (NON_GHOST, GHOST_R),
+    (GHOST_L, NON_GHOST),
 ]  #: output slice for each edge orientation during edge communication
 
 FLIP_DIMS = [(0, 1), (0,), None, (1,)]  #: which dims to flip during edge transfer

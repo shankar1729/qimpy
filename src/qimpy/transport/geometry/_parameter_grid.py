@@ -77,7 +77,7 @@ class ParameterGrid(Geometry):
             save_rho=save_rho,
             checkpoint_in=checkpoint_in,
         )
-        self.dt_max = 0  # disable transport dt limit
+        self.dt_max = np.inf  # disable transport dt limit
 
         # Prepare all parameter values:
         self.parameters: dict[str, torch.Tensor] = {}

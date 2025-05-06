@@ -267,10 +267,10 @@ class PlotGeometry:
                     if len(sel_blocked):  # otherwise no boundary left to draw
                         i_breaks = np.where(sel_blocked[:-1] + 1 != sel_blocked[1:])[0]
                         i_starts = np.concatenate(
-                            (np.zeros(1, dtype=int), sel_blocked[i_breaks + 1])
+                            (sel_blocked[:1], sel_blocked[i_breaks + 1])
                         )
                         i_stops = np.concatenate(
-                            (sel_blocked[i_breaks] + 2, np.array([Npoints + 1]))
+                            (sel_blocked[i_breaks] + 2, sel_blocked[-1:] + 2)
                         )
                         for i_start, i_stop in zip(i_starts, i_stops):
                             plt.plot(*points[i_start:i_stop].T, "k", ls=linestyle)
@@ -289,7 +289,7 @@ class PlotGeometry:
                         ):
                             selection = np.where(within_contact)[0]
                             if len(selection):
-                                i_mid = len(selection) // 2
+                                i_mid = selection[len(selection) // 2]
                                 position = points_mid[i_mid]
                                 dq = tangents_mid[i_mid]
                                 angle = np.rad2deg(np.arctan2(dq[1], dq[0]))

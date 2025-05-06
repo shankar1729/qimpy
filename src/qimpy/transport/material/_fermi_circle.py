@@ -9,6 +9,7 @@ from qimpy import rc, MPI
 from qimpy.mpi import ProcessGrid, BufferView, TaskDivision
 from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext
+from qimpy.transport.advect import Advect, N_GHOST, NON_GHOST, GHOST_L, GHOST_R
 from . import Material
 
 
@@ -21,6 +22,9 @@ class FermiCircle(Material):
     tau_inv_ee: float  #: Electron internal scattering rate (momentum-conserving)
     theta0: float  #: Initial angle in fermi circle grid
     specularity: float  #: Specularity of reflection at all boundaries
+    r_c: float  #: Cyclotron radius for extenral magnetic field (disabled if infinity)
+    F_theta: float  #: Angular force in grid coordinates
+    advect: torch.jit.ScriptModule  #: Momentum-space advection logic
 
     def __init__(
         self,
@@ -30,6 +34,7 @@ class FermiCircle(Material):
         N_theta: int,
         tau_p: float,
         tau_ee: float,
+        r_c: float = np.inf,
         theta0: float = 0.0,
         specularity: float = 1.0,
         process_grid: ProcessGrid,
@@ -48,6 +53,9 @@ class FermiCircle(Material):
             :yaml:`Number of k along Fermi circle.`
         theta0
             :yaml:`Angle of first k-point.`
+        r_c
+            :yaml:`Cyclotron radius, corresponding to external magnetic field`.
+            If infinite, disable magentic field (default).
         specularity
             :yaml:`Specularity of reflection at all surfaces.`
             Should be in the range of 0 for fully diffuse scattering,
@@ -55,6 +63,7 @@ class FermiCircle(Material):
         """
         self.kF = kF
         self.vF = vF
+        self.r_c = r_c
         self.tau_inv_p = 1.0 / tau_p
         self.tau_inv_ee = 1.0 / tau_ee
         super().__init__(
@@ -82,6 +91,14 @@ class FermiCircle(Material):
             torch.einsum("...i, ...j -> ij", self.v_all, self.v_all)
         )
 
+        # Initialize F*drho/dk calculator, if needed:
+        if np.isfinite(r_c):
+            self.F_theta = self.vF / (self.r_c * dtheta)
+            self.dt_max = 0.5 / abs(self.F_theta)
+            self.advect = torch.jit.script(Advect())
+        else:
+            self.F_theta = 0.0
+
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
@@ -91,6 +108,7 @@ class FermiCircle(Material):
         attrs["N_theta"] = self.k_division.n_tot
         attrs["tau_p"] = (1.0 / self.tau_inv_p) if self.tau_inv_p else np.inf
         attrs["tau_ee"] = (1.0 / self.tau_inv_ee) if self.tau_inv_ee else np.inf
+        attrs["r_c"] = self.r_c
         attrs["theta0"] = self.theta0
         attrs["specularity"] = self.specularity
         return list(attrs.keys())
@@ -112,6 +130,42 @@ class FermiCircle(Material):
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
+        result = self.rho_dot_collisions(rho)
+        if self.F_theta:
+            # k-space advection due to magnetic fields:
+            F_theta_t = torch.tensor([self.F_theta], device=rc.device)
+            result += self.advect(self.pad_ghost(rho), F_theta_t, axis=-1)
+        return result
+
+    def pad_ghost(self, rho: torch.Tensor) -> torch.Tensor:
+        """Pad by ghost zones for monetum-space advection."""
+        assert self.nk_mine >= N_GHOST
+        nk_mine_padded = self.nk_mine + 2 * N_GHOST
+        rho_padded = torch.zeros(rho.shape[:-1] + (nk_mine_padded,), device=rc.device)
+        rho_padded[..., NON_GHOST] = rho
+        if self.comm.size == 1:
+            rho_padded[..., GHOST_L] = rho[..., GHOST_R]
+            rho_padded[..., GHOST_R] = rho[..., GHOST_L]
+        else:
+            rank = self.comm.rank
+            rank_l = (rank - 1) % self.comm.size  # rank of k domain to the "left"
+            rank_r = (rank + 1) % self.comm.size  # rank of k domain to the "right"
+            send_buf_l = rho[..., GHOST_L].contiguous()
+            send_buf_r = rho[..., GHOST_R].contiguous()
+            recv_buf_l = torch.zeros(rho.shape[:-1] + (N_GHOST,), device=rc.device)
+            recv_buf_r = torch.zeros(rho.shape[:-1] + (N_GHOST,), device=rc.device)
+            requests = [
+                self.comm.Isend(BufferView(send_buf_r), rank_r, 1),
+                self.comm.Isend(BufferView(send_buf_l), rank_l, 2),
+                self.comm.Irecv(BufferView(recv_buf_l), rank_l, 1),
+                self.comm.Irecv(BufferView(recv_buf_r), rank_r, 2),
+            ]
+            MPI.Request.Waitall(requests)  # finish all async communications
+            rho_padded[..., GHOST_L] = recv_buf_l
+            rho_padded[..., GHOST_R] = recv_buf_r
+        return rho_padded
+
+    def rho_dot_collisions(self, rho: torch.Tensor) -> torch.Tensor:
         if not (self.tau_inv_p or self.tau_inv_ee):
             return torch.zeros_like(rho)  # no scattering
 

@@ -1,5 +1,6 @@
-__all__ = ["material", "geometry", "TimeEvolution", "Transport", "main"]
+__all__ = ["advect", "material", "geometry", "TimeEvolution", "Transport", "main"]
 
+from . import advect
 from . import material
 from . import geometry
 from ._time_evolution import TimeEvolution
