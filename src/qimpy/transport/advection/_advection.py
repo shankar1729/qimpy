@@ -4,7 +4,7 @@ import torch
 from qimpy import rc
 
 
-class Vprime(torch.nn.Module):
+class VprimeParams:
 
     N_GHOST: int = 2  #: currently a constant, but could depend on slope method later
 
@@ -14,6 +14,8 @@ class Vprime(torch.nn.Module):
     GHOST_L: slice = slice(0, N_GHOST)  #: ghost indices on left/bottom
     GHOST_R: slice = slice(-N_GHOST, None)  #: ghost indices on right/top side
 
+
+class Vprime(torch.nn.Module):
     def __init__(self, slope_lim_theta: float = 2.0, cent_diff_deriv: bool = False):
         # Initialize convolution that computes slopes using 3 difference formulae.
         # Here, `slope_lim_theta` controls the scaling of the forward/backward

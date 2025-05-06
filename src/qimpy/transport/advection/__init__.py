@@ -1,3 +1,3 @@
-__all__ = ["Vprime"]
+__all__ = ["Vprime", "VprimeParams"]
 
-from ._advection import Vprime
+from ._advection import Vprime, VprimeParams

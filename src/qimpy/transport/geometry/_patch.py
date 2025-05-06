@@ -9,7 +9,7 @@ from qimpy.io import CheckpointPath
 from qimpy.mpi import globalreduce
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
-from qimpy.transport.advection import Vprime
+from qimpy.transport.advection import Vprime, VprimeParams
 from . import within_circles
 
 
@@ -99,7 +99,7 @@ class Patch:
         Nkbb = self.v.shape[0]  # flattened density-matrix count (Nkbb_mine of material)
         nk_prev = material.k_division.n_prev[material.comm.rank]
         Nkbb_offset = nk_prev * (material.n_bands**2)
-        padding = 2 * Vprime.N_GHOST
+        padding = 2 * VprimeParams.N_GHOST
         self.rho_offset = tuple(grid_start) + (Nkbb_offset,)
         self.rho_shape = (N[0], N[1], Nkbb)
         self.rho_padded_shape = (N[0] + padding, N[1] + padding, Nkbb)
@@ -197,8 +197,8 @@ class Patch:
     def rho_dot(self, rho: torch.Tensor) -> torch.Tensor:
         """Compute rho_dot, given current rho."""
         return -1.0 * (
-            self.v_prime(rho[:, Vprime.NON_GHOST], self.V[..., 0], axis=0)
-            + self.v_prime(rho[Vprime.NON_GHOST, :], self.V[..., 1], axis=1)
+            self.v_prime(rho[:, VprimeParams.NON_GHOST], self.V[..., 0], axis=0)
+            + self.v_prime(rho[VprimeParams.NON_GHOST, :], self.V[..., 1], axis=1)
         )
 
 

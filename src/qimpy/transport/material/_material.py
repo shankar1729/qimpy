@@ -7,7 +7,7 @@ import torch
 from qimpy import TreeNode, MPI, rc
 from qimpy.mpi import ProcessGrid, TaskDivision, BufferView
 from qimpy.io import CheckpointPath
-from qimpy.transport.advection import Vprime
+
 
 class Material(TreeNode):
     """Base class / interface for material specifications."""
@@ -23,7 +23,6 @@ class Material(TreeNode):
     E: torch.Tensor  #: nk_mine x n_bands energies
     v: torch.Tensor  #: nk_mine x n_bands x n_dim velocities in plane
     rho0: torch.Tensor  #: nk_mine x n_bands x n_bands initial density matrix
-    v_prime: torch.jit.ScriptModule  #: Underlying advection logic
 
     def __init__(
         self,
@@ -50,9 +49,6 @@ class Material(TreeNode):
         self.E = torch.zeros((self.nk_mine, n_bands), device=rc.device)
         self.v = torch.zeros((self.nk_mine, n_bands, n_dim), device=rc.device)
         self.rho0 = torch.zeros((self.nk_mine, n_bands, n_bands), device=rc.device)
-
-        # Initialize F*drho/dk calculator:
-        self.v_prime = Vprime() #torch.jit.script(Vprime())
 
     @abstractmethod
     def initialize_fields(
