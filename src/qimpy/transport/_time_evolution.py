@@ -38,7 +38,7 @@ class TimeEvolution(TreeNode):
         integrator: str = "RK2",
         steady_state: dict[str, Union[str, float]] = None,
         checkpoint_in: CheckpointPath = CheckpointPath(),
-        geometry: Geometry,
+        dt_max_sources: list,
     ) -> None:
         """
         Initialize time evolution parameters
@@ -66,8 +66,8 @@ class TimeEvolution(TreeNode):
             corresponding to the number of collated steps.
         integrator
             :yaml:`Integrator for time-stepping: RK2 or RK4.`
-        geometry
-            Corresponding geometry from which maximum time step is determined
+        dt_max_sources
+            List of objects with dt_max that determine maximum safe time step.
         """
         super().__init__()
         self.steady_state = steady_state
@@ -84,15 +84,15 @@ class TimeEvolution(TreeNode):
             self.t = float(t)
             if i_step:
                 log.info(f"Continuing from step {i_step}")
-            dt_max = geometry.dt_max
+            dt_max = min(source.dt_max for source in dt_max_sources)
             if dt == 0.0:
-                if dt_max == 0.0:
+                if not np.isfinite(dt_max):
                     raise InvalidInputException(
                         "Specify dt explicitly, because dt_max is not available"
                     )
                 dt = dt_max
                 log.info(f"Setting time step dt = {dt_max = :.4g}")
-            elif dt_max and (dt > dt_max):
+            elif dt > dt_max:
                 raise InvalidInputException(f"{dt = } must be smaller than {dt_max = }")
             self.dt = float(dt)
             self.n_steps = max(1, int(np.round(t_max / self.dt)))

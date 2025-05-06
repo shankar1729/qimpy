@@ -9,7 +9,7 @@ from qimpy import rc, MPI
 from qimpy.mpi import ProcessGrid, BufferView, TaskDivision
 from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext
-from qimpy.transport.advect import Advect
+from qimpy.transport.advect import Advect, N_GHOST, NON_GHOST, GHOST_L, GHOST_R
 from . import Material
 
 
@@ -23,6 +23,7 @@ class FermiCircle(Material):
     theta0: float  #: Initial angle in fermi circle grid
     specularity: float  #: Specularity of reflection at all boundaries
     r_c: float  #: Cyclotron radius for extenral magnetic field (disabled if infinity)
+    F_theta: float  #: Angular force in grid coordinates
     advect: torch.jit.ScriptModule  #: Momentum-space advection logic
 
     def __init__(
@@ -92,7 +93,11 @@ class FermiCircle(Material):
 
         # Initialize F*drho/dk calculator, if needed:
         if np.isfinite(r_c):
+            self.F_theta = self.vF / (self.r_c * dtheta)
+            self.dt_max = 0.5 / abs(self.F_theta)
             self.advect = torch.jit.script(Advect())
+        else:
+            self.F_theta = 0.0
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
@@ -126,10 +131,24 @@ class FermiCircle(Material):
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         result = self.rho_dot_collisions(rho)
-        if np.isfinite(self.r_c):
-            # k-space advection (1/r_c) * df/dtheta due to magnetic fields:
-            result += self.advect(rho, torch.tensor([self.vF / self.r_c]), axis=-1)
+        if self.F_theta:
+            # k-space advection due to magnetic fields:
+            F_theta_t = torch.tensor([self.F_theta], device=rc.device)
+            result += self.advect(self.pad_ghost(rho), F_theta_t, axis=-1)
         return result
+
+    def pad_ghost(self, rho: torch.Tensor) -> torch.Tensor:
+        """Pad by ghost zones for monetum-space advection."""
+        assert self.nk_mine >= N_GHOST
+        nk_mine_padded = self.nk_mine + 2 * N_GHOST
+        rho_padded = torch.zeros(rho.shape[:-1] + (nk_mine_padded,))
+        rho_padded[..., NON_GHOST] = rho
+        if self.comm.size == 1:
+            rho_padded[..., GHOST_L] = rho[..., GHOST_R]
+            rho_padded[..., GHOST_R] = rho[..., GHOST_L]
+        else:
+            raise NotImplementedError
+        return rho_padded
 
     def rho_dot_collisions(self, rho: torch.Tensor) -> torch.Tensor:
         if not (self.tau_inv_p or self.tau_inv_ee):
