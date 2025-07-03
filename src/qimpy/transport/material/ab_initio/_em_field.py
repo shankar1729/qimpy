@@ -73,18 +73,17 @@ class EMField(TreeNode):
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         # Rho dot shape: x1, x2, k, b1, b2
         # Expand rho to include dimensions for adjacent k-points along each component
-        rho = rho[..., None, None].expand(-1, -1, -1, -1, -1, 5, 3).to(torch.float64)
+        result = torch.zeros_like(rho)
+        rho = rho[..., None].expand(-1, -1, -1, -1, -1, 5).to(torch.float64)
+        rho_intermediate = torch.zeros_like(rho)
         F = self.grad_phi
         nk = self.ab_initio.k.shape[0]
         # For each component, copy data for adjacent k-points (along axis 5)
-        for ik in range(nk):
-            for comp in range(3):
+        for comp in range(3):
+            for ik in range(nk):
                 for ind, jk in enumerate(self.ab_initio.k_adj[ik, comp]):
                     # Center k-point (index 2) at a k-point index is identity
-                    rho[:, :, ik, :, :, ind, comp] = rho[:, :, jk, :, :, 2, comp] 
-        # Sum contributions along each component
-        result = (self.advect(rho[...,0], F[0], axis=-1) + \
-               self.advect(rho[...,1], F[1], axis=-1) + \
-               self.advect(rho[...,2], F[2], axis=-1))
-        return result[..., 0]
+                    rho_intermediate[:, :, ik, :, :, ind] = rho[:, :, jk, :, :, 2] 
+            result += self.advect(rho_intermediate, F[comp], axis=-1)[..., 0]
+        return result.to(torch.complex128)
         
