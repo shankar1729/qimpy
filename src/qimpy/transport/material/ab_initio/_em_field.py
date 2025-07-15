@@ -58,9 +58,8 @@ class EMField(TreeNode):
         self._initialize_fields(patch_id, **params)
 
     def _initialize_fields(self, patch_id: int, *, grad_phi: torch.Tensor) -> None:
-
         # Spatial gradient of scalar potential
-        self.grad_phi = grad_phi @ self.ab_initio.R.T
+        self.grad_phi = grad_phi @ self.ab_initio.R
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:

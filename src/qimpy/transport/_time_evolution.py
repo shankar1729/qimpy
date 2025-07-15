@@ -118,9 +118,6 @@ class TimeEvolution(TreeNode):
             geometry.rho = rho0 + (dt / 6.0) * (k1 + 2 * (k2 + k3) + k4)
         else:
             raise KeyError(f"Unrecognized integrator = {self.integrator}")
-        # if len(geometry.rho.data):
-        #    np.save("rho.npy", rho0.data[0].cpu().numpy())
-        #    exit()
 
     def steady_state_sol(
         self, transport: qimpy.transport.Transport, geometry: Geometry
