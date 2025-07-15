@@ -67,8 +67,8 @@ class EMField(TreeNode):
     ) -> None:
 
         # Spatial gradient of scalar potential
-        self.grad_phi = grad_phi@np.linalg.inv(self.ab_initio.R)
-        print(self.grad_phi)
+        self.grad_phi = grad_phi@self.ab_initio.R.T
+
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
