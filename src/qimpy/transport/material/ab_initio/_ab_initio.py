@@ -123,7 +123,7 @@ class AbInitio(Material):
             attrs = data_file.attrs
             spinorial = bool(attrs["spinorial"])
             haveL = bool(attrs["haveL"])
-            haveAdj = ("k_adj" in data_file)
+            haveAdj = "k_adj" in data_file
             if orbital_zeeman is None:
                 useL = haveL
             else:
@@ -207,7 +207,9 @@ class AbInitio(Material):
                 self.dynamics_terms["light"] = self.light
 
             if (emField is not None) or checkpoint_in.member("emField"):
-                self.add_child("emField", EMField, emField, checkpoint_in, ab_initio=self)
+                self.add_child(
+                    "emField", EMField, emField, checkpoint_in, ab_initio=self
+                )
                 self.dynamics_terms["emField"] = self.emField
 
             if (pulseB is not None) or checkpoint_in.member("pulseB"):

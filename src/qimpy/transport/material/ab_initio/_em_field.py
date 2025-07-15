@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import numpy as np
 import torch
 
 from qimpy import rc, TreeNode
 from qimpy.io import (
     CheckpointPath,
-    Unit,
     CheckpointContext,
     TensorCompatible,
     cast_tensor,
@@ -59,16 +57,10 @@ class EMField(TreeNode):
     def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
         self._initialize_fields(patch_id, **params)
 
-    def _initialize_fields(
-        self,
-        patch_id: int,
-        *,
-        grad_phi: torch.Tensor
-    ) -> None:
+    def _initialize_fields(self, patch_id: int, *, grad_phi: torch.Tensor) -> None:
 
         # Spatial gradient of scalar potential
-        self.grad_phi = grad_phi@self.ab_initio.R.T
-
+        self.grad_phi = grad_phi @ self.ab_initio.R.T
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
@@ -81,4 +73,3 @@ class EMField(TreeNode):
             rho_intermediate = rho[:, :, k_adj].real.swapaxes(3, -1)
             result += self.advect(rho_intermediate, F[comp], axis=-1).squeeze(dim=3)
         return result
-        

@@ -15,7 +15,7 @@ class SparseMatrixRight:
     split: TaskDivision
     indices: torch.Tensor
     values: torch.Tensor
-    size: tuple # size of dense matrix
+    size: tuple  # size of dense matrix
     iRow_mine: torch.Tensor
     iCol_mine: torch.Tensor
     value_mine: torch.Tensor
@@ -44,21 +44,26 @@ class SparseMatrixRight:
         )
         split = self.split
         sel = torch.nonzero(
-            torch.logical_and(iCol >= split.i_start, iCol < split.i_stop)).flatten()
+            torch.logical_and(iCol >= split.i_start, iCol < split.i_stop)
+        ).flatten()
 
         self.iRow_mine = iRow[sel]
         self.iCol_mine = iCol[sel] - split.i_start
         self.value_mine = values[sel]
-        indices_mine = torch.stack([self.iRow_mine,self.iCol_mine])
+        indices_mine = torch.stack([self.iRow_mine, self.iCol_mine])
         counts = np.diff(self.split.n_prev)
         nCols_mine = counts[self.i_proc]
-        self.M_mine = sparse_coo_tensor(indices_mine, self.value_mine,
-                                        size=(iRow.max()+1, nCols_mine),
-                                        device=rc.device).to_sparse_csr()
+        self.M_mine = sparse_coo_tensor(
+            indices_mine,
+            self.value_mine,
+            size=(iRow.max() + 1, nCols_mine),
+            device=rc.device,
+        ).to_sparse_csr()
 
     def getM(self):
-        return sparse_coo_tensor(self.indices, self.values,
-                                 device=rc.device)#.to_sparse_csr()
+        return sparse_coo_tensor(
+            self.indices, self.values, device=rc.device
+        )  # .to_sparse_csr()
 
     def vecTimesMatrix(self, vec: torch.Tensor) -> torch.Tensor:
         if self.n_procs == 1:
@@ -69,7 +74,12 @@ class SparseMatrixRight:
         result = torch.empty(self.size[1], dtype=self.M_mine.dtype, device=rc.device)
         # casting self.split.n_prev[:-1] to np.array below was necessary on my laptop
         self.comm.Allgatherv(
-                (BufferView(result_mine), result_mine.shape[0], mpi_type),
-                (BufferView(result), np.diff(self.split.n_prev), np.array(self.split.n_prev[:-1]), mpi_type))
+            (BufferView(result_mine), result_mine.shape[0], mpi_type),
+            (
+                BufferView(result),
+                np.diff(self.split.n_prev),
+                np.array(self.split.n_prev[:-1]),
+                mpi_type,
+            ),
+        )
         return result
-

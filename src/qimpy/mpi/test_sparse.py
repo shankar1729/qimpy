@@ -11,7 +11,7 @@ def main():
     log_config()
     rc.init()
     torch.manual_seed(0)
-    indices = torch.stack([torch.arange(100), torch.arange(2,102)])
+    indices = torch.stack([torch.arange(100), torch.arange(2, 102)])
     values = torch.randn(indices.shape[1])
     sm = SparseMatrixRight(indices, values, comm=rc.comm)
     Md = sm.getM().to_dense()

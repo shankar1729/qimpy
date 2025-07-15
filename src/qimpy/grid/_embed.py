@@ -86,22 +86,26 @@ class CoulombEmbedder:
         weight_sum.index_add_(0, iEquivOrig, weights)
         weights *= 1.0 / weight_sum[iEquivOrig]
 
-        self.bMap = SparseMatrixRight(torch.stack([iEquivOrig, iEmbed]), weights,
-                                      comm=gridOrig.comm)
-        self.bMapT = SparseMatrixRight(torch.stack([iEmbed, iEquivOrig]), weights,
-                                      comm=gridOrig.comm)
-
+        self.bMap = SparseMatrixRight(
+            torch.stack([iEquivOrig, iEmbed]), weights, comm=gridOrig.comm
+        )
+        self.bMapT = SparseMatrixRight(
+            torch.stack([iEmbed, iEquivOrig]), weights, comm=gridOrig.comm
+        )
 
     def embedExpand(self, fieldOrig: FieldR) -> FieldR:
         """Expand real-space field 'fieldOrig' within larger embedding cell."""
-        #dataEmbed = (dataOrig.reshape(-1) @ self.bMap).reshape(self.gridEmbed.shape)
+        # dataEmbed = (dataOrig.reshape(-1) @ self.bMap).reshape(self.gridEmbed.shape)
         if fieldOrig.grid.comm is None:
             dataOrig = fieldOrig.data
         else:
-            dataOrig = gather(fieldOrig.data, self.gridOrig.split0, self.gridOrig.comm, 0)
+            dataOrig = gather(
+                fieldOrig.data, self.gridOrig.split0, self.gridOrig.comm, 0
+            )
         dataEmbed = self.bMap.vecTimesMatrix(dataOrig.reshape(-1))
-        dataEmbedMine = scatter(dataEmbed.reshape(self.gridEmbed.shape),
-                                     self.gridEmbed.split0, 0)
+        dataEmbedMine = scatter(
+            dataEmbed.reshape(self.gridEmbed.shape), self.gridEmbed.split0, 0
+        )
         return FieldR(self.gridEmbed, data=dataEmbedMine)
 
     def embedShrink(self, fieldEmbed: FieldR) -> FieldR:
@@ -109,12 +113,15 @@ class CoulombEmbedder:
         if fieldEmbed.grid.comm is None:
             dataEmbed = fieldEmbed.data
         else:
-            dataEmbed = gather(fieldEmbed.data, self.gridEmbed.split0, self.gridEmbed.comm, 0)
+            dataEmbed = gather(
+                fieldEmbed.data, self.gridEmbed.split0, self.gridEmbed.comm, 0
+            )
         # Shrink operation is dagger of embedExpand (bMap is real-valued)
-        #dataOrig = (dataEmbed.reshape(-1) @ self.bMap.T).reshape(self.gridOrig.shape)
+        # dataOrig = (dataEmbed.reshape(-1) @ self.bMap.T).reshape(self.gridOrig.shape)
         dataOrig = self.bMapT.vecTimesMatrix(dataEmbed.reshape(-1))
-        dataOrigMine = scatter(dataOrig.reshape(self.gridOrig.shape),
-                                self.gridOrig.split0, 0)
+        dataOrigMine = scatter(
+            dataOrig.reshape(self.gridOrig.shape), self.gridOrig.split0, 0
+        )
         return FieldR(self.gridOrig, data=dataOrigMine)
 
 
