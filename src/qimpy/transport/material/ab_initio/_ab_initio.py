@@ -150,6 +150,8 @@ class AbInitio(Material):
             self.k[:] = self.read_scalars(data_file, "k")
             self.E[:] = self.read_scalars(data_file, "E")
             self.k_adj = self.read_vectors(data_file, "k_adj") if haveAdj else None
+            # Bit of a hack
+            self.R = self.read_vectors_attr(data_file, "R") if "R" in attrs else None
             self.P = self.read_vectors(data_file, "P")
             self.S = self.read_vectors(data_file, "S") if spinorial else None
             self.L = self.read_vectors(data_file, "L") if useL else None
@@ -310,6 +312,20 @@ class AbInitio(Material):
         offset = (self.k_division.i_start,) + (0,) * (len(dset.shape) - 1)
         size = (self.nk_mine,) + dset.shape[1:]
         return data_file.read_slice(dset, offset, size)
+
+    def read_vectors_attr(self, data_file: Checkpoint, name: str) -> torch.Tensor:
+        """Read quantities that transform as a vector with rotations from data_file
+        (stored as attribute).
+        The second index is assumed to be the Cartesian index."""
+        dset = data_file.attrs[name]
+        offset = (self.k_division.i_start,) + (0,) * (len(dset.shape) - 1)
+        size = (self.nk_mine,) + dset.shape[1:]
+        result = data_file.read_slice(dset, offset, size)
+        if self.rotation is not None:
+            result = torch.einsum(
+                "ij, kj... -> ki...", self.rotation.to(result.dtype), result
+            )
+        return result
 
     def read_vectors(self, data_file: Checkpoint, name: str) -> torch.Tensor:
         """Read quantities that transform as a vector with rotations from data_file.

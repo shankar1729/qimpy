@@ -67,23 +67,18 @@ class EMField(TreeNode):
     ) -> None:
 
         # Spatial gradient of scalar potential
-        self.grad_phi = grad_phi
+        self.grad_phi = grad_phi@np.linalg.inv(self.ab_initio.R)
+        print(self.grad_phi)
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         # Rho dot shape: x1, x2, k, b1, b2
         # Expand rho to include dimensions for adjacent k-points along each component
         result = torch.zeros_like(rho)
-        rho = rho[..., None].expand(-1, -1, -1, -1, -1, 5).to(torch.float64)
-        rho_intermediate = torch.zeros_like(rho)
         F = self.grad_phi
-        nk = self.ab_initio.k.shape[0]
         # For each component, copy data for adjacent k-points (along axis 5)
-        for comp in range(3):
-            for ik in range(nk):
-                for ind, jk in enumerate(self.ab_initio.k_adj[ik, comp]):
-                    # Center k-point (index 2) at a k-point index is identity
-                    rho_intermediate[:, :, ik, :, :, ind] = rho[:, :, jk, :, :, 2] 
-            result += self.advect(rho_intermediate, F[comp], axis=-1)[..., 0]
-        return result.to(torch.complex128)
+        for comp, k_adj in enumerate(self.ab_initio.k_adj.swapaxes(0, 1)):
+            rho_intermediate = rho[:, :, k_adj].real.swapaxes(3, -1)
+            result += self.advect(rho_intermediate, F[comp], axis=-1).squeeze(dim=3)
+        return result
         
