@@ -367,7 +367,12 @@ class Electrons(TreeNode):
         if requires_grad:
             self.n_tilde.grad[0] += system.ions.Vloc_tilde + VH_tilde
             self.n_tilde.grad.symmetrize()
-
+        #Fluid contributions
+        if hasattr(system, "fluid"):
+            E_fluid, V_fluid, Adiel_rhoExplicitTilde = system.fluid.compute_Adiel_and_potential(self.n_tilde)
+            system.energy["Efluid"] = E_fluid
+            if requires_grad:
+                self.n_tilde.grad[0] += V_fluid
     def update(self, system: dft.System, requires_grad: bool = True) -> None:
         """Update electronic system to current wavefunctions and eigenvalues.
         This updates occupations, density, potential and electronic energy.
