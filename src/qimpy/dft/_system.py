@@ -155,7 +155,15 @@ class System(TreeNode):
             comm=self.electrons.comm,
             lattice=self.lattice,
         )
-
+        self.add_child(
+            "fluid",
+            LinearPCMFluidModel,
+            fluid,
+            checkpoint_in,
+            grid=self.grid,
+            coulomb=self.coulomb,
+            ions=self.ions,
+        )
         self.add_child("export", Export, export, checkpoint_in, system=self)
 
         # Initialize ionic potentials and energies at initial configuration:
