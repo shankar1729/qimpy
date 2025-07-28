@@ -47,6 +47,7 @@ class AbInitio(Material):
     L: Optional[torch.Tensor]  #: Angular momentum matrix elements
     R: Optional[torch.Tensor]  #: Position matrix elements (TODO: yet to be added)
     B: Optional[torch.Tensor]  #: Constant applied external field
+    dk: Optional[torch.Tensor]  #: k-point spacing
     evecs: Optional[torch.Tensor]  #: Unitary rotations w.r.t data due to B, if any
     lindblad: Lindblad  #: ab-initio Lindblad scattering
     relaxation_time: RelaxationTime  #: semi-empirical relaxation time scattering
@@ -152,6 +153,7 @@ class AbInitio(Material):
             self.k_adj = self.read_vectors(data_file, "k_adj") if haveAdj else None
             # Bit of a hack
             self.R = self.read_vectors_attr(data_file, "R") if "R" in attrs else None
+            self.dk = self.read_vectors_attr(data_file, "dk") if "dk" in attrs else None
             self.P = self.read_vectors(data_file, "P")
             self.S = self.read_vectors(data_file, "S") if spinorial else None
             self.L = self.read_vectors(data_file, "L") if useL else None

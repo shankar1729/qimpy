@@ -12,7 +12,8 @@ from qimpy.io import (
 from qimpy.profiler import stopwatch
 from qimpy.transport import material
 from qimpy.transport.advect import Advect
-
+from qimpy.lattice import Lattice
+from qimpy.io import Unit
 
 class EMField(TreeNode):
     """Magnetic field pulse to rotate spins by specific angles."""
@@ -44,7 +45,7 @@ class EMField(TreeNode):
         )
 
         # Initialize v*drho/dx calculator:
-        self.advect = torch.jit.script(Advect(cent_diff_deriv=False))
+        self.advect = torch.jit.script(Advect(cent_diff_deriv=True))
         assert self.ab_initio.k_adj is not None
 
     def _save_checkpoint(
@@ -59,16 +60,23 @@ class EMField(TreeNode):
 
     def _initialize_fields(self, patch_id: int, *, grad_phi: torch.Tensor) -> None:
         # Spatial gradient of scalar potential
-        self.grad_phi = grad_phi @ self.ab_initio.R
+        dk = torch.diag(torch.tensor([1/nk for nk in self.ab_initio.dk], device=rc.device))
+        Gbasis = 2 * torch.pi * torch.linalg.inv(self.ab_initio.R.T)
+        invJ = torch.linalg.inv(Gbasis@dk)
+        self.grad_phi = torch.einsum("...i,ji->j...", grad_phi, invJ)
+        self.rho0 = None
+        self.tau_p = 100*Unit.MAP["fs"]
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
+        if self.rho0 is None:
+            self.rho0 = rho.clone().detach()
         # Rho dot shape: x1, x2, k, b1, b2
-        # Expand rho to include dimensions for adjacent k-points along each component
         result = torch.zeros_like(rho)
         F = self.grad_phi
-        # For each component, copy data for adjacent k-points (along axis 5)
         for comp, k_adj in enumerate(self.ab_initio.k_adj.swapaxes(0, 1)):
             rho_intermediate = rho[:, :, k_adj].real.swapaxes(3, -1)
-            result += self.advect(rho_intermediate, F[comp], axis=-1).squeeze(dim=3)
+            result += self.advect(rho_intermediate, F[comp][..., None, None, None, None], axis=-1).squeeze(dim=3)
+        # Relaxation time hack
+        result -= (rho-self.rho0)/self.tau_p
         return result
