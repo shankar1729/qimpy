@@ -63,20 +63,15 @@ class EMField(TreeNode):
         dk = torch.diag(torch.tensor([1/nk for nk in self.ab_initio.dk], device=rc.device))
         Gbasis = 2 * torch.pi * torch.linalg.inv(self.ab_initio.R.T)
         invJ = torch.linalg.inv(Gbasis@dk)
-        self.grad_phi = torch.einsum("...i,ji->j...", grad_phi, invJ)
-        self.rho0 = None
-        self.tau_p = 100*Unit.MAP["fs"]
+        # Factor of 1/2 added by Hermitian conjugate
+        self.grad_phi = torch.einsum("...i,ji->j...", grad_phi, invJ)/2
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
-        if self.rho0 is None:
-            self.rho0 = rho.clone().detach()
         # Rho dot shape: x1, x2, k, b1, b2
         result = torch.zeros_like(rho)
         F = self.grad_phi
         for comp, k_adj in enumerate(self.ab_initio.k_adj.swapaxes(0, 1)):
             rho_intermediate = rho[:, :, k_adj].real.swapaxes(3, -1)
-            result += self.advect(rho_intermediate, F[comp][..., None, None, None, None], axis=-1).squeeze(dim=3)
-        # Relaxation time hack
-        result -= (rho-self.rho0)/self.tau_p
+            result += self.advect(rho_intermediate, F[comp][..., None, None, None, None], axis=-1).squeeze(dim=5)
         return result

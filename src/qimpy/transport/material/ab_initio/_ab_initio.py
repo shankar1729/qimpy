@@ -153,7 +153,7 @@ class AbInitio(Material):
             self.k_adj = self.read_vectors(data_file, "k_adj") if haveAdj else None
             # Bit of a hack
             self.R = self.read_vectors_attr(data_file, "R") if "R" in attrs else None
-            self.dk = self.read_vectors_attr(data_file, "dk") if "dk" in attrs else None
+            self.dk = self.read_vectors_attr(data_file, "nk_grid") if "nk_grid" in attrs else None
             self.P = self.read_vectors(data_file, "P")
             self.S = self.read_vectors(data_file, "S") if spinorial else None
             self.L = self.read_vectors(data_file, "L") if useL else None
