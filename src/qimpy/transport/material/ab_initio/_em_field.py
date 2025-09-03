@@ -60,7 +60,7 @@ class EMField(TreeNode):
 
     def _initialize_fields(self, patch_id: int, *, grad_phi: torch.Tensor) -> None:
         # Spatial gradient of scalar potential
-        dk = torch.diag(torch.tensor([1/nk for nk in self.ab_initio.dk], device=rc.device))
+        dk = torch.diag(torch.tensor([1/nk for nk in self.ab_initio.nk_grid], device=rc.device))
         Gbasis = 2 * torch.pi * torch.linalg.inv(self.ab_initio.R.T)
         invJ = torch.linalg.inv(Gbasis@dk)
         # Factor of 1/2 added by Hermitian conjugate
