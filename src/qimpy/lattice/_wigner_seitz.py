@@ -222,9 +222,7 @@ def get_grid(v_basis: torch.Tensor, tol: float) -> tuple[torch.Tensor, ...]:
     i_grid = torch.stack(torch.meshgrid(*i_grids_1d, indexing="ij"), dim=-1).flatten(
         0, -2
     )
-    i_grid = i_grid[torch.abs(i_grid).sum(dim=-1) > 0.0].to(
-        v_basis.dtype
-    )  # eliminate origin
+    i_grid = i_grid[torch.abs(i_grid).sum(dim=-1) > 0.0].to(v_basis.dtype)  # eliminate origin
     return i_grid, i_grid @ v_basis.T
 
 
