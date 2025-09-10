@@ -45,7 +45,7 @@ class EMField(TreeNode):
         )
 
         # Initialize v*drho/dx calculator:
-        self.advect = torch.jit.script(Advect(cent_diff_deriv=True))
+        self.advect = torch.jit.script(Advect(cent_diff_deriv=False))
         assert self.ab_initio.k_adj is not None
 
     def _save_checkpoint(
