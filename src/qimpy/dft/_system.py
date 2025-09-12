@@ -14,11 +14,12 @@ from .ions import Ions
 from .electrons import Electrons
 from .geometry import Geometry
 from .export import Export
+from qimpy.dft.fluid import LinearPCMFluidModel
 
 
 class System(TreeNode):
     """Overall system to calculate within QimPy"""
-
+    
     lattice: Lattice  #: Lattice vectors / unit cell definition
     ions: Ions  #: Ionic positions and pseudopotentials
     symmetries: Symmetries  #: Point and space group symmetries
@@ -31,6 +32,7 @@ class System(TreeNode):
     checkpoint_in: CheckpointPath  #: Input checkpoint
     checkpoint_out: Optional[str]  #: Filename for output checkpoint
     process_grid: ProcessGrid  #: Process grid for parallelization
+    fluid: LinearPCMFluidModel  #: fluid model for implicit solvent
 
     def __init__(
         self,
@@ -47,6 +49,7 @@ class System(TreeNode):
         checkpoint_out: Optional[str] = None,
         comm: Optional[MPI.Comm] = None,
         process_grid_shape: Optional[Sequence[int]] = None,
+        fluid: Union[LinearPCMFluidModel, dict, None] = None
     ):
         """Compose a System to calculate from its pieces. Each piece
         could be provided as an object or a dictionary of parameters
@@ -164,6 +167,7 @@ class System(TreeNode):
             coulomb=self.coulomb,
             ions=self.ions,
         )
+
         self.add_child("export", Export, export, checkpoint_in, system=self)
 
         # Initialize ionic potentials and energies at initial configuration:
