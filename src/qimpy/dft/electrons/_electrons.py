@@ -15,6 +15,7 @@ from qimpy.dft.ions import Ions
 from . import Fillings, Basis, Davidson, CheFSI, SCF, LCAO, Wavefunction
 from .xc import XC
 from ._hamiltonian import _hamiltonian
+from qimpy.dft.fluid import LinearPCMFluidModel
 
 
 class Electrons(TreeNode):
@@ -373,6 +374,7 @@ class Electrons(TreeNode):
             system.energy["Efluid"] = E_fluid
             if requires_grad:
                 self.n_tilde.grad[0] += V_fluid
+        
     def update(self, system: dft.System, requires_grad: bool = True) -> None:
         """Update electronic system to current wavefunctions and eigenvalues.
         This updates occupations, density, potential and electronic energy.
