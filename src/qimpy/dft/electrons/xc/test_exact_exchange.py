@@ -2,9 +2,10 @@ import torch
 import numpy as np
 
 from qimpy import log
+from qimpy.profiler import StopWatch, stopwatch
 from qimpy.dft.electrons import Wavefunction
 from qimpy.grid import Grid, FieldC
-from qimpy.io import Checkpoint, CheckpointPath
+from qimpy.io import Checkpoint, CheckpointPath, log_config
 from qimpy.dft import System
 from qimpy.rc import MPI
 from qimpy.mpi import BufferView
@@ -19,11 +20,10 @@ def band_ifft(grid: Grid, coeff: torch.Tensor, fftq_index: torch.Tensor):
     fft_shape = (n_spin, n_spinor) + grid.shape
     return grid.ifft(Cb.permute(1, 2, 0).view(fft_shape))
 
-
+@stopwatch
 def ExactExchangeEval(system: System):
     EXX = 0.0
     e = system.electrons
-    sym_tol = system.symmetries.tolerance
     log.info("\nSetting up exact exchange:")
     kpoints = e.basis.kpoints
     k_div = kpoints.division
@@ -57,8 +57,8 @@ def ExactExchangeEval(system: System):
                 for ik2 in range(k_other_start, k_other_stop):
                     k2 = kpoints.k[ik2]
                     ik2_other = ik2 - k_other_start
-                    kernel = ExchangeSpherical_calc(Rc, (-k2 + k1 + G), grid.lattice.Gbasis,
-                                                    sym_tol).type(torch.complex128)
+                    kernel = ExchangeSpherical_calc(Rc, (-k2 + k1 + G),
+                                            grid.lattice.Gbasis).type(torch.complex128)
                     fft_k2_other = fft_index_other[ik2_other]
                     for bk2 in range(n_bands_other):
                         bk2_other = bk2 + b_other_start
@@ -82,8 +82,8 @@ def ExactExchangeEval(system: System):
     eig, _ = torch.linalg.eigh((e.C ^ HC).wait())
     e.fillings.write_band_scalars(cp_path.relative("eigs"), eig)
     cp.close()
-    np.savetxt("kpoints", kpoints.k)
-    np.savetxt("eigs", eig[0])
+    #np.savetxt("kpoints", kpoints.k)
+    #np.savetxt("eigs", eig[0])
 
 def preApplyHamiltonian(system: System) -> Wavefunction:
     system.electrons.xc._functionals.clear()
@@ -91,15 +91,21 @@ def preApplyHamiltonian(system: System) -> Wavefunction:
     HC = system.electrons.hamiltonian(system.electrons.C)
     return HC
 
-def ExchangeSpherical_calc(Rc: float, k: torch.Tensor, Gbasis: torch.Tensor, tol: float):
+def ExchangeSpherical_calc(Rc: float, k: torch.Tensor, Gbasis: torch.Tensor):
     kSq = ((k @ Gbasis.T)**2).sum(dim=-1)
     return 2 * np.pi * Rc**2 * (kSq.sqrt() * Rc / (2 * np.pi)).sinc() ** 2
 
-input_dict = dict(checkpoint="/home/mkelley/RPI/Software/QimPy/tests/exchange/Si.h5")
-#input_dict = dict(checkpoint="/home/mkelley/RPI/Software/QimPy/tests/exchange/water.h5")
-#sys = System(process_grid_shape=[-1, -1, -1], **input_dict)
-sys = System(process_grid_shape=[1, 2, 3], **input_dict)
-#pg = sys.process_grid
-#print(pg.n_procs, pg.dim_names, pg.shape)
-#exit()
-ExactExchangeEval(sys)
+def main():
+    log_config()
+    input_dict = dict(checkpoint="/home/mkelley/RPI/Software/QimPy/tests/exchange/timing/Si.h5")
+    #input_dict = dict(checkpoint="/home/mkelley/RPI/Software/QimPy/tests/exchange/water.h5")
+    sys = System(process_grid_shape=[-1, -1, -1], **input_dict)
+    #sys = System(process_grid_shape=[1, 2, 3], **input_dict)
+    #pg = sys.process_grid
+    #print(pg.n_procs, pg.dim_names, pg.shape)
+    #exit()
+
+    ExactExchangeEval(sys)
+    StopWatch.print_stats()
+main()
+StopWatch.print_stats()
