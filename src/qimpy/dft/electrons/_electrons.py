@@ -368,7 +368,8 @@ class Electrons(TreeNode):
         if requires_grad:
             self.n_tilde.grad[0] += system.ions.Vloc_tilde + VH_tilde
             self.n_tilde.grad.symmetrize()
-        #Fluid contributions
+
+        # Fluid contributions
         if hasattr(system, "fluid"):
             E_fluid, V_fluid, Adiel_rhoExplicitTilde = system.fluid.compute_Adiel_and_potential(self.n_tilde)
             system.energy["Efluid"] = E_fluid

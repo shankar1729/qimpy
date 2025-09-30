@@ -193,8 +193,6 @@ class System(TreeNode):
 
     def run(self) -> None:
         """Run any actions specified in the input."""
-        log.info(f"self.geometry in run method of _system {self.geometry}")
-        log.info(f"self.child_names in system.run {self.child_names}")
         self.geometry.run(self)
         self.export(self)
 

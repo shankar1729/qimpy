@@ -63,7 +63,7 @@ class LinearPCMFluidModel(TreeNode):
     def propagate_gradient(self, n: FieldH, E_shape: FieldR) -> FieldH:
         grad_n = self.shape_gradient(n.data, E_shape.data)
         E_n = FieldH(self.grid, data=grad_n)
-        print(E_n.data, "E_n propagated gradient")
+        # print(E_n.data, "E_n propagated gradient")
         return E_n
 
     def compute_cavity_energy(self, s_field: FieldR) -> float:
@@ -102,7 +102,7 @@ class LinearPCMFluidModel(TreeNode):
             r_new = FieldH(self.grid, data=(r.data - alpha * Hd.data))
             z_new = self.preconditioner(r_new)
             rdotz_new = r_new.dot(z_new)
-            print(r_new.norm())
+            # print(r_new.norm())
             if r_new.norm() < tol:
                 return x
 
@@ -134,6 +134,6 @@ class LinearPCMFluidModel(TreeNode):
         total_energy = Adiel_electrostatic  # + cavity_energy
 
         Adiel_rhoTilde = phi - phi_ext
-        V_fluid = ~(phi)  # fieldR
+        V_fluid = Adiel_rhoTilde  # + cavity_potential
 
         return total_energy, V_fluid, Adiel_rhoTilde
