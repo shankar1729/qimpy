@@ -1,14 +1,32 @@
 # fluid/_linearPCM.py
-from qimpy import TreeNode
-from qimpy.io import CheckpointPath
-from math import sqrt, pi
-from qimpy.grid import FieldH, FieldR
 import torch
 
+from qimpy import log
+from qimpy.io import CheckpointPath
+from qimpy.algorithms import LinearSolve
+from math import sqrt, pi
+from qimpy.grid import Grid, FieldH, FieldR
 
-class LinearPCMFluidModel(TreeNode):
-    def __init__(self, *, grid, coulomb, ions, fluid_params=None, checkpoint_in=None):
-        super().__init__()
+
+class LinearPCMFluidModel(LinearSolve[FieldH]):
+
+    def __init__(
+        self,
+        *,
+        grid: Grid,
+        coulomb,
+        ions,
+        fluid_params=None,
+        checkpoint_in=None,
+        n_iterations=100,
+        gradient_threshold=1E-8,
+    ):
+        super().__init__(
+            checkpoint_in=checkpoint_in,
+            comm=grid.comm,
+            n_iterations=n_iterations,
+            gradient_threshold=gradient_threshold,
+        )
         
         iG = grid.get_mesh("H").to(torch.double)  # get Gsq manually
         self.Gsq = (iG @ grid.lattice.Gbasis.T).square().sum(dim=-1)
@@ -25,12 +43,11 @@ class LinearPCMFluidModel(TreeNode):
             "nc": 7e-4,
             "sigma": 0.6,
             "cavityTension": 5.4e-6,
-            "tol": 1e-6,
-            "max_iterations": 1000
         }
 
         self.epsilon_val = None
         self.kappa_val = None
+        self.phi = FieldH(self.grid)
 
     def write(self, path: CheckpointPath) -> None:
         path["params"] = self.params
@@ -41,9 +58,9 @@ class LinearPCMFluidModel(TreeNode):
         return cls(grid=grid, coulomb=coulomb, ions=None, fluid_params=params)
 
     def compute_shape_function(self, n: torch.Tensor) -> torch.Tensor:
-        # nc = self.params["nc"]
-        # sigma = self.params["sigma"]
-        return torch.erfc((1 / (0.6 * sqrt(2.0))) * torch.log(torch.abs(n) / 7e-4)) * 0.5
+        nc = self.params["nc"]
+        sigma = self.params["sigma"]
+        return 0.5 * torch.erfc((1 / (sigma * sqrt(2.0))) * torch.log(n.abs() / nc))
 
     def calculate_epsilon_kappa(self, nTilde: FieldH):
         S = self.compute_shape_function(~nTilde.data[0])
@@ -78,40 +95,8 @@ class LinearPCMFluidModel(TreeNode):
         H_vec = grad + 1e-6 * vector #small regularization factor for test
         return H_vec
 
-    def preconditioner(self, vector: FieldH) -> FieldH:
-        preconditioner_factor = 1 / (self.Gsq + 0.01)
-        preconditioned_data = vector.convolve(preconditioner_factor)
-        return preconditioned_data
-
-    def solve(self, rhs: FieldH, params: dict = None) -> FieldH:
-        params = params or self.params
-        tol = params.get("tol", 1e-6)
-        max_iterations = params.get("max_iterations", 1000)
-
-        x = FieldH(self.grid, data=torch.zeros_like(rhs.data))
-        r = rhs.clone()
-        z = self.preconditioner(r)
-        d = z.clone()
-        rdotz = r.dot(z)
-
-        for i in range(max_iterations):
-            Hd = self.hessian(d)
-            Hd_dot_d = d.dot(Hd)
-            alpha = rdotz / Hd_dot_d
-            x = FieldH(self.grid, data=(x.data + alpha * d.data))
-            r_new = FieldH(self.grid, data=(r.data - alpha * Hd.data))
-            z_new = self.preconditioner(r_new)
-            rdotz_new = r_new.dot(z_new)
-            # print(r_new.norm())
-            if r_new.norm() < tol:
-                return x
-
-            beta = rdotz_new / rdotz
-            d = FieldH(self.grid, data=(z_new.data + beta * d.data))
-            r = r_new
-            z = z_new
-            rdotz = rdotz_new
-        return x  # fieldH
+    def precondition(self, vector: FieldH) -> FieldH:
+        return vector.convolve(1 / (self.Gsq + 0.01))
 
     def compute_Adiel_and_potential(self, n_tilde: FieldH) -> tuple[float, FieldH, FieldH]:
         rho_field = self.ions.rho_tilde + n_tilde[0]
@@ -123,17 +108,18 @@ class LinearPCMFluidModel(TreeNode):
         self.epsilon_val = epsilon_val
         self.kappa_val = kappa_val
 
-        phi = self.solve(rhs=rho_field)
+        n_iter = self.solve(rho_field, self.phi)
+        log.info(f"  Fluid: solve completed in {n_iter} iterations")
         phi_ext = self.coulomb.kernel(rho_field)
 
-        term1 = -0.5 * (phi ^ self.hessian(phi))
-        term2 = (phi - (0.5 * phi_ext)) ^ (rho_field)
+        term1 = -0.5 * (self.phi ^ self.hessian(self.phi))
+        term2 = (self.phi - (0.5 * phi_ext)) ^ (rho_field)
         Adiel_electrostatic = (term1 + term2)
 
         cavity_energy = self.compute_cavity_energy(S)
         total_energy = Adiel_electrostatic  # + cavity_energy
 
-        Adiel_rhoTilde = phi - phi_ext
+        Adiel_rhoTilde = self.phi - phi_ext
         V_fluid = Adiel_rhoTilde  # + cavity_potential
 
         return total_energy, V_fluid, Adiel_rhoTilde
