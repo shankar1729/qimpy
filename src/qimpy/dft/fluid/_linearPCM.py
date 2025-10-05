@@ -28,8 +28,6 @@ class LinearPCMFluidModel(LinearSolve[FieldH]):
             gradient_threshold=gradient_threshold,
         )
         
-        iG = grid.get_mesh("H").to(torch.double)  # get Gsq manually
-        self.Gsq = (iG @ grid.lattice.Gbasis.T).square().sum(dim=-1)
         self.grid = grid
         self.coulomb = coulomb
         self.ions = ions
@@ -37,8 +35,6 @@ class LinearPCMFluidModel(LinearSolve[FieldH]):
         self.params = fluid_params or {
             "epsBulk": 78.4,
             "pMol": 0.92466,
-            "epsInf": 1.77,
-            "Rvdw": 1.385,
             "k2factor": 0,
             "nc": 7e-4,
             "sigma": 0.6,
@@ -48,6 +44,13 @@ class LinearPCMFluidModel(LinearSolve[FieldH]):
         self.epsilon_val = None
         self.kappa_val = None
         self.phi = FieldH(self.grid)
+
+        # Initialize preconditioner:
+        iG = grid.get_mesh("H").to(torch.double)
+        Gsq = (iG @ grid.lattice.Gbasis.T).square().sum(dim=-1)
+        GSQ_CUT = 1E-12  # regularization
+        self.Kkernel = torch.clamp(Gsq, min=GSQ_CUT).reciprocal()
+        self.Kkernel[Gsq < GSQ_CUT] = 0.0  # project out null-space
 
     def write(self, path: CheckpointPath) -> None:
         path["params"] = self.params
@@ -90,13 +93,12 @@ class LinearPCMFluidModel(LinearSolve[FieldH]):
         surface_area = norm_field.integral()
         return self.params["cavityTension"] * surface_area
 
-    def hessian(self, vector: FieldH) -> FieldH:
-        grad = (-1 / (4 * pi)) * (~(~vector.gradient() * self.epsilon_val[None])).divergence()
-        H_vec = grad + 1e-6 * vector #small regularization factor for test
-        return H_vec
+    def hessian(self, phi: FieldH) -> FieldH:
+        result = (~(~phi.gradient() * self.epsilon_val[None])).divergence()
+        return (-1 / (4 * pi)) * result
 
     def precondition(self, vector: FieldH) -> FieldH:
-        return vector.convolve(1 / (self.Gsq + 0.01))
+        return vector.convolve(self.Kkernel)
 
     def compute_Adiel_and_potential(self, n_tilde: FieldH) -> tuple[float, FieldH, FieldH]:
         rho_field = self.ions.rho_tilde + n_tilde[0]
