@@ -1,10 +1,9 @@
-# fluid/_linearPCM.py
+import numpy as np
 import torch
 
 from qimpy import log
 from qimpy.io import CheckpointPath
 from qimpy.algorithms import LinearSolve
-from math import sqrt, pi
 from qimpy.grid import Grid, FieldH, FieldR
 
 
@@ -60,31 +59,26 @@ class LinearPCMFluidModel(LinearSolve[FieldH]):
         params = path.get("params", None)
         return cls(grid=grid, coulomb=coulomb, ions=None, fluid_params=params)
 
-    def compute_shape_function(self, n: torch.Tensor) -> torch.Tensor:
+    def compute_shape_function(self, n: FieldR) -> FieldR:
         nc = self.params["nc"]
         sigma = self.params["sigma"]
-        return 0.5 * torch.erfc((1 / (sigma * sqrt(2.0))) * torch.log(n.abs() / nc))
+        return FieldR(
+            self.grid,
+            data=0.5 * torch.erfc((np.sqrt(0.5) / sigma) * (n.data.abs() / nc).log()),
+        )
 
-    def calculate_epsilon_kappa(self, nTilde: FieldH):
-        S = self.compute_shape_function(~nTilde.data[0])
-        epsilon = 1.0 + (-1.0 + self.params["epsBulk"]) * S  # placeholder water
-        kappa = 0.01 * S
-        return epsilon, kappa
-
-    def shape_gradient(self, n: torch.Tensor, grad_shape: torch.Tensor) -> torch.Tensor:
+    def shape_gradient(self, n: FieldR, grad_shape: FieldR) -> FieldR:
         nc = self.params["nc"]
         sigma = self.params["sigma"]
-        alpha = 1.0 / (sigma * sqrt(2.0))
-        logterm = torch.log(torch.abs(n) / nc)
-        u = alpha * logterm
-        grad_n = -alpha / (torch.abs(n) * sqrt(pi)) * torch.exp(-u**2) * torch.sign(n)
-        return grad_n
-
-    def propagate_gradient(self, n: FieldH, E_shape: FieldR) -> FieldH:
-        grad_n = self.shape_gradient(n.data, E_shape.data)
-        E_n = FieldH(self.grid, data=grad_n)
-        # print(E_n.data, "E_n propagated gradient")
-        return E_n
+        return FieldR(
+            self.grid,
+            data=(
+                (-1.0 / (nc * sigma * np.sqrt(2 * np.pi))) * grad_shape.data
+                * torch.exp(
+                    0.5 * (sigma**2 - ((n.data.abs() / nc).log() / sigma + sigma)**2)
+                )
+            ),
+        )
 
     def compute_cavity_energy(self, s_field: FieldR) -> float:
         grad_s = s_field.gradient().data
@@ -95,33 +89,40 @@ class LinearPCMFluidModel(LinearSolve[FieldH]):
 
     def hessian(self, phi: FieldH) -> FieldH:
         result = (~(~phi.gradient() * self.epsilon_val[None])).divergence()
-        return (-1 / (4 * pi)) * result
+        return (-1 / (4 * np.pi)) * result
 
     def precondition(self, vector: FieldH) -> FieldH:
         return vector.convolve(self.Kkernel)
 
     def compute_Adiel_and_potential(self, n_tilde: FieldH) -> tuple[float, FieldH, FieldH]:
         rho_field = self.ions.rho_tilde + n_tilde[0]
+        n_cavity = ~n_tilde[0]
+        shape = self.compute_shape_function(n_cavity)
 
-        S = FieldR(self.grid, data=self.compute_shape_function((~n_tilde[0]).data))
-
-        epsilon_val = 1.0 + (-1.0 + self.params["epsBulk"]) * S
-        kappa_val = 0.01 * S
+        epsilon_val = 1.0 + (self.params["epsBulk"] - 1.0) * shape
+        kappa_val = 0.01 * shape
         self.epsilon_val = epsilon_val
         self.kappa_val = kappa_val
 
         n_iter = self.solve(rho_field, self.phi)
         log.info(f"  Fluid: solve completed in {n_iter} iterations")
-        phi_ext = self.coulomb.kernel(rho_field)
 
+        # Electrostatic contributions:
+        phi_ext = self.coulomb.kernel(rho_field)
         term1 = -0.5 * (self.phi ^ self.hessian(self.phi))
         term2 = (self.phi - (0.5 * phi_ext)) ^ (rho_field)
         Adiel_electrostatic = (term1 + term2)
+        grad_phi_sq = (~self.phi.gradient()).data.square().sum(dim=0)
+        Adiel_shape = FieldR(
+            self.grid, data=(-(self.params["epsBulk"] - 1) / (8 * np.pi)) * grad_phi_sq
+        )
 
-        cavity_energy = self.compute_cavity_energy(S)
+        # Cavitation terms:
+        cavity_energy = self.compute_cavity_energy(shape)
         total_energy = Adiel_electrostatic  # + cavity_energy
+        # Adiel_shape +=  # TODO
 
         Adiel_rhoTilde = self.phi - phi_ext
-        V_fluid = Adiel_rhoTilde  # + cavity_potential
+        V_fluid = Adiel_rhoTilde + ~self.shape_gradient(n_cavity, Adiel_shape)
 
         return total_energy, V_fluid, Adiel_rhoTilde
