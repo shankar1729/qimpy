@@ -17,7 +17,7 @@ from qimpy.io import (
 )
 from qimpy.mpi import ProcessGrid
 from .. import Material, fermi
-from . import PackedHermitian, RelaxationTime, Lindblad, Light, PulseB
+from . import PackedHermitian, RelaxationTime, Lindblad, Light, PulseB, EMField
 
 
 class DynamicsTerm(Protocol):
@@ -69,6 +69,7 @@ class AbInitio(Material):
         relaxation_time: Optional[Union[RelaxationTime, dict]] = None,
         lindblad: Optional[Union[Lindblad, dict]] = None,
         light: Optional[Union[Light, dict]] = None,
+        emField: Optional[Union[EMField, dict]] = None,
         pulseB: Optional[Union[PulseB, dict]] = None,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
@@ -100,6 +101,8 @@ class AbInitio(Material):
             :yaml:`Light-matter interaction (coherent / Lindblad).`
         pulseB
             :yaml:`Magnetic field pulses.`
+        emField
+            :yaml:`Electromagnetic fields.`
         observable_names
             :yaml:`Control which observables will be output.`
             Specify either as a list of names, or a comma-separated string.
@@ -120,6 +123,7 @@ class AbInitio(Material):
             attrs = data_file.attrs
             spinorial = bool(attrs["spinorial"])
             haveL = bool(attrs["haveL"])
+            haveAdj = ("k_adj" in data_file)
             if orbital_zeeman is None:
                 useL = haveL
             else:
@@ -145,6 +149,9 @@ class AbInitio(Material):
 
             self.k[:] = self.read_scalars(data_file, "k")
             self.E[:] = self.read_scalars(data_file, "E")
+            self.k_adj = self.read_vectors(data_file, "k_adj") if haveAdj else None
+            # Bit of a hack
+            self.R = self.read_vectors_attr(data_file, "R") if "R" in attrs else None
             self.P = self.read_vectors(data_file, "P")
             self.S = self.read_vectors(data_file, "S") if spinorial else None
             self.L = self.read_vectors(data_file, "L") if useL else None
@@ -198,6 +205,10 @@ class AbInitio(Material):
             if (light is not None) or checkpoint_in.member("light"):
                 self.add_child("light", Light, light, checkpoint_in, ab_initio=self)
                 self.dynamics_terms["light"] = self.light
+
+            if (emField is not None) or checkpoint_in.member("emField"):
+                self.add_child("emField", EMField, emField, checkpoint_in, ab_initio=self)
+                self.dynamics_terms["emField"] = self.emField
 
             if (pulseB is not None) or checkpoint_in.member("pulseB"):
                 self.add_child("pulseB", PulseB, pulseB, checkpoint_in, ab_initio=self)
@@ -301,6 +312,20 @@ class AbInitio(Material):
         offset = (self.k_division.i_start,) + (0,) * (len(dset.shape) - 1)
         size = (self.nk_mine,) + dset.shape[1:]
         return data_file.read_slice(dset, offset, size)
+
+    def read_vectors_attr(self, data_file: Checkpoint, name: str) -> torch.Tensor:
+        """Read quantities that transform as a vector with rotations from data_file
+        (stored as attribute).
+        The second index is assumed to be the Cartesian index."""
+        dset = data_file.attrs[name]
+        offset = (self.k_division.i_start,) + (0,) * (len(dset.shape) - 1)
+        size = (self.nk_mine,) + dset.shape[1:]
+        result = data_file.read_slice(dset, offset, size)
+        if self.rotation is not None:
+            result = torch.einsum(
+                "ij, kj... -> ki...", self.rotation.to(result.dtype), result
+            )
+        return result
 
     def read_vectors(self, data_file: Checkpoint, name: str) -> torch.Tensor:
         """Read quantities that transform as a vector with rotations from data_file.
