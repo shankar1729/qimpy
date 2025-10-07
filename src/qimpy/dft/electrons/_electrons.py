@@ -374,6 +374,7 @@ class Electrons(TreeNode):
             system.energy["Efluid"] = system.fluid.model.update(n_xc_tilde, rho_tilde)
             if requires_grad:
                 self.n_tilde.grad[0] += rho_tilde.grad
+
         if requires_grad:
             self.n_tilde.grad += n_xc_tilde.grad
             self.n_tilde.grad.symmetrize()
@@ -408,15 +409,14 @@ class Electrons(TreeNode):
         Force contributions are accumulated to `system.ions.positions.grad`.
         Stress contributions are accumulated to `system.lattice.grad`.
         Gradients with respect to ionic scalar fields are accumulated to
-        `system.ions.Vloc_tilde.grad` and `system.ions.n_core_tilde.grad`.
+        `system.ions.Vloc_tilde.grad`, `system.ions.n_core_tilde.grad`
+        and `system.ions.rho_tilde.grad`.
         """
         # Exchange-correlation:
         n_xc_tilde = self.n_tilde + system.ions.n_core_tilde
         n_xc_tilde.requires_grad_(True, clear=True)
         self.tau_tilde.requires_grad_(True, clear=True)
         self.xc(n_xc_tilde, self.tau_tilde)
-        if system.ions.n_core_tilde.requires_grad:
-            system.ions.n_core_tilde.grad += n_xc_tilde.grad
 
         # Coulomb / Local pseudootential:
         rho_tilde = self.n_tilde[0]  # total charge density
@@ -426,6 +426,17 @@ class Electrons(TreeNode):
             )
         if system.ions.Vloc_tilde.requires_grad:
             system.ions.Vloc_tilde.grad += rho_tilde
+
+        # Fluid contributions
+        if system.fluid.enabled:
+            rho_tilde = self.n_tilde[0] + system.ions.rho_tilde  # total solute charge
+            rho_tilde.requires_grad_(True, clear=True)
+            system.fluid.model.update(n_xc_tilde, rho_tilde)
+            if system.ions.rho_tilde.requires_grad:
+                system.ions.rho_tilde.grad += rho_tilde.grad
+
+        if system.ions.n_core_tilde.requires_grad:
+            system.ions.n_core_tilde.grad += n_xc_tilde.grad  # XC and fluid terms
 
         # Kinetic, orthonormality constraint and volume contributions to stress:
         C = self.C[:, :, : self.fillings.n_bands]

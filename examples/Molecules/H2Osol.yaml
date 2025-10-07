@@ -20,6 +20,7 @@ electrons:
   fillings:
     smearing: no
 
+geometry: relax
 fluid: linear
 
 checkpoint: null
