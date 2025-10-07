@@ -8,9 +8,11 @@ __all__ = (
     "MinimizeState",
     "Minimize",
     "Pulay",
+    "LinearSolve",
 )
 
 from ._gradable import Gradable
 from ._optimizable import Optimizable, ConvergenceCheck, MatrixArray
 from ._minimize import Minimize, MinimizeState
 from ._pulay import Pulay
+from ._linearsolve import LinearSolve

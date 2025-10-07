@@ -353,12 +353,12 @@ class Electrons(TreeNode):
         If `requires_grad` is False, only compute the energy (skip the potentials)."""
         self.n_tilde.requires_grad_(requires_grad, clear=True)
         self.tau_tilde.requires_grad_(requires_grad, clear=True)
+
         # Exchange-correlation contributions:
         n_xc_tilde = self.n_tilde + system.ions.n_core_tilde
         n_xc_tilde.requires_grad_(requires_grad, clear=True)
         system.energy["Exc"] = self.xc(n_xc_tilde, self.tau_tilde)
-        if requires_grad:
-            self.n_tilde.grad += n_xc_tilde.grad
+
         # Hartree and local contributions:
         rho_tilde = self.n_tilde[0]  # total charge density
         VH_tilde = system.coulomb.kernel(rho_tilde)  # Hartree potential
@@ -366,6 +366,17 @@ class Electrons(TreeNode):
         system.energy["Eloc"] = (rho_tilde ^ system.ions.Vloc_tilde).item()
         if requires_grad:
             self.n_tilde.grad[0] += system.ions.Vloc_tilde + VH_tilde
+
+        # Fluid contributions
+        if system.fluid.enabled:
+            rho_tilde = self.n_tilde[0] + system.ions.rho_tilde  # total solute charge
+            rho_tilde.requires_grad_(requires_grad, clear=True)
+            system.energy["Efluid"] = system.fluid.model.update(n_xc_tilde, rho_tilde)
+            if requires_grad:
+                self.n_tilde.grad[0] += rho_tilde.grad
+
+        if requires_grad:
+            self.n_tilde.grad += n_xc_tilde.grad
             self.n_tilde.grad.symmetrize()
 
     def update(self, system: dft.System, requires_grad: bool = True) -> None:
@@ -398,15 +409,14 @@ class Electrons(TreeNode):
         Force contributions are accumulated to `system.ions.positions.grad`.
         Stress contributions are accumulated to `system.lattice.grad`.
         Gradients with respect to ionic scalar fields are accumulated to
-        `system.ions.Vloc_tilde.grad` and `system.ions.n_core_tilde.grad`.
+        `system.ions.Vloc_tilde.grad`, `system.ions.n_core_tilde.grad`
+        and `system.ions.rho_tilde.grad`.
         """
         # Exchange-correlation:
         n_xc_tilde = self.n_tilde + system.ions.n_core_tilde
         n_xc_tilde.requires_grad_(True, clear=True)
         self.tau_tilde.requires_grad_(True, clear=True)
         self.xc(n_xc_tilde, self.tau_tilde)
-        if system.ions.n_core_tilde.requires_grad:
-            system.ions.n_core_tilde.grad += n_xc_tilde.grad
 
         # Coulomb / Local pseudootential:
         rho_tilde = self.n_tilde[0]  # total charge density
@@ -416,6 +426,17 @@ class Electrons(TreeNode):
             )
         if system.ions.Vloc_tilde.requires_grad:
             system.ions.Vloc_tilde.grad += rho_tilde
+
+        # Fluid contributions
+        if system.fluid.enabled:
+            rho_tilde = self.n_tilde[0] + system.ions.rho_tilde  # total solute charge
+            rho_tilde.requires_grad_(True, clear=True)
+            system.fluid.model.update(n_xc_tilde, rho_tilde)
+            if system.ions.rho_tilde.requires_grad:
+                system.ions.rho_tilde.grad += rho_tilde.grad
+
+        if system.ions.n_core_tilde.requires_grad:
+            system.ions.n_core_tilde.grad += n_xc_tilde.grad  # XC and fluid terms
 
         # Kinetic, orthonormality constraint and volume contributions to stress:
         C = self.C[:, :, : self.fillings.n_bands]
@@ -474,9 +495,10 @@ class Electrons(TreeNode):
                 )
             system.ions.beta.grad = C.non_spinor @ beta_C_grad.transpose(-2, -1).conj()
 
-    def run(self, system: dft.System) -> None:
+    def run(self, system: dft.System, suffix: str = "") -> None:
         """Run any actions specified in the input."""
         if self.fixed_H:
+            log.info(f"\n--- Fixed-Hamiltonian optimization{suffix} ---\n")
             self.initialize_fixed_hamiltonian(system)
             self.initialize_wavefunctions(system)  # LCAO / randomize
             self.diagonalize()
@@ -485,6 +507,15 @@ class Electrons(TreeNode):
             system.energy.clear()
             system.energy["Eband"] = self.diagonalize.get_Eband()
         else:
+            if system.fluid.enabled and (not self._n_bands_done):
+                system.fluid.enabled = False
+                self.run(system, suffix=" (initial vacuum run)")
+                log.info(
+                    "\nVacuum energy after initial minimize, "
+                    f"{system.energy.name} = {float(system.energy):.16f}"
+                )
+                system.fluid.enabled = True
+            log.info(f"\n--- Electronic optimization{suffix} ---\n")
             self.initialize_wavefunctions(system)  # LCAO / randomize
             self.scf.update(system)
             self.scf.optimize()
