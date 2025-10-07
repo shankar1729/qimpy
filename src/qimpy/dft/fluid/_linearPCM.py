@@ -77,7 +77,7 @@ class LinearPCMFluidModel(LinearSolve[FieldH]):
         surface_density = FieldR(self.grid, data=Dshape.data.norm(dim=0))
         surface_area = surface_density.integral().item()
         Acavity = self.cavity_tension * surface_area
-        Acavity_shape = self.cavity_tension * (Dshape / surface_density).divergence()
+        Acavity_shape = -self.cavity_tension * (Dshape / surface_density).divergence()
         return Acavity, Acavity_shape
 
     def hessian(self, phi: FieldH) -> FieldH:
