@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Optional, Sequence
+from functools import cache
 
 import numpy as np
 import torch
@@ -190,6 +191,7 @@ class Grid(TreeNode):
         mesh1D = self._mesh1D_mine[space] if mine else self._mesh1D[space]
         return torch.stack(torch.meshgrid(*mesh1D, indexing="ij")).permute(1, 2, 3, 0)
 
+    @cache
     def get_gradient_operator(self, space: str) -> torch.Tensor:
         """Get gradient operator in reciprocal space.
 
