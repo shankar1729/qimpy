@@ -4,19 +4,18 @@ import torch
 from qimpy import log
 from qimpy.algorithms import LinearSolve
 from qimpy.grid import Grid, FieldH, FieldR
+from qimpy.grid.coulomb import Coulomb
 from qimpy.profiler import stopwatch
 
 
-class LinearPCMFluidModel(LinearSolve[FieldH]):
+class Linear(LinearSolve[FieldH]):
     epsilon: FieldR  #: spatially varying dielectric constant
-    enabled: bool  #: mask for fluid contributions (used during initialization)
 
     def __init__(
         self,
         *,
         grid: Grid,
-        coulomb,
-        ions,
+        coulomb: Coulomb,
         checkpoint_in=None,
         n_iterations=100,
         gradient_threshold=1E-8,
@@ -31,17 +30,15 @@ class LinearPCMFluidModel(LinearSolve[FieldH]):
             n_iterations=n_iterations,
             gradient_threshold=gradient_threshold,
         )
-        self.enabled = True
         self.grid = grid
         self.coulomb = coulomb
-        self.ions = ions
 
         self.eps_bulk = eps_bulk
         self.nc = nc
         self.sigma = sigma
         self.cavity_tension = cavity_tension
 
-        self.phi = FieldH(self.grid)
+        self.phi_tilde = FieldH(self.grid)
 
         # Initialize preconditioner:
         iG = grid.get_mesh("H").to(torch.double)
@@ -71,48 +68,51 @@ class LinearPCMFluidModel(LinearSolve[FieldH]):
             ),
         )
 
-    def compute_cavity_energy(self, shape: FieldR) -> tuple[float, FieldR]:
-        """Compute cavitation energy and its shape function gradient"""
+    def compute_cavity_energy(self, shape: FieldR) -> float:
+        """Compute cavitation energy and its gradient if needed"""
         Dshape = shape.gradient()
         surface_density = FieldR(self.grid, data=Dshape.data.norm(dim=0))
         surface_area = surface_density.integral().item()
         Acavity = self.cavity_tension * surface_area
-        Acavity_shape = -self.cavity_tension * (Dshape / surface_density).divergence()
-        return Acavity, Acavity_shape
+        if shape.requires_grad:
+            shape.grad -= self.cavity_tension * (Dshape / surface_density).divergence()
+        return Acavity
 
-    def hessian(self, phi: FieldH) -> FieldH:
-        result = (~(~phi.gradient() * self.epsilon[None])).divergence()
+    def hessian(self, phi_tilde: FieldH) -> FieldH:
+        result = (~(~phi_tilde.gradient() * self.epsilon[None])).divergence()
         return (-1 / (4 * np.pi)) * result
 
     def precondition(self, vector: FieldH) -> FieldH:
         return vector.convolve(self.Kkernel)
 
-    @stopwatch(name="LinearPCM.update")
-    def compute_Adiel_and_potential(
-        self, n_tilde: FieldH
-    ) -> tuple[float, FieldH, FieldH]:
-        rho_field = self.ions.rho_tilde + n_tilde[0]
-        n_cavity = ~n_tilde[0]
+    @stopwatch(name="Linear.calculate")
+    def update(self, n_tilde: FieldH, rho_tilde: FieldH) -> float:
+        n_cavity = ~n_tilde[0]  # Cavity determining electron density
         shape = self.compute_shape_function(n_cavity)
         self.epsilon = 1.0 + (self.eps_bulk - 1.0) * shape
 
-        n_iter = self.solve(rho_field, self.phi)
+        n_iter = self.solve(rho_tilde, self.phi_tilde)
         log.info(f"  Fluid: solve completed in {n_iter} iterations")
 
         # Electrostatic contributions:
-        phi_ext = self.coulomb.kernel(rho_field)
-        term1 = -0.5 * (self.phi ^ self.hessian(self.phi))
-        term2 = (self.phi - (0.5 * phi_ext)) ^ rho_field
-        Ael = term1 + term2
-        grad_phi_sq = (~self.phi.gradient()).data.square().sum(dim=0)
-        Ael_shape = FieldR(
-            self.grid, data=(-(self.eps_bulk - 1) / (8 * np.pi)) * grad_phi_sq
+        phi_ext_tilde = self.coulomb.kernel(rho_tilde)
+        Ael = (
+            -0.5 * (self.phi_tilde ^ self.hessian(self.phi_tilde))
+            + ((self.phi_tilde - 0.5 * phi_ext_tilde) ^ rho_tilde)
         )
+        if n_tilde.requires_grad:
+            grad_phi_sq = (~self.phi_tilde.gradient()).data.square().sum(dim=0)
+            shape.requires_grad_(True)
+            shape.grad = FieldR(
+                self.grid, data=(-(self.eps_bulk - 1) / (8 * np.pi)) * grad_phi_sq
+            )
 
         # Cavitation terms:
-        Acavity, Acavity_shape = self.compute_cavity_energy(shape)
+        Acavity = self.compute_cavity_energy(shape)
 
-        A_rho_tilde = self.phi - phi_ext
-        A_n_cavity = self.shape_gradient(n_cavity, Ael_shape + Acavity_shape)
-        A_n_tilde = A_rho_tilde + ~A_n_cavity
-        return Ael + Acavity, A_n_tilde, A_rho_tilde
+        # Propagate gradients as needed:
+        if n_tilde.requires_grad:
+            n_tilde.grad += ~self.shape_gradient(n_cavity, shape.grad)
+        if rho_tilde.requires_grad:
+            rho_tilde.grad += self.phi_tilde - phi_ext_tilde
+        return Ael + Acavity

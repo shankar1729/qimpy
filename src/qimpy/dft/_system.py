@@ -10,11 +10,11 @@ from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
 from qimpy.grid import Grid
 from qimpy.grid.coulomb import Coulomb
+from qimpy.fluid import Fluid
 from .ions import Ions
 from .electrons import Electrons
 from .geometry import Geometry
 from .export import Export
-from qimpy.dft.fluid import LinearPCMFluidModel
 
 
 class System(TreeNode):
@@ -32,7 +32,7 @@ class System(TreeNode):
     checkpoint_in: CheckpointPath  #: Input checkpoint
     checkpoint_out: Optional[str]  #: Filename for output checkpoint
     process_grid: ProcessGrid  #: Process grid for parallelization
-    fluid: LinearPCMFluidModel  #: fluid model for implicit solvent
+    fluid: Fluid  #: Fluid model for solvation
 
     def __init__(
         self,
@@ -44,12 +44,12 @@ class System(TreeNode):
         grid: Union[Grid, dict, None] = None,
         coulomb: Union[Coulomb, dict, None] = None,
         geometry: Union[Geometry, dict, str, None] = None,
+        fluid: Union[Fluid, dict, None] = None,
         export: Union[Export, dict, None] = None,
         checkpoint: Optional[str] = None,
         checkpoint_out: Optional[str] = None,
         comm: Optional[MPI.Comm] = None,
         process_grid_shape: Optional[Sequence[int]] = None,
-        fluid: Union[LinearPCMFluidModel, dict, None] = None
     ):
         """Compose a System to calculate from its pieces. Each piece
         could be provided as an object or a dictionary of parameters
@@ -73,6 +73,8 @@ class System(TreeNode):
             :yaml:`Geometry actions such as relaxation and dynamics.`
             Specify name of geometry action eg. 'relax' if using default options for
             that action, and if not, specify an explicit  dictionary of parameters.
+        fluid
+            :yaml:`Fluid model for solvation.`
         export
             :yaml:`Export data for other codes.`
         checkpoint
@@ -160,12 +162,11 @@ class System(TreeNode):
         )
         self.add_child(
             "fluid",
-            LinearPCMFluidModel,
+            Fluid,
             fluid,
             checkpoint_in,
             grid=self.grid,
             coulomb=self.coulomb,
-            ions=self.ions,
         )
 
         self.add_child("export", Export, export, checkpoint_in, system=self)

@@ -15,7 +15,6 @@ from qimpy.dft.ions import Ions
 from . import Fillings, Basis, Davidson, CheFSI, SCF, LCAO, Wavefunction
 from .xc import XC
 from ._hamiltonian import _hamiltonian
-from qimpy.dft.fluid import LinearPCMFluidModel
 
 
 class Electrons(TreeNode):
@@ -354,12 +353,12 @@ class Electrons(TreeNode):
         If `requires_grad` is False, only compute the energy (skip the potentials)."""
         self.n_tilde.requires_grad_(requires_grad, clear=True)
         self.tau_tilde.requires_grad_(requires_grad, clear=True)
+
         # Exchange-correlation contributions:
         n_xc_tilde = self.n_tilde + system.ions.n_core_tilde
         n_xc_tilde.requires_grad_(requires_grad, clear=True)
         system.energy["Exc"] = self.xc(n_xc_tilde, self.tau_tilde)
-        if requires_grad:
-            self.n_tilde.grad += n_xc_tilde.grad
+
         # Hartree and local contributions:
         rho_tilde = self.n_tilde[0]  # total charge density
         VH_tilde = system.coulomb.kernel(rho_tilde)  # Hartree potential
@@ -367,14 +366,17 @@ class Electrons(TreeNode):
         system.energy["Eloc"] = (rho_tilde ^ system.ions.Vloc_tilde).item()
         if requires_grad:
             self.n_tilde.grad[0] += system.ions.Vloc_tilde + VH_tilde
-            self.n_tilde.grad.symmetrize()
 
         # Fluid contributions
         if system.fluid.enabled:
-            E_fluid, V_fluid, Adiel_rhoExplicitTilde = system.fluid.compute_Adiel_and_potential(self.n_tilde)
-            system.energy["Efluid"] = E_fluid
+            rho_tilde = self.n_tilde[0] + system.ions.rho_tilde  # total solute charge
+            rho_tilde.requires_grad_(requires_grad, clear=True)
+            system.energy["Efluid"] = system.fluid.model.update(n_xc_tilde, rho_tilde)
             if requires_grad:
-                self.n_tilde.grad[0] += V_fluid
+                self.n_tilde.grad[0] += rho_tilde.grad
+        if requires_grad:
+            self.n_tilde.grad += n_xc_tilde.grad
+            self.n_tilde.grad.symmetrize()
 
     def update(self, system: dft.System, requires_grad: bool = True) -> None:
         """Update electronic system to current wavefunctions and eigenvalues.

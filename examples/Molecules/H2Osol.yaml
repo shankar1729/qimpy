@@ -20,4 +20,6 @@ electrons:
   fillings:
     smearing: no
 
+fluid: linear
+
 checkpoint: null
