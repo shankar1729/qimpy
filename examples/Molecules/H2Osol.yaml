@@ -17,5 +17,7 @@ electrons:
     real-wavefunctions: yes
   scf:
     mix-density: no  # mix potential instead
+  fillings:
+    smearing: no
 
 checkpoint: null

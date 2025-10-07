@@ -283,10 +283,7 @@ class Electrons(TreeNode):
         if n_atomic:
             log.info("Setting wavefunctions to LCAO eigenvectors")
             assert self.lcao is not None
-            fluid_enabled = system.fluid.enabled
-            system.fluid.enabled = False
             self.lcao.update(system)
-            system.fluid.enabled = fluid_enabled
         else:
             self.C = self.C.orthonormalize()  # For random / checkpoint case
 
@@ -485,9 +482,10 @@ class Electrons(TreeNode):
                 )
             system.ions.beta.grad = C.non_spinor @ beta_C_grad.transpose(-2, -1).conj()
 
-    def run(self, system: dft.System) -> None:
+    def run(self, system: dft.System, suffix: str = "") -> None:
         """Run any actions specified in the input."""
         if self.fixed_H:
+            log.info(f"\n--- Fixed-Hamiltonian optimization{suffix} ---\n")
             self.initialize_fixed_hamiltonian(system)
             self.initialize_wavefunctions(system)  # LCAO / randomize
             self.diagonalize()
@@ -496,6 +494,15 @@ class Electrons(TreeNode):
             system.energy.clear()
             system.energy["Eband"] = self.diagonalize.get_Eband()
         else:
+            if system.fluid.enabled and (not self._n_bands_done):
+                system.fluid.enabled = False
+                self.run(system, suffix=" (initial vacuum run)")
+                log.info(
+                    "\nVacuum energy after initial minimize, "
+                    f"{system.energy.name} = {float(system.energy):.16f}"
+                )
+                system.fluid.enabled = True
+            log.info(f"\n--- Electronic optimization{suffix} ---\n")
             self.initialize_wavefunctions(system)  # LCAO / randomize
             self.scf.update(system)
             self.scf.optimize()

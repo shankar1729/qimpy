@@ -62,7 +62,6 @@ class Stepper:
         system.energy = Energy()
         system.ions.update(system)
         # Optimize electrons:
-        log.info("\n--- Electronic optimization ---\n")
         system.electrons.run(system)
         # Update forces / stresses if needed:
         if require_grad:
