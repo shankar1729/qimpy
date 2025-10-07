@@ -283,7 +283,10 @@ class Electrons(TreeNode):
         if n_atomic:
             log.info("Setting wavefunctions to LCAO eigenvectors")
             assert self.lcao is not None
+            fluid_enabled = system.fluid.enabled
+            system.fluid.enabled = False
             self.lcao.update(system)
+            system.fluid.enabled = fluid_enabled
         else:
             self.C = self.C.orthonormalize()  # For random / checkpoint case
 
@@ -370,12 +373,12 @@ class Electrons(TreeNode):
             self.n_tilde.grad.symmetrize()
 
         # Fluid contributions
-        if hasattr(system, "fluid"):
+        if system.fluid.enabled:
             E_fluid, V_fluid, Adiel_rhoExplicitTilde = system.fluid.compute_Adiel_and_potential(self.n_tilde)
             system.energy["Efluid"] = E_fluid
             if requires_grad:
                 self.n_tilde.grad[0] += V_fluid
-        
+
     def update(self, system: dft.System, requires_grad: bool = True) -> None:
         """Update electronic system to current wavefunctions and eigenvalues.
         This updates occupations, density, potential and electronic energy.

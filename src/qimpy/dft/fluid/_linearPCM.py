@@ -4,10 +4,12 @@ import torch
 from qimpy import log
 from qimpy.algorithms import LinearSolve
 from qimpy.grid import Grid, FieldH, FieldR
+from qimpy.profiler import stopwatch
 
 
 class LinearPCMFluidModel(LinearSolve[FieldH]):
-    epsilon: FieldR  # spatially varying dielectric constant
+    epsilon: FieldR  #: spatially varying dielectric constant
+    enabled: bool  #: mask for fluid contributions (used during initialization)
 
     def __init__(
         self,
@@ -29,7 +31,7 @@ class LinearPCMFluidModel(LinearSolve[FieldH]):
             n_iterations=n_iterations,
             gradient_threshold=gradient_threshold,
         )
-        
+        self.enabled = True
         self.grid = grid
         self.coulomb = coulomb
         self.ions = ions
@@ -85,6 +87,7 @@ class LinearPCMFluidModel(LinearSolve[FieldH]):
     def precondition(self, vector: FieldH) -> FieldH:
         return vector.convolve(self.Kkernel)
 
+    @stopwatch(name="LinearPCM.update")
     def compute_Adiel_and_potential(
         self, n_tilde: FieldH
     ) -> tuple[float, FieldH, FieldH]:
