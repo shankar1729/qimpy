@@ -31,8 +31,13 @@ class Variant(Protocol):
 
 
 class Linear(LinearSolve[FieldH]):
+    grid: Grid
+    coulomb: Coulomb
+    eps_bulk: float  #: Bulk dielectric constant
     variant: Variant  #: variant of cavity shape and cavitation model
+
     energy: Energy  #: energy components
+    phi_tilde: FieldH  #: net electrostatic potential
     epsilon: FieldR  #: spatially varying dielectric constant
 
     def __init__(
