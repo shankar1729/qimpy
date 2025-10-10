@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Protocol, Optional, Union
 
-from qimpy import TreeNode
+from qimpy import TreeNode, Energy
 from qimpy.io import CheckpointPath
 from qimpy.grid import Grid, FieldH
 from qimpy.grid.coulomb import Coulomb
@@ -11,10 +11,12 @@ from . import Linear
 class Model(Protocol):
     """Class requirements to use as a fluid model."""
 
-    def update(self, n_tilde: FieldH, rho_tilde: FieldH) -> float:
+    energy: Energy  #: energy components
+
+    def update(self, n_tilde: FieldH, rho_tilde: FieldH) -> None:
         """Update fluid given electron density `n_tilde` to determine
         cavity and total solute charge density `rho_tilde`.
-        Return the energy and accumulate gradients to `n_tilde.grad`
+        Update `energy` and accumulate gradients to `n_tilde.grad`
         and `rho_tilde.grad` if corresponding requires_grad is set."""
         ...
 

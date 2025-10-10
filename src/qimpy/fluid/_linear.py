@@ -1,14 +1,38 @@
+from typing import Protocol, Optional, Union
+
 import numpy as np
 import torch
 
-from qimpy import log
+from qimpy import log, Energy, TreeNode
 from qimpy.algorithms import LinearSolve
 from qimpy.grid import Grid, FieldH, FieldR
 from qimpy.grid.coulomb import Coulomb
 from qimpy.profiler import stopwatch
+from . import variants
+
+
+class Variant(Protocol):
+    """Class requirements to use as a variant for Linear / Nonlinear fluid models."""
+
+    shape: FieldR  #: cavity shape function
+
+    def update_shape(self, n_tilde: FieldH) -> None:
+        """Update `shape` from electron density `n_tilde`."""
+        ...
+
+    def propagate_shape_grad(self, n_tilde: FieldH) -> None:
+        """Propagate gradient from `shape.grad` to `n_tilde.grad` (accumulate)."""
+        ...
+
+    def update_energy(self, energy: Energy) -> None:
+        """Update shape-dependent energy terms, e.g., cavitation and dispersion.
+        If `shape.requires_grad`, accumulate corresponding gradient to `shape.grad`."""
+        ...
 
 
 class Linear(LinearSolve[FieldH]):
+    variant: Variant  #: variant of cavity shape and cavitation model
+    energy: Energy  #: energy components
     epsilon: FieldR  #: spatially varying dielectric constant
 
     def __init__(
@@ -18,11 +42,10 @@ class Linear(LinearSolve[FieldH]):
         coulomb: Coulomb,
         checkpoint_in=None,
         n_iterations=100,
-        gradient_threshold=1E-8,
+        gradient_threshold=1e-8,
         eps_bulk=78.4,
-        nc=3.7E-4,
-        sigma=0.6,
-        cavity_tension=5.4E-6,
+        GLSSA13: Optional[Union[dict, variants.GLSSA13]] = None,
+        LA12: Optional[Union[dict, variants.LA12]] = None,
     ):
         super().__init__(
             checkpoint_in=checkpoint_in,
@@ -32,51 +55,24 @@ class Linear(LinearSolve[FieldH]):
         )
         self.grid = grid
         self.coulomb = coulomb
-
         self.eps_bulk = eps_bulk
-        self.nc = nc
-        self.sigma = sigma
-        self.cavity_tension = cavity_tension
+        self.add_child_one_of(
+            "variant",
+            checkpoint_in,
+            TreeNode.ChildOptions("glssa13", variants.GLSSA13, GLSSA13),
+            TreeNode.ChildOptions("la12", variants.LA12, LA12),
+            have_default=True,
+        )
 
+        self.energy = Energy()
         self.phi_tilde = FieldH(self.grid)
 
         # Initialize preconditioner:
         iG = grid.get_mesh("H").to(torch.double)
         Gsq = (iG @ grid.lattice.Gbasis.T).square().sum(dim=-1)
-        GSQ_CUT = 1E-12  # regularization
+        GSQ_CUT = 1e-12  # regularization
         self.Kkernel = torch.clamp(Gsq, min=GSQ_CUT).reciprocal() / self.eps_bulk
         self.Kkernel[Gsq < GSQ_CUT] = 0.0  # project out null-space
-
-    def compute_shape_function(self, n: FieldR) -> FieldR:
-        nc = self.nc
-        sigma = self.sigma
-        return FieldR(
-            self.grid,
-            data=0.5 * torch.erfc((np.sqrt(0.5) / sigma) * (n.data.abs() / nc).log()),
-        )
-
-    def shape_gradient(self, n: FieldR, grad_shape: FieldR) -> FieldR:
-        nc = self.nc
-        sigma = self.sigma
-        return FieldR(
-            self.grid,
-            data=(
-                (-1.0 / (nc * sigma * np.sqrt(2 * np.pi))) * grad_shape.data
-                * torch.exp(
-                    0.5 * (sigma**2 - ((n.data.abs() / nc).log() / sigma + sigma)**2)
-                )
-            ),
-        )
-
-    def compute_cavity_energy(self, shape: FieldR) -> float:
-        """Compute cavitation energy and its gradient if needed"""
-        Dshape = shape.gradient()
-        surface_density = FieldR(self.grid, data=Dshape.data.norm(dim=0))
-        surface_area = surface_density.integral().item()
-        Acavity = self.cavity_tension * surface_area
-        if shape.requires_grad:
-            shape.grad -= self.cavity_tension * (Dshape / surface_density).divergence()
-        return Acavity
 
     def hessian(self, phi_tilde: FieldH) -> FieldH:
         result = (~(~phi_tilde.gradient() * self.epsilon[None])).divergence()
@@ -86,9 +82,9 @@ class Linear(LinearSolve[FieldH]):
         return vector.convolve(self.Kkernel)
 
     @stopwatch(name="Linear.calculate")
-    def update(self, n_tilde: FieldH, rho_tilde: FieldH) -> float:
-        n_cavity = ~n_tilde[0]  # Cavity determining electron density
-        shape = self.compute_shape_function(n_cavity)
+    def update(self, n_tilde: FieldH, rho_tilde: FieldH) -> None:
+        self.variant.update_shape(n_tilde)
+        shape = self.variant.shape
         self.epsilon = 1.0 + (self.eps_bulk - 1.0) * shape
 
         n_iter = self.solve(rho_tilde, self.phi_tilde)
@@ -96,10 +92,9 @@ class Linear(LinearSolve[FieldH]):
 
         # Electrostatic contributions:
         phi_ext_tilde = self.coulomb.kernel(rho_tilde)
-        Ael = (
-            -0.5 * (self.phi_tilde ^ self.hessian(self.phi_tilde))
-            + ((self.phi_tilde - 0.5 * phi_ext_tilde) ^ rho_tilde)
-        )
+        self.energy["Electrostatic"] = -0.5 * (
+            self.phi_tilde ^ self.hessian(self.phi_tilde)
+        ) + ((self.phi_tilde - 0.5 * phi_ext_tilde) ^ rho_tilde)
         if n_tilde.requires_grad:
             grad_phi_sq = (~self.phi_tilde.gradient()).data.square().sum(dim=0)
             shape.requires_grad_(True)
@@ -108,11 +103,10 @@ class Linear(LinearSolve[FieldH]):
             )
 
         # Cavitation terms:
-        Acavity = self.compute_cavity_energy(shape)
+        self.variant.update_energy(self.energy)
 
         # Propagate gradients as needed:
         if n_tilde.requires_grad:
-            n_tilde.grad += ~self.shape_gradient(n_cavity, shape.grad)
+            self.variant.propagate_shape_grad(n_tilde)
         if rho_tilde.requires_grad:
             rho_tilde.grad += self.phi_tilde - phi_ext_tilde
-        return Ael + Acavity

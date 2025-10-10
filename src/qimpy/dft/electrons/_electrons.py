@@ -371,7 +371,8 @@ class Electrons(TreeNode):
         if system.fluid.enabled:
             rho_tilde = self.n_tilde[0] + system.ions.rho_tilde  # total solute charge
             rho_tilde.requires_grad_(requires_grad, clear=True)
-            system.energy["Efluid"] = system.fluid.model.update(n_xc_tilde, rho_tilde)
+            system.fluid.model.update(n_xc_tilde, rho_tilde)
+            system.energy["Efluid"] = float(system.fluid.model.energy)
             if requires_grad:
                 self.n_tilde.grad[0] += rho_tilde.grad
 
