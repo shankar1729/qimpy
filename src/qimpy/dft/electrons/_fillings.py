@@ -289,6 +289,16 @@ class Fillings(TreeNode):
                     self.f[i_spin, :, n_full] = f_sum - n_full  # left overs
         self.f_eig = torch.zeros_like(self.f)
 
+    @property
+    def free_energy_name(self) -> str:
+        if self.sigma:
+            if self.mu_constrain:
+                return "Phi"  # Grand potential
+            else:
+                return "A"  # Helmholtz energy
+        else:
+            return "E"  # Energy
+
     @stopwatch
     def update(self, energy: Energy) -> None:
         """Update fillings `f` and chemical potential `mu`, if needed.
@@ -297,7 +307,6 @@ class Fillings(TreeNode):
         if self.sigma is None:  # Fixed fillings
             return
         if np.isnan(self.electrons.deig_max):  # Eigenvalues not yet available
-            energy.setdefault("-TS", 0.0)  # Ensure correct energy name
             return
 
         assert self._smearing_func is not None

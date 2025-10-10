@@ -59,7 +59,7 @@ class Stepper:
         system = self.system
         lattice = system.lattice
         # Update ionic potentials and energies:
-        system.energy = Energy()
+        system.energy.clear()
         system.ions.update(system)
         # Optimize electrons:
         system.electrons.run(system)

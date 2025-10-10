@@ -64,7 +64,7 @@ class Linear(LinearSolve[FieldH]):
             have_default=True,
         )
 
-        self.energy = Energy()
+        self.energy = Energy(name="Afluid")
         self.phi_tilde = FieldH(self.grid)
 
         # Initialize preconditioner:

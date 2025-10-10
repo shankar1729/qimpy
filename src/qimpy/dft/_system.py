@@ -19,7 +19,7 @@ from .export import Export
 
 class System(TreeNode):
     """Overall system to calculate within QimPy"""
-    
+
     lattice: Lattice  #: Lattice vectors / unit cell definition
     ions: Ions  #: Ionic positions and pseudopotentials
     symmetries: Symmetries  #: Point and space group symmetries
@@ -172,7 +172,7 @@ class System(TreeNode):
         self.add_child("export", Export, export, checkpoint_in, system=self)
 
         # Initialize ionic potentials and energies at initial configuration:
-        self.energy = Energy()
+        self.energy = Energy(name=self.electrons.fillings.free_energy_name)
         self.ions.update(self)
 
         log.info(f"\nInitialization completed at t[s]: {rc.clock():.2f}\n")
