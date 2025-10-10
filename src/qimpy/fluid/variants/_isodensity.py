@@ -77,7 +77,7 @@ class GLSSA13(LA12):
         Dshape = self.shape.gradient()
         surface_density = FieldR(Dshape.grid, data=Dshape.data.norm(dim=0))
         surface_area = surface_density.integral().item()
-        energy["Cavitation"] = self.cavity_tension * surface_area
+        energy["Acavity"] = self.cavity_tension * surface_area
         if self.shape.requires_grad:
             self.shape.grad -= (
                 self.cavity_tension * (Dshape / surface_density).divergence()
