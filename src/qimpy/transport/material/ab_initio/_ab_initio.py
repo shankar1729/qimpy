@@ -47,6 +47,7 @@ class AbInitio(Material):
     L: Optional[torch.Tensor]  #: Angular momentum matrix elements
     R: Optional[torch.Tensor]  #: Position matrix elements (TODO: yet to be added)
     B: Optional[torch.Tensor]  #: Constant applied external field
+    nk_grid: Optional[torch.Tensor]  #: k-point grid dimensions
     evecs: Optional[torch.Tensor]  #: Unitary rotations w.r.t data due to B, if any
     lindblad: Lindblad  #: ab-initio Lindblad scattering
     relaxation_time: RelaxationTime  #: semi-empirical relaxation time scattering
@@ -123,7 +124,7 @@ class AbInitio(Material):
             attrs = data_file.attrs
             spinorial = bool(attrs["spinorial"])
             haveL = bool(attrs["haveL"])
-            haveAdj = ("k_adj" in data_file)
+            haveAdj = "k_adj" in data_file
             if orbital_zeeman is None:
                 useL = haveL
             else:
@@ -152,6 +153,7 @@ class AbInitio(Material):
             self.k_adj = self.read_vectors(data_file, "k_adj") if haveAdj else None
             # Bit of a hack
             self.R = self.read_vectors_attr(data_file, "R") if "R" in attrs else None
+            self.nk_grid = self.read_vectors_attr(data_file, "nk_grid") if "nk_grid" in attrs else None
             self.P = self.read_vectors(data_file, "P")
             self.S = self.read_vectors(data_file, "S") if spinorial else None
             self.L = self.read_vectors(data_file, "L") if useL else None
@@ -207,7 +209,9 @@ class AbInitio(Material):
                 self.dynamics_terms["light"] = self.light
 
             if (emField is not None) or checkpoint_in.member("emField"):
-                self.add_child("emField", EMField, emField, checkpoint_in, ab_initio=self)
+                self.add_child(
+                    "emField", EMField, emField, checkpoint_in, ab_initio=self
+                )
                 self.dynamics_terms["emField"] = self.emField
 
             if (pulseB is not None) or checkpoint_in.member("pulseB"):
