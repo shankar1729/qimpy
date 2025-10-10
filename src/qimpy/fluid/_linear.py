@@ -4,11 +4,12 @@ import numpy as np
 import torch
 
 from qimpy import log, Energy, TreeNode
+from qimpy.io import CheckpointPath, InvalidInputException
 from qimpy.algorithms import LinearSolve
 from qimpy.grid import Grid, FieldH, FieldR
 from qimpy.grid.coulomb import Coulomb
 from qimpy.profiler import stopwatch
-from . import variants
+from . import variants, DIELECTRIC_PROPERTIES
 
 
 class Variant(Protocol):
@@ -33,22 +34,24 @@ class Variant(Protocol):
 class Linear(LinearSolve[FieldH]):
     grid: Grid
     coulomb: Coulomb
-    eps_bulk: float  #: Bulk dielectric constant
+    epsilon_0: float  #: bulk static dielectric constant
     variant: Variant  #: variant of cavity shape and cavitation model
 
     energy: Energy  #: energy components
     phi_tilde: FieldH  #: net electrostatic potential
     epsilon: FieldR  #: spatially varying dielectric constant
+    Kkernel: torch.Tensor  #: preconditioner kernel
 
     def __init__(
         self,
         *,
         grid: Grid,
         coulomb: Coulomb,
-        checkpoint_in=None,
-        n_iterations=100,
-        gradient_threshold=1e-8,
-        eps_bulk=78.4,
+        checkpoint_in: CheckpointPath = CheckpointPath(),
+        n_iterations: int = 100,
+        gradient_threshold: float = 1e-8,
+        epsilon_0: Optional[float] = None,
+        solvent: str = "",
         GLSSA13: Optional[Union[dict, variants.GLSSA13]] = None,
         LA12: Optional[Union[dict, variants.LA12]] = None,
     ):
@@ -60,12 +63,25 @@ class Linear(LinearSolve[FieldH]):
         )
         self.grid = grid
         self.coulomb = coulomb
-        self.eps_bulk = eps_bulk
+
+        if solvent:
+            if solvent not in DIELECTRIC_PROPERTIES:
+                raise InvalidInputException(
+                    f"{solvent = } not recognized in Linear."
+                    f" Recognized options: {', '.join(DIELECTRIC_PROPERTIES.keys())}"
+                )
+            self.epsilon_0 = DIELECTRIC_PROPERTIES[solvent].epsilon_0
+        else:
+            if epsilon_0 is None:
+                raise InvalidInputException("epsilon_0 or solvent must be specified")
+        if epsilon_0 is not None:
+            self.epsilon_0 = epsilon_0
+
         self.add_child_one_of(
             "variant",
             checkpoint_in,
-            TreeNode.ChildOptions("glssa13", variants.GLSSA13, GLSSA13),
-            TreeNode.ChildOptions("la12", variants.LA12, LA12),
+            TreeNode.ChildOptions("GLSSA13", variants.GLSSA13, GLSSA13),
+            TreeNode.ChildOptions("LA12", variants.LA12, LA12),
             have_default=True,
         )
 
@@ -76,7 +92,7 @@ class Linear(LinearSolve[FieldH]):
         iG = grid.get_mesh("H").to(torch.double)
         Gsq = (iG @ grid.lattice.Gbasis.T).square().sum(dim=-1)
         GSQ_CUT = 1e-12  # regularization
-        self.Kkernel = torch.clamp(Gsq, min=GSQ_CUT).reciprocal() / self.eps_bulk
+        self.Kkernel = torch.clamp(Gsq, min=GSQ_CUT).reciprocal() / self.epsilon_0
         self.Kkernel[Gsq < GSQ_CUT] = 0.0  # project out null-space
 
     def hessian(self, phi_tilde: FieldH) -> FieldH:
@@ -90,7 +106,7 @@ class Linear(LinearSolve[FieldH]):
     def update(self, n_tilde: FieldH, rho_tilde: FieldH) -> None:
         self.variant.update_shape(n_tilde)
         shape = self.variant.shape
-        self.epsilon = 1.0 + (self.eps_bulk - 1.0) * shape
+        self.epsilon = 1.0 + (self.epsilon_0 - 1.0) * shape
 
         n_iter = self.solve(rho_tilde, self.phi_tilde)
         log.info(f"  Fluid: solve completed in {n_iter} iterations")
@@ -104,7 +120,7 @@ class Linear(LinearSolve[FieldH]):
             grad_phi_sq = (~self.phi_tilde.gradient()).data.square().sum(dim=0)
             shape.requires_grad_(True)
             shape.grad = FieldR(
-                self.grid, data=(-(self.eps_bulk - 1) / (8 * np.pi)) * grad_phi_sq
+                self.grid, data=(-(self.epsilon_0 - 1) / (8 * np.pi)) * grad_phi_sq
             )
 
         # Cavitation terms:

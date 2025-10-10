@@ -21,7 +21,8 @@ electrons:
     smearing: no
 
 geometry: relax
-fluid: 
+fluid:
+  solvent: H2O
   linear:
     GLSSA13: {}
 

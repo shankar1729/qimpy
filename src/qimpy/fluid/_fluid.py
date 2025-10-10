@@ -33,6 +33,7 @@ class Fluid(TreeNode):
         grid: Grid,
         coulomb: Coulomb,
         checkpoint_in: CheckpointPath = CheckpointPath(),
+        solvent: str = "",
         linear: Optional[Union[dict, Linear]] = None,
     ) -> None:
         """Specify one of the supported fluid models.
@@ -40,6 +41,8 @@ class Fluid(TreeNode):
 
         Parameters
         ----------
+        solvent
+            :yaml:`Name of solvent to load default model parameters.`
         linear
             :yaml:`Linear-response solvation model.`
         """
@@ -49,7 +52,9 @@ class Fluid(TreeNode):
             "model",
             checkpoint_in,
             ChildOptions("null", Null, None),
-            ChildOptions("linear", Linear, linear, grid=grid, coulomb=coulomb),
+            ChildOptions(
+                "linear", Linear, linear, grid=grid, coulomb=coulomb, solvent=solvent
+            ),
             have_default=True,
         )
         self.enabled = not isinstance(self.model, Null)
