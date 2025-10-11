@@ -4,12 +4,12 @@ import numpy as np
 import torch
 
 from qimpy import log, Energy, TreeNode
-from qimpy.io import CheckpointPath, InvalidInputException
+from qimpy.io import CheckpointPath
 from qimpy.algorithms import LinearSolve
 from qimpy.grid import Grid, FieldH, FieldR
 from qimpy.grid.coulomb import Coulomb
 from qimpy.profiler import stopwatch
-from . import variants, DIELECTRIC_PROPERTIES
+from . import variants, set_solvent_properties, DIELECTRIC_PROPERTIES
 
 
 class Variant(Protocol):
@@ -63,25 +63,16 @@ class Linear(LinearSolve[FieldH]):
         )
         self.grid = grid
         self.coulomb = coulomb
-
-        if solvent:
-            if solvent not in DIELECTRIC_PROPERTIES:
-                raise InvalidInputException(
-                    f"{solvent = } not recognized in Linear."
-                    f" Recognized options: {', '.join(DIELECTRIC_PROPERTIES.keys())}"
-                )
-            self.epsilon_0 = DIELECTRIC_PROPERTIES[solvent].epsilon_0
-        else:
-            if epsilon_0 is None:
-                raise InvalidInputException("epsilon_0 or solvent must be specified")
-        if epsilon_0 is not None:
-            self.epsilon_0 = epsilon_0
-
+        set_solvent_properties(
+            solvent, DIELECTRIC_PROPERTIES, dict(epsilon_0=epsilon_0), self
+        )
         self.add_child_one_of(
             "variant",
             checkpoint_in,
-            TreeNode.ChildOptions("GLSSA13", variants.GLSSA13, GLSSA13),
-            TreeNode.ChildOptions("LA12", variants.LA12, LA12),
+            TreeNode.ChildOptions(
+                "GLSSA13", variants.GLSSA13, GLSSA13, solvent=solvent
+            ),
+            TreeNode.ChildOptions("LA12", variants.LA12, LA12, solvent=solvent),
             have_default=True,
         )
 

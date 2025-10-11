@@ -1,10 +1,13 @@
 """Isodensity-cavity solvation model variants."""
+from typing import Optional, NamedTuple
+
 import torch
 import numpy as np
 
 from qimpy import TreeNode, Energy
 from qimpy.io import CheckpointPath
 from qimpy.grid import FieldR, FieldH
+from .. import set_solvent_properties
 
 
 class LA12(TreeNode):
@@ -22,13 +25,13 @@ class LA12(TreeNode):
     def __init__(
         self,
         *,
-        nc: float = 7e-4,
-        sigma: float = 0.6,
+        nc: Optional[float] = None,
+        sigma: Optional[float] = None,
+        solvent: str = "",
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
         super().__init__()
-        self.nc = nc
-        self.sigma = sigma
+        set_solvent_properties(solvent, LA12_PARAMS, dict(nc=nc, sigma=sigma), self)
 
     def update_shape(self, n_tilde: FieldH) -> None:
         n = (~n_tilde[0]).data
@@ -47,7 +50,17 @@ class LA12(TreeNode):
         pass  # purely electrostatic model
 
 
-class GLSSA13(LA12):
+class LA12_Params(NamedTuple):
+    """Parameters for the LA12 model"""
+
+    nc: float  #: threshold electron density
+    sigma: float  #: transition width in log(n)
+
+
+LA12_PARAMS: dict[str, LA12_Params] = {"H2O": LA12_Params(nc=7e-4, sigma=0.6)}
+
+
+class GLSSA13(TreeNode):
     """Electrostatic + surface tension model with an isodensity cavity, as defined in:
 
         D. Gunceler, K. Letchworth-Weaver, R. Sundararaman, K.A. Schwarz and T.A. Arias,
@@ -59,18 +72,30 @@ class GLSSA13(LA12):
         J. Chem. Phys. 140, 084106 (2014).
     """
 
+    nc: float  #: threshold electron density
+    sigma: float  #: transition width in log(n)
     cavity_tension: float  #: Cavitation energy per unit area
 
     def __init__(
         self,
         *,
-        nc: float = 3.7e-4,
-        sigma: float = 0.6,
-        cavity_tension: float = 5.4e-6,
+        nc: Optional[float] = None,
+        sigma: Optional[float] = None,
+        cavity_tension: Optional[float] = None,
+        solvent: str = "",
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
-        super().__init__(nc=nc, sigma=sigma)
-        self.cavity_tension = cavity_tension
+        super().__init__()
+        set_solvent_properties(
+            solvent,
+            GLSSA13_PARAMS,
+            dict(nc=nc, sigma=sigma, cavity_tension=cavity_tension),
+            self,
+        )
+
+    # Share cavity definition with LA12 (only differs in fit nc values):
+    update_shape = LA12.update_shape
+    propagate_shape_grad = LA12.propagate_shape_grad
 
     def update_energy(self, energy: Energy) -> None:
         """Surface-area based cavitation energy."""
@@ -82,3 +107,16 @@ class GLSSA13(LA12):
             self.shape.grad -= (
                 self.cavity_tension * (Dshape / surface_density).divergence()
             )
+
+
+class GLSSA13_Params(NamedTuple):
+    """Parameters for the LA12 model"""
+
+    nc: float  #: threshold electron density
+    sigma: float  #: transition width in log(n)
+    cavity_tension: float  #: Cavitation energy per unit area
+
+
+GLSSA13_PARAMS: dict[str, GLSSA13_Params] = {
+    "H2O": GLSSA13_Params(nc=3.7e-4, sigma=0.6, cavity_tension=5.4e-6),
+}
