@@ -41,12 +41,14 @@ class AbInitio(Material):
 
     T: float
     mu: float
+    spin_weight: float
     rotation: Optional[torch.Tensor]
     P: torch.Tensor  #: Momentum matrix elements
     S: Optional[torch.Tensor]  #: Spin matrix elements
     L: Optional[torch.Tensor]  #: Angular momentum matrix elements
     R: Optional[torch.Tensor]  #: Position matrix elements (TODO: yet to be added)
     B: Optional[torch.Tensor]  #: Constant applied external field
+    U: Optional[torch.Tensor]  #: Phase matching transformations for adjacent k-points
     nk_grid: Optional[torch.Tensor]  #: k-point grid dimensions
     evecs: Optional[torch.Tensor]  #: Unitary rotations w.r.t data due to B, if any
     lindblad: Lindblad  #: ab-initio Lindblad scattering
@@ -136,7 +138,8 @@ class AbInitio(Material):
             if T > (Tmax := float(attrs["Tmax"])) * (1 + 1e-6):
                 raise InvalidInputException(f"{T = } exceeds {Tmax = }")
             self.T = T
-            wk = 1 / float(attrs["nkTot"])
+            self.spin_weight = 1 if spinorial else 2
+            wk = self.spin_weight / float(attrs["nkTot"])
             nk, n_bands = data_file["E"].shape
             log.info(f"Initializing AbInitio material with {nk = } and {n_bands = }")
             super().__init__(
@@ -151,6 +154,7 @@ class AbInitio(Material):
             self.k[:] = self.read_scalars(data_file, "k")
             self.E[:] = self.read_scalars(data_file, "E")
             self.k_adj = self.read_vectors(data_file, "k_adj") if haveAdj else None
+            self.U = self.read_vectors(data_file, "U") if ("U" in data_file) else None
             # Bit of a hack
             self.R = self.read_vectors_attr(data_file, "R") if "R" in attrs else None
             self.nk_grid = self.read_vectors_attr(data_file, "nk_grid") if "nk_grid" in attrs else None
