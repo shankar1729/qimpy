@@ -65,13 +65,22 @@ class EMField(TreeNode):
         invJ = torch.linalg.inv(Gbasis@dk)
         # Factor of 1/2 added by Hermitian conjugate
         self.grad_phi = torch.einsum("...i,ji->j...", grad_phi, invJ)/2
+        self.R = self.ab_initio.R_elem
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         # Rho dot shape: x1, x2, k, b1, b2
-        result = torch.zeros_like(rho)
+        result = torch.view_as_real(torch.zeros_like(rho))
         F = self.grad_phi
         for comp, k_adj in enumerate(self.ab_initio.k_adj.swapaxes(0, 1)):
-            rho_intermediate = rho[:, :, k_adj].real.swapaxes(3, -1)
-            result += self.advect(rho_intermediate, F[comp][..., None, None, None, None], axis=-1).squeeze(dim=5)
-        return result
+            rho_intermediate = rho[:, :, k_adj]
+            U = self.ab_initio.U[:,comp,:,:,:]
+            rho_intermediate = torch.einsum(
+                    "knba, ...knbc, kncd -> ...kadn", U.conj(), rho_intermediate, U
+            )
+            force = F[comp][..., None, None, None, None, None]  # extra k,a,b,n,r/i
+            result += self.advect(
+                    torch.view_as_real(rho_intermediate), force, axis=-2
+            ).squeeze(dim=-2)
+        return torch.view_as_complex(result)
+

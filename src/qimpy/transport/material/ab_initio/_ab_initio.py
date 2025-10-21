@@ -46,7 +46,7 @@ class AbInitio(Material):
     P: torch.Tensor  #: Momentum matrix elements
     S: Optional[torch.Tensor]  #: Spin matrix elements
     L: Optional[torch.Tensor]  #: Angular momentum matrix elements
-    R: Optional[torch.Tensor]  #: Position matrix elements (TODO: yet to be added)
+    R_elem: Optional[torch.Tensor]  #: Position matrix elements
     B: Optional[torch.Tensor]  #: Constant applied external field
     U: Optional[torch.Tensor]  #: Phase matching transformations for adjacent k-points
     nk_grid: Optional[torch.Tensor]  #: k-point grid dimensions
@@ -161,6 +161,7 @@ class AbInitio(Material):
             self.P = self.read_vectors(data_file, "P")
             self.S = self.read_vectors(data_file, "S") if spinorial else None
             self.L = self.read_vectors(data_file, "L") if useL else None
+            self.R_elem = self.read_vectors(data_file, "R") if "R" in data_file else None
             watch.stop()
 
             # Apply constant magnetic field, if any:
