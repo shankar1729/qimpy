@@ -65,7 +65,7 @@ class EMField(TreeNode):
         invJ = torch.linalg.inv(Gbasis@dk)
         # Factor of 1/2 added by Hermitian conjugate
         self.grad_phi = torch.einsum("...i,ji->j...", grad_phi, invJ)/2
-        self.R = self.ab_initio.R_elem
+        self.grad_phi_R = torch.einsum("dxy,kdij->xykij", self.grad_phi.to(dtype=torch.complex128, device=rc.device), self.ab_initio.R_elem)
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
@@ -82,5 +82,8 @@ class EMField(TreeNode):
             result += self.advect(
                     torch.view_as_real(rho_intermediate), force, axis=-2
             ).squeeze(dim=-2)
-        return torch.view_as_complex(result)
+        result = torch.view_as_complex(result)
+        result += torch.einsum("...ij,...jk->...ik", self.grad_phi_R, rho)
+        result -= torch.einsum("...ij,...jk->...ik", rho, self.grad_phi_R)
+        return result
 
