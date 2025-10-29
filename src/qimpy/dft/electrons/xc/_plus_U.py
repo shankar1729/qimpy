@@ -28,11 +28,42 @@ class PlusU(TreeNode):
         """
         super().__init__()
         self.U_values = {}
+        
+        self.angular_qnum = {'s':0,'p':1,'d':2, 'f':3}
+        
         for key, U in U_values.items():
             specie, orbital = key.split()
-            # TODO: validate and map orbital codes, check against Ions
+            
+            assert specie in self.ions.symbols
+            
             log.info(f"  +U on {specie}: {U}")
             self.U_values[(specie, orbital)] = float(U)
+    
+    def rhoAtom_calc(self, specie: str, orbital: str) -> torch.tensor:
+
+        ions = self.ions
+        symbols = ions.symbols
+        basis = self.electrons.basis
+        
+        orbital_index = get_atomic_orbital_index(ions,basis)
+        orbitals = get_atomic_orbitals(ions,basis)
+
+        ell = self.angular_qnum[orbital]
+        
+        atom_and_orbital_index = torch.logical_and(orbital_index[:,0] == atom_index, orbital_index[:,2] == ell)
+        atom_and_orbital = orbitals[:,:,atom_and_orbital_index,:,:]
+        
+        KS_orbitals = system.electrons.C
+        fillings = system.electrons.fillings.f
+
+        w_spin = 2 // (basis.n_spins * basis.n_spinor)
+        wk = basis.wk
+        wk = torch.complex(wk,torch.zeros_like(wk))
+        
+        psi_phi_inner = KS_orbitals.dot_O(atom_and_orbital).wait()
+        rho = torch.einsum('k,skbm,skb,sknb -> mn',wk,psi_phi_inner,fillings,dagger(psi_phi_inner))
+
+        return rho
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
