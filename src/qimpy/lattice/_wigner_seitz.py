@@ -201,7 +201,7 @@ def get_grid(v_basis: torch.Tensor, tol: float) -> tuple[torch.Tensor, ...]:
     # This sphere should be within shape_min in each direction
     # Therefore shape_min >= Rmax * (R^-1 or G^-1)
     shape_min = Rmax * torch.linalg.inv(v_basis).norm(dim=0)
-    shape_min = torch.ceil(shape_min)
+    shape_min = torch.ceil(shape_min).to(torch.int)
 
     # Identify which lattice vectors are perpendicular to others
     overlap = v_basis.T @ v_basis
