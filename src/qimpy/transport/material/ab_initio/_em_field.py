@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import numpy as np
 import torch
 
 from qimpy import rc, TreeNode
 from qimpy.io import (
     CheckpointPath,
-    Unit,
     CheckpointContext,
     TensorCompatible,
     cast_tensor,
@@ -14,7 +12,8 @@ from qimpy.io import (
 from qimpy.profiler import stopwatch
 from qimpy.transport import material
 from qimpy.transport.advect import Advect
-
+from qimpy.lattice import Lattice
+from qimpy.io import Unit
 
 class EMField(TreeNode):
     """Magnetic field pulse to rotate spins by specific angles."""
@@ -59,26 +58,30 @@ class EMField(TreeNode):
     def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
         self._initialize_fields(patch_id, **params)
 
-    def _initialize_fields(
-        self,
-        patch_id: int,
-        *,
-        grad_phi: torch.Tensor
-    ) -> None:
-
+    def _initialize_fields(self, patch_id: int, *, grad_phi: torch.Tensor) -> None:
         # Spatial gradient of scalar potential
-        self.grad_phi = grad_phi@np.linalg.inv(self.ab_initio.R)
-        print(self.grad_phi)
+        dk = torch.diag(torch.tensor([1/nk for nk in self.ab_initio.nk_grid], device=rc.device))
+        Gbasis = 2 * torch.pi * torch.linalg.inv(self.ab_initio.R.T)
+        invJ = torch.linalg.inv(Gbasis@dk)
+        self.grad_phi = torch.einsum("...i,ji->j...", grad_phi, invJ)
+        self.grad_phi_R = torch.einsum("dxy,kdij->xykij", self.grad_phi.to(dtype=torch.complex128, device=rc.device), self.ab_initio.R_elem)
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         # Rho dot shape: x1, x2, k, b1, b2
-        # Expand rho to include dimensions for adjacent k-points along each component
-        result = torch.zeros_like(rho)
+        result = torch.view_as_real(torch.zeros_like(rho))
         F = self.grad_phi
-        # For each component, copy data for adjacent k-points (along axis 5)
         for comp, k_adj in enumerate(self.ab_initio.k_adj.swapaxes(0, 1)):
-            rho_intermediate = rho[:, :, k_adj].real.swapaxes(3, -1)
-            result += self.advect(rho_intermediate, F[comp], axis=-1).squeeze(dim=3)
+            rho_intermediate = rho[:, :, k_adj]
+            U = self.ab_initio.U[:,comp,:,:,:]
+            rho_intermediate = torch.einsum(
+                    "knba, ...knbc, kncd -> ...kadn", U.conj(), rho_intermediate, U
+            )
+            # Factor of 1/2 added by Hermitian conjugate
+            force = F[comp][..., None, None, None, None, None]/2  # extra k,a,b,n,r/i
+            result += self.advect(
+                    torch.view_as_real(rho_intermediate), force, axis=-2
+            ).squeeze(dim=-2)
+        result = torch.view_as_complex(result)
+        result += 1j*torch.einsum("...ij,...jk->...ik", self.grad_phi_R, rho)
         return result
-        
