@@ -180,7 +180,7 @@ class CheckpointPath(NamedTuple):
             raise CheckpointOverrideException(var_name)  # and raise, when not allowed
 
     def create_dataset(
-        self, name: str, shape: Sequence[int], dtype: np.dtype, **kwargs
+        self, name: str, shape: Sequence[int], dtype: Any, **kwargs
     ) -> Any:
         """Create dataset with `name` within current checkpoint path."""
         assert self.checkpoint is not None
@@ -234,12 +234,12 @@ class CheckpointPath(NamedTuple):
         assert checkpoint is not None
         return str(np.bytes_(checkpoint[path]).decode())
 
-    def __getitem__(self, key: str) -> Any:
+    def __getitem__(self, key) -> Any:
         checkpoint, path = self.relative(key)
         assert checkpoint is not None
         return checkpoint[path]
 
-    def __setitem__(self, key: str, value: Any) -> None:
+    def __setitem__(self, key, value: Any) -> None:
         checkpoint, path = self.relative(key)
         assert checkpoint is not None
         checkpoint[path] = value

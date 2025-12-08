@@ -17,7 +17,7 @@ from qimpy.io import (
 )
 from qimpy.mpi import ProcessGrid
 from .. import Material, fermi
-from . import PackedHermitian, RelaxationTime, Lindblad, Light, PulseB
+from . import PackedHermitian, RelaxationTime, Lindblad, Light, PulseB, EMField
 
 
 class DynamicsTerm(Protocol):
@@ -45,9 +45,11 @@ class AbInitio(Material):
     P: torch.Tensor  #: Momentum matrix elements
     S: Optional[torch.Tensor]  #: Spin matrix elements
     L: Optional[torch.Tensor]  #: Angular momentum matrix elements
+    R: Optional[torch.Tensor]  #: Position matrix elements (TODO: yet to be added)
     B: Optional[torch.Tensor]  #: Constant applied external field
     evecs: Optional[torch.Tensor]  #: Unitary rotations w.r.t data due to B, if any
-    scattering: DynamicsTerm  #: scattering functional
+    lindblad: Lindblad  #: ab-initio Lindblad scattering
+    relaxation_time: RelaxationTime  #: semi-empirical relaxation time scattering
     light: Light  #: light-matter interactions
     pulseB: PulseB  #: magnetic field pulses
     observables: torch.Tensor  #: Observable matrix elements in Schrodinger picture
@@ -67,6 +69,7 @@ class AbInitio(Material):
         relaxation_time: Optional[Union[RelaxationTime, dict]] = None,
         lindblad: Optional[Union[Lindblad, dict]] = None,
         light: Optional[Union[Light, dict]] = None,
+        emField: Optional[Union[EMField, dict]] = None,
         pulseB: Optional[Union[PulseB, dict]] = None,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
@@ -98,6 +101,8 @@ class AbInitio(Material):
             :yaml:`Light-matter interaction (coherent / Lindblad).`
         pulseB
             :yaml:`Magnetic field pulses.`
+        emField
+            :yaml:`Electromagnetic fields.`
         observable_names
             :yaml:`Control which observables will be output.`
             Specify either as a list of names, or a comma-separated string.
@@ -118,6 +123,7 @@ class AbInitio(Material):
             attrs = data_file.attrs
             spinorial = bool(attrs["spinorial"])
             haveL = bool(attrs["haveL"])
+            haveAdj = ("k_adj" in data_file)
             if orbital_zeeman is None:
                 useL = haveL
             else:
@@ -143,6 +149,9 @@ class AbInitio(Material):
 
             self.k[:] = self.read_scalars(data_file, "k")
             self.E[:] = self.read_scalars(data_file, "E")
+            self.k_adj = self.read_vectors(data_file, "k_adj") if haveAdj else None
+            # Bit of a hack
+            self.R = self.read_vectors_attr(data_file, "R") if "R" in attrs else None
             self.P = self.read_vectors(data_file, "P")
             self.S = self.read_vectors(data_file, "S") if spinorial else None
             self.L = self.read_vectors(data_file, "L") if useL else None
@@ -197,6 +206,10 @@ class AbInitio(Material):
                 self.add_child("light", Light, light, checkpoint_in, ab_initio=self)
                 self.dynamics_terms["light"] = self.light
 
+            if (emField is not None) or checkpoint_in.member("emField"):
+                self.add_child("emField", EMField, emField, checkpoint_in, ab_initio=self)
+                self.dynamics_terms["emField"] = self.emField
+
             if (pulseB is not None) or checkpoint_in.member("pulseB"):
                 self.add_child("pulseB", PulseB, pulseB, checkpoint_in, ab_initio=self)
                 self.dynamics_terms["pulseB"] = self.pulseB
@@ -211,6 +224,8 @@ class AbInitio(Material):
         match_jd = re.compile("jd[x-z]$")
         match_S = re.compile("S[x-z]$")
         match_j_S = re.compile("j[x-z]_S[x-z]$")
+        match_L = re.compile("L[x-z]$")
+        match_j_L = re.compile("j[x-z]_L[x-z]$")
         observables = []
         for observable_name in observable_names:
             if observable_name == "n":
@@ -220,10 +235,7 @@ class AbInitio(Material):
                 observables.append(self.P[:, dir_name_to_index[observable_name[1]]])
             elif match_jd.match(observable_name):
                 P_diag = torch.diag_embed(
-                    torch.einsum(
-                        "kbb -> kb",
-                        self.P[:, dir_name_to_index[observable_name[2]]]
-                    )
+                    self.v[:, :, dir_name_to_index[observable_name[2]]]
                 )
                 observables.append(P_diag)
             elif match_S.match(observable_name):
@@ -236,10 +248,21 @@ class AbInitio(Material):
                 Pi = self.P[:, dir_name_to_index[observable_name[1]]]
                 Sj = self.S[:, dir_name_to_index[observable_name[4]]]
                 observables.append(0.5 * (Pi @ Sj + Sj @ Pi))
+            elif match_L.match(observable_name):
+                if self.L is None:
+                    raise InvalidInputException(f"{observable_name = } unavailable")
+                observables.append(self.L[:, dir_name_to_index[observable_name[1]]])
+            elif match_j_L.match(observable_name):
+                if self.L is None:
+                    raise InvalidInputException(f"{observable_name = } unavailable")
+                Pi = self.P[:, dir_name_to_index[observable_name[1]]]
+                Lj = self.L[:, dir_name_to_index[observable_name[4]]]
+                observables.append(0.5 * (Pi @ Lj + Lj @ Pi))
             else:
                 raise InvalidInputException(f"{observable_name = } is not supported")
         self.observables = torch.stack(observables, dim=0)
         self.observable_names = list(observable_names)
+        self.include_coherent = False
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
@@ -290,6 +313,20 @@ class AbInitio(Material):
         size = (self.nk_mine,) + dset.shape[1:]
         return data_file.read_slice(dset, offset, size)
 
+    def read_vectors_attr(self, data_file: Checkpoint, name: str) -> torch.Tensor:
+        """Read quantities that transform as a vector with rotations from data_file
+        (stored as attribute).
+        The second index is assumed to be the Cartesian index."""
+        dset = data_file.attrs[name]
+        offset = (self.k_division.i_start,) + (0,) * (len(dset.shape) - 1)
+        size = (self.nk_mine,) + dset.shape[1:]
+        result = data_file.read_slice(dset, offset, size)
+        if self.rotation is not None:
+            result = torch.einsum(
+                "ij, kj... -> ki...", self.rotation.to(result.dtype), result
+            )
+        return result
+
     def read_vectors(self, data_file: Checkpoint, name: str) -> torch.Tensor:
         """Read quantities that transform as a vector with rotations from data_file.
         The second index is assumed to be the Cartesian index."""
@@ -307,6 +344,7 @@ class AbInitio(Material):
         """Apply transformation by `evecs` to final two band dimensions.
         For convenience, handles optional tensors = None correctly."""
         if M is not None:
+            assert self.evecs is not None
             M[:] = torch.einsum(
                 "kba, k...bc, kcd -> k...ad", self.evecs.conj(), M, self.evecs
             )
@@ -319,7 +357,7 @@ class AbInitio(Material):
     def zeemanH(self, B: torch.Tensor) -> torch.Tensor:
         """Get Zeeman Hamiltonian due to specified external magnetic fields."""
         g_e = Unit.MAP["g_e"]  # spin gyromagnetic ratio magnitude
-        muB_B = (B * Unit.MAP["mu_B"]).to(self.S.dtype)
+        muB_B = (B * Unit.MAP["mu_B"]).to(torch.complex128)
         H = torch.einsum("...i, kiab -> ...kab", muB_B * g_e * 0.5, self.S)
         if self.L is not None:
             H += torch.einsum("...i, kiab -> ...kab", muB_B, self.L)
@@ -348,7 +386,7 @@ class AbInitio(Material):
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         """Overall drho/dt in interaction picture.
         Input and output rho are in packed (real) form."""
-        if not self.dynamics_terms:
+        if not self.dynamics_terms and not self.include_coherent:
             return torch.zeros_like(rho)
         watch = StopWatch("AbInitio.rho_dot_pre")
         rho = rho.unflatten(-1, (self.nk_mine, self.n_bands, self.n_bands))
@@ -362,6 +400,8 @@ class AbInitio(Material):
 
         # Compute rho_dot (upto an overall +h.c.) in Schrodinger picture:
         rho_dot_S = torch.zeros_like(rho_S)
+        if self.include_coherent:
+            rho_dot_S += 1j * torch.einsum("...kab, kb -> ...kab", rho_S, self.E)
         for dynamics_term in self.dynamics_terms.values():
             rho_dot_S += dynamics_term.rho_dot(rho_S, t, patch_id)
 

@@ -6,6 +6,12 @@ import torch
 class Energy(dict[str, Union[float, torch.Tensor]]):
     """Energy of system with access to components"""
 
+    name: str  #: standard label for (free) energy type, e.g., E, A, Phi etc.
+
+    def __init__(self, name: str = "E") -> None:
+        super().__init__()
+        self.name = name
+
     def __float__(self) -> float:
         """Compute total energy from energy components"""
         return float(sum(self.values()))
@@ -19,17 +25,6 @@ class Energy(dict[str, Union[float, torch.Tensor]]):
         terms[0].append("-" * 37)  # separator
         terms[0].append(f"{self.name:>9s} = {float(self):25.16f}")  # total
         return "\n".join(terms[0])
-
-    @property
-    def name(self) -> str:
-        """Appropriate name of (free) energy based on components."""
-        if "Eband" in self:
-            return "Eband"  # Band structure energy
-        if "-muN" in self:
-            return "G"  # Grand free energy
-        if "-TS" in self:
-            return "F"  # Helmholtz free energy
-        return "E"  # Energy
 
     def sum_tensor(self) -> Optional[torch.Tensor]:
         result = None

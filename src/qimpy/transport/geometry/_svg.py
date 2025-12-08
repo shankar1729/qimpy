@@ -94,7 +94,7 @@ def parse_svg(
             Npoints = 2 * int(np.ceil(spline_length(spline) / grid_spacing))
             t_spline = (np.arange(Npoints)[:, None] + 0.5) / Npoints
             points = evaluate_spline(spline, t_spline)
-            pass_throughs.append(np.any(within_circles_np(apertures, points)))
+            pass_throughs.append(bool(np.any(within_circles_np(apertures, points))))
 
     # Process mesh geometry:
     vertices, edges = weld_points(splines, tol=tol)

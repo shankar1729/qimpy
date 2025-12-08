@@ -7,21 +7,21 @@ from ase.io import read
 from qimpy.io import Unit
 
 
-def _parse_cif(cif_file) -> (dict, dict):
+def _parse_cif(cif_file) -> tuple[dict, dict]:
 
-    cif_data = read(cif_file,format="cif")
-    
+    cif_data = read(cif_file, format="cif")
+
     latt_vec = cif_data.get_cell()[:] * Unit.MAP["Angstrom"]
     coords = cif_data.get_scaled_positions()
     species = cif_data.get_chemical_symbols()
     pbc = cif_data.get_pbc()
-    
+
     lattice = {
         "vector1": latt_vec[0, :].tolist(),
         "vector2": latt_vec[1, :].tolist(),
         "vector3": latt_vec[2, :].tolist(),
         "periodic": np.array(pbc).tolist(),
-    } # list(pbc) returns something weird but putting it to an array and back doesn't 
+    }  # list(pbc) returns something weird but putting it to an array and back doesn't
 
     coordinates = [
         [symbol] + position.tolist() for symbol, position in zip(species, coords)
@@ -33,7 +33,7 @@ def _parse_cif(cif_file) -> (dict, dict):
     return lattice, ions
 
 
-def write_yaml(cif_file, yaml_file) -> None:
+def write_yaml(cif_file: str, yaml_file: str) -> None:
     """Write YAML file from CIF file.
 
     Parameters

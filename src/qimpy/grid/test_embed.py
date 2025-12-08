@@ -2,38 +2,42 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from typing import Sequence
-
-from qimpy import rc
+from qimpy import rc, MPI
 from qimpy.lattice import Lattice
-from qimpy.grid import Grid
+from qimpy.grid import Grid, FieldR
 from qimpy.symmetries import Symmetries
 from qimpy.io import log_config
 from qimpy.lattice._wigner_seitz import WignerSeitz
+from qimpy.grid._embed import CoulombEmbedder
 
 
-def check_embed(
-    grid: Grid, latticeCenter: Sequence[float], periodic: np.ndarray
-) -> None:
+def check_embed(grid: Grid) -> None:
     """Check Coulomb embedding procedure on test system"""
+    lattice_center = grid.lattice.center
+    embedder = CoulombEmbedder(grid)
     # Create fake data
-    r = get_r(grid, torch.eye(3), space="R")  # In mesh coords
+    r = get_r(grid, torch.eye(3, device=rc.device), space="R")  # In mesh coords
     sigma_r = 0.005
-    blob = torch.exp(
-        -torch.sum((r - torch.tensor(latticeCenter)) ** 2, dim=-1) / (2 * sigma_r)
-    )
+    blob = torch.exp(-torch.sum((r - lattice_center) ** 2, dim=-1) / (2 * sigma_r))
     blob /= np.sqrt(2 * np.pi * sigma_r**2)
-
-    data1, data2, data3 = extend_grid(blob, grid, periodic, torch.tensor(latticeCenter))
-
-    fig, axs = plt.subplots(1, 3)
-    im = []
-    im.append(show(axs[0], data1.sum(axis=0), "Original data"))
-    im.append(show(axs[1], data2.sum(axis=0), "Embedded data"))
-    im.append(show(axs[2], data3.sum(axis=0), "Embedded->Original data"))
-    for _im in im:
-        fig.colorbar(_im, orientation="horizontal")
-    plt.show()
+    field1 = FieldR(grid, data=blob)
+    field2 = embedder.embedExpand(field1)
+    field3 = embedder.embedShrink(field2)
+    # data1, data2, data3 = extend_grid(blob, grid, periodic, torch.tensor(latticeCenter))
+    if rc.is_head:
+        fig, axs = plt.subplots(1, 3)
+        im = []
+        im.append(show(axs[0], field1.data.sum(dim=0), "Original data"))
+        im.append(show(axs[1], field2.data.sum(dim=0), "Embedded data"))
+        im.append(show(axs[2], field3.data.sum(dim=0), "Embedded->Original data"))
+        for _im in im:
+            fig.colorbar(_im, orientation="horizontal")
+        plt.show()
+        err = torch.abs(field1.data - field3.data)
+        perr = torch.abs(field1.data - field3.data) / field1.data
+        print("max abs|% error:", err.max(), perr.max())
+        #print("sum % error:", (err / field1.data).sum() / np.prod(err.shape))
+        #print(err.shape, len(err))
 
 
 def extend_grid(
@@ -47,12 +51,7 @@ def extend_grid(
     Sorig = torch.tensor(gridOrig.shape)
     RbasisOrig = gridOrig.lattice.Rbasis
     dimScale = (1, 1, 1) + np.where(periodic, 0, 1)  # extend in non-periodic directions
-    v1, v2, v3 = (RbasisOrig @ np.diag(dimScale)).T
-    latticeEmbed = Lattice(
-        vector1=(v1[0], v1[1], v1[2]),
-        vector2=(v2[0], v2[1], v2[2]),
-        vector3=(v3[0], v3[1], v3[2]),
-    )
+    latticeEmbed = Lattice(Rbasis=(RbasisOrig @ np.diag(dimScale)))
     gridEmbed = Grid(
         lattice=latticeEmbed,
         symmetries=Symmetries(lattice=latticeEmbed),
@@ -77,7 +76,7 @@ def extend_grid(
     # Setup mapping between original and embedding meshes
     ivEmbed = gridEmbed.get_mesh("R", mine=True).reshape(-1, 3)
     diagSembedInv = torch.diag(1 / torch.tensor(gridEmbed.shape))
-    ivEmbed_wsOrig = wsEmbed.reduceIndex(ivEmbed, Sembed)
+    ivEmbed_wsOrig = wsEmbed.reduce_index(ivEmbed, Sembed)
     ivEquivOrig = (ivEmbed_wsOrig + shifts) % Sorig[None, :]
     iEmbed = ivEmbed[:, 2] + Sembed[2] * (ivEmbed[:, 1] + Sembed[1] * ivEmbed[:, 0])
     iEquivOrig = ivEquivOrig[:, 2] + Sorig[2] * (
@@ -107,8 +106,8 @@ def smoothTheta(x) -> torch.Tensor:
 
 def get_r(grid, R, space="R"):
     mesh = grid.get_mesh(space, mine=True)
-    diagSinv = torch.diag(1 / torch.tensor(mesh.shape[0:3]))
-    M = torch.tensor(mesh, dtype=torch.double)
+    diagSinv = torch.diag(1 / torch.tensor(mesh.shape[0:3], device=rc.device))
+    M = mesh.to(torch.double)
     return M @ diagSinv @ R.T
 
 
@@ -116,27 +115,26 @@ def show(ax, data, title=None):
     # ax.plot(center[1] * data.shape[0], center[2] * data.shape[1], 'rx')
     if title:
         ax.set_title(title)
-    return ax.imshow(data, origin="lower")
+    return ax.imshow(data.to(rc.cpu).numpy(), origin="lower")
 
 
 def main():
     log_config()
     rc.init()
-    if rc.is_head:
-        shape = (48, 48, 48)
-        lattice = Lattice(
-            system=dict(name="cubic", modification="body-centered", a=3.3)
-        )
-        # lattice = Lattice(system=dict(name="cubic", a=3.3))
-        grid = Grid(
-            lattice=lattice,
-            symmetries=Symmetries(lattice=lattice),
-            shape=shape,
-            comm=rc.comm,
-        )
-        periodic = np.array([True, True, False])
-        latticeCenter = (0.75, 0.75, 0.75)
-        check_embed(grid, latticeCenter, periodic)
+
+    shape = (24, 24, 126)
+    lattice = Lattice(
+        system=dict(name="tetragonal", a=3.3, c=15.1),
+        periodic=(True, True, False),
+        center=(0.75, 0.75, 0.75),
+    )
+    grid = Grid(
+        lattice=lattice,
+        symmetries=Symmetries(lattice=lattice, override="identity"),
+        shape=shape,
+        comm=rc.comm,
+    )
+    check_embed(grid)
 
 
 if __name__ == "__main__":

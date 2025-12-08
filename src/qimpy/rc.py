@@ -13,6 +13,7 @@ CUDA_VISIBLE_DEVICES before any torch or MPI calls.
 """
 
 from typing import Optional
+import contextlib
 import datetime
 import time
 import os
@@ -33,6 +34,7 @@ __all__ = (
     "device",
     "use_cuda",
     "compute_stream",
+    "compute_stream_context",
     "compute_stream_wait_current",
     "current_stream_wait_compute",
     "current_stream_synchronize",
@@ -159,6 +161,16 @@ def init(
     log.info(
         f"Run totals: {n_procs} processes, {n_threads_tot} threads, {n_gpus_tot} GPUs"
     )
+
+
+def compute_stream_context():
+    """Context manager to enter compute stream.
+    Equivalent to calling `torch.cuda.stream(rc.compute_stream)`, but also
+    works correctly when cuda is not supported (and `compute_stream` is None)."""
+    if compute_stream is None:
+        return contextlib.nullcontext()
+    else:
+        return torch.cuda.StreamContext(compute_stream)
 
 
 def compute_stream_wait_current():

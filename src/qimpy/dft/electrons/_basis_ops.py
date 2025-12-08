@@ -185,7 +185,7 @@ class _ApplyPotentialKernel(_KernelCommon):
         Note that C could have a subset of bands of C_tot passed to __init__."""
         fft_block_slices = get_block_slices(C.n_bands(), self.fft_block_size)
         rc.compute_stream_wait_current()
-        with torch.cuda.stream(rc.compute_stream):
+        with rc.compute_stream_context():
             for fft_block_slice in fft_block_slices:
                 # Expand -> ifft -> multiply V -> fft -> reduce back (on block)
                 VCb = self.expand_ifft(C.coeff, fft_block_slice)
@@ -315,7 +315,7 @@ class _CollectDensityKernel(_KernelCommon):
         Note that C could have a subset of bands of C_tot passed to __init__."""
         fft_block_slices = get_block_slices(C.n_bands(), self.fft_block_size)
         rc.compute_stream_wait_current()
-        with torch.cuda.stream(rc.compute_stream):
+        with rc.compute_stream_context():
             prefac_mine = (
                 prefac[:, :, C.band_division.i_start : C.band_division.i_stop]
                 if C.band_division

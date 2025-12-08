@@ -161,7 +161,7 @@ class Lattice(TreeNode):
             self.Rbasis = get_Rbasis(**system).to(rc.device)
         else:
             assert vectors is not None
-            self.Rbasis = cast_tensor(vectors, device=rc.device).T
+            self.Rbasis = cast_tensor(vectors).T
             if self.Rbasis.shape != (3, 3):
                 raise InvalidInputException("vectors must be a 3 x 3 matrix")
 

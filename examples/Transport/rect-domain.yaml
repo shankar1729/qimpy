@@ -4,6 +4,7 @@ fermi_circle:
   tau-p: .inf
   tau-ee: .inf
   N-theta: 256
+  r_c: 10.0
 
 patch_set:
   svg_file: rect-domain.svg

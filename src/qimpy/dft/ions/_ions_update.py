@@ -164,18 +164,20 @@ class _LocalTerms:
         ions.n_core_tilde.data[0] = (SF * self.Ginterp(self.n_core_coeff)).sum(dim=0)
         ions.rho_tilde.data = (SF * self.rho_kernel).sum(dim=0)
         # Add long-range part of local potential from ionic charge:
-        ions.Vloc_tilde += self.system.coulomb(ions.rho_tilde, correct_G0_width=True)
+        ions.Vloc_tilde += self.system.coulomb.kernel(
+            ions.rho_tilde, correct_G0_width=True
+        )
 
     @stopwatch(name="Ions.LocalTerms.update_grad")
     def update_grad(self) -> None:
         """Accumulate local-pseudopotential force / stress contributions."""
         # Propagate long-range local-potential gradient to ionic charge gradient:
         ions = self.ions
-        ions.rho_tilde.grad += self.system.coulomb(
+        ions.rho_tilde.grad += self.system.coulomb.kernel(
             ions.Vloc_tilde.grad, correct_G0_width=True
         )
         if ions.lattice.requires_grad:
-            ions.lattice.grad += self.system.coulomb.stress(
+            ions.lattice.grad += self.system.coulomb.kernel.stress(
                 ions.Vloc_tilde.grad, ions.rho_tilde
             )
 

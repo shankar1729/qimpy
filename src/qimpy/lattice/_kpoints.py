@@ -106,6 +106,7 @@ class Kmesh(Kpoints):
             with codes that do not support this symmetry eg. BerkeleyGW.
         """
         if checkpoint_in:
+            assert not isinstance(size, float)  # should already be a sequence
             self.size = tuple(size)
             self.offset = tuple(offset)
             self.use_inversion = use_inversion
@@ -265,7 +266,7 @@ class Kpath(Kpoints):
         """
         if checkpoint_in:
             labels = checkpoint_in.read_str("labels").split(",")
-            label_indices = list(checkpoint_in["label_indices"])
+            label_indices = list(checkpoint_in["label_indices"])  # type: ignore
             self.labels = dict(zip(label_indices, labels))
             self.k_length = checkpoint_in.read("k_length")
             super().__init__(process_grid=process_grid, checkpoint_in=checkpoint_in)

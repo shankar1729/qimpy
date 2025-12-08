@@ -112,7 +112,7 @@ class Transport(TreeNode):
             TimeEvolution,
             time_evolution,
             checkpoint_in,
-            geometry=self.geometry,
+            dt_max_sources=[self.geometry, self.material],
         )
 
     def run(self):

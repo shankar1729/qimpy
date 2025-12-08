@@ -6,22 +6,7 @@ import torch
 
 from qimpy.profiler import stopwatch
 from qimpy.dft import electrons
-
-
-def _randn(x: torch.Tensor) -> torch.Tensor:
-    """Generate a complex standard-normal Tensor using state int Tensor x"""
-    # Generate two uniform random numbers for each output:
-    u = []
-    for i_repeat in range(2):
-        # Xor-shift RNG (64-bit):
-        x ^= x << 13
-        x ^= x >> 7
-        x ^= x << 17
-        u.append(((0.5**64) * x) + 0.5)
-    # Complex normal random number using Box-Muller transform:
-    return torch.sqrt(-2.0 * torch.log(u[0])) * torch.exp(  # Magnitude
-        (2j * np.pi) * u[1]
-    )  # Phase
+from qimpy.math import random
 
 
 @stopwatch(name="Wavefunction.randomize")
@@ -73,32 +58,29 @@ def _randomize(
 
     # Initialize random number state based on global coeff index and seed:
     def init_state(basis_index: torch.Tensor) -> torch.Tensor:
-        i_spinor = torch.arange(basis.n_spinor, device=self.coeff.device).view(
-            1, 1, -1, 1
-        )
+        n_spinor = basis.n_spinor
+        i_spinor = torch.arange(n_spinor, device=self.coeff.device).view(1, 1, -1, 1)
+        k_division = basis.kpoints.division
         i_k = torch.arange(
-            basis.kpoints.division.i_start,
-            basis.kpoints.division.i_stop,
-            device=self.coeff.device,
+            k_division.i_start, k_division.i_stop, device=self.coeff.device
         ).view(1, -1, 1, 1)
-        i_spin = torch.arange(basis.n_spins, device=self.coeff.device).view(-1, 1, 1, 1)
+        n_spins = basis.n_spins
+        i_spin = torch.arange(n_spins, device=self.coeff.device).view(-1, 1, 1, 1)
+        n_per_band = n_spins * k_division.n_tot * n_spinor * basis.n_max
         return (
-            (1 + seed)
+            (1 + seed * n_per_band)
             + basis_index.view(1, 1, 1, -1)
-            + basis.n_max
-            * (
-                i_spinor
-                + basis.n_spinor * (i_k + basis.kpoints.division.n_tot * i_spin)
-            )
+            + basis.n_max * (i_spinor + n_spinor * (i_k + k_division.n_tot * i_spin))
         )
 
     # Create random complex numbers for each band with index-based seed:
     i_basis = torch.arange(basis_start, basis_stop, device=self.coeff.device)
     x = init_state(i_basis)
-    for i_discard in range(n_bands_prev + 1):
-        _randn(x)  # get RNG to position appropriate for starting band
+    random.initialize_state(x)
+    for i_discard in range(n_bands_prev):
+        random.randn(x)  # get RNG to position appropriate for starting band
     for b_local in range(b_stop_local - b_start_local):
-        coeff_cur[:, :, b_local] = _randn(x)
+        coeff_cur[:, :, b_local] = random.randn(x)
 
     # Enforce Hermitian symmetry in real case:
     if basis.real_wavefunctions:
@@ -111,10 +93,11 @@ def _randomize(
             iz0_conj = basis.real.iz0_conj
         # Create random complex numbers based on conjugate-index seed:
         x = init_state(iz0_conj)
-        for i_discard in range(n_bands_prev + 1):
-            _randn(x)  # get RNG to position appropriate for starting band
+        random.initialize_state(x)
+        for i_discard in range(n_bands_prev):
+            random.randn(x)  # get RNG to position appropriate for starting band
         for b_local in range(b_stop_local - b_start_local):
-            coeff_cur[:, :, b_local, :, iz0] += _randn(x).conj()
+            coeff_cur[:, :, b_local, :, iz0] += random.randn(x).conj()
         coeff_cur[..., iz0] *= np.sqrt(0.5)  # keep variance = 1
 
     # Mask out inactive basis elements:
@@ -145,9 +128,11 @@ def _randomize_selected(
     # Initialize random number state based on global coeff index and seed:
     def init_state(basis_index: torch.Tensor) -> torch.Tensor:
         i_spinor = torch.arange(basis.n_spinor, device=self.coeff.device).view(1, -1, 1)
-        i_k_global = (basis.kpoints.division.i_start + i_k).view(-1, 1, 1)
+        k_division = basis.kpoints.division
+        i_k_global = (k_division.i_start + i_k).view(-1, 1, 1)
+        n_per_band = basis.n_spins * k_division.n_tot * basis.n_spinor * basis.n_max
         return (
-            (1 + seed)
+            (1 + seed * n_per_band)
             + basis_index.view(1, 1, -1)
             + basis.n_max
             * (
@@ -155,11 +140,7 @@ def _randomize_selected(
                 + basis.n_spinor
                 * (
                     i_band.view(-1, 1, 1)
-                    + n_bands
-                    * (
-                        i_k_global
-                        + basis.kpoints.division.n_tot * i_spin.view(-1, 1, 1)
-                    )
+                    + n_bands * (i_k_global + k_division.n_tot * i_spin.view(-1, 1, 1))
                 )
             )
         )
@@ -169,16 +150,16 @@ def _randomize_selected(
         basis.division.i_start, basis.division.i_stop, device=self.coeff.device
     )
     x = init_state(i_basis)
-    _randn(x)  # warm-up RNG: discard one output after seed
-    self.coeff[(i_spin, i_k, i_band)] = _randn(x)
+    random.initialize_state(x)
+    self.coeff[(i_spin, i_k, i_band)] = random.randn(x)
 
     # Enforce Hermitian symmetry in real case:
     if basis.real_wavefunctions:
         # Create random complex numbers based on conjugate-index seed:
         iz0_local = basis.real.iz0_mine_local
         x = init_state(basis.real.iz0_mine_conj)
-        _randn(x)  # warm-up RNG: discard one output after seed
-        self.coeff[(i_spin, i_k, i_band)][..., iz0_local] += _randn(x).conj()
+        random.initialize_state(x)
+        self.coeff[(i_spin, i_k, i_band)][..., iz0_local] += random.randn(x).conj()
 
     # Mask out inactive basis elements:
     self.coeff[basis.pad_index_mine] = 0.0

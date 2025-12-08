@@ -1,8 +1,21 @@
 from __future__ import annotations
+from typing import Iterator
+
 import torch
 
 
-class TensorList(list[torch.Tensor]):
+class TensorList:
+    data: list[torch.Tensor]
+
+    def __init__(self, data: Iterator[torch.Tensor]):
+        self.data = list(data)
+
+    def __iter__(self):
+        return iter(self.data)
+
+    def __getitem__(self, index: int) -> torch.Tensor:
+        return self.data[index]
+
     def __mul__(self, scale: float) -> TensorList:
         return TensorList(scale * ti for ti in self)
 

@@ -189,7 +189,7 @@ class Lindblad(TreeNode):
         nk = ab_initio.k_division.n_tot
         n_bands = ab_initio.n_bands
         batch_shape = rho.shape[:-3]
-        n_batch = np.prod(batch_shape)
+        n_batch = int(np.prod(batch_shape))
         sendbuf = rho.reshape(n_batch, -1).T.contiguous()
         recvbuf = torch.zeros(
             (n_batch, nk * n_bands * n_bands), dtype=rho.dtype, device=rc.device

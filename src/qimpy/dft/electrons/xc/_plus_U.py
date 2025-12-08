@@ -9,7 +9,7 @@ class PlusU(TreeNode):
     U_values: dict[tuple[str, str], float]  #: map specie, orbital -> U value
 
     def __init__(
-        self, *, checkpoint_in: CheckpointPath = CheckpointPath(), **U_values: dict
+        self, *, checkpoint_in: CheckpointPath = CheckpointPath(), **U_values: float
     ) -> None:
         """Initialize from components and/or dictionary of options.
 
@@ -28,7 +28,7 @@ class PlusU(TreeNode):
         """
         super().__init__()
         self.U_values = {}
-        for key, U in U_values:
+        for key, U in U_values.items():
             specie, orbital = key.split()
             # TODO: validate and map orbital codes, check against Ions
             log.info(f"  +U on {specie}: {U}")

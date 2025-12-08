@@ -211,6 +211,7 @@ class Fillings(TreeNode):
             assert self.n_bands >= 1
             n_bands_method = "explicit"
         else:
+            assert not isinstance(n_bands, int)
             n_bands = cast_default(n_bands)
             assert isinstance(n_bands, str)
             if n_bands == "atomic":
@@ -236,6 +237,7 @@ class Fillings(TreeNode):
             assert self.n_bands_extra >= 1
             n_bands_extra_method = "explicit"
         else:
+            assert not isinstance(n_bands_extra, int)
             n_bands_extra = cast_default(n_bands_extra)
             assert isinstance(n_bands_extra, str) and n_bands_extra.startswith("x")
             n_bands_extra_scale = float(n_bands_extra[1:])
@@ -287,6 +289,16 @@ class Fillings(TreeNode):
                     self.f[i_spin, :, n_full] = f_sum - n_full  # left overs
         self.f_eig = torch.zeros_like(self.f)
 
+    @property
+    def free_energy_name(self) -> str:
+        if self.sigma:
+            if self.mu_constrain:
+                return "Phi"  # Grand potential
+            else:
+                return "A"  # Helmholtz energy
+        else:
+            return "E"  # Energy
+
     @stopwatch
     def update(self, energy: Energy) -> None:
         """Update fillings `f` and chemical potential `mu`, if needed.
@@ -295,7 +307,6 @@ class Fillings(TreeNode):
         if self.sigma is None:  # Fixed fillings
             return
         if np.isnan(self.electrons.deig_max):  # Eigenvalues not yet available
-            energy.setdefault("-TS", 0.0)  # Ensure correct energy name
             return
 
         assert self._smearing_func is not None

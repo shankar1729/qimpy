@@ -16,11 +16,15 @@ class Light(TreeNode):
     gauge: str  #: Gauge: one of velocity or length
     A0: torch.Tensor  #: Vector potential amplitude
     E0: torch.Tensor  #: Electric field amplitude
+    smearing: float  #: Width of Gaussian
     omega: dict[int, torch.Tensor]  #: light frequency
     t0: dict[int, torch.Tensor]  #: center of Gaussian pulse, if sigma is non-zero
     sigma: dict[int, torch.Tensor]  #: width of Gaussian pulse in time, if non-zero
-    smearing: float  #: Width of Gaussian
     amp_mat: dict[int, torch.Tensor]  #: Amplitude matrix, precomputed A0 . P or E0 . R
+    plus: dict[int, torch.Tensor]  #: TODO: document
+    plus_deg: dict[int, torch.Tensor]  #: TODO: document
+    minus: dict[int, torch.Tensor]  #: TODO: document
+    minus_deg: dict[int, torch.Tensor]  #: TODO: document
 
     constant_params: dict[str, torch.Tensor]  #: constant values of parameters
 
@@ -72,16 +76,16 @@ class Light(TreeNode):
         if (A0 is None) == (E0 is None):
             raise InvalidInputException("Exactly one of A0 and E0 must be specified")
         if A0 is not None:
-            A0 = torch.tensor(A0, device=rc.device)
-        elif E0 is not None:
-            A0 = torch.tensor(E0, device=rc.device) / omega
-        if A0.shape[-1] == 2:  # handle complex tensors
-            A0 = torch.view_as_complex(A0)
+            A0_t = torch.tensor(A0, device=rc.device)
+        else:  # E0 is not None
+            A0_t = torch.tensor(E0, device=rc.device) / omega
+        if A0_t.shape[-1] == 2:  # handle complex tensors
+            A0_t = torch.view_as_complex(A0_t)
         else:
-            A0 = A0.to(torch.complex128)
+            A0_t = A0_t.to(torch.complex128)
 
         self.constant_params = dict(
-            A0=A0,
+            A0=A0_t,
             omega=torch.tensor(omega, device=rc.device),
             t0=torch.tensor(t0, device=rc.device),
             sigma=torch.tensor(sigma, device=rc.device),
@@ -128,32 +132,30 @@ class Light(TreeNode):
         if self.gauge == "velocity":
             amp_mat = torch.einsum("i, kiab -> kab", A0, ab_initio.P)
         elif self.gauge == "length":
+            assert ab_initio.R is not None
             amp_mat = torch.einsum("i, kiab -> kab", A0 * omega, ab_initio.R)
         else:
             raise InvalidInputException(
                 "Parameter gauge should only be velocity or length"
             )
 
-        omega = omega * torch.ones([1,1]).to(rc.device) # easy for broadcasting
+        # reshape omega here for convinient broadcasting
+        omega = (omega * torch.ones([1, 1]).to(rc.device))[..., None, None, None]
         self.t0[patch_id] = t0
         self.sigma[patch_id] = sigma
         if self.coherent:
-            self.amp_mat[patch_id] = amp_mat
+            self.amp_mat[patch_id] = amp_mat[None, None]
             self.omega[patch_id] = omega
         else:  #: lindblad version
             prefac = torch.sqrt(torch.sqrt(torch.pi / (8 * smearing**2)))
             exp_factor = -1.0 / (smearing**2)
             Nk, Nb = ab_initio.E.shape
-            dE = ab_initio.E[None, None, ..., None] - ab_initio.E[None, None, :, None, :]
-            plus = prefac * amp_mat * torch.exp(
-                exp_factor * ((dE + omega[..., None, None, None]) ** 2)
-            )
-            minus = prefac * amp_mat * torch.exp(
-                exp_factor * ((dE - omega[..., None, None, None]) ** 2)
-            )
+            dE = (ab_initio.E[..., None] - ab_initio.E[:, None, :])[None, None]
+            plus = prefac * amp_mat * torch.exp(exp_factor * ((dE + omega) ** 2))
+            minus = prefac * amp_mat * torch.exp(exp_factor * ((dE - omega) ** 2))
             plus_deg = plus.swapaxes(-2, -1).conj()
             minus_deg = minus.swapaxes(-2, -1).conj()
-            self.identity_mat = torch.tile(torch.eye(Nb), (1, Nk, 1, 1)).to(rc.device)
+            self.eye = torch.tile(torch.eye(Nb), (1, Nk, 1, 1)).to(rc.device)
             self.plus[patch_id] = plus
             self.plus_deg[patch_id] = plus_deg
             self.minus[patch_id] = minus
@@ -163,21 +165,26 @@ class Light(TreeNode):
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         t0 = self.t0[patch_id]
         sigma = self.sigma[patch_id]
+        # shape of prefac must be (Nx, Ny, 1, 1, 1)
         if sigma > 0:
-            prefac = torch.exp(-((t - t0) ** 2) / (2 * sigma**2)) / torch.sqrt(
-                torch.sqrt(np.pi * sigma**2)
+            prefac = (
+                torch.exp(-((t - t0) ** 2) / (2 * sigma**2))
+                / torch.sqrt(torch.sqrt(np.pi * sigma**2))
+                * torch.ones(rho.shape[:2] + (1, 1, 1)).to(rc.device)
             )
         else:
-            prefac = 1.0
+            prefac = torch.ones(rho.shape[:2] + (1, 1, 1)).to(rc.device)
 
         if self.coherent:
             omega = self.omega[patch_id]
-            prefac = -0.5j * torch.exp(-1j * omega * t) * prefac  # Louiville, symmetrization
-            interaction = prefac[..., None, None, None] * self.amp_mat[patch_id][None, None]
+            prefac = (
+                -0.5j * torch.exp(-1j * omega * t) * prefac
+            )  # Louiville, symmetrization
+            interaction = prefac * self.amp_mat[patch_id]
             return (interaction - interaction.swapaxes(-2, -1).conj()) @ rho
         else:
             prefac = 0.5 * prefac**2
-            I_minus_rho = self.identity_mat - rho
+            I_minus_rho = self.eye - rho
             plus = self.plus[patch_id]
             minus = self.minus[patch_id]
             plus_deg = self.plus_deg[patch_id]

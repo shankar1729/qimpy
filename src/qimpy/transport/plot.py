@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Any
+from typing import Optional, Any, Union
 import argparse
 import glob
 import logging
@@ -9,11 +9,10 @@ import matplotlib.tri as mtri
 from matplotlib.colors import ListedColormap, SymLogNorm
 from matplotlib.patches import FancyArrowPatch
 import numpy as np
-import h5py
 
 from qimpy import rc, log, io
 from qimpy.profiler import stopwatch, StopWatch
-from qimpy.io import log_config
+from qimpy.io import log_config, Checkpoint, CheckpointPath
 from .geometry import BOUNDARY_SLICES, evaluate_spline, within_circles_np
 
 
@@ -59,17 +58,17 @@ def run(
         rho_list = []
         vx_list = []
         vy_list = []
-        with h5py.File(checkpoint_file, "r") as cp:
+        with Checkpoint(checkpoint_file) as cp:
             cp_geom = cp["/geometry"]
             n_quads = cp_geom["quads"].shape[0]
-            i_step_list = np.array(cp_geom.attrs["i_step"])[mine]
-            t_list = np.array(cp_geom.attrs["t"])[mine]
+            i_step_list = np.array(cp_geom["i_step"])[mine]
+            t_list = np.array(cp_geom["t"])[mine]
             for i_quad in range(n_quads):
                 cp_quad = cp_geom[f"quad{i_quad}"]
-                rho_list.append(np.array(cp_quad["density"][mine][..., 0]))
-                v = np.array(cp_quad["flux"][mine][..., 0, :])
-                vx_list.append(v[..., 0])
-                vy_list.append(v[..., 1])
+                observables = np.array(cp_quad["observables"][mine])
+                rho_list.append(observables[..., 0])  # TODO: handle ab_initio cases
+                vx_list.append(observables[..., 1])
+                vy_list.append(observables[..., 2])
 
         # Plot each frame:
         for i_frame_mine, (i_step, t) in enumerate(zip(i_step_list, t_list)):
@@ -170,7 +169,7 @@ def plot_streamlines(
     kwargs = dict(color="k", linewidth=1, arrowsize=0.7)  # defaults
     kwargs.update(**stream_kwargs)
     if transparency:
-        v_mag = np.hypot(vx, vy).filled(0.0)
+        v_mag = np.hypot(vx, vy).filled(0.0)  # type: ignore
         v_rel = np.sqrt(v_mag / v_mag.max())  # partially suppress low v
         colors = np.zeros((256, 4))
         colors[:, -1] = np.linspace(v_rel.min(), 1.0, len(colors))
@@ -196,10 +195,11 @@ class PlotGeometry:
         q_list = []
         triangles = []
         edge_indices = []
-        with h5py.File(checkpoint_file, "r") as cp:
-            grid_spacing = float(cp["/geometry"].attrs["grid_spacing"])
-            contact_names = split_names(str(cp["/geometry"].attrs["contact_names"]))
-            aperture_names = split_names(str(cp["/geometry"].attrs["aperture_names"]))
+        with Checkpoint(checkpoint_file) as cp:
+            cp_geom = CheckpointPath(cp, "/geometry")
+            grid_spacing = float(cp_geom.attrs["grid_spacing"])
+            contact_names = split_names(cp_geom.read_str("contact_names"))
+            aperture_names = split_names(cp_geom.read_str("aperture_names"))
             contacts = np.array(cp["/geometry/contacts"])
             apertures = np.array(cp["/geometry/apertures"])
             vertices = np.array(cp["/geometry/vertices"])
@@ -216,7 +216,7 @@ class PlotGeometry:
                 g_list_flat.append(np.array(cp[f"{prefix}/g"]).flatten())
                 q_list.append(np.array(cp[f"{prefix}/q"]))
                 grid_size = q_list[-1].shape[:-1]
-                n_points = np.prod(grid_size)
+                n_points = int(np.prod(grid_size))
                 indices = n_points_prev + np.arange(n_points).reshape(grid_size)
                 triangles.append(
                     np.stack(
@@ -234,7 +234,9 @@ class PlotGeometry:
                 n_points_prev += n_points
 
                 # Store edge indices for triangulating between patches:
-                edge_indices.append([indices[boundary] for boundary in BOUNDARY_SLICES])
+                edge_indices.append(
+                    [indices[boundary] for boundary in BOUNDARY_SLICES]  # type: ignore
+                )
             self.g_flat = np.concatenate(g_list_flat)
 
         # Add triangles between adjacent segments and collect exterior splines:
@@ -258,15 +260,17 @@ class PlotGeometry:
                 circle_names = contact_names if is_exterior else aperture_names
                 within_each = within_circles_np(circles, points_mid)
                 within_any = np.any(within_each, axis=0)
-                triangle_selection = slice(None)
+                triangle_selection: Union[slice, np.ndarray] = slice(None)
                 if np.count_nonzero(within_any):
                     # Draw partial boundary due to contacts or apertures:
                     sel_blocked = np.where(np.logical_not(within_any))[0]
                     if len(sel_blocked):  # otherwise no boundary left to draw
                         i_breaks = np.where(sel_blocked[:-1] + 1 != sel_blocked[1:])[0]
-                        i_starts = np.concatenate(([0], sel_blocked[i_breaks + 1]))
+                        i_starts = np.concatenate(
+                            (sel_blocked[:1], sel_blocked[i_breaks + 1])
+                        )
                         i_stops = np.concatenate(
-                            (sel_blocked[i_breaks] + 2, [Npoints + 1])
+                            (sel_blocked[i_breaks] + 2, sel_blocked[-1:] + 2)
                         )
                         for i_start, i_stop in zip(i_starts, i_stops):
                             plt.plot(*points[i_start:i_stop].T, "k", ls=linestyle)
@@ -285,7 +289,7 @@ class PlotGeometry:
                         ):
                             selection = np.where(within_contact)[0]
                             if len(selection):
-                                i_mid = len(selection) // 2
+                                i_mid = selection[len(selection) // 2]
                                 position = points_mid[i_mid]
                                 dq = tangents_mid[i_mid]
                                 angle = np.rad2deg(np.arctan2(dq[1], dq[0]))

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional
+from typing import Optional, Sequence
 
 import numpy as np
 import torch
@@ -27,7 +27,7 @@ class ParameterGrid(Geometry):
         self,
         *,
         material: Material,
-        shape: tuple[int, int],
+        shape: Sequence[int],
         dimension1: Optional[dict[str, dict[str, TensorCompatible]]] = None,
         dimension2: Optional[dict[str, dict[str, TensorCompatible]]] = None,
         save_rho: bool = False,
@@ -53,7 +53,7 @@ class ParameterGrid(Geometry):
             If not (default), only observables are written to the checkpoint file.
         """
         assert len(shape) == 2
-        self.shape = tuple(shape)
+        self.shape = (shape[0], shape[1])
 
         # Create fake geometry for parameter grid
         quad_set = QuadSet(
@@ -77,13 +77,14 @@ class ParameterGrid(Geometry):
             save_rho=save_rho,
             checkpoint_in=checkpoint_in,
         )
-        self.dt_max = 0  # disable transport dt limit
+        self.dt_max = np.inf  # disable transport dt limit
 
         # Prepare all parameter values:
         self.parameters: dict[str, torch.Tensor] = {}
         if checkpoint_in:
             cp_parameters = checkpoint_in.relative("parameters")
             cp, path = cp_parameters
+            assert cp is not None
             if path in cp:
                 for name in cp[path].keys():
                     self.parameters[name] = cp_parameters.read(name)

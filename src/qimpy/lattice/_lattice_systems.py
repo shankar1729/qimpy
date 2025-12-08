@@ -14,7 +14,9 @@ def get_Rbasis(*, name: str, **kwargs) -> torch.Tensor:
         "rhombohedral": _get_Rbasis_rhombohedral,
         "monoclinic": _get_Rbasis_monoclinic,
         "triclinic": _get_Rbasis_triclinic,
-    }[name.lower()](**kwargs)
+    }[name.lower()](
+        **kwargs
+    )  # type: ignore
 
 
 def _get_Rbasis_cubic(*, a: float, modification: Optional[str] = None) -> torch.Tensor:

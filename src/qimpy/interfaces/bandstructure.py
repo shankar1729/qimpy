@@ -49,7 +49,7 @@ def plot(
             assert cp_k.attrs["variant_name"] == "k-path"
             k_length = np.array(cp_k["k_length"])
             label_names = cp_k.read_str("labels").split(",")
-            label_indices = list(cp_k["label_indices"])
+            label_indices = list(cp_k["label_indices"])  # type: ignore
             labels: dict[int, str] = dict(zip(label_indices, label_names))
             mu = float(checkpoint["/electrons/fillings"].attrs["mu"])
             mu *= plot_units

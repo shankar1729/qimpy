@@ -8,7 +8,9 @@ from qimpy.io import Checkpoint, CheckpointPath
 from qimpy.mpi import ProcessGrid
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
-from qimpy.grid import Grid, Coulomb, Coulomb_Slab, Coulomb_Isolated
+from qimpy.grid import Grid
+from qimpy.grid.coulomb import Coulomb
+from qimpy.fluid import Fluid
 from .ions import Ions
 from .electrons import Electrons
 from .geometry import Geometry
@@ -30,6 +32,7 @@ class System(TreeNode):
     checkpoint_in: CheckpointPath  #: Input checkpoint
     checkpoint_out: Optional[str]  #: Filename for output checkpoint
     process_grid: ProcessGrid  #: Process grid for parallelization
+    fluid: Fluid  #: Fluid model for solvation
 
     def __init__(
         self,
@@ -39,7 +42,9 @@ class System(TreeNode):
         symmetries: Union[Symmetries, dict, None] = None,
         electrons: Union[Electrons, dict, None] = None,
         grid: Union[Grid, dict, None] = None,
+        coulomb: Union[Coulomb, dict, None] = None,
         geometry: Union[Geometry, dict, str, None] = None,
+        fluid: Union[Fluid, dict, None] = None,
         export: Union[Export, dict, None] = None,
         checkpoint: Optional[str] = None,
         checkpoint_out: Optional[str] = None,
@@ -62,10 +67,14 @@ class System(TreeNode):
             :yaml:`Electronic sub-system.`
         grid
             :yaml:`Charge-density grid.`
+        coulomb
+            :yaml:`Coulomb interactions.`
         geometry
             :yaml:`Geometry actions such as relaxation and dynamics.`
             Specify name of geometry action eg. 'relax' if using default options for
             that action, and if not, specify an explicit  dictionary of parameters.
+        fluid
+            :yaml:`Fluid model for solvation.`
         export
             :yaml:`Export data for other codes.`
         checkpoint
@@ -133,18 +142,16 @@ class System(TreeNode):
             comm=self.electrons.comm,  # Parallel
             ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff,
         )
-        periodic = self.lattice.periodic
-        if all(periodic):
-            log.info("Fully periodic calculation...running in _coulomb.py")
-            self.coulomb = Coulomb(self.grid, self.ions.n_ions)
-        elif all([not x for x in periodic]):
-            log.info("Fully isolated calculation...running in _coulombisolated.py")
-            self.coulomb = Coulomb_Isolated(self.grid, self.ions.n_ions)
-        else:
-            iDir = [i for (i, x) in enumerate(periodic) if not x]
-            log.info("Truncated calculation...running in _coulombslab.py")
-            log.info(f"number of ions {self.ions.n_ions}")
-            self.coulomb = Coulomb_Slab(self.grid, self.ions.n_ions, iDir[0])
+
+        self.add_child(
+            "coulomb",
+            Coulomb,
+            coulomb,
+            checkpoint_in,
+            grid=self.grid,
+            n_ions=self.ions.n_ions,
+        )
+
         self.add_child(
             "geometry",
             Geometry,
@@ -153,11 +160,19 @@ class System(TreeNode):
             comm=self.electrons.comm,
             lattice=self.lattice,
         )
+        self.add_child(
+            "fluid",
+            Fluid,
+            fluid,
+            checkpoint_in,
+            grid=self.grid,
+            coulomb=self.coulomb,
+        )
 
         self.add_child("export", Export, export, checkpoint_in, system=self)
 
         # Initialize ionic potentials and energies at initial configuration:
-        self.energy = Energy()
+        self.energy = Energy(name=self.electrons.fillings.free_energy_name)
         self.ions.update(self)
 
         log.info(f"\nInitialization completed at t[s]: {rc.clock():.2f}\n")
@@ -179,8 +194,6 @@ class System(TreeNode):
 
     def run(self) -> None:
         """Run any actions specified in the input."""
-        log.info(f"self.geometry in run method of _system {self.geometry}")
-        log.info(f"self.child_names in system.run {self.child_names}")
         self.geometry.run(self)
         self.export(self)
 

@@ -134,6 +134,7 @@ def _initialize_unit_map():
     Unit.MAP["Å"] = Angstrom
     Unit.MAP["Ω"] = Ohm
     Unit.MAP["μ_B"] = mu_B
+    Unit.MAP["V/m"] = V / m
 
     # Angles:
     Unit.MAP["pi"] = math.pi

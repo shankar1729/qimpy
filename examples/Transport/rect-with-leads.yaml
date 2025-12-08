@@ -4,6 +4,7 @@ fermi_circle:
   tau-p: .inf
   tau-ee: 10.0
   N-theta: 256
+  specularity: 0.5
 
 patch_set:
   svg_file: rect-with-leads.svg

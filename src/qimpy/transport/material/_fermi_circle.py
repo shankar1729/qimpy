@@ -9,6 +9,7 @@ from qimpy import rc, MPI
 from qimpy.mpi import ProcessGrid, BufferView, TaskDivision
 from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext
+from qimpy.transport.advect import Advect, N_GHOST, NON_GHOST, GHOST_L, GHOST_R
 from . import Material
 
 
@@ -19,6 +20,11 @@ class FermiCircle(Material):
     vF: float  #: Fermi velocity
     tau_inv_p: float  #: Momentum relaxation rate
     tau_inv_ee: float  #: Electron internal scattering rate (momentum-conserving)
+    theta0: float  #: Initial angle in fermi circle grid
+    specularity: float  #: Specularity of reflection at all boundaries
+    r_c: float  #: Cyclotron radius for extenral magnetic field (disabled if infinity)
+    F_theta: float  #: Angular force in grid coordinates
+    advect: torch.jit.ScriptModule  #: Momentum-space advection logic
 
     def __init__(
         self,
@@ -28,7 +34,9 @@ class FermiCircle(Material):
         N_theta: int,
         tau_p: float,
         tau_ee: float,
+        r_c: float = np.inf,
         theta0: float = 0.0,
+        specularity: float = 1.0,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
@@ -45,9 +53,17 @@ class FermiCircle(Material):
             :yaml:`Number of k along Fermi circle.`
         theta0
             :yaml:`Angle of first k-point.`
+        r_c
+            :yaml:`Cyclotron radius, corresponding to external magnetic field`.
+            If infinite, disable magentic field (default).
+        specularity
+            :yaml:`Specularity of reflection at all surfaces.`
+            Should be in the range of 0 for fully diffuse scattering,
+            to 1 for perfectly specular reflection.
         """
         self.kF = kF
         self.vF = vF
+        self.r_c = r_c
         self.tau_inv_p = 1.0 / tau_p
         self.tau_inv_ee = 1.0 / tau_ee
         super().__init__(
@@ -67,12 +83,21 @@ class FermiCircle(Material):
         self.k[:] = k_hat[self.k_mine] * kF
         self.v[:] = self.v_all[self.k_mine]
         self.theta0 = theta0
+        self.specularity = specularity
 
         # Cached normalizations for collision intergal
         self.nk_inv = 1.0 / N_theta
         self.vv_inv = torch.linalg.inv(
             torch.einsum("...i, ...j -> ij", self.v_all, self.v_all)
         )
+
+        # Initialize F*drho/dk calculator, if needed:
+        if np.isfinite(r_c):
+            self.F_theta = self.vF / (self.r_c * dtheta)
+            self.dt_max = 0.5 / abs(self.F_theta)
+            self.advect = torch.jit.script(Advect())
+        else:
+            self.F_theta = 0.0
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
@@ -83,7 +108,9 @@ class FermiCircle(Material):
         attrs["N_theta"] = self.k_division.n_tot
         attrs["tau_p"] = (1.0 / self.tau_inv_p) if self.tau_inv_p else np.inf
         attrs["tau_ee"] = (1.0 / self.tau_inv_ee) if self.tau_inv_ee else np.inf
+        attrs["r_c"] = self.r_c
         attrs["theta0"] = self.theta0
+        attrs["specularity"] = self.specularity
         return list(attrs.keys())
 
     def initialize_fields(
@@ -92,20 +119,53 @@ class FermiCircle(Material):
         pass  # No spatially-varying / parameter sweep fields yet
 
     def get_contactor(
-        self, n: torch.Tensor, *, dmu: float = 0.0, vD: float = 0.0
+        self, n: torch.Tensor, **kwargs
     ) -> Callable[[float], torch.Tensor]:
-        """Return contact distribution function for specified chemical potential
-        shift and drift velocity. Note that positive vD corresponds to current
-        flowing into the device (along -n), while negative vD flows out (along +n)."""
-        v_hat = self.transport_velocity / self.vF
-        rho_contact = dmu - (n @ v_hat.T) * (vD / self.vF)  # TODO: check
-        return lambda t: rho_contact  # TODO: add time-dependence options
+        return Contactor(self, n, **kwargs)
 
     def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
-        return SpecularReflector(n, self.v_all, self.comm, self.k_division)
+        return SpecularReflector(
+            n, self.v_all, self.comm, self.k_division, self.specularity
+        )
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
+        result = self.rho_dot_collisions(rho)
+        if self.F_theta:
+            # k-space advection due to magnetic fields:
+            F_theta_t = torch.tensor([self.F_theta], device=rc.device)
+            result += self.advect(self.pad_ghost(rho), F_theta_t, axis=-1)
+        return result
+
+    def pad_ghost(self, rho: torch.Tensor) -> torch.Tensor:
+        """Pad by ghost zones for monetum-space advection."""
+        assert self.nk_mine >= N_GHOST
+        nk_mine_padded = self.nk_mine + 2 * N_GHOST
+        rho_padded = torch.zeros(rho.shape[:-1] + (nk_mine_padded,), device=rc.device)
+        rho_padded[..., NON_GHOST] = rho
+        if self.comm.size == 1:
+            rho_padded[..., GHOST_L] = rho[..., GHOST_R]
+            rho_padded[..., GHOST_R] = rho[..., GHOST_L]
+        else:
+            rank = self.comm.rank
+            rank_l = (rank - 1) % self.comm.size  # rank of k domain to the "left"
+            rank_r = (rank + 1) % self.comm.size  # rank of k domain to the "right"
+            send_buf_l = rho[..., GHOST_L].contiguous()
+            send_buf_r = rho[..., GHOST_R].contiguous()
+            recv_buf_l = torch.zeros(rho.shape[:-1] + (N_GHOST,), device=rc.device)
+            recv_buf_r = torch.zeros(rho.shape[:-1] + (N_GHOST,), device=rc.device)
+            requests = [
+                self.comm.Isend(BufferView(send_buf_r), rank_r, 1),
+                self.comm.Isend(BufferView(send_buf_l), rank_l, 2),
+                self.comm.Irecv(BufferView(recv_buf_l), rank_l, 1),
+                self.comm.Irecv(BufferView(recv_buf_r), rank_r, 2),
+            ]
+            MPI.Request.Waitall(requests)  # finish all async communications
+            rho_padded[..., GHOST_L] = recv_buf_l
+            rho_padded[..., GHOST_R] = recv_buf_r
+        return rho_padded
+
+    def rho_dot_collisions(self, rho: torch.Tensor) -> torch.Tensor:
         if not (self.tau_inv_p or self.tau_inv_ee):
             return torch.zeros_like(rho)  # no scattering
 
@@ -141,11 +201,33 @@ class FermiCircle(Material):
         )
 
 
+class Contactor:
+    rho_contact: torch.Tensor  #: Cached constant contact distribution
+
+    def __init__(
+        self, fc: FermiCircle, n: torch.Tensor, *, dmu: float = 0.0, vD: float = 0.0
+    ) -> None:
+        """Return contact distribution function for specified chemical potential
+        shift and drift velocity. Note that positive vD corresponds to current
+        flowing into the device (along -n), while negative vD flows out (along +n)."""
+        v_hat = fc.transport_velocity / fc.vF
+        self.rho_contact = dmu - (n @ v_hat.T) * (vD / fc.vF)  # TODO: check
+
+    def __call__(self, t):
+        # TODO: add time dependence options
+        return self.rho_contact
+
+
 class SpecularReflector:
     """Reflect velocities specularly i.e. with reflection angle = incidence angle."""
 
     def __init__(
-        self, n: torch.Tensor, v: torch.Tensor, comm: MPI.Comm, k_division: TaskDivision
+        self,
+        n: torch.Tensor,
+        v: torch.Tensor,
+        comm: MPI.Comm,
+        k_division: TaskDivision,
+        specularity: float,
     ) -> None:
         assert v.shape[1] == 1  # only for single-band case
         # Find which theta reflects into the first one:
@@ -180,6 +262,28 @@ class SpecularReflector:
             self.send_counts, self.send_offsets = get_counts_offsets(j_proc, comm.size)
             self.send_index = send_sel_index_mine[j_proc.argsort(stable=True)]
 
+        # Prepare input and output projectors for diffuse scattering
+        self.specularity = specularity
+        if specularity != 1.0:
+            # Select outgoing and incoming states at each boundary point:
+            outwards = torch.einsum("ri, ki -> rk", n, v[:, 0]) >= 0.0
+            out_r, out_k = torch.nonzero(outwards, as_tuple=True)
+            in_r, in_k = torch.nonzero(torch.logical_not(outwards), as_tuple=True)
+
+            # Select flattened indices local to current process:
+            ik_start = k_division.i_start
+            nk_mine = k_division.n_mine
+            sel = torch.nonzero(out_k // k_division.n_each == comm.rank).flatten()
+            self.diffuse_out_r = out_r[sel]
+            self.diffuse_out_rk = self.diffuse_out_r * nk_mine + out_k[sel] - ik_start
+            sel = torch.nonzero(in_k // k_division.n_each == comm.rank).flatten()
+            self.diffuse_in_r = in_r[sel]
+            self.diffuse_in_rk = self.diffuse_in_r * nk_mine + in_k[sel] - ik_start
+
+            # Compute normalization factor for projections:
+            _, in_counts = torch.unique_consecutive(in_r, return_counts=True)
+            self.diffuse_normalization = (1.0 - specularity) / in_counts
+
     def __call__(self, rho: torch.Tensor) -> torch.Tensor:
         rho_flat = rho.flatten(1, 2)  # flatten r and k indices
         comm = self.comm
@@ -199,6 +303,27 @@ class SpecularReflector:
                 (BufferView(recv_buf), recv_counts, recv_offsets, mpi_type),
             )
             out_flat = recv_buf[self.recv_index].T
+
+        # Optionally account for diffuse contributions:
+        if self.specularity != 1.0:
+            out_flat *= self.specularity
+
+            # Collect total outgoing rho:
+            rho_out_sum = torch.zeros(rho.shape[:2], device=rc.device)
+            rho_out_sum.index_add_(
+                1, self.diffuse_out_r, rho_flat[:, self.diffuse_out_rk]
+            )
+            if comm.size > 1:
+                comm.Allreduce(MPI.IN_PLACE, BufferView(rho_out_sum))
+
+            # Accumulate to incoming rho with normalization:
+            rho_out_sum *= self.diffuse_normalization
+            out_flat.index_add_(
+                1,
+                self.diffuse_in_rk,
+                rho_out_sum[:, self.diffuse_in_r],
+            )
+
         return out_flat.unflatten(1, rho.shape[1:])  # restore r and k
 
 

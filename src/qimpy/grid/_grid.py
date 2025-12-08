@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Optional, Sequence
+from functools import cache
 
 import numpy as np
 import torch
@@ -159,8 +160,9 @@ class Grid(TreeNode):
     def weight2H(self) -> torch.Tensor:
         """Hermitian-symmetry weights for reduced reciprocal space."""
         split2H = self.split2H
+        n_nyquist = 1 if (self.shape[2] % 2 == 0) else 0
         iz_start = max(1, split2H.i_start) - split2H.i_start
-        iz_stop = min(split2H.n_tot - 1, split2H.i_stop) - split2H.i_start
+        iz_stop = min(split2H.n_tot - n_nyquist, split2H.i_stop) - split2H.i_start
         result = torch.ones(split2H.n_mine, device=rc.device)
         result[iz_start:iz_stop] *= 2.0
         return result
@@ -189,6 +191,7 @@ class Grid(TreeNode):
         mesh1D = self._mesh1D_mine[space] if mine else self._mesh1D[space]
         return torch.stack(torch.meshgrid(*mesh1D, indexing="ij")).permute(1, 2, 3, 0)
 
+    @cache
     def get_gradient_operator(self, space: str) -> torch.Tensor:
         """Get gradient operator in reciprocal space.
 

@@ -8,7 +8,8 @@ from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import ProcessGrid, BufferView
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
-from . import TensorList, Geometry, Patch, parse_svg
+from qimpy.transport.advect import NON_GHOST, GHOST_L, GHOST_R
+from . import TensorList, Geometry, parse_svg
 
 
 class PatchSet(Geometry):
@@ -25,6 +26,7 @@ class PatchSet(Geometry):
         contacts: dict[str, dict],
         grid_size_max: int = 0,
         save_rho: bool = False,
+        cent_diff_deriv: bool = False,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
@@ -53,6 +55,9 @@ class PatchSet(Geometry):
         save_rho
             :yaml:`Whether to write the full density matrices to the checkpoint file.`
             If not (default), only observables are written to the checkpoint file.
+        cent_diff_deriv
+            :yaml:`Whether to use the simple central-difference derivative operator.`
+            The default is choosing from the backward, central or forward derivative.
         """
         self.svg_file = svg_file
         self.svg_unit = svg_unit
@@ -65,11 +70,12 @@ class PatchSet(Geometry):
             grid_size_max=grid_size_max,
             quad_set=parse_svg(svg_file, svg_unit, grid_spacing, list(contacts.keys())),
             save_rho=save_rho,
+            cent_diff_deriv=cent_diff_deriv,
             checkpoint_in=checkpoint_in,
         )
 
         # Initialize spatially-dependent fields, if any:
-        field_params = {}  # TODO: mechanism for input of spatially-varying fields
+        field_params: dict[str, torch.Tensor] = {}  # TODO: fields varying in space
         for patch in self.patches:
             material.initialize_fields(patch.rho, field_params, id(patch))
 
@@ -83,6 +89,7 @@ class PatchSet(Geometry):
         # attrs["contacts"] = self.contacts  # TODO: serialize contacts
         attrs["grid_size_max"] = self.grid_spacing_max
         attrs["save_rho"] = self.save_rho
+        attrs["cent_diff_deriv"] = self.cent_diff_deriv
         return list(attrs.keys()) + super()._save_checkpoint(cp_path, context)
 
     def rho_dot(self, rho: TensorList, t: float) -> TensorList:
@@ -98,16 +105,17 @@ class PatchSet(Geometry):
         """Apply all boundary conditions to `rho` at time `t` and produce
         ghost-padded version. The list contains the data for each patch."""
         # Create padded version for all patches:
-        out_list = TensorList()
-        for patch, rho in zip(self.patches, rho_list):
-            out = torch.zeros(patch.rho_padded_shape, device=rc.device)
-            out[Patch.NON_GHOST, Patch.NON_GHOST] = rho
-            out_list.append(out)
+        out_list = TensorList(
+            torch.zeros(patch.rho_padded_shape, device=rc.device)
+            for patch in self.patches
+        )
+        for out, rho in zip(out_list, rho_list):
+            out[NON_GHOST, NON_GHOST] = rho
 
         # Populate ghost zones across patches where needed:
         requests = []
         pending_reads = []  # keep reference to data so that it doesn't deallocate
-        pending_writes = []  # keep plans for writes till transfers complete
+        pending_writes = list[tuple[int, int, torch.Tensor, Optional[torch.Tensor]]]()
         for i_patch, adjacency in enumerate(self.sub_quad_set.adjacency):
             for i_edge, (other_patch, other_edge) in enumerate(adjacency):
                 # Reflections (always local):
@@ -169,7 +177,7 @@ class PatchSet(Geometry):
                                 self.comm.Irecv(BufferView(ghost_data), read_whose, tag)
                             )
                             pending_writes.append(
-                                [i_patch_mine, i_edge, ghost_data, mask]
+                                (i_patch_mine, i_edge, ghost_data, mask)
                             )
 
         # Finish pending data transfers and writes:
@@ -182,17 +190,17 @@ class PatchSet(Geometry):
 
 # Constants for edge data transfer:
 IN_SLICES = [
-    (slice(None), Patch.GHOST_L),
-    (Patch.GHOST_R, slice(None)),
-    (slice(None), Patch.GHOST_R),
-    (Patch.GHOST_L, slice(None)),
+    (slice(None), GHOST_L),
+    (GHOST_R, slice(None)),
+    (slice(None), GHOST_R),
+    (GHOST_L, slice(None)),
 ]  #: input slice for each edge orientation during edge communication
 
 OUT_SLICES = [
-    (Patch.NON_GHOST, Patch.GHOST_L),
-    (Patch.GHOST_R, Patch.NON_GHOST),
-    (Patch.NON_GHOST, Patch.GHOST_R),
-    (Patch.GHOST_L, Patch.NON_GHOST),
+    (NON_GHOST, GHOST_L),
+    (GHOST_R, NON_GHOST),
+    (NON_GHOST, GHOST_R),
+    (GHOST_L, NON_GHOST),
 ]  #: output slice for each edge orientation during edge communication
 
 FLIP_DIMS = [(0, 1), (0,), None, (1,)]  #: which dims to flip during edge transfer
