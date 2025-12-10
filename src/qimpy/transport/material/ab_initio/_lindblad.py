@@ -182,10 +182,10 @@ class Lindblad(TreeNode):
         log.info(f"P tensor fill fraction: {fill_percent_P:.1f}%")
 
         if detailed_balance in ["none", "emission"]:
-            log.info(f"Setting rho0 = 0.0")
+            log.info(f"Setting rho_dot0 to zero for {detailed_balance} detailed balance scheme")
             self.rho_dot0 = 0 
         else:
-            log.info(f"Computing rho0")
+            log.info(f"Computing rho_dot0 for {detailed_balance} detailed balance scheme")
             self.rho_dot0 = self._calculate(ph.unpack(ab_initio.rho0))
 
         self.constant_params = dict(
@@ -214,11 +214,6 @@ class Lindblad(TreeNode):
             if self.mu0.shape == (1,1):
                 self.mu0 = torch.tile(self.mu0,rho.shape[:2])
             self.rho_dot0 = self._update_rho_dot0(rho)
-        #if self.cC < 7:
-        #    np.save(f'rho_dot_{self.cC}.npy',self.rho_dot0.cpu().numpy())
-        #    self.cC += 1
-        nbands = self.ab_initio.n_bands
-        print(self._calculate(rho)[..., range(nbands), range(nbands)].__abs__().max())
         return self.scale_factor[patch_id] * (self._calculate(rho) - self.rho_dot0)
   
     def _update_rho_dot0(self, rho: torch.Tensor) -> torch.Tensor:
@@ -230,8 +225,6 @@ class Lindblad(TreeNode):
         f = rho[..., brange, brange].real
         mu, fk_eq = self.find_mu(f, self.mu0)
         self.mu0 = mu
-        #H0 = torch.diag_embed(ab_initio.E.to(torch.complex128))[None] 
-        #rho0, _, _ = ab_initio.rho_fermi(H0, mu)
         rho0 = torch.diag_embed(fk_eq)
         return self._calculate(ph.unpack(rho0))
 
