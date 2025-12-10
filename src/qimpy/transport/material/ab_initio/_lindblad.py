@@ -34,7 +34,7 @@ class Lindblad(TreeNode):
         ab_initio: material.ab_initio.AbInitio,
         data_file: Checkpoint,
         scale_factor: float = 1.0,
-        detailed_balance: str = "spatial",
+        detailed_balance: str = "single",
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """
@@ -48,7 +48,6 @@ class Lindblad(TreeNode):
         super().__init__()
         self.ab_initio = ab_initio
         self.detailed_balance = detailed_balance
-        #self.cC = 0
 
         if detailed_balance == "spatial":
             max_dmu = 1e-3
@@ -211,8 +210,8 @@ class Lindblad(TreeNode):
         """drho/dt due to scattering in Schrodinger picture.
         Input and output rho are in unpacked (complex Hermitian) form."""
         if self.detailed_balance == "spatial":
-            if self.mu0.shape == (1,1):
-                self.mu0 = torch.tile(self.mu0,rho.shape[:2])
+            if self.mu0.shape == (1, 1):
+                self.mu0 = torch.tile(self.mu0, rho.shape[:2])
             self.rho_dot0 = self._update_rho_dot0(rho)
         return self.scale_factor[patch_id] * (self._calculate(rho) - self.rho_dot0)
   
