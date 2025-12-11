@@ -1,0 +1,29 @@
+single_band:
+  lattice:
+    periodic: [True, True, False]
+    system:
+      name: hexagonal
+      a: 4.651
+      c: 15  # irrelevant
+  kmesh: [1000, 1000, 1]
+  mu: 0.3 eV
+  T: 50 K
+  v: 0.375
+
+patch_set:
+  svg_file: ../rect-periodic.svg
+  svg_unit: 100.0 nm
+  grid_spacing: 100.0 nm
+
+  contacts:
+    source:
+      dmu: 0.01 eV
+    drain:
+      dmu: -0.01 eV
+
+time_evolution:
+  t_max: 20.0 ps
+  dt_save: 1 ps
+  n_collate: 32
+
+checkpoint_out: animation/advect_{:04d}.h5
