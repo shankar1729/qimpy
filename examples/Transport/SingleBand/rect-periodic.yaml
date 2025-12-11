@@ -13,16 +13,17 @@ single_band:
 patch_set:
   svg_file: ../rect-periodic.svg
   svg_unit: 100.0 nm
-  grid_spacing: 100.0 nm
+  grid_spacing: 200.0 nm
+  save-rho: yes
 
   contacts:
     source:
-      dmu: 0.01 eV
+      dmu: 0.005 eV
     drain:
-      dmu: -0.01 eV
+      dmu: -0.005 eV
 
 time_evolution:
-  t_max: 20.0 ps
+  t_max: 40.0 ps
   dt_save: 1 ps
   n_collate: 32
 

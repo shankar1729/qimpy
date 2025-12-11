@@ -52,6 +52,7 @@ class SingleBand(Material):
             should be periodic on the reciprocal lattice, but this will not matter
             if the selected k are far from the Brillouin zone boundaries.
             This option currently does not support continuing from checkpoints.
+            Exactly only one of v, m and dispersion must be specified.
         mu
             :yaml:`Backround/reference chemical potential of initial state`
         T
@@ -129,14 +130,33 @@ class SingleBand(Material):
         attrs = cp_path.attrs
         attrs["kmesh"] = self.kmesh
         if isinstance(self.dispersion, LinearDispersion):
-            attrs["v"] = self.v
+            attrs["v"] = self.dispersion.v
         if isinstance(self.dispersion, QuadraticDispersion):
-            attrs["m"] = self.m
+            attrs["m"] = self.dispersion.m
         attrs["mu"] = self.mu
         attrs["T"] = self.T
         attrs["nT_below"] = self.nT_below
         attrs["nT_above"] = self.nT_above
-        return list(attrs.keys())
+
+        # Write k-points, velocities and energies:
+        cp, path = cp_path
+        assert cp is not None
+        cp.write_slice(
+            cp.create_dataset_real(f"{path}/k", (self.k_division.n_tot, 3)),
+            (self.k_division.i_start, 0),
+            self.k,
+        )
+        cp.write_slice(
+            cp.create_dataset_real(f"{path}/v", (self.k_division.n_tot, 3)),
+            (self.k_division.i_start, 0),
+            self.v[:, 0, :],
+        )
+        cp.write_slice(
+            cp.create_dataset_real(f"{path}/E", (self.k_division.n_tot,)),
+            (self.k_division.i_start,),
+            self.E[:, 0],
+        )
+        return list(attrs.keys()) + ["k", "v", "E"]
 
     def initialize_fields(
         self, rho: torch.Tensor, params: dict[str, torch.Tensor], patch_id: int
