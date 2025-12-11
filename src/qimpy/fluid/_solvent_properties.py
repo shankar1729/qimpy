@@ -1,6 +1,6 @@
 from typing import NamedTuple, Optional
 
-from qimpy.io import InvalidInputException
+from qimpy.io import Unit, InvalidInputException
 
 
 class DielectricProperty(NamedTuple):
@@ -16,6 +16,19 @@ DIELECTRIC_PROPERTIES: dict[str, DielectricProperty] = {
     "H2O": DielectricProperty(
         epsilon_0=78.4, epsilon_inf=1.77, p_mol=0.92466, N_bulk=4.9383e-3
     ),
+}
+
+
+class IonProperty(NamedTuple):
+    """Ion properties used in Linear and Nonlinear fluid models."""
+
+    Z: float  #: Charge on ion
+    Rhs: float  #: Hard-sphere radius of ion (to set packing limit)
+
+
+ION_PROPERTIES: dict[str, IonProperty] = {
+    "Na+": IonProperty(Z=+1.0, Rhs=1.16 * Unit.MAP["Angstrom"]),
+    "Cl-": IonProperty(Z=-1.0, Rhs=1.67 * Unit.MAP["Angstrom"]),
 }
 
 

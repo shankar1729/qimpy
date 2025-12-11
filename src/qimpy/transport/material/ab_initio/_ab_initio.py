@@ -113,6 +113,7 @@ class AbInitio(Material):
                 * jx_Sx, jx_Sy, ...: spin flux, where jx_Sy = Sy flux along x direction
             By default, only n (number density) is output.
         """
+        super().__init__()
         self.comm = process_grid.get_comm("k")
         self.file = file
         self.orbital_zeeman = orbital_zeeman
@@ -123,7 +124,7 @@ class AbInitio(Material):
             attrs = data_file.attrs
             spinorial = bool(attrs["spinorial"])
             haveL = bool(attrs["haveL"])
-            haveAdj = ("k_adj" in data_file)
+            haveAdj = "k_adj" in data_file
             if orbital_zeeman is None:
                 useL = haveL
             else:
@@ -138,12 +139,11 @@ class AbInitio(Material):
             wk = 1 / float(attrs["nkTot"])
             nk, n_bands = data_file["E"].shape
             log.info(f"Initializing AbInitio material with {nk = } and {n_bands = }")
-            super().__init__(
+            self.initialize(
                 wk=wk,
                 nk=nk,
                 n_bands=n_bands,
                 n_dim=3,
-                checkpoint_in=checkpoint_in,
                 process_grid=process_grid,
             )
 
@@ -207,7 +207,9 @@ class AbInitio(Material):
                 self.dynamics_terms["light"] = self.light
 
             if (emField is not None) or checkpoint_in.member("emField"):
-                self.add_child("emField", EMField, emField, checkpoint_in, ab_initio=self)
+                self.add_child(
+                    "emField", EMField, emField, checkpoint_in, ab_initio=self
+                )
                 self.dynamics_terms["emField"] = self.emField
 
             if (pulseB is not None) or checkpoint_in.member("pulseB"):

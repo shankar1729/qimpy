@@ -41,7 +41,7 @@ class FermiCircle(Material):
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
         """
-        Initialize ab initio material.
+        Initialize Fermi-circle model material.
 
         Parameters
         ----------
@@ -61,17 +61,17 @@ class FermiCircle(Material):
             Should be in the range of 0 for fully diffuse scattering,
             to 1 for perfectly specular reflection.
         """
+        super().__init__()
         self.kF = kF
         self.vF = vF
         self.r_c = r_c
         self.tau_inv_p = 1.0 / tau_p
         self.tau_inv_ee = 1.0 / tau_ee
-        super().__init__(
+        self.initialize(
             wk=1.0 / N_theta,
             nk=N_theta,
             n_bands=1,
             n_dim=2,
-            checkpoint_in=checkpoint_in,
             process_grid=process_grid,
         )
 
