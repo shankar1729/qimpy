@@ -77,8 +77,8 @@ class Material(TreeNode):
     def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
         """Return a function (or callable object) to calculate reflections for a
         sequence of surface points with unit normals (Nsurf x 2). This function will
-        be called with a Nghost x Nsurf x Nkbb_mine tensor, and the reflection should
-        be calculated pointwise in real-space with output of the same dimensions."""
+        be called with a Nsurf x Nkbb_mine tensor, and the reflection should be
+        calculated pointwise in real-space with output of the same dimensions."""
 
     @abstractmethod
     def get_contactor(

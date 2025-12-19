@@ -133,13 +133,11 @@ class PatchSet(Geometry):
                         g_edge = patch.g[EDGES[i_edge]]
                         ghost_data = g_edge * rho_list[i_patch_mine][EDGES[i_edge]]
                         # Reflect:
-                        ghost_data = reflector(ghost_data[None])[
-                            0
-                        ]  # reciprocal space changes
+                        ghost_data = reflector(ghost_data)
                         # Apply contacts, if any:
                         for contact_slice, contactor in patch.contacts[i_edge]:
-                            g = patch.g[EDGES[i_edge]][contact_slice]
-                            ghost_data[contact_slice] = g * contactor(t)[0]
+                            g_slice = g_edge[contact_slice]
+                            ghost_data[contact_slice] = g_slice * contactor(t)
                         # Store back:
                         out_list[i_patch_mine][GHOSTS[i_edge]] = ghost_data
 
@@ -210,7 +208,7 @@ class PatchSet(Geometry):
                     reflector = patch.reflectors[i_edge]
                     if reflector is not None:
                         # Fetch and reflect the edge data as 1 x N x Nkbb:
-                        edge_data = reflector(grho_dot_edges[i_edge][None])[0]
+                        edge_data = reflector(grho_dot_edges[i_edge])
                         # Mask out contacts, if any:
                         for contact_slice, _ in patch.contacts[i_edge]:
                             edge_data[contact_slice] = 0.0

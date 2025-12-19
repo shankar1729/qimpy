@@ -287,46 +287,35 @@ class SpecularReflector:
             self.diffuse_normalization = (1.0 - specularity) / in_counts
 
     def __call__(self, rho: torch.Tensor) -> torch.Tensor:
-        rho_flat = rho.flatten(1, 2)  # flatten r and k indices
+        rho_flat = rho.flatten()
         comm = self.comm
         if comm.size == 1:
-            out_flat = rho_flat[:, self.i_reflected_flat]
+            out_flat = rho_flat[self.i_reflected_flat]
         else:
-            n_ghost, nr, _ = rho.shape  # same on all processes
-            send_buf = rho_flat.T[self.send_index].contiguous()
-            send_counts = self.send_counts * n_ghost
-            send_offsets = self.send_offsets * n_ghost
-            recv_counts = self.recv_counts * n_ghost
-            recv_offsets = self.recv_offsets * n_ghost
+            send_buf = rho_flat[self.send_index].contiguous()
             recv_buf = torch.empty_like(send_buf)
             mpi_type = rc.mpi_type[rho.dtype]
             comm.Alltoallv(
-                (BufferView(send_buf), send_counts, send_offsets, mpi_type),
-                (BufferView(recv_buf), recv_counts, recv_offsets, mpi_type),
+                (BufferView(send_buf), self.send_counts, self.send_offsets, mpi_type),
+                (BufferView(recv_buf), self.recv_counts, self.recv_offsets, mpi_type),
             )
-            out_flat = recv_buf[self.recv_index].T
+            out_flat = recv_buf[self.recv_index]
 
         # Optionally account for diffuse contributions:
         if self.specularity != 1.0:
             out_flat *= self.specularity
 
             # Collect total outgoing rho:
-            rho_out_sum = torch.zeros(rho.shape[:2], device=rc.device)
-            rho_out_sum.index_add_(
-                1, self.diffuse_out_r, rho_flat[:, self.diffuse_out_rk]
-            )
+            rho_out_sum = torch.zeros(rho.shape[:1], device=rc.device)
+            rho_out_sum.index_add_(0, self.diffuse_out_r, rho_flat[self.diffuse_out_rk])
             if comm.size > 1:
                 comm.Allreduce(MPI.IN_PLACE, BufferView(rho_out_sum))
 
             # Accumulate to incoming rho with normalization:
             rho_out_sum *= self.diffuse_normalization
-            out_flat.index_add_(
-                1,
-                self.diffuse_in_rk,
-                rho_out_sum[:, self.diffuse_in_r],
-            )
+            out_flat.index_add_(0, self.diffuse_in_rk, rho_out_sum[self.diffuse_in_r])
 
-        return out_flat.unflatten(1, rho.shape[1:])  # restore r and k
+        return out_flat.unflatten(0, rho.shape)
 
 
 def get_counts_offsets(
