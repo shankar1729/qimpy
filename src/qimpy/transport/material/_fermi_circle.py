@@ -9,7 +9,7 @@ from qimpy import rc, MPI
 from qimpy.mpi import ProcessGrid, BufferView, TaskDivision
 from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext
-from qimpy.transport.advect import Advect, N_GHOST, NON_GHOST, GHOST_L, GHOST_R
+from qimpy.transport.advect import Advect, N_GHOST, NON_GHOST
 from . import Material
 
 
@@ -139,6 +139,8 @@ class FermiCircle(Material):
 
     def pad_ghost(self, rho: torch.Tensor) -> torch.Tensor:
         """Pad by ghost zones for monetum-space advection."""
+        GHOST_L, GHOST_R = slice(0, N_GHOST), slice(-N_GHOST, None)  # HACK: BROKEN
+
         assert self.nk_mine >= N_GHOST
         nk_mine_padded = self.nk_mine + 2 * N_GHOST
         rho_padded = torch.zeros(rho.shape[:-1] + (nk_mine_padded,), device=rc.device)

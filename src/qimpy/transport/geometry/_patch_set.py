@@ -8,7 +8,7 @@ from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import ProcessGrid, BufferView
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
-from qimpy.transport.advect import NON_GHOST, GHOST_L, GHOST_R, N_GHOST
+from qimpy.transport.advect import N_GHOST, NON_GHOST
 from . import TensorList, Geometry, parse_svg
 
 
@@ -113,7 +113,7 @@ class PatchSet(Geometry):
         The list contains the data for each patch."""
         # Create padded g-multiplied version for all patches:
         out_list = [
-            torch.nn.functional.pad(rho * patch.g, [0, 0] + [N_GHOST] * 4)
+            torch.nn.functional.pad(rho * patch.g, (0, 0) + (N_GHOST,) * 4)
             for rho, patch in zip(rho_list, self.patches)
         ]
 
@@ -130,21 +130,18 @@ class PatchSet(Geometry):
                     reflector = patch.reflectors[i_edge]
                     if reflector is not None:
                         # Fetch the data in appropriate orientation:
-                        g_edge = patch.g[IN_SLICES[i_edge]]
-                        ghost_data = g_edge * rho_list[i_patch_mine][IN_SLICES[i_edge]]
-                        if i_edge % 2 == 0:
-                            ghost_data = ghost_data.swapaxes(0, 1)  # short axis first
+                        g_edge = patch.g[EDGES[i_edge]]
+                        ghost_data = g_edge * rho_list[i_patch_mine][EDGES[i_edge]]
                         # Reflect:
-                        ghost_data = reflector(ghost_data)  # reciprocal space changes
-                        ghost_data = ghost_data.flip(dims=(0,))  # flip short axis
+                        ghost_data = reflector(ghost_data[None])[
+                            0
+                        ]  # reciprocal space changes
                         # Apply contacts, if any:
                         for contact_slice, contactor in patch.contacts[i_edge]:
-                            g = patch.g[OUT_SLICES_POST[i_edge]][contact_slice][:, None]
-                            ghost_data[:, contact_slice] = g * contactor(t)
+                            g = patch.g[EDGES[i_edge]][contact_slice]
+                            ghost_data[contact_slice] = g * contactor(t)[0]
                         # Store back:
-                        if i_edge % 2 == 0:
-                            ghost_data = ghost_data.swapaxes(0, 1)  # restore axis order
-                        out_list[i_patch_mine][OUT_SLICES[i_edge]] = ghost_data
+                        out_list[i_patch_mine][GHOSTS[i_edge]] = ghost_data
 
                 # Pass-through boundaries (may involve MPI communication):
                 if other_patch >= 0:
@@ -154,13 +151,10 @@ class PatchSet(Geometry):
                     if read_mine:
                         other_patch_mine = other_patch - self.patch_division.i_start
                         rho = rho_list[other_patch_mine]
-                        g_edge = self.patches[other_patch_mine].g[IN_SLICES[other_edge]]
-                        ghost_data = g_edge * rho[IN_SLICES[other_edge]]
-                        delta_edge = other_edge - i_edge
-                        if delta_edge % 2:
-                            ghost_data = ghost_data.swapaxes(0, 1)
-                        if flip_dims := FLIP_DIMS[delta_edge]:
-                            ghost_data = ghost_data.flip(dims=flip_dims)
+                        g_edge = self.patches[other_patch_mine].g[EDGES[other_edge]]
+                        ghost_data = g_edge * rho[EDGES[other_edge]]
+                        if (other_edge < 2) ^ (i_edge >= 2):
+                            ghost_data = ghost_data.flip(dims=(0,))
                         if not write_mine:
                             write_whose = self.patch_division.whose(i_patch)
                             ghost_data = ghost_data.contiguous()
@@ -180,7 +174,7 @@ class PatchSet(Geometry):
                         else:
                             read_whose = self.patch_division.whose(other_patch)
                             ghost_data = torch.empty_like(
-                                out_list[i_patch_mine][OUT_SLICES[i_edge]]
+                                out_list[i_patch_mine][GHOSTS[i_edge]]
                             )
                             requests.append(
                                 self.comm.Irecv(BufferView(ghost_data), read_whose, tag)
@@ -224,7 +218,7 @@ class PatchSet(Geometry):
                         if (mask := patch.aperture_selections[i_edge]) is not None:
                             edge_data[mask] = 0.0
                         # Accumulate contribution:
-                        grho_dot[OUT_SLICES_POST[i_edge]] += edge_data
+                        grho_dot[EDGES[i_edge]] += edge_data
 
                 # Pass-through boundaries (may involve MPI communication):
                 if other_patch >= 0:
@@ -253,7 +247,7 @@ class PatchSet(Geometry):
                         else:
                             read_whose = self.patch_division.whose(other_patch)
                             edge_data = torch.empty_like(
-                                grho_dot_list[i_patch_mine][0][OUT_SLICES_POST[i_edge]]
+                                grho_dot_list[i_patch_mine][0][EDGES[i_edge]]
                             )
                             requests.append(
                                 self.comm.Irecv(BufferView(edge_data), read_whose, tag)
@@ -270,28 +264,19 @@ class PatchSet(Geometry):
 
 
 # Constants for edge data transfer:
-IN_SLICES = [
-    (slice(None), GHOST_L),
-    (GHOST_R, slice(None)),
-    (slice(None), GHOST_R),
-    (GHOST_L, slice(None)),
-]  #: input slice for each edge orientation during edge communication
+GHOSTS = [
+    (NON_GHOST, 0),
+    (-1, NON_GHOST),
+    (NON_GHOST, -1),
+    (0, NON_GHOST),
+]  #: slices for the edges of the ghost zone
 
-OUT_SLICES = [
-    (NON_GHOST, GHOST_L),
-    (GHOST_R, NON_GHOST),
-    (NON_GHOST, GHOST_R),
-    (GHOST_L, NON_GHOST),
-]  #: output slice for each edge orientation during edge communication
-
-FLIP_DIMS = [(0, 1), (0,), None, (1,)]  #: which dims to flip during edge transfer
-
-OUT_SLICES_POST = [
+EDGES = [
     (slice(None), 0),
     (-1, slice(None)),
     (slice(None), -1),
     (0, slice(None)),
-]  #: output slice for storing rho_dot edge contributions in PatchSet.boundaries_post
+]  #: slices for the edges of the domain
 
 
 def set_ghost_zone(
@@ -302,10 +287,9 @@ def set_ghost_zone(
 ) -> None:
     """Set ghost-zone data, accounting for an aperture mask if any."""
     if mask is None:
-        data[OUT_SLICES[i_edge]] = ghost_data
+        data[GHOSTS[i_edge]] = ghost_data
     else:
-        mask_sel = (slice(None), mask) if (i_edge % 2) else (mask, slice(None))
-        data[OUT_SLICES[i_edge]][mask_sel] = ghost_data[mask_sel]
+        data[GHOSTS[i_edge]][mask] = ghost_data[mask]
 
 
 def accumulate_edge(
@@ -316,6 +300,6 @@ def accumulate_edge(
 ) -> None:
     """Accumulate edge contributions, accounting for an aperture mask if any."""
     if mask is None:
-        data[OUT_SLICES_POST[i_edge]] += edge_data
+        data[EDGES[i_edge]] += edge_data
     else:
-        data[OUT_SLICES_POST[i_edge]][mask] += edge_data[mask]
+        data[EDGES[i_edge]][mask] += edge_data[mask]

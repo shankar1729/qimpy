@@ -9,7 +9,7 @@ from qimpy.io import CheckpointPath
 from qimpy.mpi import globalreduce
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
-from qimpy.transport.advect import Advect, N_GHOST, NON_GHOST, GHOST_L, GHOST_R
+from qimpy.transport.advect import Advect, N_GHOST, NON_GHOST
 from . import within_circles
 
 
@@ -30,8 +30,6 @@ class Patch:
     wk: float  #: Integration weight for the flattened density matrix dimensions
     rho_offset: tuple[int, ...]  #: Offset of density matrix data within that of quad
     rho_shape: tuple[int, ...]  #: Shape of density matrix on patch
-    rho_padded_shape: tuple[int, ...]  #: Shape of density matrix with ghost padding
-    rho_half_padded_shape: tuple[int, ...]  #: Shape of density matrix with half-padding
     rho: torch.Tensor  #: current density matrix on this patch
     advect: torch.jit.ScriptModule  #: Underlying advection logic
     cent_diff_deriv: bool  # using simple central difference operator
@@ -99,11 +97,8 @@ class Patch:
         Nkbb = v.shape[0]  # flattened density-matrix count (Nkbb_mine of material)
         nk_prev = material.k_division.n_prev[material.comm.rank]
         Nkbb_offset = nk_prev * (material.n_bands**2)
-        padding = 2 * N_GHOST
         self.rho_offset = tuple(grid_start) + (Nkbb_offset,)
         self.rho_shape = (N[0], N[1], Nkbb)
-        self.rho_padded_shape = (N[0] + padding, N[1] + padding, Nkbb)
-        self.rho_half_padded_shape = (N[0] + 2, N[1] + 2, Nkbb)
         if checkpoint_in:
             checkpoint, path = checkpoint_in.relative("rho")
             assert checkpoint is not None
@@ -114,14 +109,16 @@ class Patch:
             self.rho = torch.tile(material.rho0.flatten(), (N[0], N[1], 1))
 
         # Store mesh velocities with padding needed for advection:
-        self.V = torch.nn.functional.pad(V, [0] * 4 + [N_GHOST] * 4)
-        self.V[GHOST_L, NON_GHOST] = V[:1]
-        self.V[GHOST_R, NON_GHOST] = V[-1:]
-        self.V[NON_GHOST, GHOST_L] = V[:, :1]
-        self.V[NON_GHOST, GHOST_R] = V[:, -1:]
+        self.V = torch.nn.functional.pad(V, (0,) * 4 + (N_GHOST,) * 4)
+        self.V[0, NON_GHOST] = V[0]
+        self.V[-1, NON_GHOST] = V[-1]
+        self.V[NON_GHOST, 0] = V[:, 0]
+        self.V[NON_GHOST, -1] = V[:, -1]
 
         # Initialize v*drho/dx calculator:
-        self.advect = torch.jit.script(Advect(cent_diff_deriv=cent_diff_deriv))
+        self.advect = torch.jit.script(
+            Advect(cent_diff_deriv=cent_diff_deriv, pad=True)
+        )
 
         # Initialize reflectors if needed:
         self.material = material
@@ -210,8 +207,8 @@ class Patch:
         the domain and the edge contributions that must be reflected/passed-through."""
         V0 = self.V[:, NON_GHOST, :, 0]
         V1 = self.V[NON_GHOST, :, :, 1]
-        out0, outL, outR = self.advect(grho[:, NON_GHOST], V0, 0, retain_padding=True)
-        out1, outB, outT = self.advect(grho[NON_GHOST, :], V1, 1, retain_padding=True)
+        out0, outL, outR = self.advect(grho[:, NON_GHOST], V0, axis=0)
+        out1, outB, outT = self.advect(grho[NON_GHOST, :], V1, axis=1)
         return out0 + out1, [outB, outR, outT, outL]
 
 
