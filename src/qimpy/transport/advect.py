@@ -47,22 +47,35 @@ class Advect(torch.nn.Module):
         slope = minmod(self.slope_conv(f), axis=1)  # n_batch x n_axis
         return slope.unflatten(0, batch_shape)  # restore dimensions
 
-    def forward(self, rho: torch.Tensor, v: torch.Tensor, axis: int) -> torch.Tensor:
-        """Compute v * d`rho`/dx, with velocity `v` along `axis`."""
+    def forward(
+        self, rho: torch.Tensor, v: torch.Tensor, axis: int, retain_padding: bool
+    ) -> list[torch.Tensor]:
+        """Compute advection -d`v``rho`/dx of `rho` with velocity `v` along `axis`.
+        Along `axis`, for a domain of actual length N, `rho` and `v` are ghost-padded
+        with length N + 4. The result contains the contribution within the domain, along
+        with optional left and right edge contributions if `retain_padding` is True.
+        All tensors have equal/broadcastable dimensions along all other axes.
+        """
         # Bring active axis to end
-        rho = rho.swapaxes(axis, -1)
-        v = v.swapaxes(axis, -1)
+        flux = (rho * v).swapaxes(axis, -1)
+        v = v.swapaxes(axis, -1)[..., 1:-1]  # now same dimension as result
 
         # Reconstruction
-        half_slope = 0.5 * self.slope_minmod(rho)
+        half_slope = 0.5 * self.slope_minmod(flux)
 
         # Central difference from half points & Riemann selection based on velocity:
-        rho_diff = rho[..., 1:-1].diff(dim=-1)
-        half_slope_diff = half_slope.diff(dim=-1)
-        result_minus = (rho_diff - half_slope_diff)[..., 1:]
-        result_plus = (rho_diff + half_slope_diff)[..., :-1]
-        delta_rho = torch.where(v < 0.0, result_minus, result_plus)
-        return -(v * delta_rho).swapaxes(axis, -1)  # original axis order; overall sign
+        flux_minus = flux[..., 2:-1] - half_slope[..., 1:]  # - flux from next cell
+        flux_plus = flux[..., 1:-2] + half_slope[..., :-1]  # + flux from prev cell
+        flux_minus[v[..., 1:] >= 0.0] = 0.0  # select v < 0 contributions
+        flux_plus[v[..., :-1] <= 0.0] = 0.0  # select v > 0 contributions
+        flux_minus[..., -1] = 0.0
+        flux_plus[..., 0] = 0.0
+        flux_net = flux_minus + flux_plus
+        out = [-flux_net.diff(dim=-1).swapaxes(axis, -1)]
+        if retain_padding:
+            out.append(-flux_net[..., 0].swapaxes(axis, -1))  # left edge
+            out.append(flux_net[..., -1].swapaxes(axis, -1))  # right edge
+        return out
 
 
 def minmod(f: torch.Tensor, axis: int) -> torch.Tensor:

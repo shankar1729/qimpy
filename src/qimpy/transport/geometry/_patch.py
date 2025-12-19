@@ -9,7 +9,7 @@ from qimpy.io import CheckpointPath
 from qimpy.mpi import globalreduce
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
-from qimpy.transport.advect import Advect, N_GHOST, NON_GHOST
+from qimpy.transport.advect import Advect, N_GHOST, NON_GHOST, GHOST_L, GHOST_R
 from . import within_circles
 
 
@@ -25,13 +25,13 @@ class Patch:
 
     q: torch.Tensor  #: Nx x Ny x 2 Cartesian coordinates
     g: torch.Tensor  #: Nx x Ny x 1 sqrt(metric), with extra dimensipm for broadcasting
-    v: torch.Tensor  #: Nkbb x 2 Cartesian velocities (where Nkbb is flattened k, b, b')
-    V: torch.Tensor  #: Nx x Ny x Nkbb x 2 mesh coordinate velocities
+    V: torch.Tensor  #: Nx_padded x Ny_padded x Nkbb x 2 mesh coordinate velocities
     dt_max: float  #: Maximum stable time step
     wk: float  #: Integration weight for the flattened density matrix dimensions
     rho_offset: tuple[int, ...]  #: Offset of density matrix data within that of quad
     rho_shape: tuple[int, ...]  #: Shape of density matrix on patch
     rho_padded_shape: tuple[int, ...]  #: Shape of density matrix with ghost padding
+    rho_half_padded_shape: tuple[int, ...]  #: Shape of density matrix with half-padding
     rho: torch.Tensor  #: current density matrix on this patch
     advect: torch.jit.ScriptModule  #: Underlying advection logic
     cent_diff_deriv: bool  # using simple central difference operator
@@ -90,19 +90,20 @@ class Patch:
         self.g = torch.linalg.det(metric).sqrt()[:, :, None]
 
         # Initialize velocities:
-        self.v = material.transport_velocity
-        self.V = torch.einsum("ka, ...Ba -> ...kB", self.v, torch.linalg.inv(jacobian))
-        self.dt_max = 0.5 / globalreduce.max(self.V.abs(), material.comm)
+        v = material.transport_velocity
+        V = torch.einsum("ka, ...Ba -> ...kB", v, torch.linalg.inv(jacobian))
+        self.dt_max = 0.5 / globalreduce.max(V.abs(), material.comm)
         self.wk = material.wk
 
         # Initialize distribution function:
-        Nkbb = self.v.shape[0]  # flattened density-matrix count (Nkbb_mine of material)
+        Nkbb = v.shape[0]  # flattened density-matrix count (Nkbb_mine of material)
         nk_prev = material.k_division.n_prev[material.comm.rank]
         Nkbb_offset = nk_prev * (material.n_bands**2)
         padding = 2 * N_GHOST
         self.rho_offset = tuple(grid_start) + (Nkbb_offset,)
         self.rho_shape = (N[0], N[1], Nkbb)
         self.rho_padded_shape = (N[0] + padding, N[1] + padding, Nkbb)
+        self.rho_half_padded_shape = (N[0] + 2, N[1] + 2, Nkbb)
         if checkpoint_in:
             checkpoint, path = checkpoint_in.relative("rho")
             assert checkpoint is not None
@@ -111,6 +112,16 @@ class Patch:
             )
         else:
             self.rho = torch.tile(material.rho0.flatten(), (N[0], N[1], 1))
+
+        # Store mesh velocities with padding needed for advection:
+        self.V = torch.zeros(
+            self.rho_padded_shape + (2,), dtype=V.dtype, device=V.device
+        )
+        self.V[NON_GHOST, NON_GHOST] = V
+        self.V[GHOST_L, NON_GHOST] = V[:1]
+        self.V[GHOST_R, NON_GHOST] = V[-1:]
+        self.V[NON_GHOST, GHOST_L] = V[:, :1]
+        self.V[NON_GHOST, GHOST_R] = V[:, -1:]
 
         # Initialize v*drho/dx calculator:
         self.advect = torch.jit.script(Advect(cent_diff_deriv=cent_diff_deriv))
@@ -162,6 +173,8 @@ class Patch:
                 self.aperture_selections[i_edge] = torch.where(within.any(dim=0))[0]
 
             # Check for any contacts:
+            if not is_reflective_i:
+                continue  # ignore contacts in periodic/pass-through
             within = within_circles(contact_circles, q_edge.detach())
             for i_contact, contact_params_i in enumerate(contact_params):
                 if len(selection := torch.argwhere(within[i_contact])):
@@ -194,11 +207,15 @@ class Patch:
             cp.write_slice(cp[path + "/rho"], self.rho_offset, self.rho)
 
     @stopwatch
-    def rho_dot(self, rho: torch.Tensor) -> torch.Tensor:
-        """Compute rho_dot, given current rho."""
-        return self.advect(rho[:, NON_GHOST], self.V[..., 0], axis=0) + self.advect(
-            rho[NON_GHOST, :], self.V[..., 1], axis=1
-        )
+    def rho_dot(self, rho: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        """Compute rho_dot, given current rho.
+        The input is ghost-padded, while the output contains the contributions within
+        the domain and the edge contributions that must be reflected/passed-through."""
+        V0 = self.V[:, NON_GHOST, :, 0]
+        V1 = self.V[NON_GHOST, :, :, 1]
+        out0, outL, outR = self.advect(rho[:, NON_GHOST], V0, 0, retain_padding=True)
+        out1, outB, outT = self.advect(rho[NON_GHOST, :], V1, 1, retain_padding=True)
+        return out0 + out1, [outB, outR, outT, outL]
 
 
 def to_numpy(f: torch.Tensor) -> np.ndarray:
