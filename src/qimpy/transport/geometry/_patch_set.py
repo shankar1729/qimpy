@@ -3,12 +3,12 @@ from typing import Optional
 
 import torch
 
-from qimpy import MPI, rc
+from qimpy import MPI
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import ProcessGrid, BufferView
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
-from qimpy.transport.advect import NON_GHOST, GHOST_L, GHOST_R
+from qimpy.transport.advect import NON_GHOST, GHOST_L, GHOST_R, N_GHOST
 from . import TensorList, Geometry, parse_svg
 
 
@@ -93,33 +93,29 @@ class PatchSet(Geometry):
         return list(attrs.keys()) + super()._save_checkpoint(cp_path, context)
 
     def rho_dot(self, rho: TensorList, t: float) -> TensorList:
-        # Material contributions:
-        material = self.material
-        rho_dot = TensorList(
-            material.rho_dot(rho_i, t, id(patch))
-            for rho_i, patch in zip(rho, self.patches)
-        )
         # Geometry contributions:
-        rho_padded = self.boundaries_pre(rho, t)
-        rho_dot_edges = []
-        for patch, rho_padded_i, rho_dot_i in zip(self.patches, rho_padded, rho_dot):
-            rho_dot_domain_i, rho_dot_edges_i = patch.rho_dot(rho_padded_i)
-            rho_dot_i[:] += rho_dot_domain_i
-            rho_dot_edges.append(rho_dot_edges_i)
-        self.boundaries_post(rho_dot, rho_dot_edges)
-        return rho_dot
+        grho_padded = self.boundaries_pre(rho, t)
+        grho_dot = [
+            patch.rho_dot(grho_padded_i)
+            for patch, grho_padded_i in zip(self.patches, grho_padded)
+        ]
+        self.boundaries_post(grho_dot)
+        # Add material contributions:
+        return TensorList(
+            grho_dot_i / patch.g + self.material.rho_dot(rho_i, t, id(patch))
+            for (grho_dot_i, _), rho_i, patch in zip(grho_dot, rho, self.patches)
+        )
 
     @stopwatch
-    def boundaries_pre(self, rho_list: TensorList, t: float) -> TensorList:
+    def boundaries_pre(self, rho_list: TensorList, t: float) -> list[torch.Tensor]:
         """Apply all boundary conditions to `rho` at time `t` and produce
-        ghost-padded version. The list contains the data for each patch."""
-        # Create padded version for all patches:
-        out_list = TensorList(
-            torch.zeros(patch.rho_padded_shape, device=rc.device)
-            for patch in self.patches
-        )
-        for out, rho in zip(out_list, rho_list):
-            out[NON_GHOST, NON_GHOST] = rho
+        ghost-padded, g=sqrt(metric)-multipled version suitable for advection.
+        The list contains the data for each patch."""
+        # Create padded g-multiplied version for all patches:
+        out_list = [
+            torch.nn.functional.pad(rho * patch.g, [0, 0] + [N_GHOST] * 4)
+            for rho, patch in zip(rho_list, self.patches)
+        ]
 
         # Populate ghost zones across patches where needed:
         requests = []
@@ -134,7 +130,8 @@ class PatchSet(Geometry):
                     reflector = patch.reflectors[i_edge]
                     if reflector is not None:
                         # Fetch the data in appropriate orientation:
-                        ghost_data = rho_list[i_patch_mine][IN_SLICES[i_edge]]
+                        g_edge = patch.g[IN_SLICES[i_edge]]
+                        ghost_data = g_edge * rho_list[i_patch_mine][IN_SLICES[i_edge]]
                         if i_edge % 2 == 0:
                             ghost_data = ghost_data.swapaxes(0, 1)  # short axis first
                         # Reflect:
@@ -142,7 +139,8 @@ class PatchSet(Geometry):
                         ghost_data = ghost_data.flip(dims=(0,))  # flip short axis
                         # Apply contacts, if any:
                         for contact_slice, contactor in patch.contacts[i_edge]:
-                            ghost_data[:, contact_slice] = contactor(t)
+                            g = patch.g[OUT_SLICES_POST[i_edge]][contact_slice][:, None]
+                            ghost_data[:, contact_slice] = g * contactor(t)
                         # Store back:
                         if i_edge % 2 == 0:
                             ghost_data = ghost_data.swapaxes(0, 1)  # restore axis order
@@ -154,8 +152,10 @@ class PatchSet(Geometry):
                     write_mine = self.patch_division.is_mine(i_patch)
                     tag = 4 * i_patch + i_edge  # unique for each message
                     if read_mine:
-                        rho = rho_list[other_patch - self.patch_division.i_start]
-                        ghost_data = rho[IN_SLICES[other_edge]]
+                        other_patch_mine = other_patch - self.patch_division.i_start
+                        rho = rho_list[other_patch_mine]
+                        g_edge = self.patches[other_patch_mine].g[IN_SLICES[other_edge]]
+                        ghost_data = g_edge * rho[IN_SLICES[other_edge]]
                         delta_edge = other_edge - i_edge
                         if delta_edge % 2:
                             ghost_data = ghost_data.swapaxes(0, 1)
@@ -198,9 +198,9 @@ class PatchSet(Geometry):
 
     @stopwatch
     def boundaries_post(
-        self, rho_dot_list: TensorList, rho_dot_edges_list: TensorList
+        self, grho_dot_list: list[tuple[torch.Tensor, list[torch.Tensor]]]
     ) -> None:
-        """Accumulate edge contributions of rho_dot into appropriate domain points.
+        """Accumulate edge contributions of `grho_dot` into appropriate domain points.
         This is necessary for exact norm conservation in reflection and pass-throughs,
         when velocities don't map exactly across the boundary."""
         requests = []
@@ -211,13 +211,12 @@ class PatchSet(Geometry):
                 # Reflections (always local):
                 if self.patch_division.is_mine(i_patch):
                     i_patch_mine = i_patch - self.patch_division.i_start
+                    grho_dot, grho_dot_edges = grho_dot_list[i_patch_mine]
                     patch = self.patches[i_patch_mine]
                     reflector = patch.reflectors[i_edge]
                     if reflector is not None:
-                        # Fetch the edge data as 1 x N x Nkbb:
-                        edge_data = rho_dot_edges_list[i_patch_mine][i_edge]
-                        # Reflect:
-                        edge_data = reflector(edge_data[None])[0]
+                        # Fetch and reflect the edge data as 1 x N x Nkbb:
+                        edge_data = reflector(grho_dot_edges[i_edge][None])[0]
                         # Mask out contacts, if any:
                         for contact_slice, _ in patch.contacts[i_edge]:
                             edge_data[contact_slice] = 0.0
@@ -225,7 +224,7 @@ class PatchSet(Geometry):
                         if (mask := patch.aperture_selections[i_edge]) is not None:
                             edge_data[mask] = 0.0
                         # Accumulate contribution:
-                        rho_dot_list[i_patch_mine][OUT_SLICES_POST[i_edge]] += edge_data
+                        grho_dot[OUT_SLICES_POST[i_edge]] += edge_data
 
                 # Pass-through boundaries (may involve MPI communication):
                 if other_patch >= 0:
@@ -233,9 +232,8 @@ class PatchSet(Geometry):
                     write_mine = self.patch_division.is_mine(i_patch)
                     tag = 4 * i_patch + i_edge  # unique for each message
                     if read_mine:
-                        edge_data = rho_dot_edges_list[
-                            other_patch - self.patch_division.i_start
-                        ][other_edge]
+                        other_patch_mine = other_patch - self.patch_division.i_start
+                        edge_data = grho_dot_list[other_patch_mine][1][other_edge]
                         if (other_edge < 2) ^ (i_edge >= 2):
                             edge_data = edge_data.flip(dims=(0,))
                         if not write_mine:
@@ -250,12 +248,12 @@ class PatchSet(Geometry):
                         mask = self.patches[i_patch_mine].aperture_selections[i_edge]
                         if read_mine:
                             accumulate_edge(
-                                rho_dot_list[i_patch_mine], i_edge, edge_data, mask
+                                grho_dot_list[i_patch_mine][0], i_edge, edge_data, mask
                             )
                         else:
                             read_whose = self.patch_division.whose(other_patch)
                             edge_data = torch.empty_like(
-                                rho_dot_list[i_patch_mine][OUT_SLICES_POST[i_edge]]
+                                grho_dot_list[i_patch_mine][0][OUT_SLICES_POST[i_edge]]
                             )
                             requests.append(
                                 self.comm.Irecv(BufferView(edge_data), read_whose, tag)
@@ -268,7 +266,7 @@ class PatchSet(Geometry):
         if requests:
             MPI.Request.Waitall(requests)
             for i_patch_mine, i_edge, edge_data, mask in pending_writes:
-                accumulate_edge(rho_dot_list[i_patch_mine], i_edge, edge_data, mask)
+                accumulate_edge(grho_dot_list[i_patch_mine][0], i_edge, edge_data, mask)
 
 
 # Constants for edge data transfer:

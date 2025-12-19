@@ -114,10 +114,7 @@ class Patch:
             self.rho = torch.tile(material.rho0.flatten(), (N[0], N[1], 1))
 
         # Store mesh velocities with padding needed for advection:
-        self.V = torch.zeros(
-            self.rho_padded_shape + (2,), dtype=V.dtype, device=V.device
-        )
-        self.V[NON_GHOST, NON_GHOST] = V
+        self.V = torch.nn.functional.pad(V, [0] * 4 + [N_GHOST] * 4)
         self.V[GHOST_L, NON_GHOST] = V[:1]
         self.V[GHOST_R, NON_GHOST] = V[-1:]
         self.V[NON_GHOST, GHOST_L] = V[:, :1]
@@ -207,14 +204,14 @@ class Patch:
             cp.write_slice(cp[path + "/rho"], self.rho_offset, self.rho)
 
     @stopwatch
-    def rho_dot(self, rho: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
-        """Compute rho_dot, given current rho.
+    def rho_dot(self, grho: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        """Compute g*rho_dot, given current g*rho.
         The input is ghost-padded, while the output contains the contributions within
         the domain and the edge contributions that must be reflected/passed-through."""
         V0 = self.V[:, NON_GHOST, :, 0]
         V1 = self.V[NON_GHOST, :, :, 1]
-        out0, outL, outR = self.advect(rho[:, NON_GHOST], V0, 0, retain_padding=True)
-        out1, outB, outT = self.advect(rho[NON_GHOST, :], V1, 1, retain_padding=True)
+        out0, outL, outR = self.advect(grho[:, NON_GHOST], V0, 0, retain_padding=True)
+        out1, outB, outT = self.advect(grho[NON_GHOST, :], V1, 1, retain_padding=True)
         return out0 + out1, [outB, outR, outT, outL]
 
 
