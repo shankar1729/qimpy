@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any
+from typing import Any, Optional
 
 import torch
 from qimpy import rc
@@ -54,13 +54,26 @@ class Advect(torch.nn.Module):
         return slope.unflatten(0, batch_shape)  # restore dimensions
 
     def forward(
-        self, rho: torch.Tensor, v: torch.Tensor, axis: int
+        self,
+        rho: torch.Tensor,
+        v: torch.Tensor,
+        axis: int,
+        edge_masks: tuple[Optional[torch.Tensor], Optional[torch.Tensor]] = (
+            None,
+            None,
+        ),
     ) -> list[torch.Tensor]:
         """Compute advection -d`v``rho`/dx of `rho` with velocity `v` along `axis`.
         Along `axis`, for a domain of actual length N, `rho` and `v` are ghost-padded
         with length N + 2 if `pad`, and N + 4 otherwise. The result contains the domain
         contribution, along with left and right edge contributions if `pad` is True.
         All tensors have equal/broadcastable dimensions along all other axes.
+
+        If specified, edge_masks control where the incoming flux is zeroed out on the
+        left and right boundaries. For the typical use case with `pad` = True, this
+        mask should zero out the incoming flux, except in contact regions.
+        If the masks are None, the flux is not zeroed out and can lead to double
+        counting with the edge contributions for the `pad` = True case.
         """
         # Bring active axis to end
         flux = (rho * v).swapaxes(axis, -1)
@@ -78,8 +91,14 @@ class Advect(torch.nn.Module):
         flux_plus = (flux + half_slope)[..., :-1]  # + flux from prev cell
         flux_minus[v[..., 1:] >= 0.0] = 0.0  # select v < 0 contributions
         flux_plus[v[..., :-1] <= 0.0] = 0.0  # select v > 0 contributions
-        flux_minus[..., -1] = 0.0
-        flux_plus[..., 0] = 0.0
+        for flux_sign, edge_mask, index in zip(
+            (flux_plus, flux_minus), edge_masks, (0, -1)
+        ):
+            if edge_mask is not None:
+                if axis == 0:
+                    flux_sign[:, edge_mask, index] = 0.0
+                if axis == 1:
+                    flux_sign[edge_mask, :, index] = 0.0
         flux_net = flux_minus + flux_plus
         out = [-flux_net.diff(dim=-1).swapaxes(axis, -1)]
         if self.pad:
