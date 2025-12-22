@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Callable
+from typing import Callable, Optional
 from functools import cache
 
 import numpy as np
@@ -9,7 +9,7 @@ from qimpy import rc, MPI
 from qimpy.mpi import ProcessGrid, BufferView, TaskDivision
 from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext
-from qimpy.transport.advect import Advect, N_GHOST, NON_GHOST
+from qimpy.transport.advect import Advect
 from . import Material
 
 
@@ -23,7 +23,7 @@ class FermiCircle(Material):
     theta0: float  #: Initial angle in fermi circle grid
     specularity: float  #: Specularity of reflection at all boundaries
     r_c: float  #: Cyclotron radius for extenral magnetic field (disabled if infinity)
-    F_theta: float  #: Angular force in grid coordinates
+    F_theta: Optional[torch.Tensor]  #: Angular force in grid coordinates
     advect: torch.jit.ScriptModule  #: Momentum-space advection logic
 
     def __init__(
@@ -93,11 +93,12 @@ class FermiCircle(Material):
 
         # Initialize F*drho/dk calculator, if needed:
         if np.isfinite(r_c):
-            self.F_theta = self.vF / (self.r_c * dtheta)
-            self.dt_max = 0.5 / abs(self.F_theta)
-            self.advect = torch.jit.script(Advect())
+            F_theta = self.vF / (self.r_c * dtheta)
+            self.F_theta = torch.tensor(F_theta, device=rc.device)
+            self.dt_max = 0.5 / abs(F_theta)
+            self.advect = torch.jit.script(Advect(pad=True))
         else:
-            self.F_theta = 0.0
+            self.F_theta = None
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
@@ -131,41 +132,29 @@ class FermiCircle(Material):
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         result = self.rho_dot_collisions(rho)
-        if self.F_theta:
+        if self.F_theta is not None:
             # k-space advection due to magnetic fields:
-            F_theta_t = torch.tensor([self.F_theta], device=rc.device)
-            result += self.advect(self.pad_ghost(rho), F_theta_t, axis=-1)
+            F_theta = self.F_theta.expand(*rho.shape[:-1], self.nk_mine + 2)
+            result += self.accumulate_edges(
+                *self.advect(self.pad_ghost(rho), F_theta, -1, (True, True))
+            )
         return result
 
     def pad_ghost(self, rho: torch.Tensor) -> torch.Tensor:
         """Pad by ghost zones for monetum-space advection."""
-        GHOST_L, GHOST_R = slice(0, N_GHOST), slice(-N_GHOST, None)  # HACK: BROKEN
+        assert self.nk_mine >= 1
+        rhoL, rhoR = ring_exchange(self.comm, rho[..., 0], rho[..., -1])
+        return torch.cat((rhoL[..., None], rho, rhoR[..., None]), dim=-1)
 
-        assert self.nk_mine >= N_GHOST
-        nk_mine_padded = self.nk_mine + 2 * N_GHOST
-        rho_padded = torch.zeros(rho.shape[:-1] + (nk_mine_padded,), device=rc.device)
-        rho_padded[..., NON_GHOST] = rho
-        if self.comm.size == 1:
-            rho_padded[..., GHOST_L] = rho[..., GHOST_R]
-            rho_padded[..., GHOST_R] = rho[..., GHOST_L]
-        else:
-            rank = self.comm.rank
-            rank_l = (rank - 1) % self.comm.size  # rank of k domain to the "left"
-            rank_r = (rank + 1) % self.comm.size  # rank of k domain to the "right"
-            send_buf_l = rho[..., GHOST_L].contiguous()
-            send_buf_r = rho[..., GHOST_R].contiguous()
-            recv_buf_l = torch.zeros(rho.shape[:-1] + (N_GHOST,), device=rc.device)
-            recv_buf_r = torch.zeros(rho.shape[:-1] + (N_GHOST,), device=rc.device)
-            requests = [
-                self.comm.Isend(BufferView(send_buf_r), rank_r, 1),
-                self.comm.Isend(BufferView(send_buf_l), rank_l, 2),
-                self.comm.Irecv(BufferView(recv_buf_l), rank_l, 1),
-                self.comm.Irecv(BufferView(recv_buf_r), rank_r, 2),
-            ]
-            MPI.Request.Waitall(requests)  # finish all async communications
-            rho_padded[..., GHOST_L] = recv_buf_l
-            rho_padded[..., GHOST_R] = recv_buf_r
-        return rho_padded
+    def accumulate_edges(
+        self, out: torch.Tensor, outL: torch.Tensor, outR: torch.Tensor
+    ) -> torch.Tensor:
+        """Accumulate momentum-space advection edge contributions `outL` and `outR`
+        into `out`, and return `out` for convenience."""
+        outL, outR = ring_exchange(self.comm, outL, outR)
+        out[..., 0] += outL
+        out[..., -1] += outR
+        return out
 
     def rho_dot_collisions(self, rho: torch.Tensor) -> torch.Tensor:
         if not (self.tau_inv_p or self.tau_inv_ee):
@@ -330,3 +319,28 @@ def invert_index(indices: torch.Tensor) -> torch.Tensor:
     inv_indices = torch.empty_like(indices)
     inv_indices[indices] = torch.arange(len(indices), device=rc.device)
     return inv_indices
+
+
+def ring_exchange(
+    comm: MPI.Comm, buf_l: torch.Tensor, buf_r: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Send `buf_l` and `buf_r` to left and right neighbors of `comm`, taken as a ring.
+    Return the results received from the left and right neighbors respectively."""
+    if comm.size == 1:
+        return buf_r, buf_l
+    else:
+        rank = comm.rank
+        rank_l = (rank - 1) % comm.size  # rank to the "left" on ring
+        rank_r = (rank + 1) % comm.size  # rank to the "right" on ring
+        send_buf_l = buf_l.contiguous()
+        send_buf_r = buf_r.contiguous()
+        recv_buf_l = torch.zeros_like(send_buf_r)
+        recv_buf_r = torch.zeros_like(send_buf_l)
+        requests = [
+            comm.Isend(BufferView(send_buf_r), rank_r, 1),
+            comm.Isend(BufferView(send_buf_l), rank_l, 2),
+            comm.Irecv(BufferView(recv_buf_l), rank_l, 1),
+            comm.Irecv(BufferView(recv_buf_r), rank_r, 2),
+        ]
+        MPI.Request.Waitall(requests)  # finish all async communications
+        return recv_buf_l, recv_buf_r
