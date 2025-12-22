@@ -1,11 +1,12 @@
 from __future__ import annotations
-from typing import Any, Optional
+from typing import Any, Union
 
 import torch
 from qimpy import rc
 
 N_GHOST: int = 1  #: Implementation optimized heavily for single ghost layer
 NON_GHOST: slice = slice(N_GHOST, -N_GHOST)
+Mask = Union[bool, torch.Tensor]
 
 
 class Advect(torch.nn.Module):
@@ -58,10 +59,7 @@ class Advect(torch.nn.Module):
         rho: torch.Tensor,
         v: torch.Tensor,
         axis: int,
-        edge_masks: tuple[Optional[torch.Tensor], Optional[torch.Tensor]] = (
-            None,
-            None,
-        ),
+        edge_masks: tuple[Mask, Mask] = (False, False),
     ) -> list[torch.Tensor]:
         """Compute advection -d`v``rho`/dx of `rho` with velocity `v` along `axis`.
         Along `axis`, for a domain of actual length N, `rho` and `v` are ghost-padded
@@ -69,11 +67,16 @@ class Advect(torch.nn.Module):
         contribution, along with left and right edge contributions if `pad` is True.
         All tensors have equal/broadcastable dimensions along all other axes.
 
-        If specified, edge_masks control where the incoming flux is zeroed out on the
-        left and right boundaries. For the typical use case with `pad` = True, this
-        mask should zero out the incoming flux, except in contact regions.
-        If the masks are None, the flux is not zeroed out and can lead to double
-        counting with the edge contributions for the `pad` = True case.
+        The `edge_masks` control whether and where the incoming flux is zeroed out on
+        the left and right boundaries. For the typical use case with `pad` = True,
+        this mask should zero out the incoming flux, except in contact regions.
+        The flux is zeroed out completely on an edge if its mask is True, and left
+        unchanged if mask is False. If the mask is a tensor, then it corresponds to
+        the indices of points on the edge that must be zeroed; this is supported only
+        for two-dimensional domains (i.e rho has three dimensions overall), and the
+        indexing happens on axis 0 for transport along axis 1 and vice versa.
+        Note that when `pad` = True, leaving the masks at the default of False (not
+        zerong the edge flux) will typically lead to double counting the edge.
         """
         # Bring active axis to end
         flux = (rho * v).swapaxes(axis, -1)
@@ -94,11 +97,12 @@ class Advect(torch.nn.Module):
         for flux_sign, edge_mask, index in zip(
             (flux_plus, flux_minus), edge_masks, (0, -1)
         ):
-            if edge_mask is not None:
-                if axis == 0:
-                    flux_sign[:, edge_mask, index] = 0.0
-                if axis == 1:
-                    flux_sign[edge_mask, :, index] = 0.0
+            if edge_mask is False:
+                pass
+            elif edge_mask is True:
+                flux_sign[..., index] = 0.0
+            elif isinstance(edge_mask, torch.Tensor):
+                flux_sign[..., index].index_fill_(1 - axis, edge_mask, 0.0)
         flux_net = flux_minus + flux_plus
         out = [-flux_net.diff(dim=-1).swapaxes(axis, -1)]
         if self.pad:

@@ -246,7 +246,7 @@ class PatchSet(Geometry):
                             read_whose = self.patch_division.whose(other_patch)
                             edge_data = torch.empty_like(
                                 grho_dot_list[i_patch_mine][0][EDGES[i_edge]]
-                            )
+                            ).contiguous()
                             requests.append(
                                 self.comm.Irecv(BufferView(edge_data), read_whose, tag)
                             )

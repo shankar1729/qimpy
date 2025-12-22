@@ -9,7 +9,7 @@ from qimpy.io import CheckpointPath
 from qimpy.mpi import globalreduce
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
-from qimpy.transport.advect import Advect, N_GHOST, NON_GHOST
+from qimpy.transport.advect import Advect, N_GHOST, NON_GHOST, Mask
 from . import within_circles
 
 
@@ -41,8 +41,8 @@ class Patch:
         Optional[Callable[[torch.Tensor], torch.Tensor]]
     ]  #: Material-dependent reflector for each edge that needs one
     contacts: list[list[Contact]]  #: Contact calculators (multiple possibly) by edge
-    edge_masks0: list[torch.Tensor]  #: Masks for zeroing edge flux in first axis
-    edge_masks1: list[torch.Tensor]  #: Masks for zeroing edge flux in second axis
+    edge_masks0: list[Mask]  #: Masks for zeroing edge flux in first axis
+    edge_masks1: list[Mask]  #: Masks for zeroing edge flux in second axis
 
     def __init__(
         self,
@@ -129,18 +129,15 @@ class Patch:
         self.aperture_selections = [None] * 4
         self.reflectors = [None] * 4
         self.contacts = [[] for _ in range(4)]  # Note: [[]]*N makes N refs to one []!
-        edge_masks = []
+        edge_masks: list[Mask] = [True] * 4
         for i_edge, (is_reflective_i, has_apertures_i) in enumerate(
             zip(is_reflective, has_apertures)
         ):
-            i_dim = i_edge % 2  # long direction of edge
-            j_dim = 1 - i_dim  # other direction
-
-            edge_mask = torch.full((N[i_dim],), True, device=rc.device)
-            edge_masks.append(edge_mask)
-
             if not (is_reflective_i or has_apertures_i):
                 continue  # Entirely pass-through (neither reflective nor has apertures)
+
+            i_dim = i_edge % 2  # long direction of edge
+            j_dim = 1 - i_dim  # other direction
 
             # Compute coordinates along edge:
             Q_edge = torch.empty((N[i_dim], 2), device=rc.device)
@@ -190,7 +187,11 @@ class Patch:
                         normal[contact_slice], **contact_params_i
                     )
                     self.contacts[i_edge].append(Contact(contact_slice, contactor))
-                    edge_mask[contact_slice] = False
+            edge_mask = torch.where(torch.logical_not(within.any(dim=0)))[0]
+            if len(edge_mask) == 0:
+                edge_masks[i_edge] = False  # Disable mask for full-edge contact
+            elif len(edge_mask) < within.shape[1]:
+                edge_masks[i_edge] = edge_mask  # Partial mask outside contact only
 
         self.edge_masks0 = [edge_masks[3], edge_masks[1]]
         self.edge_masks1 = [edge_masks[0], edge_masks[2]]
