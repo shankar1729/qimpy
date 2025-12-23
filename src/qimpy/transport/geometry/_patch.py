@@ -25,8 +25,7 @@ class Patch:
 
     q: torch.Tensor  #: Nx x Ny x 2 Cartesian coordinates
     g: torch.Tensor  #: Nx x Ny x 1 sqrt(metric), with extra dimensipm for broadcasting
-    V0: torch.Tensor  #: Nx_padded x Ny x Nkbb mesh coordinate velocities in first axis
-    V1: torch.Tensor  #: Nx x Ny_padded x Nkbb mesh coordinate velocities in second axis
+    V: tuple[torch.Tensor, torch.Tensor]  #: Padded mesh coordinate velocities
     dt_max: float  #: Maximum stable time step
     wk: float  #: Integration weight for the flattened density matrix dimensions
     rho_offset: tuple[int, ...]  #: Offset of density matrix data within that of quad
@@ -41,8 +40,7 @@ class Patch:
         Optional[Callable[[torch.Tensor], torch.Tensor]]
     ]  #: Material-dependent reflector for each edge that needs one
     contacts: list[list[Contact]]  #: Contact calculators (multiple possibly) by edge
-    edge_masks0: list[Mask]  #: Masks for zeroing edge flux in first axis
-    edge_masks1: list[Mask]  #: Masks for zeroing edge flux in second axis
+    edge_masks: tuple[list[Mask], list[Mask]]  #: Masks for zeroing edge flux by axis
 
     def __init__(
         self,
@@ -112,17 +110,16 @@ class Patch:
             self.rho = torch.tile(material.rho0.flatten(), (N[0], N[1], 1))
 
         # Store mesh velocities with padding needed for advection:
-        self.V0 = torch.nn.functional.pad(V[..., 0], (0, 0, 0, 0, N_GHOST, N_GHOST))
-        self.V0[0] = V[0, ..., 0]
-        self.V0[-1] = V[-1, ..., 0]
-        self.V1 = torch.nn.functional.pad(V[..., 1], (0, 0, N_GHOST, N_GHOST))
-        self.V1[:, 0] = V[:, 0, :, 1]
-        self.V1[:, -1] = V[:, -1, :, 1]
+        V0 = torch.nn.functional.pad(V[..., 0], (0, 0, 0, 0, N_GHOST, N_GHOST))
+        V0[:N_GHOST] = V[:1, ..., 0]
+        V0[-N_GHOST:] = V[-1:, ..., 0]
+        V1 = torch.nn.functional.pad(V[..., 1], (0, 0, N_GHOST, N_GHOST))
+        V1[:, :N_GHOST] = V[:, :1, :, 1]
+        V1[:, -N_GHOST:] = V[:, -1:, :, 1]
+        self.V = (V0, V1)
 
         # Initialize v*drho/dx calculator:
-        self.advect = torch.jit.script(
-            Advect(cent_diff_deriv=cent_diff_deriv, pad=True)
-        )
+        self.advect = torch.jit.script(Advect(cent_diff_deriv=cent_diff_deriv))
 
         # Initialize reflectors if needed:
         self.material = material
@@ -193,8 +190,10 @@ class Patch:
             elif len(edge_mask) < within.shape[1]:
                 edge_masks[i_edge] = edge_mask  # Partial mask outside contact only
 
-        self.edge_masks0 = [edge_masks[3], edge_masks[1]]
-        self.edge_masks1 = [edge_masks[0], edge_masks[2]]
+        self.edge_masks = (
+            [edge_masks[3], edge_masks[1]],
+            [edge_masks[0], edge_masks[2]],
+        )
 
     def save_checkpoint(
         self, cp_path: CheckpointPath, observables: torch.Tensor, save_rho: bool
@@ -218,8 +217,10 @@ class Patch:
         """Compute g*rho_dot, given current g*rho.
         The input is ghost-padded, while the output contains the contributions within
         the domain and the edge contributions that must be reflected/passed-through."""
-        out0, outL, outR = self.advect(grho[:, NON_GHOST], self.V0, 0, self.edge_masks0)
-        out1, outB, outT = self.advect(grho[NON_GHOST, :], self.V1, 1, self.edge_masks1)
+        V0, V1 = self.V
+        edge_masks0, edge_masks1 = self.edge_masks
+        out0, outL, outR = self.advect(grho[:, NON_GHOST], V0, 0, True, edge_masks0)
+        out1, outB, outT = self.advect(grho[NON_GHOST, :], V1, 1, True, edge_masks1)
         return out0 + out1, [outB, outR, outT, outL]
 
 

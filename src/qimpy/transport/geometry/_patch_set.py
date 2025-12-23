@@ -115,8 +115,9 @@ class PatchSet(Geometry):
         out_list = []
         grho_edge_list = []
         for rho, patch in zip(rho_list, self.patches):
-            grho = rho * patch.g
-            out = torch.nn.functional.pad(grho, (0, 0) + (N_GHOST,) * 4)
+            out = torch.nn.functional.pad(rho, (0, 0) + (N_GHOST,) * 4)
+            grho = out[NON_GHOST, NON_GHOST]
+            grho *= patch.g  # save memory copy with in-place op
             grho_edges = []
             for i_edge, reflector in enumerate(patch.reflectors):
                 grho_edge = grho[EDGES[i_edge]]
@@ -129,7 +130,7 @@ class PatchSet(Geometry):
                         g_slice = patch.g[EDGES[i_edge]][contact_slice]
                         ghost_data[contact_slice] = g_slice * contactor(t)
                     # Store back:
-                    out[GHOSTS[i_edge]] = ghost_data
+                    out[FULL_GHOSTS[i_edge]] = ghost_data.unsqueeze(1 - i_edge % 2)
             out_list.append(out)
             grho_edge_list.append(grho_edges)
 
@@ -230,11 +231,18 @@ class PatchSet(Geometry):
 
 # Constants for edge data transfer:
 GHOSTS = [
-    (NON_GHOST, 0),
-    (-1, NON_GHOST),
-    (NON_GHOST, -1),
-    (0, NON_GHOST),
-]  #: slices for the edges of the ghost zone
+    (NON_GHOST, N_GHOST - 1),
+    (-N_GHOST, NON_GHOST),
+    (NON_GHOST, -N_GHOST),
+    (N_GHOST - 1, NON_GHOST),
+]  #: slices for the ghost zone edges immediately adjacent to domain
+
+FULL_GHOSTS = [
+    (NON_GHOST, slice(N_GHOST)),
+    (slice(-N_GHOST, None), NON_GHOST),
+    (NON_GHOST, slice(-N_GHOST, None)),
+    (slice(N_GHOST), NON_GHOST),
+]  #: slices for the outer edges of the ghost zone
 
 EDGES = [
     (slice(None), 0),

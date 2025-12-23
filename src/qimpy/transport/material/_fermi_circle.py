@@ -9,7 +9,7 @@ from qimpy import rc, MPI
 from qimpy.mpi import ProcessGrid, BufferView, TaskDivision
 from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext
-from qimpy.transport.advect import Advect
+from qimpy.transport.advect import Advect, N_GHOST
 from . import Material
 
 
@@ -96,7 +96,7 @@ class FermiCircle(Material):
             F_theta = self.vF / (self.r_c * dtheta)
             self.F_theta = torch.tensor(F_theta, device=rc.device)
             self.dt_max = 0.5 / abs(F_theta)
-            self.advect = torch.jit.script(Advect(pad=True))
+            self.advect = torch.jit.script(Advect())
         else:
             self.F_theta = None
 
@@ -134,9 +134,9 @@ class FermiCircle(Material):
         result = self.rho_dot_collisions(rho)
         if self.F_theta is not None:
             # k-space advection due to magnetic fields:
-            F_theta = self.F_theta.expand(*rho.shape[:-1], self.nk_mine + 2)
+            F_theta = self.F_theta.expand(*rho.shape[:-1], self.nk_mine + 2 * N_GHOST)
             result += self.accumulate_edges(
-                *self.advect(self.pad_ghost(rho), F_theta, -1, (True, True))
+                *self.advect(self.pad_ghost(rho), F_theta, -1, True, (True, True))
             )
         return result
 
@@ -144,7 +144,10 @@ class FermiCircle(Material):
         """Pad by ghost zones for monetum-space advection."""
         assert self.nk_mine >= 1
         rhoL, rhoR = ring_exchange(self.comm, rho[..., 0], rho[..., -1])
-        return torch.cat((rhoL[..., None], rho, rhoR[..., None]), dim=-1)
+        rho_padded = torch.nn.functional.pad(rho, (N_GHOST, N_GHOST))
+        rho_padded[..., N_GHOST - 1] = rhoL
+        rho_padded[..., -N_GHOST] = rhoR
+        return rho_padded
 
     def accumulate_edges(
         self, out: torch.Tensor, outL: torch.Tensor, outR: torch.Tensor
