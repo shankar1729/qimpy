@@ -9,7 +9,7 @@ from qimpy.io import CheckpointPath
 from qimpy.mpi import globalreduce
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
-from qimpy.transport.advect import Advect, N_GHOST, NON_GHOST, Mask
+from qimpy.transport.advect import Advect, N_GHOST, NON_GHOST, Mask, get_riemann_mask
 from . import within_circles
 
 
@@ -26,6 +26,7 @@ class Patch:
     q: torch.Tensor  #: Nx x Ny x 2 Cartesian coordinates
     g: torch.Tensor  #: Nx x Ny x 1 sqrt(metric), with extra dimensipm for broadcasting
     V: tuple[torch.Tensor, torch.Tensor]  #: Padded mesh coordinate velocities
+    riemann_masks: tuple[torch.Tensor, torch.Tensor]  #: Cached riemann selection masks
     dt_max: float  #: Maximum stable time step
     wk: float  #: Integration weight for the flattened density matrix dimensions
     rho_offset: tuple[int, ...]  #: Offset of density matrix data within that of quad
@@ -117,6 +118,7 @@ class Patch:
         V1[:, :N_GHOST] = V[:, :1, :, 1]
         V1[:, -N_GHOST:] = V[:, -1:, :, 1]
         self.V = (V0, V1)
+        self.riemann_masks = (get_riemann_mask(V0, 0), get_riemann_mask(V1, 1))
 
         # Initialize v*drho/dx calculator:
         self.advect = torch.jit.script(Advect(cent_diff_deriv=cent_diff_deriv))
@@ -218,9 +220,10 @@ class Patch:
         The input is ghost-padded, while the output contains the contributions within
         the domain and the edge contributions that must be reflected/passed-through."""
         V0, V1 = self.V
+        R0, R1 = self.riemann_masks
         edge_masks0, edge_masks1 = self.edge_masks
-        out0, outL, outR = self.advect(grho[:, NON_GHOST], V0, 0, True, edge_masks0)
-        out1, outB, outT = self.advect(grho[NON_GHOST, :], V1, 1, True, edge_masks1)
+        out0, outL, outR = self.advect(grho[:, NON_GHOST], V0, R0, 0, True, edge_masks0)
+        out1, outB, outT = self.advect(grho[NON_GHOST, :], V1, R1, 1, True, edge_masks1)
         return out0 + out1, [outB, outR, outT, outL]
 
 

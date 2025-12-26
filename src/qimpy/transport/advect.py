@@ -53,6 +53,7 @@ class Advect(torch.nn.Module):
         self,
         rho: torch.Tensor,
         v: torch.Tensor,
+        riemann_mask: torch.Tensor,
         axis: int,
         retain_padding: bool = False,
         edge_masks: tuple[Mask, Mask] = (False, False),
@@ -62,6 +63,8 @@ class Advect(torch.nn.Module):
         with length N + 4. The result contains the domain contribution, along with
         additional left and right edge contributions if `retain_padding` is True.
         All tensors have equal/broadcastable dimensions along all other axes.
+        The `riemann_mask` should be the result of `get_riemann_mask(v)`, and is the
+        cached selection of positive/negative v directions for the Riemann selection.
 
         The `edge_masks` control whether and where the incoming flux is zeroed out on
         the left and right boundaries. For the typical case with `retain_padding` set to
@@ -71,7 +74,7 @@ class Advect(torch.nn.Module):
         the indices of points on the edge that must be zeroed; this is supported only
         for two-dimensional domains (i.e rho has three dimensions overall), and the
         indexing happens on axis 0 for transport along axis 1 and vice versa.
-        Note that with `retain_paddig` enabled, leaving the masks at the default False
+        Note that with `retain_padding` enabled, leaving the masks at the default False
         (not zerong the edge flux) will typically lead to double counting the edge.
         """
         # Bring active axis to end
@@ -81,23 +84,19 @@ class Advect(torch.nn.Module):
         # Reconstruction
         half_slope = 0.5 * self.slope_minmod(flux)  # length N + 2
         flux = flux[..., 1:-1]  # make same length as half_slope
-        v = v[..., 1:-1]  # make same length as half_slope
 
         # Central difference from half points & Riemann selection based on velocity:
-        flux_minus = (flux - half_slope)[..., 1:]  # - flux from next cell
-        flux_plus = (flux + half_slope)[..., :-1]  # + flux from prev cell
-        flux_minus[v[..., 1:] >= 0.0] = 0.0  # select v < 0 contributions
-        flux_plus[v[..., :-1] <= 0.0] = 0.0  # select v > 0 contributions
-        for flux_sign, edge_mask, index in zip(
-            (flux_plus, flux_minus), edge_masks, (0, -1)
-        ):
+        fluxes = torch.stack((flux + half_slope, flux - half_slope), dim=-1)
+        fluxes *= riemann_mask  # apply Riemann selection for each v direction
+
+        for i_sign, (edge_mask, index) in enumerate(zip(edge_masks, (0, -1))):
             if edge_mask is False:
                 pass
             elif edge_mask is True:
-                flux_sign[..., index] = 0.0
+                fluxes[..., index, i_sign] = 0.0
             elif isinstance(edge_mask, torch.Tensor):
-                flux_sign[..., index].index_fill_(1 - axis, edge_mask, 0.0)
-        flux_net = flux_minus + flux_plus
+                fluxes[..., index, i_sign].index_fill_(1 - axis, edge_mask, 0.0)
+        flux_net = fluxes[..., :-1, 0] + fluxes[..., 1:, 1]
         out = [-flux_net.diff(dim=-1).swapaxes(axis, -1)]
         if retain_padding:
             out.append(-flux_net[..., 0].swapaxes(axis, -1))  # left edge
@@ -113,3 +112,8 @@ def minmod(f: torch.Tensor, axis: int) -> torch.Tensor:
         torch.clamp(fmax, max=0.0),  # fmin < 0, so fmax if also < 0, else 0.
         fmin,  # fmin >= 0, so this is the min mod
     )
+
+
+def get_riemann_mask(v: torch.Tensor, axis: int) -> torch.Tensor:
+    v = v.swapaxes(axis, -1)[..., 1:-1]
+    return torch.where(torch.stack((v <= 0.0, v >= 0.0), dim=-1), 0.0, 1.0)

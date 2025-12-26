@@ -97,6 +97,11 @@ class FermiCircle(Material):
             self.F_theta = torch.tensor(F_theta, device=rc.device)
             self.dt_max = 0.5 / abs(F_theta)
             self.advect = torch.jit.script(Advect())
+            self.riemann_mask = torch.tensor(
+                (1.0, 0.0) if F_theta > 0 else (0.0, 1.0), device=rc.device
+            ).view(
+                1, 1, 1, -1
+            )  # faster constant-F equivalent to get_riemann_mask
         else:
             self.F_theta = None
 
@@ -136,7 +141,14 @@ class FermiCircle(Material):
             # k-space advection due to magnetic fields:
             F_theta = self.F_theta.expand(*rho.shape[:-1], self.nk_mine + 2 * N_GHOST)
             result += self.accumulate_edges(
-                *self.advect(self.pad_ghost(rho), F_theta, -1, True, (True, True))
+                *self.advect(
+                    self.pad_ghost(rho),
+                    F_theta,
+                    self.riemann_mask,
+                    -1,
+                    True,
+                    (True, True),
+                )
             )
         return result
 
