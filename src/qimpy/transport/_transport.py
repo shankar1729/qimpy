@@ -52,6 +52,8 @@ class Transport(TreeNode):
         parameter_grid
             :yaml:`Virtual geometry of disconnected points for batched dynamics.`
             Exactly one supported geometry type must be specified.
+        time_evolution
+            :yaml:`Time integration options.`
         checkpoint
             :yaml:`Checkpoint file to read at start-up.`
         checkpoint_out
