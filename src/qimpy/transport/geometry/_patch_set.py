@@ -23,7 +23,7 @@ class PatchSet(Geometry):
         svg_file: str,
         svg_unit: float = 1.0,
         grid_spacing: float,
-        contacts: dict[str, dict],
+        contacts: dict[str, Optional[dict]],
         grid_size_max: int = 0,
         save_rho: bool = False,
         cent_diff_deriv: bool = False,
@@ -45,7 +45,9 @@ class PatchSet(Geometry):
         contacts
             :yaml:`Dictionary of contact names to parameters.`
             The available contact parameters depend on the contact models
-            implemented in the corresponding material.
+            implemented in the corresponding material. If None, the contact
+            is treated like a regular boundary, but stored in the checkpoint,
+            enabling consistent plotting of 'floating' contacts.
         grid_size_max
             :yaml:`Maximum grid points per dimension after quad subdvision.`
             If 0, will be determined automatically from number of processes.
