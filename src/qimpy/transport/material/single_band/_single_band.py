@@ -11,6 +11,7 @@ from qimpy.mpi import ProcessGrid
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.lattice import Lattice
 from .. import Material, fermi
+from . import Scatter
 
 
 class SingleBand(Material):
@@ -28,6 +29,7 @@ class SingleBand(Material):
         T: float,
         nT_below: float = 5,
         nT_above: float = 5,
+        scatter: Optional[Union[Scatter, dict]] = None,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
@@ -61,6 +63,8 @@ class SingleBand(Material):
             :yaml:`Include states with energies starting at this many T below mu.`
         nT_above
             :yaml:`Include states with energies up to this many T above mu.`
+        scatter
+            :yaml:`Explicit state-dependent scattering kernel.`
         """
         super().__init__()
         self.add_child("lattice", Lattice, lattice, checkpoint_in)
@@ -124,6 +128,10 @@ class SingleBand(Material):
         self.v[:, 0, :] = k_cart.grad.detach()
         self.rho0[:, 0, 0] = fermi(self.E[:, 0], mu, T)
 
+        # Initialize scattering kernel (if any):
+        if (scatter is not None) or checkpoint_in.member("scatter"):
+            self.add_child("scatter", Scatter, scatter, checkpoint_in, single_band=self)
+
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
@@ -174,7 +182,11 @@ class SingleBand(Material):
         return torch.zeros_like
 
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
-        return torch.zeros_like(rho)  # TODO: add scattering
+        # TODO: systematize dynamics terms like AbInitio
+        if hasattr(self, "scatter"):
+            return self.scatter.rho_dot(rho)
+        else:
+            return torch.zeros_like(rho)
 
     def get_observable_names(self) -> list[str]:
         return ["n", "jx", "jy", "e"]  # density, fluxes and energy density

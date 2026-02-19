@@ -1,3 +1,4 @@
-__all__ = ["SingleBand"]
+__all__ = ["Scatter", "SingleBand"]
 
+from ._scatter import Scatter
 from ._single_band import SingleBand
