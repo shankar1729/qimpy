@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import torch
+import numpy as np
 
-from qimpy import TreeNode
+from qimpy import rc, log, TreeNode
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.transport import material
 
@@ -46,7 +47,32 @@ class Scatter(TreeNode):
         self.lambda_D = lambda_D
 
         # Initialize scattering operator
-        raise NotImplementedError
+        log.info("\n--- Initializing Scatter operator ---")
+        assert single_band.comm.size == 1  # MPI over k not yet supported
+        kmesh = torch.tensor(single_band.kmesh, device=rc.device)
+        k = single_band.k  # may need to pass in k_all later for MPI support
+        E = single_band.E  # may need E_all for MPI
+
+        # Frequency grid
+        omega_max = (E.max() - E.min()).item()
+        i_omega_max = int(np.ceil(omega_max / dE))
+        omega = torch.arange(-i_omega_max, i_omega_max + 1, device=rc.device) * dE
+        n_omega = len(omega)
+        log.info(
+            f"Initialized frequency grid with {n_omega} points and resolution {dE}"
+        )
+
+        # Momentum-transfer grid
+        ik = torch.round(k * kmesh).to(torch.int)
+        iq_pair = (ik[:, None] - ik[None]) % kmesh
+        iq, q_index = iq_pair.flatten(0, 1).unique(dim=0, return_inverse=True)
+        q_index = q_index.unflatten(0, iq_pair.shape[:-1])
+        q = iq / kmesh
+        q -= torch.round(q)  # wrap to [-0.5, 0.5) in each dimension
+        q_mag = (q @ single_band.lattice.Gbasis.T).norm(dim=-1)
+        log.info(f"Found {len(q)} unique momentum transfers")
+        print(q_mag.max().item())
+        exit()
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext

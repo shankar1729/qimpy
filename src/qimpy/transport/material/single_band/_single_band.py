@@ -86,6 +86,7 @@ class SingleBand(Material):
             assert callable(dispersion)
             self.dispersion = dispersion
 
+        log.info("\n--- Initializing SingleBand material ---")
         # Select k-points:
         k0, k1, k2 = [
             torch.cat(
