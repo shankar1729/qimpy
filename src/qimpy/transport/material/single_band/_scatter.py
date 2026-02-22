@@ -5,6 +5,7 @@ import numpy as np
 
 from qimpy import rc, log, TreeNode
 from qimpy.io import CheckpointPath, CheckpointContext
+from qimpy.mpi import get_block_slices
 from qimpy.transport import material
 
 
@@ -17,6 +18,7 @@ class Scatter(TreeNode):
     dE: float
     epsilon_bg: float
     lambda_D: float
+    block_size: int
 
     def __init__(
         self,
@@ -25,6 +27,7 @@ class Scatter(TreeNode):
         dE: float,
         epsilon_bg: float,
         lambda_D: float,
+        block_size: int = 128,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """
@@ -39,12 +42,17 @@ class Scatter(TreeNode):
             :yaml:`Background dielectric constant.`
         lambda_D
             :yaml:`Debye screening length of electrons.`
+        block_size
+            :yaml:`Number of reals-apce points to calculate together.`
+            Performance should generally increase with block_size,
+            but so does the memory requirement.
         """
         super().__init__()
         self.single_band = single_band
         self.dE = dE
         self.epsilon_bg = epsilon_bg
         self.lambda_D = lambda_D
+        self.block_size = block_size
 
         # Initialize scattering operator
         log.info("\n--- Initializing Scatter operator ---")
@@ -86,9 +94,9 @@ class Scatter(TreeNode):
         log.info(f"Found {n_q_omega} accessible energy-momentum combinations")
         prefac = 1 / (np.prod(single_band.kmesh) * single_band.lattice.volume)
         S = torch.sparse_coo_tensor(
-            torch.stack((torch.cat((ik_pair, ik_pair)), i_q_omega_reduced), dim=0),
+            torch.stack((i_q_omega_reduced, torch.cat((ik_pair, ik_pair))), dim=0),
             prefac * torch.cat((w_omega_plus, w_omega_minus)),
-            size=(len(ik_pair), n_q_omega),
+            size=(n_q_omega, len(ik_pair)),
         )
         Msq = (
             ((4 * np.pi) ** 3 / (dE * epsilon_bg))
@@ -99,8 +107,8 @@ class Scatter(TreeNode):
             f" with {S._nnz()} non-zero elements"
         )
         self.S = S
-        self.Msq = Msq
-        exit()
+        self.ST = S.T
+        self.Msq = Msq[:, None]  # dimension added for broadcasting
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
@@ -112,4 +120,15 @@ class Scatter(TreeNode):
         return list(attrs.keys())
 
     def rho_dot(self, rho: torch.Tensor) -> torch.Tensor:
-        return NotImplemented
+        rho_shape = rho.shape
+        rho = rho.view(-1, rho_shape[-1])  # flatten real space dimensions
+        rho_dot = torch.empty_like(rho)
+        for sel in get_block_slices(len(rho), self.block_size):
+            rho_sel = rho[sel]
+            rho_pair = rho_sel[..., None] * (1 - rho_sel[:, None, :])
+            rho_pair_dot = (
+                self.ST @ (self.Msq * (self.S @ rho_pair.flatten(-2, -1).T))
+            ).T.unflatten(1, rho_pair.shape[1:])
+            rho_pair_dot *= rho_pair.swapaxes(-1, -2)
+            rho_dot[sel] = rho_pair_dot.sum(dim=-1) - rho_pair_dot.sum(dim=-2)
+        return rho_dot.reshape(rho_shape)
