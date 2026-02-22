@@ -15,7 +15,7 @@ def test_scatter():
         mu=0.01,  # ~ 0.3 eV
         T=0.0002,  # ~ 60 K
         v=0.375,  # Graphene Fermi velocity
-        scatter=dict(dE=0.0001, epsilon_bg=1.0, lambda_D=1.0),
+        scatter=dict(dE=0.0001, epsilon_bg=1.0, lambda_D=10.0),
     )
     print(material)
 
