@@ -5,6 +5,7 @@ import numpy as np
 
 from qimpy import rc, log, TreeNode
 from qimpy.io import CheckpointPath, CheckpointContext
+from qimpy.math import ortho_matrix
 from qimpy.mpi import get_block_slices
 from qimpy.transport import material
 
@@ -19,6 +20,11 @@ class Scatter(TreeNode):
     epsilon_bg: float
     lambda_D: float
     block_size: int
+    conserve_energy: bool
+    S: torch.Tensor  #: energy-momentum conservation sparse matrix
+    ST: torch.Tensor  #: cached transpose of `S`
+    Msq: torch.Tensor  #: e-e matrix element squared (including rate prefactors)
+    vE: torch.Tensor  #: vector for energy conservation correction
 
     def __init__(
         self,
@@ -28,6 +34,7 @@ class Scatter(TreeNode):
         epsilon_bg: float,
         lambda_D: float,
         block_size: int = 128,
+        conserve_energy: bool = True,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """
@@ -43,9 +50,11 @@ class Scatter(TreeNode):
         lambda_D
             :yaml:`Debye screening length of electrons.`
         block_size
-            :yaml:`Number of reals-apce points to calculate together.`
+            :yaml:`Number of real-space points to calculate together.`
             Performance should generally increase with block_size,
             but so does the memory requirement.
+        conserve_energy
+            :yaml:`Whether to enforce exact energy conservation of e-e scattering.`
         """
         super().__init__()
         self.single_band = single_band
@@ -53,6 +62,7 @@ class Scatter(TreeNode):
         self.epsilon_bg = epsilon_bg
         self.lambda_D = lambda_D
         self.block_size = block_size
+        self.conserve_energy = conserve_energy
 
         # Initialize scattering operator
         log.info("\n--- Initializing Scatter operator ---")
@@ -110,6 +120,16 @@ class Scatter(TreeNode):
         self.ST = S.T
         self.Msq = Msq[:, None]  # dimension added for broadcasting
 
+        if self.conserve_energy:
+            # Construct energy conservation correction:
+            vE = E.flatten() - single_band.mu
+            dims = torch.where(kmesh > 1)[0]  # only use momenta in periodic directions
+            constraints = torch.cat((torch.ones_like(vE)[:, None], k[:, dims]), dim=1)
+            constraints = constraints @ ortho_matrix(constraints.T @ constraints)
+            vE -= constraints @ (constraints.T @ vE)  # orthogonalize w.r.t constraints
+            vE *= 1.0 / (vE @ E.flatten())  # normalize to unit energy
+            self.vE = vE
+
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
@@ -117,6 +137,7 @@ class Scatter(TreeNode):
         attrs["dE"] = self.dE
         attrs["epsilon_bg"] = self.epsilon_bg
         attrs["lambda_D"] = self.lambda_D
+        attrs["conserve_energy"] = self.conserve_energy
         return list(attrs.keys())
 
     def rho_dot(self, rho: torch.Tensor) -> torch.Tensor:
@@ -131,4 +152,6 @@ class Scatter(TreeNode):
             ).T.unflatten(1, rho_pair.shape[1:])
             rho_pair_dot *= rho_pair.swapaxes(-1, -2)
             rho_dot[sel] = rho_pair_dot.sum(dim=-1) - rho_pair_dot.sum(dim=-2)
+        if self.conserve_energy:
+            rho_dot -= (rho_dot @ self.single_band.E.flatten())[:, None] * self.vE
         return rho_dot.reshape(rho_shape)
