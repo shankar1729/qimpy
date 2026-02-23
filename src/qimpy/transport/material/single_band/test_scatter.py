@@ -63,6 +63,17 @@ def test_scatter():
     plt.ylabel(r"$\tau_{ee}^{-1}$")
     plt.ylim(0, None)
     plt.legend()
+
+    plt.figure()
+    i_k = torch.argmax((material.E.flatten() - material.mu).abs()).item()
+    f_dot_i = f_dot[i_k].to(rc.cpu).numpy()
+    f_dot_i[i_k] = 0.0
+    cmax = np.max(np.abs(f_dot_i))
+    kx, ky, _ = (material.k @ material.lattice.Gbasis.T).to(rc.cpu).numpy().T
+    plt.scatter(kx, ky, c=f_dot_i, cmap="RdBu", vmin=-cmax, vmax=cmax)
+    plt.colorbar(label="df/dt")
+    plt.scatter(kx[i_k], ky[i_k], marker="+", color="k")
+    plt.gca().set_aspect("equal")
     plt.show()
 
 
