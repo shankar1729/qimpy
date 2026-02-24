@@ -59,10 +59,9 @@ class Stepper:
         system = self.system
         lattice = system.lattice
         # Update ionic potentials and energies:
-        system.energy = Energy()
+        system.energy.clear()
         system.ions.update(system)
         # Optimize electrons:
-        log.info("\n--- Electronic optimization ---\n")
         system.electrons.run(system)
         # Update forces / stresses if needed:
         if require_grad:
@@ -82,6 +81,8 @@ class Stepper:
         ions = system.ions
         electrons = system.electrons
         log.info(f"\nEnergy components:\n{repr(system.energy)}")
+        if system.fluid.enabled:
+            log.info(f"\nFluid energy components:\n{repr(system.fluid.model.energy)}")
         log.info("")
         self._lowdin = Lowdin(electrons.C)
         ions.Q, ions.M = self._lowdin.analyze(

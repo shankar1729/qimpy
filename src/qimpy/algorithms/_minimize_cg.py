@@ -102,7 +102,7 @@ def cg(self: algorithms.Minimize[Vector]) -> Energy:
                 )
                 return state.energy
 
-    log.info(f"{self.name}: Not converged in {self.n_iterations}" " iterations.")
+    log.info(f"{self.name}: Not converged in {self.n_iterations} iterations.")
     return state.energy
 
 

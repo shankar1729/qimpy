@@ -116,6 +116,7 @@ class AbInitio(Material):
                 * jx_Sx, jx_Sy, ...: spin flux, where jx_Sy = Sy flux along x direction
             By default, only n (number density) is output.
         """
+        super().__init__()
         self.comm = process_grid.get_comm("k")
         self.file = file
         self.orbital_zeeman = orbital_zeeman
@@ -142,12 +143,11 @@ class AbInitio(Material):
             wk = self.spin_weight / float(attrs["nkTot"])
             nk, n_bands = data_file["E"].shape
             log.info(f"Initializing AbInitio material with {nk = } and {n_bands = }")
-            super().__init__(
+            self.initialize(
                 wk=wk,
                 nk=nk,
                 n_bands=n_bands,
                 n_dim=3,
-                checkpoint_in=checkpoint_in,
                 process_grid=process_grid,
             )
 

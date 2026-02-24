@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Optional
 from abc import abstractmethod
 
 import torch
@@ -25,7 +26,7 @@ class Geometry(TreeNode):
     comm: MPI.Comm  #: Communicator for real-space split over patches
     material: Material  #: Corresponding material
     grid_spacing: float  #: Grid spacing used for discretization
-    contacts: dict[str, dict]  #: Mapping from SVG contact names to material parameters
+    contacts: dict[str, Optional[dict]]  #: SVG contact names to material parameters
     quad_set: QuadSet  #: Original geometry specification from SVG
     sub_quad_set: SubQuadSet  #: Division into smaller quads for tuning parallelization
     patches: list[Patch]  #: Advection for each quad patch local to this process
@@ -41,7 +42,7 @@ class Geometry(TreeNode):
         material: Material,
         quad_set: QuadSet,
         grid_spacing: float,
-        contacts: dict[str, dict],
+        contacts: dict[str, Optional[dict]],
         grid_size_max: int,
         save_rho: bool = False,
         cent_diff_deriv: bool = False,
@@ -61,7 +62,9 @@ class Geometry(TreeNode):
         contacts
             :yaml:`Dictionary of contact names to parameters.`
             The available contact parameters depend on the contact models
-            implemented in the corresponding material.
+            implemented in the corresponding material. If None, the contact
+            is treated like a regular boundary, but stored in the checkpoint,
+            enabling consistent plotting of 'floating' contacts.
         grid_size_max
             :yaml:`Maximum grid points per dimension after quad subdvision.`
             If 0, will be determined automatically from number of processes.
@@ -83,8 +86,13 @@ class Geometry(TreeNode):
         self.cent_diff_deriv = cent_diff_deriv
         self.contacts = contacts
         aperture_circles = torch.from_numpy(quad_set.apertures).to(rc.device)
-        contact_circles = torch.from_numpy(quad_set.contacts).to(rc.device)
-        contact_params = list(contacts.values())
+        contact_params: list[dict] = []
+        contact_sel: list[int] = []
+        for i_contact, params in enumerate(contacts.values()):
+            if params is not None:
+                contact_params.append(params)
+                contact_sel.append(i_contact)
+        contact_circles = torch.from_numpy(quad_set.contacts[contact_sel]).to(rc.device)
 
         # Subdivide:
         if grid_size_max:

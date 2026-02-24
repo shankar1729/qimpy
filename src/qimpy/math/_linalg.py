@@ -171,7 +171,7 @@ def eighg(
     """
     # Start orthogonoalization:
     rc.compute_stream_wait_current()
-    with torch.cuda.stream(rc.compute_stream):
+    with rc.compute_stream_context():
         U = ortho_matrix(O, use_cholesky)
     # Finish pending communication on H (if any)
     Hresult = H.wait()

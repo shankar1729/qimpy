@@ -1,25 +1,27 @@
 from __future__ import annotations
+from typing import Union
 
 import torch
 from qimpy import rc
 
-
-N_GHOST: int = 2  #: currently a constant, but could depend on slope method later
-
-# Initialize slices for accessing ghost regions in padded version:
-# These are also the slices for the boundary region in non-padded version
+N_GHOST: int = 2
 NON_GHOST: slice = slice(N_GHOST, -N_GHOST)
-GHOST_L: slice = slice(0, N_GHOST)  #: ghost indices on left/bottom
-GHOST_R: slice = slice(-N_GHOST, None)  #: ghost indices on right/top side
+Mask = Union[bool, torch.Tensor]
 
 
 class Advect(torch.nn.Module):
-    def __init__(self, slope_lim_theta: float = 2.0, cent_diff_deriv: bool = False):
+    def __init__(
+        self,
+        *,
+        slope_lim_theta: float = 2.0,
+        cent_diff_deriv: bool = False,
+    ):
         # Initialize convolution that computes slopes using 3 difference formulae.
         # Here, `slope_lim_theta` controls the scaling of the forward/backward
         # difference formulae relative to the central difference one.
+        # Optionally, override this with central difference only if `cent_diff_deriv`.
         # This convolution takes input Nbatch x 1 x N and produces output with
-        # dimensions Nbatch x 3 x (N-2), containing backward, central and forward
+        # dimensions Nbatch x 3 x N-2, containing backward, central and forward
         # difference computations of the slope.
         super().__init__()
         weight_data = torch.tensor(
@@ -47,22 +49,59 @@ class Advect(torch.nn.Module):
         slope = minmod(self.slope_conv(f), axis=1)  # n_batch x n_axis
         return slope.unflatten(0, batch_shape)  # restore dimensions
 
-    def forward(self, rho: torch.Tensor, v: torch.Tensor, axis: int) -> torch.Tensor:
-        """Compute v * d`rho`/dx, with velocity `v` along `axis`."""
+    def forward(
+        self,
+        rho: torch.Tensor,
+        v: torch.Tensor,
+        riemann_mask: torch.Tensor,
+        axis: int,
+        retain_padding: bool = False,
+        edge_masks: tuple[Mask, Mask] = (False, False),
+    ) -> list[torch.Tensor]:
+        """Compute advection -d`v``rho`/dx of `rho` with velocity `v` along `axis`.
+        Along `axis`, for a domain of actual length N, `rho` and `v` are ghost-padded
+        with length N + 4. The result contains the domain contribution, along with
+        additional left and right edge contributions if `retain_padding` is True.
+        All tensors have equal/broadcastable dimensions along all other axes.
+        The `riemann_mask` should be the result of `get_riemann_mask(v)`, and is the
+        cached selection of positive/negative v directions for the Riemann selection.
+
+        The `edge_masks` control whether and where the incoming flux is zeroed out on
+        the left and right boundaries. For the typical case with `retain_padding` set to
+        True, this mask should zero out the incoming flux, except in contact regions.
+        The flux is zeroed out completely on an edge if its mask is True, and left
+        unchanged if mask is False. If the mask is a tensor, then it corresponds to
+        the indices of points on the edge that must be zeroed; this is supported only
+        for two-dimensional domains (i.e rho has three dimensions overall), and the
+        indexing happens on axis 0 for transport along axis 1 and vice versa.
+        Note that with `retain_padding` enabled, leaving the masks at the default False
+        (not zerong the edge flux) will typically lead to double counting the edge.
+        """
         # Bring active axis to end
-        rho = rho.swapaxes(axis, -1)
+        flux = (rho * v).swapaxes(axis, -1)
         v = v.swapaxes(axis, -1)
 
         # Reconstruction
-        half_slope = 0.5 * self.slope_minmod(rho)
+        half_slope = 0.5 * self.slope_minmod(flux)  # length N + 2
+        flux = flux[..., 1:-1]  # make same length as half_slope
 
         # Central difference from half points & Riemann selection based on velocity:
-        rho_diff = rho[..., 1:-1].diff(dim=-1)
-        half_slope_diff = half_slope.diff(dim=-1)
-        result_minus = (rho_diff - half_slope_diff)[..., 1:]
-        result_plus = (rho_diff + half_slope_diff)[..., :-1]
-        delta_rho = torch.where(v < 0.0, result_minus, result_plus)
-        return -(v * delta_rho).swapaxes(axis, -1)  # original axis order; overall sign
+        fluxes = torch.stack((flux + half_slope, flux - half_slope), dim=-1)
+        fluxes *= riemann_mask  # apply Riemann selection for each v direction
+
+        for i_sign, (edge_mask, index) in enumerate(zip(edge_masks, (0, -1))):
+            if edge_mask is False:
+                pass
+            elif edge_mask is True:
+                fluxes[..., index, i_sign] = 0.0
+            elif isinstance(edge_mask, torch.Tensor):
+                fluxes[..., index, i_sign].index_fill_(1 - axis, edge_mask, 0.0)
+        flux_net = fluxes[..., :-1, 0] + fluxes[..., 1:, 1]
+        out = [-flux_net.diff(dim=-1).swapaxes(axis, -1)]
+        if retain_padding:
+            out.append(-flux_net[..., 0].swapaxes(axis, -1))  # left edge
+            out.append(flux_net[..., -1].swapaxes(axis, -1))  # right edge
+        return out
 
 
 def minmod(f: torch.Tensor, axis: int) -> torch.Tensor:
@@ -73,3 +112,8 @@ def minmod(f: torch.Tensor, axis: int) -> torch.Tensor:
         torch.clamp(fmax, max=0.0),  # fmin < 0, so fmax if also < 0, else 0.
         fmin,  # fmin >= 0, so this is the min mod
     )
+
+
+def get_riemann_mask(v: torch.Tensor, axis: int) -> torch.Tensor:
+    v = v.swapaxes(axis, -1)[..., 1:-1]
+    return torch.where(torch.stack((v <= 0.0, v >= 0.0), dim=-1), 0.0, 1.0)

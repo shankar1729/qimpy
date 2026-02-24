@@ -8,6 +8,7 @@ from qimpy.profiler import stopwatch
 from .geometry import Geometry, PatchSet, ParameterGrid
 from .material import Material, FermiCircle
 from .material.ab_initio import AbInitio
+from .material.single_band import SingleBand
 from . import TimeEvolution
 
 
@@ -21,6 +22,7 @@ class Transport(TreeNode):
         *,
         ab_initio: Optional[Union[AbInitio, dict]] = None,
         fermi_circle: Optional[Union[FermiCircle, dict]] = None,
+        single_band: Optional[Union[SingleBand, dict]] = None,
         patch_set: Optional[Union[PatchSet, dict]] = None,
         parameter_grid: Optional[Union[ParameterGrid, dict]] = None,
         time_evolution: Optional[Union[TimeEvolution, dict]] = None,
@@ -41,12 +43,17 @@ class Transport(TreeNode):
         fermi_circle
             :yaml:`Fermi-circle material for graphene/2DEG.`
             Exactly one supported material type must be specified.
+        single_band
+            :yaml:`Single-band model material for energy-resolved charge transport.`
+            Exactly one supported material type must be specified.
         patch_set
             :yaml:`Geometry consisting of bicubic patches.`
             Exactly one supported geometry type must be specified.
         parameter_grid
             :yaml:`Virtual geometry of disconnected points for batched dynamics.`
             Exactly one supported geometry type must be specified.
+        time_evolution
+            :yaml:`Time integration options.`
         checkpoint
             :yaml:`Checkpoint file to read at start-up.`
         checkpoint_out
@@ -85,6 +92,9 @@ class Transport(TreeNode):
                 FermiCircle,
                 fermi_circle,
                 process_grid=self.process_grid,
+            ),
+            TreeNode.ChildOptions(
+                "single-band", SingleBand, single_band, process_grid=self.process_grid
             ),
             have_default=False,
         )
