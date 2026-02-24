@@ -90,5 +90,5 @@ class EMField(TreeNode):
             ).squeeze(dim=-2)
         result = torch.view_as_complex(result)
         # HACK result += 1j*torch.einsum("...ij,...jk->...ik", self.grad_phi_R, rho)
-        result += 1j*torch.einsum("...ij,...jk->...ik", self.grad_phi_R, rho)
+        #result += 1j*torch.einsum("...ij,...jk->...ik", self.grad_phi_R, rho)
         return result
