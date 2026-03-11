@@ -79,7 +79,7 @@ class Lindblad(TreeNode):
         block_shape_flat = (-1, n_bands_sq, n_bands_sq)
         P_shape = (2, nk_mine * nk, n_bands_sq, n_bands_sq)
         P = torch.zeros(P_shape, dtype=torch.double, device=rc.device)
-        prefactor = np.pi * ab_initio.wk
+        prefactor = np.pi * ab_initio.wk / ab_initio.spin_weight
 
         # Collect together evecs for all k if needed:
         if (ab_initio.comm.size == 1) or (ab_initio.evecs is None):
