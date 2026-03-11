@@ -93,8 +93,10 @@ def write_xsf(
     h5_file = h5py.File(checkpoint, "r")
     ions = h5_file["ions"]
     types = ions["types"][:]
+    print(np.array(str(np.array(ions["symbols"])).split(",")))
+    print(np.unique(types, return_counts=True)[1])
     symbols = np.repeat(
-        np.array(ions.attrs["symbols"].split(",")),
+        np.array(str(np.array(ions["symbols"])).split(",")),
         np.unique(types, return_counts=True)[1],
     )
     to_ang = Unit.convert(1, "Angstrom").value
@@ -117,7 +119,7 @@ def write_xsf(
                     print_positions(f, symbols, pos_n, f"{n+1}")
 
             else:
-                lattice_vecs = lattice["Rbasis"][:] * to_ang
+                lattice_vecs = lattice.attrs["Rbasis"][:] * to_ang
                 positions = np.einsum("ij,klj->kli", lattice_vecs, fractional_positions)
                 print_lattice_vecs(f, lattice_vecs, "")
 
@@ -125,7 +127,7 @@ def write_xsf(
                     print_positions(f, symbols, pos_n, f"{n+1}")
 
         else:
-            lattice_vecs = lattice["Rbasis"][:] * to_ang
+            lattice_vecs = lattice.attrs["Rbasis"][:] * to_ang
             fractional_positions = ions["positions"][:]
             positions = (lattice_vecs @ fractional_positions.T).T
             print_header(f)

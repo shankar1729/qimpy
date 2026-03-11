@@ -11,7 +11,7 @@ from qimpy.io import (
 )
 from qimpy.profiler import stopwatch
 from qimpy.transport import material
-from qimpy.transport.advect import Advect
+from qimpy.transport.advect import Advect, get_riemann_mask
 from qimpy.lattice import Lattice
 from qimpy.io import Unit
 
@@ -68,6 +68,7 @@ class EMField(TreeNode):
         invJ = torch.linalg.inv(Gbasis@dk)
         self.grad_phi = torch.einsum("...i,ji->j...", grad_phi, invJ)
         self.grad_phi_R = torch.einsum("dxy,kdij->xykij", self.grad_phi.to(dtype=torch.complex128, device=rc.device), self.ab_initio.R_elem)
+        self.riemann_mask = torch.where(torch.stack((self.grad_phi.flatten() <= 0.0, self.grad_phi.flatten() >= 0.0), dim=-1), 0.0, 1.0)
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
@@ -85,9 +86,10 @@ class EMField(TreeNode):
             #rho_intermediate = torch.einsum("...knab -> ...kabn", rho_intermediate)  # HACK!!
             # Factor of 1/2 added by Hermitian conjugate
             force = F[comp][..., None, None, None, None, None]/2  # extra k,a,b,n,r/i
+            mask = self.riemann_mask[comp]
             result += self.advect(
-                    torch.view_as_real(rho_intermediate), force, axis=-2
-            ).squeeze(dim=-2)
+                    torch.view_as_real(rho_intermediate), force, mask, axis=-2
+            )[0].squeeze(dim=-2)
         result = torch.view_as_complex(result)
         # HACK result += 1j*torch.einsum("...ij,...jk->...ik", self.grad_phi_R, rho)
         #result += 1j*torch.einsum("...ij,...jk->...ik", self.grad_phi_R, rho)

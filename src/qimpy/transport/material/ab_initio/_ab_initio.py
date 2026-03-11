@@ -17,7 +17,7 @@ from qimpy.io import (
 )
 from qimpy.mpi import ProcessGrid
 from .. import Material, fermi
-from . import PackedHermitian, RelaxationTime, Lindblad, Light, PulseB, EMField
+from . import PackedHermitian, RelaxationTime, Lindblad, Light, PulseB, EMField, Reflector
 
 
 class DynamicsTerm(Protocol):
@@ -390,7 +390,7 @@ class AbInitio(Material):
     def get_reflector(
         self, n: torch.Tensor
     ) -> Callable[[torch.Tensor], torch.Tensor]:  # absorbing boundary
-        return torch.zeros_like
+        return Reflector(self, n)
 
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         """Overall drho/dt in interaction picture.
