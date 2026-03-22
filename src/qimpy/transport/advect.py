@@ -4,8 +4,14 @@ from typing import Union
 import torch
 from qimpy import rc
 
-N_GHOST: int = 2
+
+N_GHOST: int = 2  #: currently a constant, but could depend on slope method later
+
+# Initialize slices for accessing ghost regions in padded version:
+# These are also the slices for the boundary region in non-padded version
 NON_GHOST: slice = slice(N_GHOST, -N_GHOST)
+GHOST_L: slice = slice(0, N_GHOST)  #: ghost indices on left/bottom
+GHOST_R: slice = slice(-N_GHOST, None)  #: ghost indices on right/top side
 Mask = Union[bool, torch.Tensor]
 
 

@@ -8,7 +8,7 @@ from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import ProcessGrid, BufferView
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
-from qimpy.transport.advect import N_GHOST, NON_GHOST
+from qimpy.transport.advect import N_GHOST, NON_GHOST, GHOST_L, GHOST_R
 from . import TensorList, Geometry, parse_svg
 
 
@@ -122,17 +122,22 @@ class PatchSet(Geometry):
             grho *= patch.g  # save memory copy with in-place op
             grho_edges = []
             for i_edge, reflector in enumerate(patch.reflectors):
-                grho_edge = grho[EDGES[i_edge]]
+                grho_edge = grho[IN_SLICES[i_edge]]
                 grho_edges.append(grho_edge)
+                if i_edge % 2 == 0:
+                    grho_edge = grho_edge.swapaxes(0, 1)  # short axis first
                 if reflector is not None:
                     # Reflect:
-                    ghost_data = reflector(grho_edge)
+                    ghost_data = reflector(grho_edge)  # reciprocal space changes
+                    ghost_data = ghost_data.flip(dims=(0,))  # flip short axis
                     # Apply contacts, if any:
                     for contact_slice, contactor in patch.contacts[i_edge]:
                         g_slice = patch.g[EDGES[i_edge]][contact_slice]
-                        ghost_data[contact_slice] = g_slice * contactor(t)
+                        ghost_data[:, contact_slice] = g_slice * contactor(t)
                     # Store back:
-                    out[FULL_GHOSTS[i_edge]] = ghost_data.unsqueeze(1 - i_edge % 2)
+                    if i_edge % 2 == 0:
+                        ghost_data = ghost_data.swapaxes(0, 1)  # restore axis order
+                    out[OUT_SLICES[i_edge]] = ghost_data
             out_list.append(out)
             grho_edge_list.append(grho_edges)
 
@@ -143,9 +148,11 @@ class PatchSet(Geometry):
                 if edge_data is not None:
                     mask = patch.aperture_selections[i_edge]
                     if mask is None:
-                        out[GHOSTS[i_edge]] = edge_data
+                        out[OUT_SLICES[i_edge]] = edge_data
+                    elif i_edge % 2:
+                        out[OUT_SLICES[i_edge]][:, mask] = edge_data[:, mask]
                     else:
-                        out[GHOSTS[i_edge]][mask] = edge_data[mask]
+                        out[OUT_SLICES[i_edge]][mask] = edge_data[mask]
         return out_list
 
     @stopwatch
@@ -160,7 +167,7 @@ class PatchSet(Geometry):
             for i_edge, reflector in enumerate(patch.reflectors):
                 if reflector is not None:
                     # Fetch and reflect the edge data as 1 x N x Nkbb:
-                    edge_data = reflector(grho_dot_edges[i_edge])
+                    edge_data = reflector(grho_dot_edges[i_edge][None])[0]
                     # Mask out contacts, if any:
                     for contact_slice, _ in patch.contacts[i_edge]:
                         edge_data[contact_slice] = 0.0
@@ -201,8 +208,17 @@ class PatchSet(Geometry):
                     if read_mine:
                         other_patch_mine = other_patch - self.patch_division.i_start
                         edge_data = edge_list_in[other_patch_mine][other_edge]
-                        if (other_edge < 2) ^ (i_edge >= 2):
-                            edge_data = edge_data.flip(dims=(0,))
+                        if len(edge_data.shape) == 2:
+                            # 1D edge data mode:
+                            if (other_edge < 2) ^ (i_edge >= 2):
+                                edge_data = edge_data.flip(dims=(0,))
+                        else:
+                            # 2D ghost domain mode:
+                            delta_edge = other_edge - i_edge
+                            if delta_edge % 2:
+                                edge_data = edge_data.swapaxes(0, 1)
+                            if flip_dims := FLIP_DIMS[delta_edge]:
+                                edge_data = edge_data.flip(dims=flip_dims)
                         if not write_mine:
                             write_whose = self.patch_division.whose(i_patch)
                             edge_data = edge_data.contiguous()
@@ -229,6 +245,24 @@ class PatchSet(Geometry):
         if requests:
             MPI.Request.Waitall(requests)
         return edge_list_out
+
+
+# Constants for edge data transfer:
+IN_SLICES = [
+    (slice(None), GHOST_L),
+    (GHOST_R, slice(None)),
+    (slice(None), GHOST_R),
+    (GHOST_L, slice(None)),
+]  #: input slice for each edge orientation during edge communication
+
+OUT_SLICES = [
+    (NON_GHOST, GHOST_L),
+    (GHOST_R, NON_GHOST),
+    (NON_GHOST, GHOST_R),
+    (GHOST_L, NON_GHOST),
+]  #: output slice for each edge orientation during edge communication
+
+FLIP_DIMS = [(0, 1), (0,), None, (1,)]  #: which dims to flip during edge transfer
 
 
 # Constants for edge data transfer:
