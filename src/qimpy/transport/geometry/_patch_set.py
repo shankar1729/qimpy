@@ -8,7 +8,13 @@ from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import ProcessGrid, BufferView
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
-from qimpy.transport.advect import N_GHOST, NON_GHOST, GHOST_L, GHOST_R
+from qimpy.transport.advect import (
+    N_GHOST,
+    NON_GHOST,
+    GHOST_L,
+    GHOST_R,
+    get_riemann_mask,
+)
 from . import TensorList, Geometry, parse_svg
 
 
@@ -75,6 +81,7 @@ class PatchSet(Geometry):
             cent_diff_deriv=cent_diff_deriv,
             checkpoint_in=checkpoint_in,
         )
+        self.update_padded_velocities()
 
         # Initialize spatially-dependent fields, if any:
         field_params: dict[str, torch.Tensor] = {}  # TODO: fields varying in space
@@ -124,9 +131,9 @@ class PatchSet(Geometry):
             for i_edge, reflector in enumerate(patch.reflectors):
                 grho_edge = grho[IN_SLICES[i_edge]]
                 grho_edges.append(grho_edge)
-                if i_edge % 2 == 0:
-                    grho_edge = grho_edge.swapaxes(0, 1)  # short axis first
                 if reflector is not None:
+                    if i_edge % 2 == 0:
+                        grho_edge = grho_edge.swapaxes(0, 1)  # short axis first
                     # Reflect:
                     ghost_data = reflector(grho_edge)  # reciprocal space changes
                     ghost_data = ghost_data.flip(dims=(0,))  # flip short axis
@@ -192,10 +199,13 @@ class PatchSet(Geometry):
                         grho_dot[EDGES[i_edge]][mask] += edge_data[mask]
 
     def edge_exchange(
-        self, edge_list_in: list[list[torch.Tensor]]
+        self, edge_list_in: list[list[torch.Tensor]], velocity_mode: bool = False
     ) -> list[list[Optional[torch.Tensor]]]:
         """Exchange data across edges based on patch adjacency, handling
-        communication between patches on different processes, as necessary."""
+        communication between patches on different processes, as necessary.
+        If `velocity_mode` is True, the edge data is vectorial along the short axis
+        of the edges, as used for communication of velocities, and hence changes
+        sign when the short axis is flipped across a pass-through edge."""
         requests = []
         pending_reads = []  # keep reference to data so that it doesn't deallocate
         edge_list_out = [[None, None, None, None] for _ in range(len(self.patches))]
@@ -219,6 +229,8 @@ class PatchSet(Geometry):
                                 edge_data = edge_data.swapaxes(0, 1)
                             if flip_dims := FLIP_DIMS[delta_edge]:
                                 edge_data = edge_data.flip(dims=flip_dims)
+                                if velocity_mode and ((1 - i_edge % 2) in flip_dims):
+                                    edge_data = -edge_data
                         if not write_mine:
                             write_whose = self.patch_division.whose(i_patch)
                             edge_data = edge_data.contiguous()
@@ -246,6 +258,38 @@ class PatchSet(Geometry):
             MPI.Request.Waitall(requests)
         return edge_list_out
 
+    def update_padded_velocities(self):
+        """Update padded velocities and riemann masks in each patch."""
+        for patch in self.patches:
+            patch.Vedges = [
+                patch.V[:, GHOST_L, :, 1],  # bottom edge
+                patch.V[GHOST_R, :, :, 0],  # right edge
+                patch.V[:, GHOST_R, :, 1],  # top edge
+                patch.V[GHOST_L, :, :, 0],  # left edge
+            ]  # Used to construct Vpadded after inter-patch communication
+        V_edge_list = self.edge_exchange(
+            [patch.Vedges for patch in self.patches], velocity_mode=True
+        )
+        for patch, V_edges in zip(self.patches, V_edge_list):
+            for i_edge, Vedge in enumerate(V_edges):
+                Vedge_out = patch.Vedges[i_edge].flip(dims=(1 - i_edge % 2,))  # reflect
+                if Vedge is not None:  # exchanged data for pass-through boundaries
+                    mask = patch.aperture_selections[i_edge]
+                    if mask is None:
+                        Vedge_out = Vedge  # overwrite reflected version fully
+                    elif i_edge % 2:
+                        Vedge_out[:, mask] = Vedge[:, mask]
+                    else:
+                        Vedge_out[mask] = Vedge[mask]
+                patch.Vedges[i_edge] = Vedge_out
+
+            # Construct padded velocities
+            VB, VR, VT, VL = patch.Vedges
+            V0 = torch.cat((VL, patch.V[..., 0], VR), dim=0)
+            V1 = torch.cat((VB, patch.V[..., 1], VT), dim=1)
+            patch.Vpadded = (V0, V1)
+            patch.riemann_masks = (get_riemann_mask(V0, 0), get_riemann_mask(V1, 1))
+
 
 # Constants for edge data transfer:
 IN_SLICES = [
@@ -263,22 +307,6 @@ OUT_SLICES = [
 ]  #: output slice for each edge orientation during edge communication
 
 FLIP_DIMS = [(0, 1), (0,), None, (1,)]  #: which dims to flip during edge transfer
-
-
-# Constants for edge data transfer:
-GHOSTS = [
-    (NON_GHOST, N_GHOST - 1),
-    (-N_GHOST, NON_GHOST),
-    (NON_GHOST, -N_GHOST),
-    (N_GHOST - 1, NON_GHOST),
-]  #: slices for the ghost zone edges immediately adjacent to domain
-
-FULL_GHOSTS = [
-    (NON_GHOST, slice(N_GHOST)),
-    (slice(-N_GHOST, None), NON_GHOST),
-    (NON_GHOST, slice(-N_GHOST, None)),
-    (slice(N_GHOST), NON_GHOST),
-]  #: slices for the outer edges of the ghost zone
 
 EDGES = [
     (slice(None), 0),

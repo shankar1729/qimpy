@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Callable, Optional
+from typing import Callable
 from functools import cache
 
 import numpy as np
@@ -23,7 +23,7 @@ class FermiCircle(Material):
     theta0: float  #: Initial angle in fermi circle grid
     specularity: float  #: Specularity of reflection at all boundaries
     r_c: float  #: Cyclotron radius for extenral magnetic field (disabled if infinity)
-    F_theta: Optional[torch.Tensor]  #: Angular force in grid coordinates
+    F_theta: float  #: Angular force in grid coordinates
     advect: torch.jit.ScriptModule  #: Momentum-space advection logic
 
     def __init__(
@@ -93,17 +93,16 @@ class FermiCircle(Material):
 
         # Initialize F*drho/dk calculator, if needed:
         if np.isfinite(r_c):
-            F_theta = self.vF / (self.r_c * dtheta)
-            self.F_theta = torch.tensor(F_theta, device=rc.device)
-            self.dt_max = 0.5 / abs(F_theta)
+            self.F_theta = self.vF / (self.r_c * dtheta)
+            self.dt_max = 0.5 / abs(self.F_theta)
             self.advect = torch.jit.script(Advect())
             self.riemann_mask = torch.tensor(
-                (1.0, 0.0) if F_theta > 0 else (0.0, 1.0), device=rc.device
+                (1.0, 0.0) if self.F_theta > 0 else (0.0, 1.0), device=rc.device
             ).view(
                 1, 1, 1, -1
             )  # faster constant-F equivalent to get_riemann_mask
         else:
-            self.F_theta = None
+            self.F_theta = 0.0
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
@@ -137,13 +136,11 @@ class FermiCircle(Material):
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         result = self.rho_dot_collisions(rho)
-        if self.F_theta is not None:
+        if self.F_theta:
             # k-space advection due to magnetic fields:
-            F_theta = self.F_theta.expand(*rho.shape[:-1], self.nk_mine + 2 * N_GHOST)
             result += self.accumulate_edges(
                 *self.advect(
-                    self.pad_ghost(rho),
-                    F_theta,
+                    self.pad_ghost(rho) * self.F_theta,
                     self.riemann_mask,
                     -1,
                     True,

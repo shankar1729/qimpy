@@ -9,7 +9,7 @@ from qimpy.io import CheckpointPath
 from qimpy.mpi import globalreduce
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
-from qimpy.transport.advect import Advect, N_GHOST, NON_GHOST, Mask, get_riemann_mask
+from qimpy.transport.advect import Advect, NON_GHOST, Mask
 from . import within_circles
 
 
@@ -25,7 +25,9 @@ class Patch:
 
     q: torch.Tensor  #: Nx x Ny x 2 Cartesian coordinates
     g: torch.Tensor  #: Nx x Ny x 1 sqrt(metric), with extra dimensipm for broadcasting
-    V: tuple[torch.Tensor, torch.Tensor]  #: Padded mesh coordinate velocities
+    V: torch.Tensor  #: Nx x Ny x Nkbb x 2 mesh-coordinate velocities
+    Vedges: list[torch.Tensor]  #: Relevant velocity component along each edge
+    Vpadded: tuple[torch.Tensor, torch.Tensor]  #: Padded mesh-coordinate velocities
     riemann_masks: tuple[torch.Tensor, torch.Tensor]  #: Cached riemann selection masks
     dt_max: float  #: Maximum stable time step
     wk: float  #: Integration weight for the flattened density matrix dimensions
@@ -91,8 +93,8 @@ class Patch:
 
         # Initialize velocities:
         v = material.transport_velocity
-        V = torch.einsum("ka, ...Ba -> ...kB", v, torch.linalg.inv(jacobian))
-        self.dt_max = 0.5 / globalreduce.max(V.abs(), material.comm)
+        self.V = torch.einsum("ka, ...Ba -> ...kB", v, torch.linalg.inv(jacobian))
+        self.dt_max = 0.5 / globalreduce.max(self.V.abs(), material.comm)
         self.wk = material.wk
 
         # Initialize distribution function:
@@ -109,16 +111,6 @@ class Patch:
             )
         else:
             self.rho = torch.tile(material.rho0.flatten(), (N[0], N[1], 1))
-
-        # Store mesh velocities with padding needed for advection:
-        V0 = torch.nn.functional.pad(V[..., 0], (0, 0, 0, 0, N_GHOST, N_GHOST))
-        V0[:N_GHOST] = V[:1, ..., 0]
-        V0[-N_GHOST:] = V[-1:, ..., 0]
-        V1 = torch.nn.functional.pad(V[..., 1], (0, 0, N_GHOST, N_GHOST))
-        V1[:, :N_GHOST] = V[:, :1, :, 1]
-        V1[:, -N_GHOST:] = V[:, -1:, :, 1]
-        self.V = (V0, V1)
-        self.riemann_masks = (get_riemann_mask(V0, 0), get_riemann_mask(V1, 1))
 
         # Initialize v*drho/dx calculator:
         self.advect = torch.jit.script(Advect(cent_diff_deriv=cent_diff_deriv))
@@ -219,11 +211,11 @@ class Patch:
         """Compute g*rho_dot, given current g*rho.
         The input is ghost-padded, while the output contains the contributions within
         the domain and the edge contributions that must be reflected/passed-through."""
-        V0, V1 = self.V
+        V0, V1 = self.Vpadded
         R0, R1 = self.riemann_masks
-        edge_masks0, edge_masks1 = self.edge_masks
-        out0, outL, outR = self.advect(grho[:, NON_GHOST], V0, R0, 0, True, edge_masks0)
-        out1, outB, outT = self.advect(grho[NON_GHOST, :], V1, R1, 1, True, edge_masks1)
+        masks0, masks1 = self.edge_masks
+        out0, outL, outR = self.advect(V0 * grho[:, NON_GHOST], R0, 0, True, masks0)
+        out1, outB, outT = self.advect(V1 * grho[NON_GHOST, :], R1, 1, True, masks1)
         return out0 + out1, [outB, outR, outT, outL]
 
 

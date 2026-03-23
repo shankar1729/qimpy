@@ -57,15 +57,14 @@ class Advect(torch.nn.Module):
 
     def forward(
         self,
-        rho: torch.Tensor,
-        v: torch.Tensor,
+        flux: torch.Tensor,
         riemann_mask: torch.Tensor,
         axis: int,
         retain_padding: bool = False,
         edge_masks: tuple[Mask, Mask] = (False, False),
     ) -> list[torch.Tensor]:
-        """Compute advection -d`v``rho`/dx of `rho` with velocity `v` along `axis`.
-        Along `axis`, for a domain of actual length N, `rho` and `v` are ghost-padded
+        """Compute advection -d`flux`/dx of `flux` (= rho * v) along `axis`.
+        Along `axis`, for a domain of actual length N, `flux` are ghost-padded
         with length N + 4. The result contains the domain contribution, along with
         additional left and right edge contributions if `retain_padding` is True.
         All tensors have equal/broadcastable dimensions along all other axes.
@@ -84,8 +83,7 @@ class Advect(torch.nn.Module):
         (not zerong the edge flux) will typically lead to double counting the edge.
         """
         # Bring active axis to end
-        flux = (rho * v).swapaxes(axis, -1)
-        v = v.swapaxes(axis, -1)
+        flux = flux.swapaxes(axis, -1)
 
         # Reconstruction
         half_slope = 0.5 * self.slope_minmod(flux)  # length N + 2
