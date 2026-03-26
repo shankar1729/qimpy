@@ -7,7 +7,8 @@ from qimpy import log, rc
 from qimpy.lattice import Lattice
 from qimpy.grid import Grid, FieldH, coulomb
 from qimpy.grid._embed import CoulombEmbedder
- 
+
+
 class KernelSlab:
     """Coulomb interactions between fields in a truncated Slab geometry."""
 
@@ -18,20 +19,18 @@ class KernelSlab:
 
     def __init__(self, coul: coulomb.Coulomb, i_dir: int) -> None:
         """Initialize truncated coulomb calculation"""
-        self.grid = grid = coul.grid
+        self.grid = coul.grid
         self.i_dir = i_dir
         self.embedder = CoulombEmbedder(self.grid)
         self.gridEmbed = self.embedder.gridEmbed
         self.embed = coul.embed
+        grid = self.gridEmbed if self.embed else self.grid
         if coul.radius:
             self.radius = coul.radius
         else:
             self.radius = grid.lattice.Rbasis[:, i_dir].norm() * 0.5
         iG = grid.get_mesh("H").to(torch.double)
         Gi = iG @ grid.lattice.Gbasis.T
-        if self.embed:
-            iG = self.gridEmbed.get_mesh("H").to(torch.double)
-            Gi = iG @ self.gridEmbed.lattice.Gbasis.T
         Gsqi = Gi.square()
         Gsq = Gsqi.sum(dim=-1)
         Gplane = torch.sqrt(Gsq - Gsqi[..., i_dir])
@@ -51,7 +50,9 @@ class KernelSlab:
         if self.embed:
             k_space_expanded_rho = ~self.embedder.embedExpand(~rho)
             assert self.grid is rho.grid
-            result = FieldH(self.gridEmbed, data= self._kernel * k_space_expanded_rho.data)
+            result = FieldH(
+                self.gridEmbed, data=self._kernel * k_space_expanded_rho.data
+            )
             return ~self.embedder.embedShrink(~result)
         assert self.grid is rho.grid
         result = FieldH(self.grid, data=(self._kernel * rho.data))
