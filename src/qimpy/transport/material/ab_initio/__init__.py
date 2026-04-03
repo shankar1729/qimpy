@@ -6,6 +6,7 @@ __all__ = [
     "PulseB",
     "AbInitio",
     "EMField",
+    "Reflector",
 ]
 
 from ._packed_hermitian import PackedHermitian
@@ -14,4 +15,5 @@ from ._lindblad import Lindblad
 from ._light import Light
 from ._pulse_b import PulseB
 from ._em_field import EMField
+from ._reflector import Reflector
 from ._ab_initio import AbInitio

@@ -14,6 +14,7 @@ from qimpy import rc, log, io
 from qimpy.profiler import stopwatch, StopWatch
 from qimpy.io import log_config, Checkpoint, CheckpointPath
 from .geometry import BOUNDARY_SLICES, evaluate_spline, within_circles_np
+from qimpy.io import Unit
 
 
 def main() -> None:
@@ -66,15 +67,19 @@ def run(
             for i_quad in range(n_quads):
                 cp_quad = cp_geom[f"quad{i_quad}"]
                 observables = np.array(cp_quad["observables"][mine])
-                rho_list.append(observables[..., 0])  # TODO: handle ab_initio cases
-                vx_list.append(observables[..., 1])
-                vy_list.append(observables[..., 2])
+                #rho_list.append(observables[..., 0])  # TODO: handle ab_initio cases
+                #vx_list.append(observables[..., 13])
+                #vy_list.append(observables[..., 14])
+                rho_list.append(observables[..., pg.channel])  # TODO: handle ab_initio cases
+                vx_list.append(observables[..., 13])
+                vy_list.append(observables[..., 14])
 
         # Plot each frame:
         for i_frame_mine, (i_step, t) in enumerate(zip(i_step_list, t_list)):
             plot_file = output.format(i_step)
             # Density:
-            pg.title.set_text(f"$t$ = {t:.4g}")
+            t /= Unit.MAP["ps"]
+            pg.title.set_text(f"$t$ = {t:.4g} ps")
             rho, rho_flat = pg.interpolate(rho_list, i_frame_mine)
             rho_max_abs = np.max(np.abs(rho))
             pg.img.set_data(rho / rho_max_abs)
@@ -190,7 +195,9 @@ class PlotGeometry:
         interpolation: str = "bilinear",
         linthresh: float = 0.1,
         plot_apertures: dict,
+        channel: int = 0,
     ):
+        self.channel = channel
         # Load geometry:
         q_list = []
         triangles = []
@@ -293,9 +300,10 @@ class PlotGeometry:
                                 position = points_mid[i_mid]
                                 dq = tangents_mid[i_mid]
                                 angle = np.rad2deg(np.arctan2(dq[1], dq[0]))
-                                plt.text(
-                                    *position, contact_name, rotation=angle, **text_args
-                                )
+                                if not contact_name.startswith("bg"):
+                                    plt.text(
+                                        *position, contact_name, rotation=angle, **text_args
+                                    )
 
                     # Collect quantities to calculate current:
                     normals_mid = np.stack(
@@ -354,6 +362,10 @@ class PlotGeometry:
         # Construct target grid for interpolation
         x_min, y_min = q_all.min(axis=0)
         x_max, y_max = q_all.max(axis=0)
+        x_min += 100
+        y_min += 100
+        x_max -= 100
+        y_max -= 100
         Nx = 1 + 2 * int(np.round((x_max - x_min) / grid_spacing))
         Ny = 1 + 2 * int(np.round((y_max - y_min) / grid_spacing))
         x_grid_1d = np.linspace(x_min, x_max, Nx)
@@ -372,10 +384,11 @@ class PlotGeometry:
             norm=SymLogNorm(linthresh=linthresh, vmin=-1, vmax=+1),
         )
         ax = plt.gca()
+        ax.axis('off')
         ax.set_aspect("equal")
         ax.margins(0.1)
         cbar_orientation = "horizontal" if (Nx > 1.5 * Ny) else "vertical"
-        self.cbar = plt.colorbar(self.img, label="Temp", orientation=cbar_orientation)
+        self.cbar = plt.colorbar(self.img, label="Temp", orientation=cbar_orientation, shrink=0.8)
         spines = ax.spines
         spines["top"].set_visible(False)
         spines["right"].set_visible(False)
