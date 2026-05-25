@@ -49,7 +49,7 @@ def run(
     # TriSet writes a structured bounding-box grid (geometry_type 'tri_set');
     # render it directly rather than via the PatchSet quad triangulation.
     with Checkpoint(file_list[0]) as cp:
-        geom_type = cp["/geometry"].attrs.get("geometry_type", b"")
+        geom_type = cp["/geometry"].attrs.get("variant_name", b"")
         geom_type = (geom_type.decode() if isinstance(geom_type, bytes)
                      else str(geom_type))
     if geom_type == "tri_set":
@@ -161,45 +161,65 @@ def run(
 
 
 def run_tri_set(file_list, mine, output, density, streamlines, dpi) -> None:
-    """Frame-parallel rendering of a TriSet structured bounding-box grid.
+    """Frame-parallel, mesh-native rendering of TriSet output.
 
-    Each rank renders its strided subset of frames (`mine`), reading and writing
-    independently, so post-processing scales the same way the solve does. Cells
-    outside the device are NaN and are masked. (Probe density/current
-    time-series, a PatchSet/contact-circle feature, are not produced here.)"""
+    Renders the density on the actual triangulation (each order-N element shown
+    via its N^2 nodal sub-triangles, so the high-order, graded, exact-boundary
+    field is preserved) with tripcolor, and traces current streamlines from a
+    triangulation interpolation of (jx, jy). Each rank renders its strided subset
+    of frames independently, so post-processing scales like the solve."""
+    import matplotlib.tri as mtri
     cmap = density.get("cmap", "bwr")
-    interp = density.get("interpolation", "bilinear")
     with Checkpoint(file_list[0]) as cp:
-        q = np.array(cp["/geometry/quad0/q"])            # (nx, ny, 2)
-    xg, yg = q[:, 0, 0], q[0, :, 1]
-    extent = [xg.min(), xg.max(), yg.min(), yg.max()]
+        g = cp["/geometry"]
+        node_xy = np.array(g["node_xy"])             # (K, Np, 2)
+        subtri = np.array(g["subtri"])               # (n_sub, 3)
+    K, Np, _ = node_xy.shape
+    xall = node_xy[..., 0].ravel(); yall = node_xy[..., 1].ravel()
+    tris = (subtri[None] + (np.arange(K) * Np)[:, None, None]).reshape(-1, 3)
+    # Adjacent elements' shared-edge DG nodes coincide; merge them so the
+    # triangulation (and its trifinder, used for streamline interpolation) is
+    # valid. Inter-element jumps are averaged -- standard for DG visualization.
+    key = np.round(np.stack([xall, yall], 1), 9)
+    uniq, inv = np.unique(key, axis=0, return_inverse=True)
+    xu, yu = uniq[:, 0], uniq[:, 1]
+    triang = mtri.Triangulation(xu, yu, inv[tris])
+    counts = np.zeros(len(xu)); np.add.at(counts, inv, 1.0)
+
+    def to_unique(flat_vals):
+        acc = np.zeros(len(xu)); np.add.at(acc, inv, flat_vals)
+        return acc / counts
+
+    if streamlines is not None:
+        xs = np.linspace(xu.min(), xu.max(), 220)
+        ys = np.linspace(yu.min(), yu.max(), 220)
+        Xs, Ys = np.meshgrid(xs, ys)
     orig_level = log.getEffectiveLevel(); log.setLevel(logging.INFO)
     for checkpoint_file in file_list:
         with Checkpoint(checkpoint_file) as cp:
             g = cp["/geometry"]
             i_step_list = np.array(g["i_step"])[mine]
             t_list = np.array(g["t"])[mine]
-            obs = np.array(g["quad0/observables"][mine])  # (nframe, nx, ny, nobs)
+            obs = np.array(g["dg_observables"][mine])   # (nframe, K, Np, n_obs)
         for fr, (i_step, t) in enumerate(zip(i_step_list, t_list)):
-            rho = obs[fr, ..., 0]
-            vmax = np.nanmax(np.abs(rho))
+            n_val = to_unique(obs[fr, :, :, 0].ravel())
+            vmax = float(np.nanmax(np.abs(n_val)))
             if not np.isfinite(vmax) or vmax == 0.0:
                 vmax = 1.0
             fig, ax = plt.subplots(figsize=(6, 6))
-            im = ax.imshow(np.ma.masked_invalid(rho).T / vmax, origin="lower",
-                           extent=extent, cmap=cmap, interpolation=interp,
-                           vmin=-1, vmax=1, aspect="equal")
-            ax.set_title(f"$t$ = {t:.4g}")
-            cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            tpc = ax.tripcolor(triang, n_val / vmax, cmap=cmap, vmin=-1, vmax=1,
+                               shading="gouraud")
+            ax.set_aspect("equal"); ax.set_title(f"$t$ = {t:.4g}"); ax.axis("off")
+            cb = fig.colorbar(tpc, ax=ax, fraction=0.046, pad=0.04)
             cb.set_label(rf"Density ($\times|\rho|_{{\max}}$ = {vmax:.2e})")
             if streamlines is not None and obs.shape[-1] >= 3:
-                vx = np.nan_to_num(obs[fr, ..., 1]); vy = np.nan_to_num(obs[fr, ..., 2])
-                ax.streamplot(xg, yg, vx.T, vy.T,
+                jx = mtri.LinearTriInterpolator(triang, to_unique(obs[fr, :, :, 1].ravel()))
+                jy = mtri.LinearTriInterpolator(triang, to_unique(obs[fr, :, :, 2].ravel()))
+                U = np.ma.filled(jx(Xs, Ys), 0.0); V = np.ma.filled(jy(Xs, Ys), 0.0)
+                ax.streamplot(xs, ys, U, V,
                               density=streamlines.get("density", 1.5),
                               linewidth=streamlines.get("linewidth", 0.6),
                               arrowsize=streamlines.get("arrowsize", 0.6), color="k")
-            ax.set_xlim(extent[0], extent[1]); ax.set_ylim(extent[2], extent[3])
-            ax.axis("off")
             plot_file = output.format(i_step)
             fig.savefig(plot_file, bbox_inches="tight", dpi=dpi)
             plt.close(fig)

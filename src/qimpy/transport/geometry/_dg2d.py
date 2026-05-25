@@ -597,3 +597,16 @@ def lserk4_step(dg, u, ax, ay, dt, t, resu, bc=None):
         resu = _RK4A[i] * resu + dt * rhs
         u = u + _RK4B[i] * resu
     return u, resu
+
+
+def prolongation_matrix(N_from: int, N_to: int) -> np.ndarray:
+    """Nodal order-prolongation operator P (Np_to x Np_from).
+
+    A DG field on an element is a polynomial of degree N_from. P evaluates that
+    polynomial at the order-N_to nodes: u_to = P @ u_from. For N_to >= N_from
+    this is EXACT (the degree-N_from polynomial space embeds in degree-N_to), so
+    a run checkpointed at N_from can be continued at N_to with no loss. For
+    N_to < N_from it is an interpolatory restriction (lossy)."""
+    r_to, s_to = nodes2d(N_to)
+    V_from = vandermonde2d(N_from, *nodes2d(N_from))
+    return vandermonde2d(N_from, r_to, s_to) @ np.linalg.inv(V_from)
