@@ -98,7 +98,18 @@ class TimeEvolution(TreeNode):
                 dt = dt_max
                 log.info(f"Setting time step dt = {dt_max = :.4g}")
             elif dt > dt_max:
-                raise InvalidInputException(f"{dt = } must be smaller than {dt_max = }")
+                if i_step:
+                    # Continuing from a checkpoint whose dt is no longer valid for
+                    # the current discretization (e.g. the DG order was increased,
+                    # so the explicit-CFL limit dt_max ~ 1/(N+1)^2 tightened). The
+                    # restored dt is a stale continuation default, so reduce it to
+                    # the new dt_max automatically rather than failing.
+                    log.info(f"Reducing restored time step dt = {dt:.4g} to "
+                             f"{dt_max = :.4g} for the current discretization")
+                    dt = dt_max
+                else:
+                    raise InvalidInputException(
+                        f"{dt = } must be smaller than {dt_max = }")
             self.dt = float(dt)
             self.n_steps = max(1, int(np.round(t_max / self.dt)))
             self.save_interval = max(1, int(np.round(dt_save / self.dt)))
