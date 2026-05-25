@@ -41,7 +41,12 @@ class Checkpoint(h5py.File):
             filename_open = filename  # Directly open the target filename,
             self.filename_move = ""  # and don't move at the end
         mode = "w" if writable else "r"  # don't allow r+, a etc. for safety
-        super().__init__(filename_open, mode, driver="mpio", comm=rc.comm)
+        if rc.n_procs == 1:
+            # Serial run: avoid the parallel-HDF5 (mpio) driver, which requires
+            # an MPI-enabled h5py build. Plain h5py is sufficient on one process.
+            super().__init__(filename_open, mode)
+        else:
+            super().__init__(filename_open, mode, driver="mpio", comm=rc.comm)
         mode_name = "writing:" if writable else "reading"
         log.info(f"\nOpened checkpoint file '{filename_open}' for {mode_name}")
 

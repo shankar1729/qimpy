@@ -1,49 +1,31 @@
 from __future__ import annotations
-from typing import Callable, Optional, NamedTuple
+from typing import Callable, Optional
 
 import numpy as np
 import torch
 
 from qimpy import rc
 from qimpy.io import CheckpointPath
-from qimpy.mpi import globalreduce
-from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
-from qimpy.transport.advect import Advect, NON_GHOST, Mask
-from . import within_circles
-
-
-class Contact(NamedTuple):
-    """Definition of a contact."""
-
-    selection: slice  #: Slice of edge's data that are within the contact
-    contactor: Callable[[float], torch.Tensor]  #: Corresponding distribution calculator
 
 
 class Patch:
-    """Quad-patch with real-space advection on an arbitrary transformation."""
+    """Structured quad grid holding coordinates, metric and density-matrix state.
+
+    This is a passive grid/state container (used by `ParameterGrid` for batched
+    dynamics). The spatial finite-volume advection that previously lived here
+    has been removed; spatial transport is now handled by the DG solver
+    (`TriSet`). Momentum-space advection lives in the material.
+    """
 
     q: torch.Tensor  #: Nx x Ny x 2 Cartesian coordinates
-    g: torch.Tensor  #: Nx x Ny x 1 sqrt(metric), with extra dimensipm for broadcasting
-    V: torch.Tensor  #: Nx x Ny x Nkbb x 2 mesh-coordinate velocities
-    Vedges: list[torch.Tensor]  #: Relevant velocity component along each edge
-    Vpadded: tuple[torch.Tensor, torch.Tensor]  #: Padded mesh-coordinate velocities
-    riemann_masks: tuple[torch.Tensor, torch.Tensor]  #: Cached riemann selection masks
-    dt_max: float  #: Maximum stable time step
-    wk: float  #: Integration weight for the flattened density matrix dimensions
-    rho_offset: tuple[int, ...]  #: Offset of density matrix data within that of quad
-    rho_shape: tuple[int, ...]  #: Shape of density matrix on patch
+    g: torch.Tensor  #: Nx x Ny x 1 sqrt(metric)
+    dt_max: float  #: Maximum stable time step (unused here; set by Geometry)
+    wk: float  #: Integration weight for the flattened density-matrix dimensions
+    rho_offset: tuple[int, ...]  #: Offset of density matrix within that of the quad
+    rho_shape: tuple[int, ...]  #: Shape of the density matrix on this patch
     rho: torch.Tensor  #: current density matrix on this patch
-    advect: torch.jit.ScriptModule  #: Underlying advection logic
-    cent_diff_deriv: bool  # using simple central difference operator
-
     material: Material
-    aperture_selections: list[Optional[torch.Tensor]]  #: Aperture indices for each edge
-    reflectors: list[
-        Optional[Callable[[torch.Tensor], torch.Tensor]]
-    ]  #: Material-dependent reflector for each edge that needs one
-    contacts: list[list[Contact]]  #: Contact calculators (multiple possibly) by edge
-    edge_masks: tuple[list[Mask], list[Mask]]  #: Masks for zeroing edge flux by axis
 
     def __init__(
         self,
@@ -52,13 +34,13 @@ class Patch:
         grid_size_tot: tuple[int, ...],
         grid_start: tuple[int, ...],
         grid_stop: tuple[int, ...],
-        is_reflective: np.ndarray,
-        has_apertures: np.ndarray,
-        aperture_circles: torch.Tensor,
-        contact_circles: torch.Tensor,
-        contact_params: list[dict],
+        is_reflective: np.ndarray = None,
+        has_apertures: np.ndarray = None,
+        aperture_circles: Optional[torch.Tensor] = None,
+        contact_circles: Optional[torch.Tensor] = None,
+        contact_params: Optional[list[dict]] = None,
         material: Material,
-        cent_diff_deriv: bool,
+        cent_diff_deriv: bool = False,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         # Initialize mesh:
@@ -68,7 +50,7 @@ class Patch:
         ]
         Q = torch.stack(torch.meshgrid(*grids1d, indexing="ij"), dim=-1)
 
-        # Initialize transformed coordinates and jacobian using auto-grad
+        # Transformed coordinates and Jacobian via auto-grad:
         N = tuple(
             (grid_stop_i - grid_start_i)
             for grid_start_i, grid_stop_i in zip(grid_start, grid_stop)
@@ -78,8 +60,7 @@ class Patch:
             torch.eye(2, device=rc.device)[:, None, None], (1,) + N + (1,)
         )
         Q.requires_grad = True
-        Qfrac = Q / N_tot
-        q = transformation(Qfrac)
+        q = transformation(Q / N_tot)
         jacobian = torch.autograd.grad(
             q, Q, grad_outputs=grad_q, is_grads_batched=True, retain_graph=False
         )[0]
@@ -87,18 +68,17 @@ class Patch:
         Q.requires_grad = False
         self.q = q.detach()
 
-        # Initialize metric:
+        # Metric:
         metric = torch.einsum("...aB, ...aC -> ...BC", jacobian, jacobian)
         self.g = torch.linalg.det(metric).sqrt()[:, :, None]
 
-        # Initialize velocities:
-        v = material.transport_velocity
-        self.V = torch.einsum("ka, ...Ba -> ...kB", v, torch.linalg.inv(jacobian))
-        self.dt_max = 0.5 / globalreduce.max(self.V.abs(), material.comm)
+        self.material = material
         self.wk = material.wk
+        self.dt_max = np.inf  # no spatial advection here; set by the geometry
 
-        # Initialize distribution function:
-        Nkbb = v.shape[0]  # flattened density-matrix count (Nkbb_mine of material)
+        # Distribution function:
+        v = material.transport_velocity
+        Nkbb = v.shape[0]
         nk_prev = material.k_division.n_prev[material.comm.rank]
         Nkbb_offset = nk_prev * (material.n_bands**2)
         self.rho_offset = tuple(grid_start) + (Nkbb_offset,)
@@ -112,83 +92,6 @@ class Patch:
         else:
             self.rho = torch.tile(material.rho0.flatten(), (N[0], N[1], 1))
 
-        # Initialize v*drho/dx calculator:
-        self.advect = torch.jit.script(Advect(cent_diff_deriv=cent_diff_deriv))
-
-        # Initialize reflectors if needed:
-        self.material = material
-        self.aperture_selections = [None] * 4
-        self.reflectors = [None] * 4
-        self.contacts = [[] for _ in range(4)]  # Note: [[]]*N makes N refs to one []!
-        edge_masks: list[Mask] = [True] * 4
-        for i_edge, (is_reflective_i, has_apertures_i) in enumerate(
-            zip(is_reflective, has_apertures)
-        ):
-            if not (is_reflective_i or has_apertures_i):
-                continue  # Entirely pass-through (neither reflective nor has apertures)
-
-            i_dim = i_edge % 2  # long direction of edge
-            j_dim = 1 - i_dim  # other direction
-
-            # Compute coordinates along edge:
-            Q_edge = torch.empty((N[i_dim], 2), device=rc.device)
-            Q_edge[:, i_dim] = grids1d[i_dim]
-            Q_edge[:, j_dim] = (grid_start if (i_edge in {0, 3}) else grid_stop)[j_dim]
-            Q_edge_frac = Q_edge / N_tot
-            Q_edge_frac.requires_grad = True
-            q_edge = transformation(Q_edge_frac)
-
-            # Compute tangent direction:
-            grad_q_edge = torch.tile(
-                torch.eye(2, device=rc.device)[:, None], (1, N[i_dim], 1)
-            )
-            jacobian_edge = torch.autograd.grad(
-                q_edge,
-                Q_edge_frac,
-                grad_outputs=grad_q_edge,
-                is_grads_batched=True,
-                retain_graph=False,
-            )[0]
-            jacobian_edge = torch.permute(jacobian_edge, (1, 0, 2)).detach()
-            tangent = jacobian_edge[..., i_dim]  # derivative along edge
-            if i_edge >= 2:
-                tangent *= -1  # so that it follows the counter-clockwise diretcion
-            normal = torch.stack((tangent[..., 1], -tangent[..., 0]), dim=-1)
-            normal *= (1.0 / normal.norm(dim=-1))[..., None]  # unit outward normal
-            self.reflectors[i_edge] = material.get_reflector(normal)
-
-            # Initialize pass-through indices for edges with apertures:
-            if has_apertures_i:
-                within = within_circles(aperture_circles, q_edge.detach())
-                self.aperture_selections[i_edge] = torch.where(within.any(dim=0))[0]
-
-            # Check for any contacts:
-            if not is_reflective_i:
-                continue  # ignore contacts in periodic/pass-through
-            within = within_circles(contact_circles, q_edge.detach())
-            for i_contact, contact_params_i in enumerate(contact_params):
-                if len(selection := torch.argwhere(within[i_contact])):
-                    selection_start = selection.min().item()
-                    selection_stop = selection.max().item() + 1
-                    assert (selection_stop - selection_start) == len(selection)
-                    # Assume each edge intersection with contact is contiguous
-                    # Using this reduce selection to a slice (more convenient):
-                    contact_slice = slice(selection_start, selection_stop)
-                    contactor = material.get_contactor(
-                        normal[contact_slice], **contact_params_i
-                    )
-                    self.contacts[i_edge].append(Contact(contact_slice, contactor))
-            edge_mask = torch.where(torch.logical_not(within.any(dim=0)))[0]
-            if len(edge_mask) == 0:
-                edge_masks[i_edge] = False  # Disable mask for full-edge contact
-            elif len(edge_mask) < within.shape[1]:
-                edge_masks[i_edge] = edge_mask  # Partial mask outside contact only
-
-        self.edge_masks = (
-            [edge_masks[3], edge_masks[1]],
-            [edge_masks[0], edge_masks[2]],
-        )
-
     def save_checkpoint(
         self, cp_path: CheckpointPath, observables: torch.Tensor, save_rho: bool
     ) -> None:
@@ -197,7 +100,6 @@ class Patch:
         assert cp is not None
         grid_offset = self.rho_offset[:-1]
         if self.material.comm.rank == 0:
-            # Write quantities not divided over material:
             cp.write_slice(cp[path + "/q"], grid_offset + (0,), self.q)
             cp.write_slice(cp[path + "/g"], grid_offset, self.g[:, :, 0])
             cp.write_slice(
@@ -205,18 +107,6 @@ class Patch:
             )
         if save_rho:
             cp.write_slice(cp[path + "/rho"], self.rho_offset, self.rho)
-
-    @stopwatch
-    def rho_dot(self, grho: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
-        """Compute g*rho_dot, given current g*rho.
-        The input is ghost-padded, while the output contains the contributions within
-        the domain and the edge contributions that must be reflected/passed-through."""
-        V0, V1 = self.Vpadded
-        R0, R1 = self.riemann_masks
-        masks0, masks1 = self.edge_masks
-        out0, outL, outR = self.advect(V0 * grho[:, NON_GHOST], R0, 0, True, masks0)
-        out1, outB, outT = self.advect(V1 * grho[NON_GHOST, :], R1, 1, True, masks1)
-        return out0 + out1, [outB, outR, outT, outL]
 
 
 def to_numpy(f: torch.Tensor) -> np.ndarray:

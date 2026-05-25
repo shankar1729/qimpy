@@ -5,7 +5,7 @@ from qimpy.rc import MPI
 from qimpy.io import CheckpointPath, Checkpoint, CheckpointContext
 from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
-from .geometry import Geometry, PatchSet, ParameterGrid
+from .geometry import Geometry, ParameterGrid, TriSet
 from .material import Material, FermiCircle
 from .material.ab_initio import AbInitio
 from .material.single_band import SingleBand
@@ -23,7 +23,7 @@ class Transport(TreeNode):
         ab_initio: Optional[Union[AbInitio, dict]] = None,
         fermi_circle: Optional[Union[FermiCircle, dict]] = None,
         single_band: Optional[Union[SingleBand, dict]] = None,
-        patch_set: Optional[Union[PatchSet, dict]] = None,
+        tri_set: Optional[Union[TriSet, dict]] = None,
         parameter_grid: Optional[Union[ParameterGrid, dict]] = None,
         time_evolution: Optional[Union[TimeEvolution, dict]] = None,
         checkpoint: Optional[str] = None,
@@ -46,8 +46,8 @@ class Transport(TreeNode):
         single_band
             :yaml:`Single-band model material for energy-resolved charge transport.`
             Exactly one supported material type must be specified.
-        patch_set
-            :yaml:`Geometry consisting of bicubic patches.`
+        tri_set
+            :yaml:`Discontinuous-Galerkin geometry on an unstructured triangle mesh.`
             Exactly one supported geometry type must be specified.
         parameter_grid
             :yaml:`Virtual geometry of disconnected points for batched dynamics.`
@@ -102,9 +102,9 @@ class Transport(TreeNode):
             "geometry",
             checkpoint_in,
             TreeNode.ChildOptions(
-                "patch_set",
-                PatchSet,
-                patch_set,
+                "tri_set",
+                TriSet,
+                tri_set,
                 material=self.material,
                 process_grid=self.process_grid,
             ),
