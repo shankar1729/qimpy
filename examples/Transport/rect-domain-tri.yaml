@@ -1,0 +1,26 @@
+# rect-domain driven by source/drain contacts, solved with the DG triangle-mesh
+# advection (tri_set). The mesh is supplied externally (qimpy does not mesh);
+# generate it first with:  python make_rect_mesh.py --out rect-domain-tri.npz
+fermi_circle:
+  kF: 1.0
+  vF: 1.5
+  tau-p: .inf
+  tau-ee: .inf
+  N-theta: 256
+  r_c: 10.0
+
+tri_set:
+  mesh_file: rect-domain-tri.npz
+  order: 3
+  contacts:
+    source:
+      dmu: +0.1
+    drain:
+      dmu: -0.1
+
+time_evolution:
+  t_max: 1000.0
+  dt_save: 5.0
+  n_collate: 32
+
+checkpoint_out: animation/advect_{:04d}.h5
