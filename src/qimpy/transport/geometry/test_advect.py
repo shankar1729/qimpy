@@ -207,3 +207,58 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def test_spatial_mpi_matches_serial(tmp_path):
+    """Spatial domain decomposition reproduces the serial DG result bit-for-bit
+    on a contact-driven problem (halo emulated in-process; the real mpi4py
+    transport moves the identical buffers)."""
+    from qimpy.mpi import ProcessGrid
+    from qimpy.transport.material import FermiCircle
+    from ._dg_mesh import load_mesh
+    from ._dg2d import DG2D
+    from ._dg_mpi import (compute_partition, SpatialPartition,
+                          DistributedAdvect, emulate_halo)
+    rc.init()
+    torch.set_default_dtype(torch.float64)
+    mesh = load_mesh(_make_rect_mesh(8.0, str(tmp_path / "rect.npz")))
+    pg = ProcessGrid(rc.comm, "rk", (1, 1))           # all channels local
+    mat = FermiCircle(kF=1.0, vF=1.5, N_theta=8, theta0=0.0, tau_p=np.inf,
+                      tau_ee=np.inf, r_c=np.inf, specularity=1.0, process_grid=pg)
+    contacts = {"source": {"dmu": 0.1}, "drain": {"dmu": -0.1}}
+    order, nsteps = 2, 16
+    dt = 0.5 * float(DG2D(order, mesh.VX, mesh.VY, mesh.EToV).dt_scale) / 1.5
+
+    def initial(adv, dg):
+        x, y = np.asarray(dg.x), np.asarray(dg.y)
+        u0 = np.zeros((dg.Np, dg.K, adv.Nk))
+        u0[:, :, 0] = np.exp(-((x - 55) ** 2 + (y - 30) ** 2) / (2 * 8.0 ** 2))
+        return adv.adv.apply_mass(torch.from_numpy(u0))
+
+    def run(nparts):
+        part = compute_partition(mesh, nparts)
+        parts = [SpatialPartition(mesh, order, part, r) for r in range(nparts)]
+        advs = [DistributedAdvect(p, mat, contacts) for p in parts]
+        ws = [initial(advs[r], parts[r].dg) for r in range(nparts)]
+
+        def rhs(stage):
+            emulate_halo(parts, stage)
+            return [advs[r].local_rhs(stage[r]) for r in range(nparts)]
+
+        for _ in range(nsteps):
+            k1 = rhs([w.clone() for w in ws])
+            k2 = rhs([ws[r] + 0.5 * dt * k1[r] for r in range(nparts)])
+            k3 = rhs([ws[r] + 0.5 * dt * k2[r] for r in range(nparts)])
+            k4 = rhs([ws[r] + dt * k3[r] for r in range(nparts)])
+            ws = [ws[r] + (dt / 6.0) * (k1[r] + 2 * (k2[r] + k3[r]) + k4[r])
+                  for r in range(nparts)]
+        K = len(mesh.EToV)
+        full = np.zeros((parts[0].dg.Np, K, advs[0].Nk))
+        for r in range(nparts):
+            no = parts[r].n_owned
+            full[:, parts[r].local2global_elem[:no], :] = \
+                ws[r].detach().cpu().numpy()[:, :no, :]
+        return full
+
+    serial, par = run(1), run(4)
+    assert np.abs(par - serial).max() < 1e-12, "spatial decomposition != serial"
