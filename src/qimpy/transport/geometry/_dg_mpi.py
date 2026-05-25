@@ -99,10 +99,10 @@ class DistributedAdvect:
 
     def __init__(self, part: SpatialPartition, material, contacts):
         self.p = part
-        v = material.transport_velocity.detach().cpu().numpy()
-        self.Nk = v.shape[0]
-        self.vx = torch.tensor(v[:, 0]); self.vy = torch.tensor(v[:, 1])
-        self.adv = AdvectTorch(part.dg)
+        v_t = material.transport_velocity
+        self.Nk = v_t.shape[0]
+        self.vx = v_t[:, 0].contiguous(); self.vy = v_t[:, 1].contiguous()
+        self.adv = AdvectTorch(part.dg, device=v_t.device, dtype=v_t.dtype)
         self._setup_boundaries(material, contacts)
 
     def _setup_boundaries(self, material, contacts):
