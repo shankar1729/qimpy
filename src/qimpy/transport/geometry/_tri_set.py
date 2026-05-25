@@ -140,6 +140,13 @@ class TriSet(Geometry):
                                      dtype=torch.float64)]
         self._render_size = [(nx, ny)]
         self._bbox = (xmin, xmax, ymin, ymax)
+        self._grid_spacing = max(dx, dy)
+        # mask of render points inside the true (global) domain, so output cells
+        # outside the device read NaN regardless of how space is partitioned
+        import matplotlib.tri as mtri
+        finder = mtri.Triangulation(self.mesh.VX, self.mesh.VY,
+                                    self.mesh.EToV).get_trifinder()
+        self._inside_global = [finder(X.ravel(), Y.ravel()).reshape(nx, ny) >= 0]
 
     def _build_interp(self, q_grid):
         """Locate each render point in an OWNED element and build DG nodal-interp
@@ -174,9 +181,9 @@ class TriSet(Geometry):
         rho = self.density.detach().cpu().numpy()    # density u = M^-1 w
         tri, W, inside = self._interp[i_quad]
         grid = np.einsum('pi,ipk->pk', W, rho[:, tri, :])
-        # outside the owned region: 0 under decomposition (so the cross-rank sum
-        # picks up each point from its single owner); NaN in serial (clean plot)
-        grid[~inside] = 0.0 if self._distributed else np.nan
+        # outside this rank's owned region -> 0 so the cross-rank sum picks up
+        # each point from its single owner; true-domain NaN mask applied in stash
+        grid[~inside] = 0.0
         return torch.from_numpy(
             grid.reshape(*self._render_size[i_quad], -1)).to(self._rho)
 
@@ -218,6 +225,7 @@ class TriSet(Geometry):
             obs_np = np.ascontiguousarray(obs.detach().cpu().numpy())
             if self._distributed:                        # combine owned regions
                 self.comm.Allreduce(MPI.IN_PLACE, BufferView(obs_np))
+            obs_np[~self._inside_global[i_quad]] = np.nan  # blank outside device
             self._stash_obs[i_quad].append(obs_np)
 
     def _save_checkpoint(
@@ -227,6 +235,7 @@ class TriSet(Geometry):
         attrs["mesh_file"] = self.mesh_file
         attrs["geometry_type"] = "tri_set"
         attrs["dg_order"] = self.order
+        attrs["grid_spacing"] = self._grid_spacing
         xmin, xmax, ymin, ymax = self._bbox
         quads = np.array([[[xmin, ymin], [xmax, ymin], [xmax, ymax], [xmin, ymax]]])
         verts = quads.reshape(-1, 2)
