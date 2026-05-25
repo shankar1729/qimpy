@@ -46,6 +46,15 @@ def run(
     # Distribute tasks over MPI:
     file_list = rc.comm.bcast(sorted(glob.glob(checkpoints)))
     mine = slice(rc.i_proc, None, rc.n_procs)  # divide frames within each file
+    # TriSet writes a structured bounding-box grid (geometry_type 'tri_set');
+    # render it directly rather than via the PatchSet quad triangulation.
+    with Checkpoint(file_list[0]) as cp:
+        geom_type = cp["/geometry"].attrs.get("geometry_type", b"")
+        geom_type = (geom_type.decode() if isinstance(geom_type, bytes)
+                     else str(geom_type))
+    if geom_type == "tri_set":
+        run_tri_set(file_list, mine, output, density, streamlines, dpi)
+        return
     pg = PlotGeometry(
         file_list[0], **density, plot_apertures=(apertures if apertures else {})
     )
@@ -149,6 +158,54 @@ def run(
                         np.hstack((t[:, None], quantities)),
                         header="t " + " ".join(labels),
                     )
+
+
+def run_tri_set(file_list, mine, output, density, streamlines, dpi) -> None:
+    """Frame-parallel rendering of a TriSet structured bounding-box grid.
+
+    Each rank renders its strided subset of frames (`mine`), reading and writing
+    independently, so post-processing scales the same way the solve does. Cells
+    outside the device are NaN and are masked. (Probe density/current
+    time-series, a PatchSet/contact-circle feature, are not produced here.)"""
+    cmap = density.get("cmap", "bwr")
+    interp = density.get("interpolation", "bilinear")
+    with Checkpoint(file_list[0]) as cp:
+        q = np.array(cp["/geometry/quad0/q"])            # (nx, ny, 2)
+    xg, yg = q[:, 0, 0], q[0, :, 1]
+    extent = [xg.min(), xg.max(), yg.min(), yg.max()]
+    orig_level = log.getEffectiveLevel(); log.setLevel(logging.INFO)
+    for checkpoint_file in file_list:
+        with Checkpoint(checkpoint_file) as cp:
+            g = cp["/geometry"]
+            i_step_list = np.array(g["i_step"])[mine]
+            t_list = np.array(g["t"])[mine]
+            obs = np.array(g["quad0/observables"][mine])  # (nframe, nx, ny, nobs)
+        for fr, (i_step, t) in enumerate(zip(i_step_list, t_list)):
+            rho = obs[fr, ..., 0]
+            vmax = np.nanmax(np.abs(rho))
+            if not np.isfinite(vmax) or vmax == 0.0:
+                vmax = 1.0
+            fig, ax = plt.subplots(figsize=(6, 6))
+            im = ax.imshow(np.ma.masked_invalid(rho).T / vmax, origin="lower",
+                           extent=extent, cmap=cmap, interpolation=interp,
+                           vmin=-1, vmax=1, aspect="equal")
+            ax.set_title(f"$t$ = {t:.4g}")
+            cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            cb.set_label(rf"Density ($\times|\rho|_{{\max}}$ = {vmax:.2e})")
+            if streamlines is not None and obs.shape[-1] >= 3:
+                vx = np.nan_to_num(obs[fr, ..., 1]); vy = np.nan_to_num(obs[fr, ..., 2])
+                ax.streamplot(xg, yg, vx.T, vy.T,
+                              density=streamlines.get("density", 1.5),
+                              linewidth=streamlines.get("linewidth", 0.6),
+                              arrowsize=streamlines.get("arrowsize", 0.6), color="k")
+            ax.set_xlim(extent[0], extent[1]); ax.set_ylim(extent[2], extent[3])
+            ax.axis("off")
+            plot_file = output.format(i_step)
+            fig.savefig(plot_file, bbox_inches="tight", dpi=dpi)
+            plt.close(fig)
+            log.info(f"Saved {plot_file}")
+    log.setLevel(orig_level)
+    rc.comm.Barrier()
 
 
 def plot_streamlines(
