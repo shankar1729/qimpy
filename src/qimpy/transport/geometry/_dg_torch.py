@@ -24,6 +24,7 @@ class AdvectTorch:
         self.Mref, self.Emat = t(dg.Mref), t(dg.Emat)
         self.Mass = t(dg.Mass)
         self.Minv_mass = t(dg.Minv_mass)
+        self.area = self.Mass.sum(dim=(1, 2))   # |K| = int_K 1, per element (affine)
         self.xs, self.ys = t(dg.xs), t(dg.ys)
         self.xr, self.yr = t(dg.xr), t(dg.yr)
         self.sJ = t(dg.sJ)
@@ -69,6 +70,34 @@ class AdvectTorch:
 
     def apply_mass_inv(self, w):
         return torch.einsum('kij,jkc->ikc', self.Minv_mass, w)
+
+    def limit_density(self, w, channel=0, eps=0.0):
+        """Zhang-Shu maximum-principle-satisfying scaling limiter on one channel
+        (default the m=0 density). On each element it squashes the solution
+        polynomial toward its cell mean just enough to lift the nodal minimum to
+        ``eps``, wherever the cell mean is itself admissible (>= eps):
+
+            u <- ubar + theta * (u - ubar),   theta = min(1, (ubar-eps)/(ubar-m)).
+
+        This preserves the cell average exactly (so it is conservative), is a
+        no-op where the polynomial is already non-negative, and touches only
+        ``channel`` -- the higher angular moments (currents) are left untouched.
+        Where the cell mean itself is < eps (which a positivity-preserving SSP
+        step + admissible mean should prevent, but the truncated angular system
+        can still produce) it leaves the cell unchanged: there is no conservative
+        local fix, and it flags genuine angular under-resolution rather than the
+        spatial over/undershoot this limiter targets."""
+        ubar = w[:, :, channel].sum(dim=0) / self.area          # (K,) cell average
+        u0 = torch.einsum('kij,jk->ik', self.Minv_mass, w[:, :, channel])  # (Np,K)
+        m = u0.min(dim=0).values                                # (K,) cell minimum
+        need = (m < eps) & (ubar > eps)
+        denom = (ubar - m).clamp_min(1e-300)
+        theta = torch.where(need, ((ubar - eps) / denom).clamp(0.0, 1.0),
+                            torch.ones_like(ubar))
+        u0_lim = ubar.unsqueeze(0) + theta.unsqueeze(0) * (u0 - ubar.unsqueeze(0))
+        w_out = w.clone()
+        w_out[:, :, channel] = torch.einsum('kij,jk->ik', self.Mass, u0_lim)
+        return w_out
 
     def _residual(self, u, ax, ay, t=0.0, coupling=None, return_fstar=False):
         Np, K, Nfp, Nfaces = self.Np, self.K, self.Nfp, self.Nfaces

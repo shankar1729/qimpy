@@ -216,6 +216,54 @@ def test_beam_at_angle_converges_in_M() -> None:
     assert e12 < 0.01                          # converged to ~spatial floor by M=12
 
 
+def test_positivity_limiter_enforces_nonnegative_density() -> None:
+    """The Zhang-Shu scaling limiter with SSPRK3 drives the density non-negative
+    to round-off wherever the cell average is admissible (spatial positivity), and
+    conservatively. Unlimited high-order DG advection of a sharp beam undershoots
+    negative. Any residual negativity is confined to cells whose *mean* the
+    truncated angular system drove negative -- an angular-resolution limit no
+    conservative spatial limiter can fix, so the guarantee is stated per
+    positive-mean cell."""
+    torch.set_default_dtype(torch.float64)
+    from .. import Transport
+    tmp = tempfile.mkdtemp()
+    mesh = TA._make_periodic_rect(14, 40.0, os.path.join(tmp, "per.npz"))
+    L, sigma, theta0, M, kappa, vF = 40.0, 4.0, np.deg2rad(30.0), 12, 8.0, 1.0
+
+    def evolve(integrator, positivity):
+        t = Transport(
+            fermi_circle_modes=dict(kF=1.0, vF=vF, M=M, tau_p=np.inf, tau_ee=np.inf,
+                                    r_c=np.inf, specularity=1.0),
+            tri_set=dict(mesh_file=mesh, contacts={}, order=2),
+            time_evolution=dict(t_max=1.0, dt_save=2.0, n_collate=10,
+                                integrator=integrator, positivity=positivity))
+        g = t.geometry; dg = g.dg; te = t.time_evolution
+        am = AngularModes(M, vF); x = np.asarray(dg.x); y = np.asarray(dg.y)
+        b = np.exp(kappa * np.cos(np.asarray(am.theta) - theta0)); b /= b.mean()
+        bm = np.asarray(torch.einsum('cq,q->c', am.Tinv, torch.as_tensor(b)))
+        blob = np.exp(-(((x - L / 2) ** 2 + (y - L / 2) ** 2)) / (2 * sigma ** 2))
+        d = torch.zeros_like(g.density)
+        for c in range(g.Nk):
+            d[..., c] = torch.as_tensor(blob * bm[c])
+        g.density = d
+        te.dt = 0.4 * float(dg.dt_scale) / vF
+        T = 0.2 * L / vF
+        ns = max(1, int(round(T / te.dt))); te.dt = T / ns
+        m0 = float(dg.integrate(np.asarray(g.density[..., 0])))
+        for _ in range(ns):
+            te.time_step(g); te.t += te.dt
+        u0 = np.asarray(g.density[..., 0])
+        ubar = (g._rho[:, :, 0].sum(0) / g.adv.area).numpy()       # cell averages
+        drift = abs(float(dg.integrate(u0)) - m0) / abs(m0)
+        return float(u0.min()), float(u0[:, ubar >= 0.0].min()), drift
+
+    gmin_off, _, _ = evolve("SSPRK3", False)
+    gmin_on, min_posmean_on, drift_on = evolve("SSPRK3", True)
+    assert gmin_off < -1e-7         # unlimited DG undershoots a sharp beam negative
+    assert min_posmean_on > -1e-12  # spatial positivity: non-negative to round-off
+    assert drift_on < 1e-10         # the limiter is conservative
+
+
 def test_checkpoint_roundtrip(tmp_path) -> None:
     """Write a modal run (finite r_c cyclotron + diffuse walls + contacts) to a
     checkpoint, then reconstruct purely from the file: the FermiCircleModes
@@ -259,6 +307,7 @@ if __name__ == "__main__":
     test_diffuse_reflection_conserves_mass_any_angle(); print("diffuse_reflection: PASS")
     test_spatial_rhs_converges_in_M(); print("spatial_converges: PASS")
     test_beam_at_angle_converges_in_M(); print("beam_converges_in_M: PASS")
+    test_positivity_limiter_enforces_nonnegative_density(); print("positivity_limiter: PASS")
     test_mass_conservation_specular_walls(); print("mass_conservation: PASS")
     test_checkpoint_roundtrip(pathlib.Path(tempfile.mkdtemp())); print("checkpoint_roundtrip: PASS")
     print("ALL PASS")

@@ -207,6 +207,12 @@ class TriSet(Geometry):
         coll = self.adv.apply_mass(coll_u)
         return TensorList([spatial + coll])
 
+    def limit_positivity(self, rho: TensorList) -> TensorList:
+        """Enforce a non-negative density (the m=0 channel) via the Zhang-Shu
+        scaling limiter; conservative and a no-op where already non-negative.
+        Applied after each SSP-RK stage by the time integrator when requested."""
+        return TensorList([self.adv.limit_density(rho[0])])
+
 
     def update_stash(self, i_step: int, t: float) -> None:
         # observables evaluated at the DG nodes (exact), k-reduced by the material
