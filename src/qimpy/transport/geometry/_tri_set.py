@@ -103,7 +103,7 @@ class TriSet(Geometry):
         elif getattr(mesh, "_lattice", None) and self._distributed:
             log.info("tri_set: periodic lattice ignored under spatial "
                      "decomposition (Pr>1); run periodic cases with Pr=1.")
-        self.dist = DistributedAdvect(self.part, material, contacts)
+        self.dist = DistributedAdvect(self.part, material, contacts, self.comm)
         self.dg = self.part.dg
         self.adv = self.dist.adv
         self._vx, self._vy = self.dist.vx, self.dist.vy
@@ -174,6 +174,15 @@ class TriSet(Geometry):
     @density.setter
     def density(self, dens: torch.Tensor) -> None:
         self._rho = self.adv.apply_mass(dens.to(self._rho))
+
+    def contact_currents(self, t: float = 0.0) -> dict:
+        """Net outward current through each contact (ammeter reading); positive
+        means current flowing out of the device into the contact."""
+        return self.dist.contact_currents(self._rho, t)
+
+    def contact_potentials(self) -> dict:
+        """Floating electrochemical potential of each voltage-probe contact."""
+        return self.dist.contact_potentials()
 
     def rho_dot(self, rho: TensorList, t: float) -> TensorList:
         w = rho[0]

@@ -3,12 +3,12 @@
 #     python make_mixer_mesh.py --out mixer-tri.npz
 # Ballistic limit (tau, r_c = inf): source/drain on two arms, the other two
 # arms are reflective voltage probes.
-fermi_circle:
+fermi_circle_modes:
   kF: 1.0
   vF: 1.0
   tau-p: .inf
   tau-ee: .inf
-  N-theta: 256
+  M: 12
   r_c: .inf
   specularity: 1.0
 

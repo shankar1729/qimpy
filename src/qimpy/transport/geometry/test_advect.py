@@ -1,19 +1,11 @@
 from __future__ import annotations
-from typing import Optional, Sequence
 from collections import Counter
-import argparse
-import os
-import tempfile
 
 import pytest
 import torch
 import numpy as np
-import matplotlib.pyplot as plt
 
-from qimpy import log, rc
-from qimpy.io import log_config
-from qimpy.profiler import StopWatch
-from .. import Transport
+from qimpy import rc
 from ._dg_mesh import save_mesh
 
 
@@ -49,72 +41,29 @@ def _make_rect_mesh(grid_spacing: float, path: str) -> str:
     return path
 
 
-def gaussian_blob(
-    q: torch.Tensor, q0: torch.Tensor, Rbasis: torch.Tensor, sigma: float
-) -> torch.Tensor:
-    dq = q - q0
-    dq -= torch.floor(0.5 + dq @ torch.linalg.inv(Rbasis.T)) @ Rbasis.T
-    return torch.exp(-dq.square().sum(dim=-1) / sigma**2).detach()
+def _make_periodic_rect(n: int, L: float, path: str) -> str:
+    """Structured n x n triangulation of [0,L]^2 with periodic lattice vectors.
+    A structured grid guarantees opposite-edge nodes match under translation, so
+    DG2D.make_periodic links every boundary face into a fully periodic domain."""
+    xs = np.linspace(0.0, L, n + 1)
+    V = np.array([[x, y] for y in xs for x in xs], float)
 
+    def idx(i, j):
+        return j * (n + 1) + i
 
-def run(
-    *,
-    specularity: float,
-    N_theta: int,
-    sigma: float,
-    q0: torch.Tensor,
-    v0: torch.Tensor,
-    dt_save: float,
-    t_max: float,
-    r_c: float,
-    mesh_file: str,
-    save_frames: bool = False,
-    process_grid_shape: Optional[Sequence[int]],
-    order: int = 3,
-) -> float:
-    """Run DG (tri_set) advection on an external mesh; report MAE in density."""
-    vF = v0.norm().item()
-    init_angle = torch.atan2(v0[1], v0[0]).item()
-    dt_save_ = 2 * t_max
-    if save_frames:
-        dt_save_ = dt_save
-    transport = Transport(
-        fermi_circle=dict(
-            kF=1.0, vF=vF, N_theta=N_theta, theta0=init_angle,
-            tau_p=np.inf, tau_ee=np.inf, r_c=r_c, specularity=specularity,
-        ),
-        tri_set=dict(mesh_file=mesh_file, contacts={}, order=order),
-        time_evolution=dict(t_max=t_max, dt_save=dt_save_, n_collate=10),
-        checkpoint_out="animation/advect_{:04d}.h5",
-        process_grid_shape=process_grid_shape,
-    )
-    geometry = transport.geometry
-    dg = geometry.dg
-
-    Rnp = getattr(dg, "_lattice", None)
-    if Rnp is not None and np.asarray(Rnp).shape == (2, 2):
-        Rbasis = torch.from_numpy(np.asarray(Rnp, float)).to(rc.device)
-    else:
-        log.info("Lattice vectors set to bounding box: IGNORE reported rho_mae.")
-        bbox_size = np.array([dg.x.max() - dg.x.min(), dg.y.max() - dg.y.min()])
-        Rbasis = torch.diag(torch.from_numpy(bbox_size)).to(rc.device)
-
-    q_nodes = torch.from_numpy(np.stack([dg.x, dg.y], axis=-1)).to(rc.device)
-    if transport.material.comm.rank == 0:
-        dens = torch.zeros_like(geometry.density)
-        dens[:, :, 0] = gaussian_blob(q_nodes, q0, Rbasis, sigma).to(dens)
-        geometry.density = dens          # stores conservative variable w = M u
-
-    transport.run()
-
-    q_final = q0 + v0 * transport.time_evolution.t
-    rho0 = geometry.density[:, :, 0].detach().cpu().numpy()
-    exact = gaussian_blob(q_nodes, q_final, Rbasis, sigma).detach().cpu().numpy()
-    rho_err = dg.integrate(np.abs(rho0 - exact))
-    rho_sum = dg.integrate(exact)
-    rho_mae = float(rho_err / rho_sum)
-    log.info(f"Done with {rho_mae = :.6f} at t[s]: {rc.clock():.2f}")
-    return rho_mae
+    T, be = [], []
+    for j in range(n):
+        for i in range(n):
+            a, b = idx(i, j), idx(i + 1, j)
+            c, d = idx(i + 1, j + 1), idx(i, j + 1)
+            T += [[a, b, c], [a, c, d]]
+    for i in range(n):
+        be += [[idx(i, 0), idx(i + 1, 0)], [idx(i, n), idx(i + 1, n)]]
+    for j in range(n):
+        be += [[idx(0, j), idx(0, j + 1)], [idx(n, j), idx(n, j + 1)]]
+    save_mesh(path, V, np.array(T), np.array(be), ["periodic"] * len(be),
+              lattice=[[L, 0.0], [0.0, L]])
+    return path
 
 
 def _step_rk4(g, dt, nt, t0=0.0):
@@ -132,8 +81,8 @@ def test_reflective_conservation(tmp_path):
     rc.init()
     mesh = _make_rect_mesh(8.0, str(tmp_path / "rect.npz"))
     transport = Transport(
-        fermi_circle=dict(kF=1.0, vF=1.5, N_theta=8, theta0=0.0, tau_p=np.inf,
-                          tau_ee=np.inf, r_c=np.inf, specularity=1.0),
+        fermi_circle_modes=dict(kF=1.0, vF=1.5, M=8, tau_p=np.inf,
+                                tau_ee=np.inf, r_c=np.inf, specularity=1.0),
         tri_set=dict(mesh_file=mesh, contacts={}, order=3),
         time_evolution=dict(t_max=1.0, dt_save=2.0, n_collate=10),
     )
@@ -156,8 +105,8 @@ def test_contact_steady_state(tmp_path):
     rc.init()
     mesh = _make_rect_mesh(8.0, str(tmp_path / "rect.npz"))
     transport = Transport(
-        fermi_circle=dict(kF=1.0, vF=1.5, N_theta=12, theta0=0.0, tau_p=np.inf,
-                          tau_ee=np.inf, r_c=np.inf, specularity=1.0),
+        fermi_circle_modes=dict(kF=1.0, vF=1.5, M=8, tau_p=np.inf,
+                                tau_ee=np.inf, r_c=np.inf, specularity=1.0),
         tri_set=dict(mesh_file=mesh,
                      contacts={"source": {"dmu": 0.1}, "drain": {"dmu": -0.1}},
                      order=3),
@@ -168,7 +117,7 @@ def test_contact_steady_state(tmp_path):
         g.density = torch.zeros_like(g.density)
     dt = 0.5 * g.dt_max
     _step_rk4(g, dt, int(50.0 / dt))
-    pot = g.density.mean(dim=2)
+    pot = g.density[..., 0]                    # modal density = m=0 coefficient
     assert torch.isfinite(pot).all(), "contact-driven solution diverged"
     assert float(pot.abs().max()) < 0.15, "interior potential exceeds contact range"
 
@@ -180,41 +129,12 @@ def test_curved_mass_conservation():
     ...
 
 
-def main():
-    log_config()
-    rc.init()
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--specularity", type=float, required=True)
-    parser.add_argument("--Ntheta", type=int, required=True)
-    parser.add_argument("--sigma", type=float, required=True)
-    parser.add_argument("--q0", nargs=2, type=float, required=True)
-    parser.add_argument("--v0", nargs=2, type=float, required=True)
-    parser.add_argument("--dt_save", type=float, required=True)
-    parser.add_argument("--r_c", type=float, default=np.inf)
-    parser.add_argument("--t_max", type=float, required=True)
-    parser.add_argument("--mesh", help="external mesh (.npz)", type=str, required=True)
-    parser.add_argument("-p", "--process-grid", type=int, nargs=2, default=[-1, -1])
-    args = parser.parse_args()
-    run(
-        N_theta=args.Ntheta, sigma=args.sigma, specularity=args.specularity,
-        q0=torch.tensor(args.q0, device=rc.device),
-        v0=torch.tensor(args.v0, device=rc.device),
-        dt_save=args.dt_save, t_max=args.t_max, r_c=args.r_c,
-        mesh_file=args.mesh, save_frames=True,
-        process_grid_shape=args.process_grid,
-    )
-
-
-if __name__ == "__main__":
-    main()
-
-
 def test_spatial_mpi_matches_serial(tmp_path):
     """Spatial domain decomposition reproduces the serial DG result bit-for-bit
     on a contact-driven problem (halo emulated in-process; the real mpi4py
     transport moves the identical buffers)."""
     from qimpy.mpi import ProcessGrid
-    from qimpy.transport.material import FermiCircle
+    from qimpy.transport.material import FermiCircleModes
     from ._dg_mesh import load_mesh
     from ._dg2d import DG2D
     from ._dg_mpi import (compute_partition, SpatialPartition,
@@ -222,9 +142,9 @@ def test_spatial_mpi_matches_serial(tmp_path):
     rc.init()
     torch.set_default_dtype(torch.float64)
     mesh = load_mesh(_make_rect_mesh(8.0, str(tmp_path / "rect.npz")))
-    pg = ProcessGrid(rc.comm, "rk", (1, 1))           # all channels local
-    mat = FermiCircle(kF=1.0, vF=1.5, N_theta=8, theta0=0.0, tau_p=np.inf,
-                      tau_ee=np.inf, r_c=np.inf, specularity=1.0, process_grid=pg)
+    pg = ProcessGrid(rc.comm, "rk", (1, 1))           # all channels local (modal: Pk=1)
+    mat = FermiCircleModes(kF=1.0, vF=1.5, M=8, tau_p=np.inf,
+                           tau_ee=np.inf, r_c=np.inf, specularity=1.0, process_grid=pg)
     contacts = {"source": {"dmu": 0.1}, "drain": {"dmu": -0.1}}
     order, nsteps = 2, 16
     dt = 0.5 * float(DG2D(order, mesh.VX, mesh.VY, mesh.EToV).dt_scale) / 1.5
