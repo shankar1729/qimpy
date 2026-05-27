@@ -23,6 +23,8 @@ from collections import defaultdict
 import numpy as np
 import torch
 
+from qimpy import MPI
+from qimpy.mpi import BufferView
 from ._dg2d import DG2D
 from ._dg_torch import AdvectTorch
 
@@ -97,12 +99,18 @@ class DistributedAdvect:
     """Local DG advection on a SpatialPartition. Ghost rows of `w` must be
     refreshed by the chosen halo transport before `local_rhs` is called."""
 
-    def __init__(self, part: SpatialPartition, material, contacts):
+    def __init__(self, part: SpatialPartition, material, contacts, comm=None):
         self.p = part
+        self.comm_sp = comm                       # spatial comm (face reductions)
         v_t = material.transport_velocity
         self.Nk = v_t.shape[0]
         self.vx = v_t[:, 0].contiguous(); self.vy = v_t[:, 1].contiguous()
+        self.coupling = getattr(material, "coupling", None)  # modal flux operator
         self.adv = AdvectTorch(part.dg, device=v_t.device, dtype=v_t.dtype)
+        # number-density projection (wk * observable_0) for contact-current readout
+        self.mass_proj = (material.wk * material.get_observables(0.0)[0]).to(v_t.dtype)
+        self._floating = []                       # (name, pos, FloatingContactor)
+        self._contact_sel = {}                    # name -> sel (indices into mapB)
         self._setup_boundaries(material, contacts)
 
     def _setup_boundaries(self, material, contacts):
@@ -129,18 +137,87 @@ class DistributedAdvect:
         cops = []; assigned = np.zeros(dg.mapB.size, bool)
         for name, params in (contacts or {}).items():
             sel = np.where(node_name == name)[0]
-            if sel.size:
-                assigned[sel] = True
-                ten = torch.as_tensor(sel, dtype=torch.long)
-                cops.append((sel, material.get_contactor(n_all[ten], **(params or {}))))
+            if not sel.size:
+                continue
+            assigned[sel] = True
+            ten = torch.as_tensor(sel, dtype=torch.long)
+            self._contact_sel[name] = ten
+            p = params or {}
+            if p.get("floating", False):
+                # voltage probe: isotropic ghost whose level floats to zero current
+                fc = FloatingContactor(dim=self._coupling_dim(),
+                                       device=self.adv.device, dtype=self.adv.dtype)
+                cops.append((sel, fc))
+                self._floating.append((name, self.adv.mapB[ten], fc))
+            else:
+                cops.append((sel, material.get_contactor(n_all[ten], **p)))
         rsel = np.where(~assigned)[0]
         refl = (material.get_reflector(n_all[torch.as_tensor(rsel, dtype=torch.long)])
                 if rsel.size else None)
         self.adv.set_boundary(reflect_sel=rsel, reflector=refl,
                               contacts=cops, specularity=1.0)
 
+    def _coupling_dim(self):
+        c = getattr(self, "coupling", None)
+        return None if c is None else c.dim
+
+    def _update_floating(self, u):
+        """Set each voltage-probe level mu_c = (face number-flux out)/(face inflow
+        capacity), so the net current through the contact is zero. With an isotropic
+        ghost uP = mu_c e_0, the boundary number-flux is (A_n^+ uM)_0 + mu_c (A_n^- e_0)_0,
+        so mu_c = -sum (A_n^+ uM)_0 / sum (A_n^- e_0)_0 (flux-weighted over the face).
+        Scalar channels are the diagonal special case A_n = diag(v.n)."""
+        cpl = self.coupling
+        uf = u.permute(1, 0, 2).reshape(self.adv.Np * self.adv.K, -1)
+        uM = uf[self.adv.vmapM]
+        for name, pos, fc in self._floating:
+            nx = self.adv.nxf[pos]; ny = self.adv.nyf[pos]
+            uMb = uM[pos]; wq = self.adv.face_quad_w[pos]
+            if cpl is None:
+                adn = nx[:, None] * self.vx[None, :] + ny[:, None] * self.vy[None, :]
+                num = (adn.clamp(min=0.0) * uMb).sum(-1)   # (v.n)^+ . uM  per node
+                den = (-adn.clamp(max=0.0)).sum(-1)        # (v.n)^- capacity per node
+            else:
+                phi = torch.atan2(ny, nx)
+                e0 = torch.zeros_like(uMb); e0[:, 0] = 1.0
+                An_uM = nx[:, None] * (uMb @ cpl.Ax.T) + ny[:, None] * (uMb @ cpl.Ay.T)
+                An_e0 = nx[:, None] * (e0 @ cpl.Ax.T) + ny[:, None] * (e0 @ cpl.Ay.T)
+                num = 0.5 * (An_uM + cpl.abs_flux(uMb, phi))[:, 0]   # (A_n^+ uM)_0
+                den = -0.5 * (An_e0 - cpl.abs_flux(e0, phi))[:, 0]   # -(A_n^- e_0)_0
+            acc = torch.stack([(wq * num).sum(), (wq * den).sum()])
+            if self.comm_sp is not None and self.comm_sp.size > 1:
+                self.comm_sp.Allreduce(MPI.IN_PLACE, BufferView(acc))
+            fc.level = acc[0] / acc[1].clamp(min=1e-300)
+
     def local_rhs(self, w, t: float = 0.0):
-        return self.adv.rhs_w(w, self.vx, self.vy, t)
+        if self._floating:
+            self._update_floating(self.adv.apply_mass_inv(w))
+        return self.adv.rhs_w(w, self.vx, self.vy, t, coupling=self.coupling)
+
+    def contact_currents(self, w, t: float = 0.0) -> dict:
+        """Net outward current through each contact, I_c = integral_Gamma_c
+        (number-flux of the numerical flux) dl. Positive = out of the device.
+        For a floating probe this is ~0 by construction; its `level` is the
+        floating potential. Conservative: sum over all boundaries = -d/dt of mass."""
+        u = self.adv.apply_mass_inv(w)
+        if self._floating:
+            self._update_floating(u)
+        _, fstar_b = self.adv._residual(u, self.vx, self.vy, t,
+                                        coupling=self.coupling, return_fstar=True)
+        massflux = fstar_b @ self.mass_proj            # (Nb,) per boundary node
+        wb = self.adv.face_quad_w[self.adv.mapB]
+        out = {}
+        for name, sel in self._contact_sel.items():
+            I = (wb[sel] * massflux[sel]).sum()
+            if self.comm_sp is not None and self.comm_sp.size > 1:
+                buf = I.clone()[None]
+                self.comm_sp.Allreduce(MPI.IN_PLACE, BufferView(buf)); I = buf[0]
+            out[name] = float(I)
+        return out
+
+    def contact_potentials(self) -> dict:
+        """Floating (voltage-probe) potentials read at the last RHS evaluation."""
+        return {name: float(fc.level) for name, _, fc in self._floating}
 
 
 def build_distributed(mesh, order, material, contacts, comm):
@@ -152,7 +229,25 @@ def build_distributed(mesh, order, material, contacts, comm):
         part[:] = compute_partition(mesh, comm.size)
     comm.Bcast(part, root=0)
     sp = SpatialPartition(mesh, order, part, comm.rank)
-    return sp, DistributedAdvect(sp, material, contacts)
+    return sp, DistributedAdvect(sp, material, contacts, comm)
+
+
+class FloatingContactor:
+    """Voltage-probe contact. Holds an isotropic ghost level (the floating
+    electrochemical potential mu_c), updated each step to zero the contact
+    current. Returns a per-direction constant (scalar representation) or a
+    level * e_0 modal vector (`dim` set)."""
+
+    def __init__(self, dim=None, device=None, dtype=None):
+        self.dim = dim
+        self.level = torch.zeros((), device=device, dtype=dtype)
+
+    def __call__(self, t):
+        if self.dim is None:
+            return self.level                       # scalar: broadcast to channels
+        v = torch.zeros(self.dim, device=self.level.device, dtype=self.level.dtype)
+        v[0] = self.level                           # modal: isotropic m=0
+        return v
 
 
 def mpi_halo_exchange(comm, part: SpatialPartition, w):
