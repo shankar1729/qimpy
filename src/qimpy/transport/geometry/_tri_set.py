@@ -109,9 +109,18 @@ class TriSet(Geometry):
         self._vx, self._vy = self.dist.vx, self.dist.vy
         self.Nk = self.dist.Nk
 
-        v = material.transport_velocity.detach().cpu().numpy()
-        dt_local = float(0.4 * self.dg.dt_scale
-                         / max(np.hypot(v[:, 0], v[:, 1]).max(), 1e-300))
+        coupling = getattr(self.dist, "coupling", None)
+        if coupling is not None:
+            # Coupled (modal) flux advects through n.A, not diagonal velocities
+            # (which are ~0 here); the max characteristic speed is the spectral
+            # radius of n_x Ax + n_y Ay, exposed as coupling.max_speed (= vF for
+            # the Fermi-circle operator). Using the ~0 diagonal velocity would
+            # make dt_max blow up and the auto-selected step diverge.
+            vmax = float(coupling.max_speed)
+        else:
+            v = material.transport_velocity.detach().cpu().numpy()
+            vmax = float(np.hypot(v[:, 0], v[:, 1]).max())
+        dt_local = float(0.4 * self.dg.dt_scale / max(vmax, 1e-300))
         self.dt_max = self.comm.allreduce(dt_local, op=MPI.MIN)
         if self._distributed:
             log.info(f"tri_set: spatial decomposition over {nparts} ranks "
@@ -188,12 +197,16 @@ class TriSet(Geometry):
         w = rho[0]
         if self._distributed:
             mpi_halo_exchange(self.comm, self.part, w)   # refresh ghost rows
-        spatial = self.adv.rhs_w(w, self._vx, self._vy, t)
+        # local_rhs applies the coupled (modal) boundary/volume flux and any
+        # floating-contact update; calling adv.rhs_w directly would drop the
+        # coupling (scalar path) and freeze the modal advection.
+        spatial = self.dist.local_rhs(w, t)
         u = self.adv.apply_mass_inv(w)
         coll_u = self.material.rho_dot(
             u.reshape(-1, 1, self.Nk), t, id(self)).reshape(u.shape)
         coll = self.adv.apply_mass(coll_u)
         return TensorList([spatial + coll])
+
 
     def update_stash(self, i_step: int, t: float) -> None:
         # observables evaluated at the DG nodes (exact), k-reduced by the material
