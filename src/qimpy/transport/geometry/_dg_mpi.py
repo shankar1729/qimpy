@@ -151,7 +151,9 @@ class DistributedAdvect:
                 self._floating.append((name, self.adv.mapB[ten], fc))
             else:
                 cops.append((sel, material.get_contactor(n_all[ten], **p)))
-        rsel = np.where(~assigned)[0]
+        is_wall = np.array([nm == "wall" for nm in node_name], bool)
+        rsel = np.where(is_wall & (~assigned))[0]   # only 'wall' edges reflect;
+        #                                             other non-contact edges = outflow
         refl = (material.get_reflector(n_all[torch.as_tensor(rsel, dtype=torch.long)])
                 if rsel.size else None)
         self.adv.set_boundary(reflect_sel=rsel, reflector=refl,
