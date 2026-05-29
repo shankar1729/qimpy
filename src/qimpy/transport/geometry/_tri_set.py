@@ -208,10 +208,23 @@ class TriSet(Geometry):
         return TensorList([spatial + coll])
 
     def limit_positivity(self, rho: TensorList) -> TensorList:
-        """Enforce a non-negative density (the m=0 channel) via the Zhang-Shu
-        scaling limiter; conservative and a no-op where already non-negative.
-        Applied after each SSP-RK stage by the time integrator when requested."""
-        return TensorList([self.adv.limit_density(rho[0])])
+        """Enforce a non-negative density via the Zhang-Shu scaling limiter on
+        the m=0 channel, gated by the material's realizability floor.
+
+        For delta-f materials (the default ``realizability_floor() -> None``)
+        this is a no-op: clipping the linear-response delta-f to >= 0 breaks
+        the antisymmetry that a contact-driven dipole problem must have, since
+        drain-side dips are physically real.  Future full-distribution
+        materials can opt into the limiter by overriding ``realizability_floor``
+        to return e.g. ``0.0``.
+
+        Applied after each SSP-RK stage by the time integrator when
+        ``positivity=True`` is set.  Conservative; a no-op where already
+        admissible."""
+        floor = self.material.realizability_floor()
+        if floor is None:
+            return rho
+        return TensorList([self.adv.limit_density(rho[0], eps=float(floor))])
 
 
     def update_stash(self, i_step: int, t: float) -> None:
