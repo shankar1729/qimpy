@@ -167,7 +167,8 @@ def test_reflector_specular_axis_aligned() -> None:
 @pytest.mark.parametrize("s", [0.0, 0.3, 0.7, 1.0])
 def test_reflector_mass_conservation(phi_deg: float, s: float) -> None:
     """Net normal mass flux at the wall is zero for any specularity, any wall
-    angle.  The D formula folds the specular's discrete-quadrature leak in."""
+    angle.  The (D, T) formulation absorbs the discrete-quadrature artifacts
+    of the kinked (v.n)_+/_- weights, so mass conservation holds exactly."""
     torch.set_default_dtype(torch.float64)
     fs = _make(M_theta=8, Nr=1, specularity=s)
     phi = np.deg2rad(phi_deg)
@@ -183,6 +184,62 @@ def test_reflector_mass_conservation(phi_deg: float, s: float) -> None:
     out_pos = v_dot_n.clamp(min=0); out_neg = v_dot_n.clamp(max=0)
     F_out = (out_pos * u_in[0, 0]).sum()
     F_in  = (out_neg * u_out[0, 0]).sum()
+    net = float((F_out + F_in).abs())
+    scale = max(float(F_out.abs()), 1e-30)
+    assert net / scale < 1e-12
+
+
+@pytest.mark.parametrize("phi_deg", [0.0, 23.7, 45.0, 90.0, 137.0])
+@pytest.mark.parametrize("s", [0.0, 0.3, 0.7, 1.0])
+def test_reflector_tang_momentum_conservation(phi_deg: float, s: float) -> None:
+    """At a partially-specular wall the discrete tangential-momentum flux into
+    the wall equals the continuum value  (1 - s) * F_out_tang^M  to roundoff
+    (the gas keeps the specular fraction, the diffuse fraction is absorbed).
+    At s=1 (pure specular) the flux is identically zero.  This is what the
+    (D, T) coefficients in the diffuse correction enforce."""
+    torch.set_default_dtype(torch.float64)
+    fs = _make(M_theta=8, Nr=1, specularity=s)
+    phi = np.deg2rad(phi_deg)
+    n = torch.tensor([[np.cos(phi), np.sin(phi)]], dtype=torch.float64)
+    refl = _FermiSurfaceReflector(fs, n, specularity=s)
+    rng = torch.Generator().manual_seed(0)
+    u_in = torch.randn(1, 1, fs.angular.N_theta, dtype=torch.float64,
+                       generator=rng)
+    u_out = refl(u_in)
+    theta = fs.angular.theta
+    v_dot_n = fs.vF * (n[0, 0] * torch.cos(theta) + n[0, 1] * torch.sin(theta))
+    v_tang  = fs.vF * (-n[0, 1] * torch.cos(theta) + n[0, 0] * torch.sin(theta))
+    out_pos = v_dot_n.clamp(min=0); out_neg = v_dot_n.clamp(max=0)
+    F_out_tang = (out_pos * v_tang * u_in[0, 0]).sum()
+    F_in_tang  = (out_neg * v_tang * u_out[0, 0]).sum()
+    F_total = F_out_tang + F_in_tang
+    expected = (1.0 - s) * F_out_tang                       # continuum identity
+    scale = max(float(F_out_tang.abs()), 1e-30)
+    err = float((F_total - expected).abs()) / scale
+    assert err < 1e-12
+
+
+@pytest.mark.parametrize("phi_deg", [0.0, 23.7, 45.0])
+@pytest.mark.parametrize("s", [0.0, 1.0])
+def test_reflector_energy_conservation(phi_deg: float, s: float) -> None:
+    """On the Fermi circle |v| = vF is constant, so the kinetic-energy flux is
+    proportional to the mass flux.  Wall conservation of energy is therefore
+    inherited from mass conservation at every (phi, s)."""
+    torch.set_default_dtype(torch.float64)
+    fs = _make(M_theta=8, Nr=1, specularity=s)
+    phi = np.deg2rad(phi_deg)
+    n = torch.tensor([[np.cos(phi), np.sin(phi)]], dtype=torch.float64)
+    refl = _FermiSurfaceReflector(fs, n, specularity=s)
+    rng = torch.Generator().manual_seed(0)
+    u_in = torch.randn(1, 1, fs.angular.N_theta, dtype=torch.float64,
+                       generator=rng)
+    u_out = refl(u_in)
+    theta = fs.angular.theta
+    v_dot_n = fs.vF * (n[0, 0] * torch.cos(theta) + n[0, 1] * torch.sin(theta))
+    out_pos = v_dot_n.clamp(min=0); out_neg = v_dot_n.clamp(max=0)
+    energy = 0.5 * fs.vF ** 2                                # constant on Fermi circle
+    F_out = (out_pos * energy * u_in[0, 0]).sum()
+    F_in  = (out_neg * energy * u_out[0, 0]).sum()
     net = float((F_out + F_in).abs())
     scale = max(float(F_out.abs()), 1e-30)
     assert net / scale < 1e-12
