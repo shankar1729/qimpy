@@ -431,26 +431,66 @@ class _FermiSurfaceReflector:
         uM_modal  = self.fs.to_modes(uM_dk)
         spec_modal = self._specular_modal(uM_modal)
         spec_dk   = self.fs.from_modes(spec_modal)
-        # 2) Mass-conserving D.
+        # 2) (D_n, T_n) per radial mode -- enforce mass AND tangential-momentum
+        #    conservation at the wall to machine precision.
         #
-        # In the continuous limit specular reflection conserves mass exactly:
-        # F_in,spec = -F_out, so the diffuse correction vanishes.  At finite
-        # N_theta = 2 M_theta + 1 the discrete reflection is only a permutation
-        # of collocation points for walls aligned with the basis (phi multiples
-        # of pi/2 when N is odd); at generic angles there's a quadrature leak.
-        # Setting  D = (F_out^M + s * F_in,spec) / w_in  guarantees discrete
-        # mass conservation by construction and reduces to the standard
-        # isotropic-diffuse  D = F_out^M / w_in  at s = 0.
+        # The outgoing addition has the form
+        #     u_added(r, q) = sum_n  psi_n(xi_r) * [D_n + T_n * sin(theta_q - phi)]
+        # so D_n controls the (n, m=0) mode (mass-like) and T_n controls the
+        # (n, m=1 tangential) mode (tang-momentum-like) of the outgoing.
+        #
+        # Per radial n we solve the 2x2 system
+        #     [-w_in     beta    ] [D_n]   [-F_M_n     ]
+        #     [vF beta   vF gamma] [T_n] = [-s * F_T_n ]
+        # where
+        #   beta  = sum_{q in inflow} (v_q.n) * sin(theta_q - phi)     (<=0)
+        #   gamma = sum_{q in inflow} (v_q.n) * sin^2(theta_q - phi)   (<=0)
+        #   F_M_n = F_out_mass_n + s * F_in_spec_mass_n  (discrete mass flux)
+        #   F_T_n = F_out_tang_n + F_in_spec_tang_n     (discrete tang flux)
+        # The RHS for tang enforces the discrete identity
+        #   F_total_tang = (1 - s) * F_out_tang_n
+        # which is the continuum tang flux balance at the wall (specular
+        # preserves tang momentum, diffuse fraction dumps it into the wall).
+        # At s=1 this drives the specular's discrete-quadrature tang leak to
+        # zero; at s=0 it cancels the discrete artifact  D*beta  in the tang
+        # flux integral, leaving the gas-loses-F_out_tang continuum behavior.
+        #
+        # The 2x2 blocks decouple per n because the velocity v_q is r-indep:
+        # same (beta, gamma, w_in) for every radial level.
         shape_in = uM_dk.shape
         uM4 = uM_dk.reshape(*shape_in[:-1], self.Nr, self.N_theta)
         sp4 = spec_dk.reshape(*shape_in[:-1], self.Nr, self.N_theta)
-        # n=0 radial projection at each angular ordinate
-        uM_r0 = torch.einsum("r,...nrq->...nq", self.T_to_rad_0, uM4)
-        sp_r0 = torch.einsum("r,...nrq->...nq", self.T_to_rad_0, sp4)
-        F_out     = (self.adn_pos * uM_r0).sum(-1)
-        F_in_spec = (self.adn_neg * sp_r0).sum(-1)
-        D = (F_out + self.s * F_in_spec) / self.w_in
-        # 3) Diffuse delta-k: D * psi_0(xi_r), constant in q.
-        diff4 = D.unsqueeze(-1).unsqueeze(-1) * self.psi_0.unsqueeze(-1)  # (..., Nsel, Nr, 1)
-        diff_dk = diff4.expand_as(uM4).reshape(shape_in)
-        return self.s * spec_dk + diff_dk
+        # radial-n projection: u^M_n(q) = sum_r T_to_radial[n, r] u^M(r, q)
+        T_to_r   = self.fs.radial.T_to_modes                # (Nr, Nr)
+        T_from_r = self.fs.radial.T_from_modes              # (Nr, Nr)
+        uM_n_q = torch.einsum("nr,...arq->...anq", T_to_r, uM4)
+        sp_n_q = torch.einsum("nr,...arq->...anq", T_to_r, sp4)
+        # angular basis sin(theta_q - phi) per wall node
+        sin_q = (torch.cos(self.phi)[:, None] * torch.sin(self.fs.angular.theta)[None, :]
+                 - torch.sin(self.phi)[:, None] * torch.cos(self.fs.angular.theta)[None, :])
+        # 2x2 wall-geometry coefficients (Nsel,) -- same for every n
+        beta  = (self.adn_neg * sin_q).sum(-1)
+        gamma = (self.adn_neg * sin_q ** 2).sum(-1)
+        # discrete fluxes per (Nsel, Nr)
+        adn_pos = self.adn_pos[:, None, :]
+        adn_neg = self.adn_neg[:, None, :]
+        sin_b   = sin_q[:, None, :]
+        vF = self.fs.vF
+        F_out_mass_n     = (adn_pos * uM_n_q).sum(-1)
+        F_in_spec_mass_n = (adn_neg * sp_n_q).sum(-1)
+        F_out_tang_n     = vF * (adn_pos * sin_b * uM_n_q).sum(-1)
+        F_in_spec_tang_n = vF * (adn_neg * sin_b * sp_n_q).sum(-1)
+        F_M_n = F_out_mass_n + self.s * F_in_spec_mass_n
+        F_T_n = F_out_tang_n + F_in_spec_tang_n
+        # 2x2 Cramer per (Nsel), broadcast over Nr (and any leading batch).
+        det = -vF * (self.w_in * gamma + beta * beta)        # (Nsel,)  < 0
+        det_b = det[:, None]
+        b1 = -F_M_n
+        b2 = -self.s * F_T_n
+        D = (b1 * (vF * gamma)[:, None] - b2 * beta[:, None]) / det_b
+        T = ((-self.w_in)[:, None] * b2 - (vF * beta)[:, None] * b1) / det_b
+        # 3) u_added(r, q) = sum_n psi_n(r) [D_n + T_n sin_q],  via T_from_modes.
+        D_r = torch.einsum("rn,...an->...ar", T_from_r, D)
+        T_r = torch.einsum("rn,...an->...ar", T_from_r, T)
+        u_added = D_r.unsqueeze(-1) + T_r.unsqueeze(-1) * sin_q.unsqueeze(-2)
+        return self.s * spec_dk + u_added.reshape(shape_in)
