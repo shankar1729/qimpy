@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Callable
+from typing import Callable, Optional
 from abc import abstractmethod
 
 import torch
@@ -110,6 +110,24 @@ class Material(TreeNode):
             result = result.contiguous()
             self.comm.Allreduce(MPI.IN_PLACE, BufferView(result))
         return result
+
+    def realizability_floor(self) -> Optional[float]:
+        """Per-channel floor for the positivity limiter, or None to disable.
+
+        A material is responsible for declaring what "non-negative" means for
+        its storage:
+
+        * Full-distribution materials (e.g. discrete ordinates of f >= 0) can
+          return ``0.0`` (limit_density's eps).
+        * Delta-f materials (linear-response around f_eq), like
+          ``FermiSurface``, return ``None``: clipping
+          a delta-f to >= 0 breaks the inherent antisymmetry of the response
+          (drain-side dips are physical), so the limiter is correctly a no-op.
+
+        The time integrator multiplies through ``geometry.limit_positivity``,
+        which checks this method and skips the limiter when None.
+        """
+        return None
 
 
 def fermi(E, mu, T):
