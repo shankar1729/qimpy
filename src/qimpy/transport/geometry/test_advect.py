@@ -71,6 +71,49 @@ def _make_periodic_rect(n: int, L: float, path: str) -> str:
     return path
 
 
+def _make_strip_mesh(nx: int, ny: int, Lx: float, Ly: float,
+                     alpha_deg: float, path: str) -> str:
+    """Tilted strip:  the [0,Lx] x [0,Ly] reference rectangle is rotated by
+    alpha so the top/bottom walls become OBLIQUE (normal at angle 90+alpha
+    from x-axis), and the periodic lattice vector becomes (Lx cos a, Lx sin a)
+    along the long direction.
+
+    Why tilt?  At axis-aligned walls (alpha = 0 -> normal = +/- y_hat) the
+    discrete reflection happens to coincide with a Galerkin operator by
+    symmetry, so the alias-driven tang-quadrature artifact at finite N_theta
+    cancels even without the (D, T) correction.  At any other angle the
+    artifact does not cancel and the test discriminates the (D, T) fix from
+    the older single-D scheme.
+
+    The wall-tangential direction is (cos a, sin a) at every wall, and
+    periodic boundaries don't mix angular moments, so
+        J_tang = cos(a) * jx_total + sin(a) * jy_total
+    is the global invariant of specular reflection on this geometry."""
+    a = np.deg2rad(alpha_deg)
+    c, s = np.cos(a), np.sin(a)
+    xs = np.linspace(0.0, Lx, nx + 1)
+    ys = np.linspace(0.0, Ly, ny + 1)
+    V  = np.array([[x * c - y * s, x * s + y * c]
+                   for y in ys for x in xs], float)
+    def idx(i, j): return j * (nx + 1) + i
+    T = []
+    for j in range(ny):
+        for i in range(nx):
+            a_, b_ = idx(i, j), idx(i + 1, j)
+            c_, d_ = idx(i + 1, j + 1), idx(i, j + 1)
+            T += [[a_, b_, c_], [a_, c_, d_]]
+    be, bm = [], []
+    for i in range(nx):
+        be.append([idx(i, 0),  idx(i + 1, 0)]);  bm.append("wall")
+        be.append([idx(i, ny), idx(i + 1, ny)]); bm.append("wall")
+    for j in range(ny):
+        be.append([idx(0,  j), idx(0,  j + 1)]); bm.append("periodic")
+        be.append([idx(nx, j), idx(nx, j + 1)]); bm.append("periodic")
+    save_mesh(path, V, np.array(T), np.array(be), bm,
+              lattice=[[Lx * c, Lx * s]])
+    return path
+
+
 def _step_rk4(g, dt, nt, t0=0.0):
     for it in range(nt):
         r0 = g.rho; t = t0 + it * dt
@@ -122,6 +165,72 @@ def test_reflective_conservation(tmp_path):
     _step_rk4(g, dt, int(30.0 / dt))
     assert abs(total_mass() - m0) / abs(m0) < 1e-10, \
         "reflective walls not conserving mass"
+
+
+def test_strip_tang_momentum_conservation(tmp_path):
+    """Long-time integration on a TILTED strip (oblique walls + periodic along
+    the slanted direction) -- the projected current
+        J_tang = cos(alpha) * jx + sin(alpha) * jy
+    is a global invariant of specular reflection on this geometry, because
+    every wall has tangent direction (cos a, sin a) and the periodic boundary
+    transports across it without mixing angular moments.
+
+    With the (D, T) reflector this conservation holds to roundoff over
+    thousands of RK4 steps and several wall bounces.  With the old single-D
+    scheme the discrete tang-quadrature artifact at oblique walls accumulates
+    into a drift of ~1e-4 over the same span (mass still conserved by D),
+    confirmed empirically -- this test reliably discriminates the two.
+
+    Mass is checked as a stronger control: the D coefficient guarantees it
+    even in the single-D scheme, so passing this isn't surprising; failing
+    it would be."""
+    from .._transport import Transport
+    rc.init()
+    alpha_deg = 23.7                              # oblique; not at 0, 45, 90 deg
+    a = np.deg2rad(alpha_deg)
+    ca, sa = float(np.cos(a)), float(np.sin(a))
+    Lx, Ly = 40.0, 20.0
+    mesh = _make_strip_mesh(8, 4, Lx, Ly, alpha_deg,
+                            str(tmp_path / "strip.npz"))
+    transport = Transport(
+        fermi_surface=dict(kF=1.0, vF=1.5, M_theta=8, Nr=1, T=1.0,
+                           tau_p=np.inf, tau_ee=np.inf, r_c=np.inf,
+                           specularity=1.0),
+        tri_set=dict(mesh_file=mesh, contacts={}, order=3),
+        time_evolution=dict(t_max=1.0, dt_save=2.0, n_collate=10),
+    )
+    g = transport.geometry; dg = g.dg
+    # IC in delta-k:  density bump centered on the strip midline (in the
+    # rotated-perpendicular coord) + a uniform drift along the wall-tangent
+    # direction.  The angular profile cos(theta - alpha) projects directly
+    # onto the wall-tangent component, giving a nonzero J_tang.
+    x = np.asarray(dg.x); y = np.asarray(dg.y)
+    d_perp = -sa * x + ca * y - 0.5 * Ly         # perp-to-strip coord
+    blob = np.exp(-(d_perp ** 2) / (2 * 2.0 ** 2))
+    theta_q = transport.material.angular.theta.detach().cpu().numpy()
+    cos_t_a = np.cos(theta_q - a)
+    if transport.material.comm.rank == 0:
+        A, B = 1.0, 0.3
+        u_init = A * blob[..., None] + B * cos_t_a[None, None, :]
+        g.density = torch.as_tensor(u_init.astype(np.float64)).to(g.density)
+
+    def total(obs_idx):
+        u = g.dist.adv.apply_mass_inv(g._rho)
+        obs = transport.material.measure_observables(u, 0.0)
+        return float(dg.integrate(np.asarray(obs[..., obs_idx])))
+
+    n0  = total(0)
+    J0  = ca * total(1) + sa * total(2)
+    dt = 0.5 * g.dt_max
+    # vF=1.5, Ly=20: perpendicular transit time ~13;  t_end=20 covers
+    # roughly one full round-trip after the gas has reached steady drift.
+    _step_rk4(g, dt, int(20.0 / dt))
+    n1 = total(0)
+    J1 = ca * total(1) + sa * total(2)
+    assert abs(n1 - n0) / abs(n0) < 1e-10, \
+        f"strip mass drifted: dn/n0 = {(n1-n0)/n0:.2e}"
+    assert abs(J1 - J0) / abs(J0) < 1e-10, \
+        f"strip wall-tangent current J_tang drifted: dJ/J0 = {(J1-J0)/J0:.2e}"
 
 
 def test_contact_steady_state(tmp_path):
