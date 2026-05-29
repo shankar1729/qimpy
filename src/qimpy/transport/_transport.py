@@ -6,7 +6,7 @@ from qimpy.io import CheckpointPath, Checkpoint, CheckpointContext
 from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
 from .geometry import Geometry, ParameterGrid, TriSet
-from .material import Material, FermiCircleModes
+from .material import Material, FermiSurface
 from .material.ab_initio import AbInitio
 from .material.single_band import SingleBand
 from . import TimeEvolution
@@ -21,7 +21,7 @@ class Transport(TreeNode):
         self,
         *,
         ab_initio: Optional[Union[AbInitio, dict]] = None,
-        fermi_circle_modes: Optional[Union[FermiCircleModes, dict]] = None,
+        fermi_surface: Optional[Union[FermiSurface, dict]] = None,
         single_band: Optional[Union[SingleBand, dict]] = None,
         tri_set: Optional[Union[TriSet, dict]] = None,
         parameter_grid: Optional[Union[ParameterGrid, dict]] = None,
@@ -40,8 +40,9 @@ class Transport(TreeNode):
         ab_initio
             :yaml:`Ab-initio material.`
             Exactly one supported material type must be specified.
-        fermi_circle_modes
-            :yaml:`Modal (angular-harmonic) Fermi-circle material for graphene/2DEG.`
+        fermi_surface
+            :yaml:`Unified Fermi-surface (delta-k storage with modal transforms).`
+            Set Nr=1 to recover the Fermi-circle limit.
             Exactly one supported material type must be specified.
         single_band
             :yaml:`Single-band model material for energy-resolved charge transport.`
@@ -88,9 +89,9 @@ class Transport(TreeNode):
                 "ab-initio", AbInitio, ab_initio, process_grid=self.process_grid
             ),
             TreeNode.ChildOptions(
-                "fermi-circle-modes",
-                FermiCircleModes,
-                fermi_circle_modes,
+                "fermi-surface",
+                FermiSurface,
+                fermi_surface,
                 process_grid=self.process_grid,
             ),
             TreeNode.ChildOptions(

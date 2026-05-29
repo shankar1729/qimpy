@@ -92,8 +92,9 @@ def test_reflective_conservation(tmp_path):
     rc.init()
     mesh = _make_rect_mesh(8.0, str(tmp_path / "rect.npz"), all_walls=True)
     transport = Transport(
-        fermi_circle_modes=dict(kF=1.0, vF=1.5, M=8, tau_p=np.inf,
-                                tau_ee=np.inf, r_c=np.inf, specularity=1.0),
+        fermi_surface=dict(kF=1.0, vF=1.5, M_theta=8, Nr=1, T=1.0,
+                           tau_p=np.inf, tau_ee=np.inf, r_c=np.inf,
+                           specularity=1.0),
         tri_set=dict(mesh_file=mesh, contacts={}, order=3),
         time_evolution=dict(t_max=1.0, dt_save=2.0, n_collate=10),
     )
@@ -101,15 +102,26 @@ def test_reflective_conservation(tmp_path):
     q = np.stack([dg.x, dg.y], axis=-1); q0 = np.array([55.0, 30.0])
     blob = np.exp(-(((q - q0) ** 2).sum(-1)) / (2 * 6.0 ** 2))
     if transport.material.comm.rank == 0:
+        # Delta-k storage: a constant-in-theta nodal state corresponds to the
+        # (m=0) angular mode = density blob.  Broadcast across all N_theta channels.
         dens = torch.zeros_like(g.density)
-        dens[:, :, 0] = torch.as_tensor(blob).to(dens)
+        dens[:, :, :] = torch.as_tensor(blob).to(dens).unsqueeze(-1)
         g.density = dens
-    mass = lambda: float(g._rho[..., 0].sum()); m0 = mass()
+
+    def total_mass():
+        # The conserved quantity is the integral of the density observable n,
+        # which is the radial-and-angular weighted sum of all delta-k channels.
+        u = g.dist.adv.apply_mass_inv(g._rho)
+        obs = transport.material.measure_observables(u, 0.0)   # (Np, K, 3)
+        return float(dg.integrate(np.asarray(obs[..., 0])))
+
+    m0 = total_mass()
     dt = 0.5 * g.dt_max
     # Long enough for the blob to traverse the domain and actively reflect off
     # walls (vF=1.5, domain ~100x50): ~30 time units = several wall encounters.
     _step_rk4(g, dt, int(30.0 / dt))
-    assert abs(mass() - m0) / abs(m0) < 1e-10, "reflective walls not conserving mass"
+    assert abs(total_mass() - m0) / abs(m0) < 1e-10, \
+        "reflective walls not conserving mass"
 
 
 def test_contact_steady_state(tmp_path):
@@ -118,8 +130,9 @@ def test_contact_steady_state(tmp_path):
     rc.init()
     mesh = _make_rect_mesh(8.0, str(tmp_path / "rect.npz"))
     transport = Transport(
-        fermi_circle_modes=dict(kF=1.0, vF=1.5, M=8, tau_p=np.inf,
-                                tau_ee=np.inf, r_c=np.inf, specularity=1.0),
+        fermi_surface=dict(kF=1.0, vF=1.5, M_theta=8, Nr=1, T=1.0,
+                           tau_p=np.inf, tau_ee=np.inf, r_c=np.inf,
+                           specularity=1.0),
         tri_set=dict(mesh_file=mesh,
                      contacts={"source": {"dmu": 0.1}, "drain": {"dmu": -0.1}},
                      order=3),
@@ -147,7 +160,7 @@ def test_spatial_mpi_matches_serial(tmp_path):
     on a contact-driven problem (halo emulated in-process; the real mpi4py
     transport moves the identical buffers)."""
     from qimpy.mpi import ProcessGrid
-    from qimpy.transport.material import FermiCircleModes
+    from qimpy.transport.material import FermiSurface
     from ._dg_mesh import load_mesh
     from ._dg2d import DG2D
     from ._dg_mpi import (compute_partition, SpatialPartition,
@@ -155,9 +168,10 @@ def test_spatial_mpi_matches_serial(tmp_path):
     rc.init()
     torch.set_default_dtype(torch.float64)
     mesh = load_mesh(_make_rect_mesh(8.0, str(tmp_path / "rect.npz")))
-    pg = ProcessGrid(rc.comm, "rk", (1, 1))           # all channels local (modal: Pk=1)
-    mat = FermiCircleModes(kF=1.0, vF=1.5, M=8, tau_p=np.inf,
-                           tau_ee=np.inf, r_c=np.inf, specularity=1.0, process_grid=pg)
+    pg = ProcessGrid(rc.comm, "rk", (1, 1))           # all channels local (scalar/coupled: Pk=1)
+    mat = FermiSurface(kF=1.0, vF=1.5, M_theta=8, Nr=1, T=1.0,
+                       tau_p=np.inf, tau_ee=np.inf, r_c=np.inf,
+                       specularity=1.0, process_grid=pg)
     contacts = {"source": {"dmu": 0.1}, "drain": {"dmu": -0.1}}
     order, nsteps = 2, 16
     dt = 0.5 * float(DG2D(order, mesh.VX, mesh.VY, mesh.EToV).dt_scale) / 1.5
@@ -165,7 +179,10 @@ def test_spatial_mpi_matches_serial(tmp_path):
     def initial(adv, dg):
         x, y = np.asarray(dg.x), np.asarray(dg.y)
         u0 = np.zeros((dg.Np, dg.K, adv.Nk))
-        u0[:, :, 0] = np.exp(-((x - 55) ** 2 + (y - 30) ** 2) / (2 * 8.0 ** 2))
+        # Delta-k constant-in-theta = (m=0) density blob.  Broadcast across channels.
+        u0[:, :, :] = np.exp(
+            -((x - 55) ** 2 + (y - 30) ** 2) / (2 * 8.0 ** 2)
+        )[:, :, None]
         return adv.adv.apply_mass(torch.from_numpy(u0))
 
     def run(nparts):
