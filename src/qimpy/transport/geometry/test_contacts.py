@@ -10,20 +10,21 @@ import torch
 
 from qimpy import rc
 from qimpy.mpi import ProcessGrid
-from ..material import FermiCircleModes
+from ..material import FermiSurface
 from ._dg_mesh import load_mesh
 from ._dg_mpi import build_distributed
 from . import test_advect as TA
 
 
 def _build(contacts, order=3, vF=1.5, M=8):
-    """Modal (angular-harmonic) FermiCircleModes device on the rect mesh; contacts
-    exercise the coupled-flux path. Modal requires Pk=1 (serial)."""
+    """FermiSurface(Nr=1, M_theta=M) device on the rect mesh; contacts exercise
+    the scalar (per-collocation) advection path."""
     tmp = tempfile.mkdtemp()
     mesh = load_mesh(TA._make_rect_mesh(12.0, os.path.join(tmp, "rect.npz")))
     pg = ProcessGrid(rc.comm, "rk", (1, 1))
-    mat = FermiCircleModes(kF=1.0, vF=vF, M=M, tau_p=np.inf, tau_ee=np.inf,
-                           r_c=np.inf, specularity=1.0, process_grid=pg)
+    mat = FermiSurface(kF=1.0, vF=vF, M_theta=M, Nr=1, T=1.0,
+                       tau_p=np.inf, tau_ee=np.inf, r_c=np.inf,
+                       specularity=1.0, process_grid=pg)
     sp, da = build_distributed(mesh, order, mat, contacts, rc.comm)
     return sp, da, vF
 
@@ -57,8 +58,9 @@ def test_biased_contacts_balance_at_steady_state() -> None:
     tmp = tempfile.mkdtemp()
     mesh = load_mesh(TA._make_rect_mesh(12.0, os.path.join(tmp, "rect.npz")))
     pg = ProcessGrid(rc.comm, "rk", (1, 1))
-    mat = FermiCircleModes(kF=1.0, vF=1.5, M=8, tau_p=15.0, tau_ee=8.0,
-                           r_c=np.inf, specularity=1.0, process_grid=pg)
+    mat = FermiSurface(kF=1.0, vF=1.5, M_theta=8, Nr=1, T=1.0,
+                       tau_p=15.0, tau_ee=8.0, r_c=np.inf, specularity=1.0,
+                       process_grid=pg)
     sp, da = build_distributed(
         mesh, 3, mat, {"source": {"dmu": 0.1}, "drain": {"dmu": -0.1}}, rc.comm)
     w = da.adv.apply_mass(torch.zeros(sp.dg.Np, sp.dg.K, da.Nk))
@@ -91,7 +93,7 @@ def test_floating_contact_reads_uniform_potential() -> None:
     sp, da, vF = _build({"source": {"dmu": 0.1}, "drain": {"floating": True}})
     for V0 in (0.05, -0.1, 0.2):
         u = torch.zeros(sp.dg.Np, sp.dg.K, da.Nk)
-        u[..., 0] = float(V0)                 # isotropic m=0 coefficient = level V0
+        u[..., :] = float(V0)                # constant in theta = isotropic level V0
         da._update_floating(u)
         assert abs(da.contact_potentials()["drain"] - V0) < 1e-12
 
