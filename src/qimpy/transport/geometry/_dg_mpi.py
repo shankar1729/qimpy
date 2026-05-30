@@ -109,7 +109,7 @@ class DistributedAdvect:
         self.adv = AdvectTorch(part.dg, device=v_t.device, dtype=v_t.dtype)
         # number-density projection (wk * observable_0) for contact-current readout
         self.mass_proj = (material.wk * material.get_observables(0.0)[0]).to(v_t.dtype)
-        self._floating = []                       # (name, pos, FloatingContactor)
+        self._feedback = []                       # (name, pos, contactor) for floating + current-source
         self._contact_sel = {}                    # name -> sel (indices into mapB)
         self._setup_boundaries(material, contacts)
 
@@ -148,7 +148,15 @@ class DistributedAdvect:
                 fc = FloatingContactor(dim=self._coupling_dim(),
                                        device=self.adv.device, dtype=self.adv.dtype)
                 cops.append((sel, fc))
-                self._floating.append((name, self.adv.mapB[ten], fc))
+                self._feedback.append((name, self.adv.mapB[ten], fc))
+            elif "I_set" in p and p["I_set"] is not None:
+                # current source: isotropic ghost whose level adjusts to deliver I_set
+                cs = CurrentSourceContactor(I_set=p["I_set"],
+                                            dim=self._coupling_dim(),
+                                            device=self.adv.device,
+                                            dtype=self.adv.dtype)
+                cops.append((sel, cs))
+                self._feedback.append((name, self.adv.mapB[ten], cs))
             else:
                 cops.append((sel, material.get_contactor(n_all[ten], **p)))
         is_wall = np.array([nm == "wall" for nm in node_name], bool)
@@ -163,22 +171,34 @@ class DistributedAdvect:
         c = getattr(self, "coupling", None)
         return None if c is None else c.dim
 
-    def _update_floating(self, u):
-        """Set each voltage-probe level mu_c = (face number-flux out)/(face inflow
-        capacity), so the net current through the contact is zero. With an isotropic
-        ghost uP = mu_c e_0, the boundary number-flux is (A_n^+ uM)_0 + mu_c (A_n^- e_0)_0,
-        so mu_c = -sum (A_n^+ uM)_0 / sum (A_n^- e_0)_0 (flux-weighted over the face).
-        Scalar channels are the diagonal special case A_n = diag(v.n)."""
+    def _update_feedback(self, u):
+        """Update the level of each floating / current-source contact by solving
+        I_net(mu_c) = num + mu_c * (-den) = target  for mu_c.
+
+        num = face-integrated outward number-flux from the device,
+              sum_face w_q (mass_proj @ (v.n)^+ * u^M)_node
+        den = face-integrated inflow capacity per unit isotropic level,
+              sum_face w_q (mass_proj @ (-(v.n)^-)_node
+        target = 0 for floating, target = I_set for current-source.
+
+        Using mass_proj (the same per-channel weight contact_currents reads
+        through) makes num and den match the readout normalization, so I_set
+        is delivered to roundoff at every step.  Without mass_proj the floating
+        case still works (ratio is normalization-invariant) but a current
+        source comes out off by 1/sum(mass_proj_per_channel).  The actual
+        formula is dispatched by the contactor's :meth:`set_level`."""
         cpl = self.coupling
         uf = u.permute(1, 0, 2).reshape(self.adv.Np * self.adv.K, -1)
         uM = uf[self.adv.vmapM]
-        for name, pos, fc in self._floating:
+        for name, pos, fc in self._feedback:
             nx = self.adv.nxf[pos]; ny = self.adv.nyf[pos]
             uMb = uM[pos]; wq = self.adv.face_quad_w[pos]
             if cpl is None:
                 adn = nx[:, None] * self.vx[None, :] + ny[:, None] * self.vy[None, :]
-                num = (adn.clamp(min=0.0) * uMb).sum(-1)   # (v.n)^+ . uM  per node
-                den = (-adn.clamp(max=0.0)).sum(-1)        # (v.n)^- capacity per node
+                fstar_out = adn.clamp(min=0.0) * uMb               # outflow contribution (Nf, Nk)
+                in_cap    = -adn.clamp(max=0.0)                     # inflow capacity per unit isotropic mu_c (Nf, Nk)
+                num = (fstar_out * self.mass_proj[None, :]).sum(-1) # mass-projected outflow flux per node
+                den = (in_cap    * self.mass_proj[None, :]).sum(-1) # mass-projected inflow capacity per node
             else:
                 phi = torch.atan2(ny, nx)
                 e0 = torch.zeros_like(uMb); e0[:, 0] = 1.0
@@ -189,21 +209,22 @@ class DistributedAdvect:
             acc = torch.stack([(wq * num).sum(), (wq * den).sum()])
             if self.comm_sp is not None and self.comm_sp.size > 1:
                 self.comm_sp.Allreduce(MPI.IN_PLACE, BufferView(acc))
-            fc.level = acc[0] / acc[1].clamp(min=1e-300)
+            fc.set_level(acc[0], acc[1])
 
     def local_rhs(self, w, t: float = 0.0):
-        if self._floating:
-            self._update_floating(self.adv.apply_mass_inv(w))
+        if self._feedback:
+            self._update_feedback(self.adv.apply_mass_inv(w))
         return self.adv.rhs_w(w, self.vx, self.vy, t, coupling=self.coupling)
 
     def contact_currents(self, w, t: float = 0.0) -> dict:
         """Net outward current through each contact, I_c = integral_Gamma_c
         (number-flux of the numerical flux) dl. Positive = out of the device.
-        For a floating probe this is ~0 by construction; its `level` is the
-        floating potential. Conservative: sum over all boundaries = -d/dt of mass."""
+        For a floating probe this is ~0 by construction; for a current source it
+        is I_set; for a voltage source it is a response.  Conservative:
+        sum over all boundaries = -d/dt of mass."""
         u = self.adv.apply_mass_inv(w)
-        if self._floating:
-            self._update_floating(u)
+        if self._feedback:
+            self._update_feedback(u)
         _, fstar_b = self.adv._residual(u, self.vx, self.vy, t,
                                         coupling=self.coupling, return_fstar=True)
         massflux = fstar_b @ self.mass_proj            # (Nb,) per boundary node
@@ -218,8 +239,9 @@ class DistributedAdvect:
         return out
 
     def contact_potentials(self) -> dict:
-        """Floating (voltage-probe) potentials read at the last RHS evaluation."""
-        return {name: float(fc.level) for name, _, fc in self._floating}
+        """Self-adjusting electrochemical potential of each feedback contact
+        (floating voltmeter or current source).  Read at the last RHS evaluation."""
+        return {name: float(fc.level) for name, _, fc in self._feedback}
 
 
 def build_distributed(mesh, order, material, contacts, comm):
@@ -238,7 +260,12 @@ class FloatingContactor:
     """Voltage-probe contact. Holds an isotropic ghost level (the floating
     electrochemical potential mu_c), updated each step to zero the contact
     current. Returns a per-direction constant (scalar representation) or a
-    level * e_0 modal vector (`dim` set)."""
+    level * e_0 modal vector (`dim` set).
+
+    The :meth:`set_level` polymorphism is shared with :class:`CurrentSourceContactor`
+    so the same face-integral update loop drives both kinds: floating sets
+    the level to make the current vanish; current source sets it to make
+    the current equal a prescribed I_set."""
 
     def __init__(self, dim=None, device=None, dtype=None):
         self.dim = dim
@@ -250,6 +277,44 @@ class FloatingContactor:
         v = torch.zeros(self.dim, device=self.level.device, dtype=self.level.dtype)
         v[0] = self.level                           # modal: isotropic m=0
         return v
+
+    def set_level(self, num, den):
+        """Solve   I_net(mu_c) = num + mu_c * (-den)  =  0   ->   mu_c = num / den.
+        `num` is the face-integrated (A_n^+ u^M)_{m=0} (outward flux from device),
+        `den` is the face-integrated -(A_n^- e_0)_{m=0} > 0 (inflow capacity of an
+        isotropic ghost per unit level).  Floating means target = 0."""
+        self.level = num / den.clamp(min=1e-300)
+
+
+class CurrentSourceContactor:
+    """Current-source contact.  Dual of :class:`FloatingContactor`: holds an
+    isotropic ghost level (chemical potential mu_c), updated each step so that
+    the net outward contact current equals the prescribed ``I_set`` (positive
+    = out of the device, matching the ``contact_currents`` convention).
+
+    The contact's voltage is then a response, exposed via ``contact_potentials``.
+    Setting ``I_set = 0`` reproduces a floating probe exactly -- the formulas
+    differ only by a constant.
+
+    Like a floating probe, this is a single-scalar feedback per contact, with
+    cost identical to floating in MPI (one Allreduce of a 2-vector per RHS)."""
+
+    def __init__(self, I_set, dim=None, device=None, dtype=None):
+        self.dim = dim
+        self.I_set = float(I_set)
+        self.level = torch.zeros((), device=device, dtype=dtype)
+
+    def __call__(self, t):
+        if self.dim is None:
+            return self.level
+        v = torch.zeros(self.dim, device=self.level.device, dtype=self.level.dtype)
+        v[0] = self.level
+        return v
+
+    def set_level(self, num, den):
+        """Solve I_net(mu_c) = num + mu_c * (-den) = I_set
+                          ->   mu_c = (num - I_set) / den."""
+        self.level = (num - self.I_set) / den.clamp(min=1e-300)
 
 
 def mpi_halo_exchange(comm, part: SpatialPartition, w):
