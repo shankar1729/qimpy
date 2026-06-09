@@ -48,7 +48,7 @@ class Transport(TreeNode):
             :yaml:`Single-band model material for energy-resolved charge transport.`
             Exactly one supported material type must be specified.
         tri_set
-            :yaml:`Discontinuous-Galerkin geometry on an unstructured triangle mesh.`
+            :yaml:`Finite-volume transport on an external unstructured triangle mesh.`
             Exactly one supported geometry type must be specified.
         parameter_grid
             :yaml:`Virtual geometry of disconnected points for batched dynamics.`

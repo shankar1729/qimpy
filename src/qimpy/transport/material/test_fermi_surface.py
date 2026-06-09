@@ -66,13 +66,21 @@ def test_radial_basis_orthonormal(Nr: int, T_temp: float) -> None:
 @pytest.mark.parametrize("Nr", [1, 2, 4])
 @pytest.mark.parametrize("M", [4, 16])
 def test_fermisurface_transform_roundtrip(Nr: int, M: int) -> None:
-    """nodal -> modal -> nodal preserves the state to roundoff."""
+    """Transforms round-trip to roundoff.
+
+    The angular nodes oversample the 2M+1 modes (the symmetric quadrature uses an
+    even N_theta >= 2M+1), so the invariant is modal -> nodal -> modal = identity.
+    Equivalently, a *physical* (band-limited) nodal state f = from_modes(a) also
+    satisfies from_modes(to_modes(f)) = f; only out-of-band nodal noise is
+    projected away (that content carries no represented harmonic, n, or current).
+    """
     torch.set_default_dtype(torch.float64)
     fs = _make(M_theta=M, Nr=Nr)
-    N_k = Nr * fs.angular.N_theta
-    f = torch.randn(4, N_k, dtype=torch.float64, device=rc.device)
-    f2 = fs.from_modes(fs.to_modes(f))
-    assert torch.allclose(f, f2, atol=1e-12)
+    n_modes = Nr * fs.angular.dim
+    a = torch.randn(4, n_modes, dtype=torch.float64, device=rc.device)
+    assert torch.allclose(a, fs.to_modes(fs.from_modes(a)), atol=1e-12)
+    f = fs.from_modes(a)                                   # band-limited nodal state
+    assert torch.allclose(f, fs.from_modes(fs.to_modes(f)), atol=1e-12)
 
 
 def test_fermisurface_constant_projects_to_n0m0() -> None:

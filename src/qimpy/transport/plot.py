@@ -46,8 +46,8 @@ def run(
     # Distribute tasks over MPI:
     file_list = rc.comm.bcast(sorted(glob.glob(checkpoints)))
     mine = slice(rc.i_proc, None, rc.n_procs)  # divide frames within each file
-    # TriSet writes a structured bounding-box grid (geometry_type 'tri_set');
-    # render it directly rather than via the PatchSet quad triangulation.
+    # TriSet writes piecewise-constant finite-volume cell data on a triangle
+    # mesh (geometry_type 'tri_set'); render it directly on the mesh.
     with Checkpoint(file_list[0]) as cp:
         geom_type = cp["/geometry"].attrs.get("variant_name", b"")
         geom_type = (geom_type.decode() if isinstance(geom_type, bytes)
@@ -161,38 +161,25 @@ def run(
 
 
 def run_tri_set(file_list, mine, output, density, streamlines, dpi) -> None:
-    """Frame-parallel, mesh-native rendering of TriSet output.
+    """Frame-parallel, mesh-native rendering of TriSet (finite-volume) output.
 
-    Renders the density on the actual triangulation (each order-N element shown
-    via its N^2 nodal sub-triangles, so the high-order, graded, exact-boundary
-    field is preserved) with tripcolor, and traces current streamlines from a
-    triangulation interpolation of (jx, jy). Each rank renders its strided subset
-    of frames independently, so post-processing scales like the solve."""
+    The finite-volume state is one average per triangle, so the density is drawn
+    as a flat-shaded ``tripcolor`` (piecewise-constant, the honest FV picture)
+    over the actual mesh, and current streamlines are traced from a linear
+    interpolation of (jx, jy) off the cell centroids. Each rank renders its
+    strided subset of frames, so post-processing scales like the solve."""
     import matplotlib.tri as mtri
+    from scipy.interpolate import griddata
     cmap = density.get("cmap", "bwr")
     with Checkpoint(file_list[0]) as cp:
         g = cp["/geometry"]
-        node_xy = np.array(g["node_xy"])             # (K, Np, 2)
-        subtri = np.array(g["subtri"])               # (n_sub, 3)
-    K, Np, _ = node_xy.shape
-    xall = node_xy[..., 0].ravel(); yall = node_xy[..., 1].ravel()
-    tris = (subtri[None] + (np.arange(K) * Np)[:, None, None]).reshape(-1, 3)
-    # Adjacent elements' shared-edge DG nodes coincide; merge them so the
-    # triangulation (and its trifinder, used for streamline interpolation) is
-    # valid. Inter-element jumps are averaged -- standard for DG visualization.
-    key = np.round(np.stack([xall, yall], 1), 9)
-    uniq, inv = np.unique(key, axis=0, return_inverse=True)
-    xu, yu = uniq[:, 0], uniq[:, 1]
-    triang = mtri.Triangulation(xu, yu, inv[tris])
-    counts = np.zeros(len(xu)); np.add.at(counts, inv, 1.0)
-
-    def to_unique(flat_vals):
-        acc = np.zeros(len(xu)); np.add.at(acc, inv, flat_vals)
-        return acc / counts
-
+        verts = np.array(g["mesh_vertices"])         # (Nv, 2)
+        tris = np.array(g["mesh_triangles"])         # (K, 3)
+        cen = np.array(g["cell_centroid"])           # (K, 2)
+    triang = mtri.Triangulation(verts[:, 0], verts[:, 1], tris)
     if streamlines is not None:
-        xs = np.linspace(xu.min(), xu.max(), 220)
-        ys = np.linspace(yu.min(), yu.max(), 220)
+        xs = np.linspace(verts[:, 0].min(), verts[:, 0].max(), 220)
+        ys = np.linspace(verts[:, 1].min(), verts[:, 1].max(), 220)
         Xs, Ys = np.meshgrid(xs, ys)
     orig_level = log.getEffectiveLevel(); log.setLevel(logging.INFO)
     for checkpoint_file in file_list:
@@ -200,22 +187,21 @@ def run_tri_set(file_list, mine, output, density, streamlines, dpi) -> None:
             g = cp["/geometry"]
             i_step_list = np.array(g["i_step"])[mine]
             t_list = np.array(g["t"])[mine]
-            obs = np.array(g["dg_observables"][mine])   # (nframe, K, Np, n_obs)
+            obs = np.array(g["fv_observables"][mine])   # (nframe, K, n_obs)
         for fr, (i_step, t) in enumerate(zip(i_step_list, t_list)):
-            n_val = to_unique(obs[fr, :, :, 0].ravel())
+            n_val = obs[fr, :, 0]                        # (K,) per-cell density
             vmax = float(np.nanmax(np.abs(n_val)))
             if not np.isfinite(vmax) or vmax == 0.0:
                 vmax = 1.0
             fig, ax = plt.subplots(figsize=(6, 6))
-            tpc = ax.tripcolor(triang, n_val / vmax, cmap=cmap, vmin=-1, vmax=1,
-                               shading="gouraud")
+            tpc = ax.tripcolor(triang, facecolors=n_val / vmax, cmap=cmap,
+                               vmin=-1, vmax=1)         # flat shading = FV cell average
             ax.set_aspect("equal"); ax.set_title(f"$t$ = {t:.4g}"); ax.axis("off")
             cb = fig.colorbar(tpc, ax=ax, fraction=0.046, pad=0.04)
             cb.set_label(rf"Density ($\times|\rho|_{{\max}}$ = {vmax:.2e})")
             if streamlines is not None and obs.shape[-1] >= 3:
-                jx = mtri.LinearTriInterpolator(triang, to_unique(obs[fr, :, :, 1].ravel()))
-                jy = mtri.LinearTriInterpolator(triang, to_unique(obs[fr, :, :, 2].ravel()))
-                U = np.ma.filled(jx(Xs, Ys), 0.0); V = np.ma.filled(jy(Xs, Ys), 0.0)
+                U = np.nan_to_num(griddata(cen, obs[fr, :, 1], (Xs, Ys), method="linear"))
+                V = np.nan_to_num(griddata(cen, obs[fr, :, 2], (Xs, Ys), method="linear"))
                 ax.streamplot(xs, ys, U, V,
                               density=streamlines.get("density", 1.5),
                               linewidth=streamlines.get("linewidth", 0.6),

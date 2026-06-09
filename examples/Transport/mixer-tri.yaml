@@ -1,20 +1,20 @@
-# Mixer/cross device solved with the DG triangle-mesh advection (tri_set).
-# The mesh is external (qimpy does not mesh); generate it first with:
+# Mixer/cross device solved with the finite-volume triangle-mesh transport
+# (tri_set). The mesh is external (qimpy does not mesh); generate it first with:
 #     python make_mixer_mesh.py --out mixer-tri.npz
-# Ballistic limit (tau, r_c = inf): source/drain on two arms, the other two
-# arms are reflective voltage probes.
-fermi_circle_modes:
+# Ballistic limit (tau, r_c = inf): source/drain on two arms; the other two
+# arms default to reflective walls.
+fermi_surface:
   kF: 1.0
   vF: 1.0
-  tau-p: .inf
-  tau-ee: .inf
-  M: 12
+  M_theta: 12
+  Nr: 1
+  tau_p: .inf
+  tau_ee: .inf
   r_c: .inf
   specularity: 1.0
 
 tri_set:
   mesh_file: mixer-tri.npz
-  order: 3
   contacts:
     source:
       dmu: +0.1

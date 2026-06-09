@@ -1,9 +1,9 @@
-"""DG triangle-mesh container and external-mesh I/O for TriSet.
+"""Triangle-mesh container and external-mesh I/O for the FVM solver.
 
 qimpy does NOT generate meshes. The triangle mesh is produced by external
 tooling (e.g. Shewchuk's `triangle`, gmsh, or a hand-written generator) and
 supplied to ``TriSet`` as a file. This module defines the in-memory container
-that ``DG2D`` consumes (``MeshResult``) and the loader/saver for the external
+that ``TriSet`` consumes (``MeshResult``) and the loader/saver for the external
 mesh format.
 
 External mesh format (NumPy ``.npz``)
@@ -28,7 +28,7 @@ import numpy as np
 
 @dataclass
 class MeshResult:
-    """The mesh as DG2D and TriSet consume it (output of :func:`load_mesh`)."""
+    """The mesh as :class:`TriSet` consumes it (output of :func:`load_mesh`)."""
     VX: np.ndarray
     VY: np.ndarray
     EToV: np.ndarray
@@ -36,20 +36,6 @@ class MeshResult:
     marker_names: list             # id -> name (id 0 reserved/unused)
     projectors: dict               # id -> curve-projection fn, or None (straight)
     _lattice: Optional[list] = None
-
-    def face_markers(self, dg):
-        """For each boundary (element, local-face), return (name, marker_id)."""
-        vn = np.array([[0, 1], [1, 2], [2, 0]])
-        out = {}
-        for k in range(dg.K):
-            for f in range(dg.Nfaces):
-                if dg.EToE[k, f] != k:
-                    continue                       # interior face
-                a = dg.EToV[k, vn[f, 0]]; b = dg.EToV[k, vn[f, 1]]
-                m = self.edge_marker.get(tuple(sorted((int(a), int(b)))), 0)
-                name = self.marker_names[m] if m < len(self.marker_names) else "wall"
-                out[(k, f)] = (name, m)
-        return out
 
 
 def load_mesh(path: str) -> MeshResult:

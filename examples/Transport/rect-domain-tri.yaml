@@ -1,17 +1,18 @@
-# rect-domain driven by source/drain contacts, solved with the DG triangle-mesh
-# advection (tri_set). The mesh is supplied externally (qimpy does not mesh);
-# generate it first with:  python make_rect_mesh.py --out rect-domain-tri.npz
-fermi_circle_modes:
+# rect-domain driven by source/drain contacts, solved with the finite-volume
+# triangle-mesh transport (tri_set). The mesh is supplied externally (qimpy does
+# not mesh); generate it first with:
+#     python make_rect_mesh.py --out rect-domain-tri.npz
+fermi_surface:
   kF: 1.0
   vF: 1.5
-  tau-p: .inf
-  tau-ee: .inf
-  M: 12
+  M_theta: 12
+  Nr: 1
+  tau_p: .inf
+  tau_ee: .inf
   r_c: 10.0
 
 tri_set:
   mesh_file: rect-domain-tri.npz
-  order: 3
   contacts:
     source:
       dmu: +0.1
