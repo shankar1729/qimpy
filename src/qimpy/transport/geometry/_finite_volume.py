@@ -835,11 +835,11 @@ class FiniteVolume(Geometry):
             # steady-state warm start. Each rank writes its owned cell block.
             u_own = self._u[self._own_start:self._own_stop].detach().cpu().numpy()
             CheckpointPath(checkpoint, path).create_dataset(
-                "fv_rho", (self.K, self.Nk), u_own.dtype)
+                "rho", (self.K, self.Nk), u_own.dtype)
             if checkpoint is not None:
-                checkpoint.write_slice(checkpoint[f"{path}/fv_rho"],
+                checkpoint.write_slice(checkpoint[f"{path}/rho"],
                                        (self._own_start, 0),
                                        torch.from_numpy(u_own))
-            saved.append("fv_rho")
+            saved.append("rho")
         self._stash_t, self._stash_i, self._stash_obs = [], [], []
         return saved
