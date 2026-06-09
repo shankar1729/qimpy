@@ -19,6 +19,7 @@ one limited-reconstruction pass, two gathers, and three scatters.
 """
 
 from __future__ import annotations
+import os
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Optional
@@ -560,11 +561,18 @@ class FiniteVolume(Geometry):
         self._faces_fn = self._faces
         self._srhs_fn = self._spatial_rhs
         if compile:
+            # This workload is kernel-launch- and bandwidth-bound (a long chain of
+            # small elementwise ops). Benchmarked on a T4: "max-autotune" (kernel
+            # fusion + tuning) is fastest; "reduce-overhead" (CUDA graphs) is a touch
+            # slower here because the RK2 stages feed changing inputs, so the
+            # cudagraph input copies offset the launch-overhead savings. Override
+            # with QIMPY_COMPILE_MODE if a workload benefits from a different mode.
+            mode = os.environ.get("QIMPY_COMPILE_MODE", "max-autotune")
             try:
                 if self._mpi:
-                    self._faces_fn = torch.compile(self._faces, mode="max-autotune")
+                    self._faces_fn = torch.compile(self._faces, mode=mode)
                 else:
-                    self._srhs_fn = torch.compile(self._spatial_rhs, mode="max-autotune")
+                    self._srhs_fn = torch.compile(self._spatial_rhs, mode=mode)
             except Exception:               # older torch / no backend -> eager
                 self._faces_fn, self._srhs_fn = self._faces, self._spatial_rhs
 
