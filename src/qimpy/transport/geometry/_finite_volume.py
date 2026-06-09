@@ -539,7 +539,14 @@ class FiniteVolume(Geometry):
             ghost = eye - proj                                   # onto unrepresented DOFs
             if ghost.abs().max() > 1e-10:                        # only if oversampled
                 U, S, Vh = torch.linalg.svd(ghost)
-                r = int((S > 1e-8).sum())
+                # Numerical-rank cutoff scaled to the working precision. An
+                # absolute threshold (1e-8) sits below the fp32 modal round-trip
+                # floor (~1e-6), so in fp32 it counts ~Nk noise singular values as
+                # ghost directions. sqrt(eps) lands safely between the noise floor
+                # and the O(1) genuine ghost in both fp32 and fp64 (fp64: ~1.5e-8,
+                # matching the old cutoff; fp32: ~3.4e-4).
+                tol = float(S[0]) * torch.finfo(v.dtype).eps ** 0.5
+                r = int((S > tol).sum())
                 self._dl_A = (U[:, :r] * S[:r]).contiguous()     # (Nk, r)
                 self._dl_B = Vh[:r].T.contiguous()               # (Nk, r)
 
@@ -678,10 +685,16 @@ class FiniteVolume(Geometry):
         lo = (torch.minimum(uc, un.amin(1)) - uc)[:, None]    # headroom down (<= 0)
         D1 = torch.where(d >= 0, hi, lo)                      # same sign as d
         e = self._vk_eps2
+        # Denominator is D1^2 + D1 d + 2 d^2 + e >= 2 d^2 > 0 for d != 0 in exact
+        # arithmetic, but in fp32 it can underflow to a subnormal/zero at locally
+        # flat cells (d a denormal-tiny roundoff with D1 == 0), giving 0/0 = NaN.
+        # Guard on the denominator being a normal float rather than on d != 0:
+        # where it isn't, the cell is flat and the limiter is 1 (no limiting).
+        num = D1 * D1 + 2 * D1 * d + e
+        den = D1 * D1 + D1 * d + 2 * d * d + e
         phi = torch.where(
-            d != 0,
-            ((D1 * D1 + 2 * D1 * d + e)
-             / (D1 * D1 + D1 * d + 2 * d * d + e)).clamp(max=1.0),
+            den > torch.finfo(d.dtype).tiny,
+            (num / den).clamp(max=1.0),
             torch.ones_like(d),
         ).amin(1)[:, None]                                    # (n, 1, Nk)
         return uc[:, None] + phi * d
