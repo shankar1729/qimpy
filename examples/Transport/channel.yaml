@@ -5,6 +5,7 @@ fermi_surface: {kF: 1.0, vF: 1.0, M_theta: 16, Nr: 1, tau_p: .inf, tau_ee: .inf,
 finite_volume:
   mesh_file: channel.npz
   cfl: 1.2
+  compile: true   # fuse the per-step kernels (~2.5x on GPU); one-time compile cost
   contacts:
     source: {dmu: +0.1}
     drain: {dmu: -0.1}

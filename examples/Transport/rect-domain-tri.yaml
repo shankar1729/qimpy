@@ -13,6 +13,7 @@ fermi_surface:
 
 finite_volume:
   mesh_file: rect-domain-tri.npz
+  compile: true   # fuse the per-step kernels (~2.5x on GPU); one-time compile cost
   contacts:
     source:
       dmu: +0.1
