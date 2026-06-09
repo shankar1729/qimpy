@@ -39,12 +39,16 @@ _FACE = np.array([[0, 1], [1, 2], [2, 0]])   # local vertex pairs of the 3 faces
 
 @dataclass
 class FVGeom:
-    """Static FV geometry from a triangle mesh; hot-path arrays are torch tensors.
+    """Static FV geometry from a triangle (2D) or line (1D) mesh; hot-path arrays
+    are torch tensors.  ``area`` is the cell measure (triangle area / interval
+    length) and ``elen``/``blen`` the face measure (edge length / 1 for a 1D
+    point face).
 
-    Edges split into interior (shared by cells ``eL``/``eR``, normal ``en`` points
+    Faces split into interior (shared by cells ``eL``/``eR``, normal ``en`` points
     out of ``eL``) and boundary (cell ``bcell``, outward normal ``bn``, ``bmark``
-    names the wall/contact). ``eLF``/``eRF``/``bF`` are flat ``cell*3 + localface``
-    indices used to gather the reconstructed face value of the adjacent cell.
+    names the wall/contact). ``eLF``/``eRF``/``bF`` are flat ``cell*n_face +
+    localface`` indices (``n_face`` = 3 triangles, 2 line cells) used to gather
+    the reconstructed face value of the adjacent cell.
     Periodic faces are paired through the lattice and stored as interior edges
     (the streaming neighbour is the periodic image).
     """
@@ -61,9 +65,15 @@ class FVGeom:
 
 
 def build_fv_geom(mesh, *, dtype: torch.dtype = torch.float64) -> FVGeom:
-    """Build the FV geometry from a loaded triangle mesh (``_mesh.MeshResult``)."""
-    V = np.stack([mesh.VX, mesh.VY], axis=1).astype(float)
+    """Build the FV geometry from a loaded mesh (``_mesh.MeshResult``).
+
+    Dispatches on cell type: 3 vertices/cell -> 2D triangles, 2 vertices/cell ->
+    a 1D line mesh (interval cells; see :func:`_build_fv_geom_1d`).
+    """
     tri = np.asarray(mesh.EToV, dtype=int)
+    if tri.shape[1] == 2:
+        return _build_fv_geom_1d(mesh, dtype=dtype)
+    V = np.stack([mesh.VX, mesh.VY], axis=1).astype(float)
     K = len(tri)
     p = V[tri]                                                # (K, 3, 2)
     e1, e2 = p[:, 1] - p[:, 0], p[:, 2] - p[:, 0]
@@ -163,6 +173,89 @@ def build_fv_geom(mesh, *, dtype: torch.dtype = torch.float64) -> FVGeom:
         eLF=t(kL * 3 + fL, long=True), eRF=t(kR * 3 + fR, long=True),
         en=t(fnrm[kL, fL]), elen=t(flen[kL, fL]),
         bcell=t(bk, long=True), bF=t(bk * 3 + bf, long=True), bmark=t(bmark, long=True),
+        bn=t(fnrm[bk, bf]), blen=t(flen[bk, bf]), marker_names=list(mesh.marker_names),
+        nbr=t(nbr, long=True), recon=t(recon),
+    )
+
+
+def _build_fv_geom_1d(mesh, *, dtype: torch.dtype = torch.float64) -> FVGeom:
+    """Build the FV geometry for a 1D line mesh: interval cells on a line.
+
+    Each cell is an interval with two endpoint "faces" (local face 0 = left
+    vertex, 1 = right vertex).  The cell measure is its length L (the FV update
+    divides by it, so ``area``:=L), the outward face normals are +/- x (unit), and
+    point faces have unit measure (``elen``/``blen``:=1, the 1D divergence
+    theorem).  The reconstruction reuses the same inverse-distance least-squares
+    gradient as 2D; on a line the centroid offsets are purely x, so ``pinv``
+    returns the x-gradient and a zero y-gradient (min-norm).  Adjacency is by
+    shared vertex: a vertex in two cells is an interior face, in one a boundary
+    face (the domain ends), whose marker is looked up as ``(v, v)``.  The material
+    is untouched -- velocities stay 2D; only ``v_x = v.n`` streams along the line.
+    """
+    V = np.stack([mesh.VX, mesh.VY], axis=1).astype(float)    # (Nv, 2), VY ~ 0
+    seg = np.asarray(mesh.EToV, dtype=int)                    # (K, 2): [v_left, v_right]
+    K = len(seg)
+    p = V[seg]                                                # (K, 2, 2): endpoints
+    centroid = p.mean(axis=1)                                 # (K, 2)
+    L = np.linalg.norm(p[:, 1] - p[:, 0], axis=1)             # (K,) cell length
+    if np.any(L <= 0.0):
+        raise ValueError("1D line mesh has a zero-length cell")
+    area = L                                                  # FV cell measure
+    inradius = L                                              # dt = cfl * L / vmax
+    fmid = p                                                  # face = the endpoint vertex
+    face_off = fmid - centroid[:, None]                       # (K, 2, 2) centroid->face
+    fnrm = face_off / np.linalg.norm(face_off, axis=2, keepdims=True)  # +/- x unit normal
+    flen = np.ones((K, 2))                                    # point face: unit measure
+
+    # Interior / boundary by shared-vertex dedup.
+    vmap: dict[int, list[tuple[int, int]]] = {}
+    for k in range(K):
+        for f in range(2):
+            vmap.setdefault(int(seg[k, f]), []).append((k, f))
+    interior, boundary = [], []
+    for v, hits in vmap.items():
+        if len(hits) == 2:
+            (kL, fL), (kR, fR) = hits
+            interior.append((kL, fL, kR, fR))
+        else:
+            (k, f), = hits
+            boundary.append((k, f, mesh.edge_marker.get((v, v), 0)))
+    interior = np.array(interior, int).reshape(-1, 4)
+    boundary = np.array(boundary, int).reshape(-1, 3)
+    kL, fL, kR, fR = (interior.T if len(interior) else (np.empty(0, int),) * 4)
+    bk, bf, bmark = (boundary.T if len(boundary) else (np.empty(0, int),) * 3)
+
+    # Inverse-distance least-squares gradient over shared-vertex neighbors.
+    v2c: dict[int, list[int]] = {}
+    for k in range(K):
+        for vtx in seg[k]:
+            v2c.setdefault(int(vtx), []).append(k)
+    vnbr = [sorted({c for vtx in seg[k] for c in v2c[int(vtx)]} - {k}) for k in range(K)]
+    Nmax = max((len(s) for s in vnbr), default=1)
+    nbr = np.arange(K)[:, None].repeat(Nmax, axis=1)
+    grad_op = np.zeros((K, 2, Nmax))
+    for i, js in enumerate(vnbr):
+        if not js:
+            continue
+        nbr[i, :len(js)] = js
+        D = centroid[js] - centroid[i]                        # (n, 2), y ~ 0
+        w = 1.0 / np.maximum((D ** 2).sum(1), 1e-300)
+        sw = np.sqrt(w)
+        grad_op[i, :, :len(js)] = np.linalg.pinv(sw[:, None] * D) * sw[None, :]
+    recon = np.einsum("kfx,kxg->kfg", face_off, grad_op)      # (K, 2, Nmax)
+
+    def t(a, long=False):
+        return torch.tensor(np.ascontiguousarray(a), device=rc.device,
+                            dtype=torch.long if long else dtype)
+
+    area_t = t(area)
+    return FVGeom(
+        area=area_t, inv_area=1.0 / area_t, inradius=t(inradius),
+        centroid_np=centroid, vertices_np=V, triangles_np=seg,
+        eL=t(kL, long=True), eR=t(kR, long=True),
+        eLF=t(kL * 2 + fL, long=True), eRF=t(kR * 2 + fR, long=True),
+        en=t(fnrm[kL, fL]), elen=t(flen[kL, fL]),
+        bcell=t(bk, long=True), bF=t(bk * 2 + bf, long=True), bmark=t(bmark, long=True),
         bn=t(fnrm[bk, bf]), blen=t(flen[bk, bf]), marker_names=list(mesh.marker_names),
         nbr=t(nbr, long=True), recon=t(recon),
     )
@@ -335,7 +428,6 @@ class TriSet(Geometry):
         cfl: float = 0.4,
         vk_eps2: float = 0.0,
         compile: bool = False,
-        dealias: bool = True,
         save_rho: bool = False,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
@@ -360,18 +452,6 @@ class TriSet(Geometry):
             :yaml:`torch.compile the limited reconstruction (fuses the per-step
             limiter kernels).` ~3x faster steps on GPU at the cost of a one-time
             compile; leave off for short runs and the test suite.
-        dealias
-            :yaml:`Project the per-cell state onto the represented angular modes
-            each step (the orthogonal projector from_modes(to_modes(.))).`
-            Active only when the material's angular quadrature oversamples its
-            modes -- FermiSurface uses an even N_theta > 2M+1 for mirror symmetry,
-            leaving a rank-(N_theta-2M-1) "ghost" subspace that the collision
-            operator cannot damp (it lies in ker(to_modes)) but the nonlinear
-            MUSCL limiter excites.  Keep on (default): it is *required* for
-            collisional runs, where collisions shrink the resolved modes while the
-            limiter keeps feeding the ghost.  Setting ``false`` is a few % faster
-            and is safe only for purely ballistic runs, where the specular
-            reflector already removes the ghost at every wall bounce.
         """
         TreeNode.__init__(self)
         self.material = material
@@ -396,6 +476,7 @@ class TriSet(Geometry):
         v = material.transport_velocity                       # (Nk, 2)
         self.Nk = v.shape[0]
         self.K = int(g.area.shape[0])
+        self._nf = int(g.recon.shape[1])                      # faces/cell: 3 (tri) or 2 (1D)
 
         # Spatial decomposition: owned cell block, reconstruction rows (owned +
         # 1-ring), owned-incident edges and the halo exchange (see SpatialDecomp).
@@ -448,8 +529,10 @@ class TriSet(Geometry):
         # The unrepresented ("ghost") subspace has tiny rank r = N_theta - (2M+1)
         # (1-3), so we remove it with a rank-r update  u -= (u @ A) @ B^T  rather
         # than a dense Nk*Nk matmul -- numerically identical, ~Nk/r times cheaper.
+        # Always on: the ghost lies in ker(to_modes) (collision cannot damp it) yet
+        # the nonlinear limiter excites it, so it must be projected out each step.
         self._dl_A = self._dl_B = None
-        if dealias and hasattr(material, "to_modes") and hasattr(material, "from_modes"):
+        if hasattr(material, "to_modes") and hasattr(material, "from_modes"):
             eye = torch.eye(self.Nk, device=rc.device, dtype=v.dtype)
             proj = material.from_modes(material.to_modes(eye))   # (Nk, Nk) projector
             ghost = eye - proj                                   # onto unrepresented DOFs
@@ -596,14 +679,14 @@ class TriSet(Geometry):
         return uc[:, None] + phi * d
 
     def _faces(self, u: torch.Tensor) -> torch.Tensor:
-        """Reconstructed face values, (K, 3, Nk). Serial reconstructs every cell;
-        under decomposition only the rows this rank needs (owned + 1-ring) are
-        filled, the rest left zero (their faces are never read)."""
+        """Reconstructed face values, (K, n_face, Nk). Serial reconstructs every
+        cell; under decomposition only the rows this rank needs (owned + 1-ring)
+        are filled, the rest left zero (their faces are never read)."""
         g = self.geom
         if self._R is None:
             return self._limited_faces(u, u[g.nbr], g.recon)
         R = self._R
-        uf = u.new_zeros(self.K, 3, self.Nk)
+        uf = u.new_zeros(self.K, self._nf, self.Nk)
         uf[R] = self._limited_faces(u[R], u[g.nbr[R]], g.recon[R])
         return uf
 
