@@ -1,3 +1,6 @@
+# Single-band charge transport on the finite-volume triangle mesh (FiniteVolume),
+# driven by source/drain contacts.  Generate the mesh first, from this folder:
+#     python ../make_rect_mesh.py --out ../rect-domain-tri.npz
 single_band:
   lattice:
     periodic: [True, True, False]
@@ -10,12 +13,9 @@ single_band:
   T: 50 K
   v: 0.375
 
-patch_set:
-  svg_file: ../rect-periodic.svg
-  svg_unit: 100.0 nm
-  grid_spacing: 200.0 nm
-  save-rho: yes
-
+finite_volume:
+  mesh_file: ../rect-domain-tri.npz
+  cfl: 1.0
   contacts:
     source:
       dmu: 0.005 eV

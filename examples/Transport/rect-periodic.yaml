@@ -1,13 +1,15 @@
+# Ab-initio material on the finite-volume triangle mesh (FiniteVolume), driven by
+# magnetized source/drain contacts.  Supply your own ab-initio data file (the
+# HDF5 written by qimpy.transport.material.ab_initio.read) and a triangle mesh
+# with matching 'source'/'drain' boundary markers.
 ab_initio:
-  fname: ldbd-CsPbBr3-dft.h5
+  file: ldbd-CsPbBr3-dft.h5
+  T: 300 K
   mu: 0.528824 eV
-  eph_scatt: no
 
-patch_set:
-  svg_file: rect-periodic.svg
-  svg_unit: 100.0 nm
-  grid_spacing: 100.0 nm
-
+finite_volume:
+  mesh_file: rect-domain-tri.npz
+  cfl: 1.0
   contacts:
     source:
       dmu: 0.1
