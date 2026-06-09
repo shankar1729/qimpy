@@ -33,7 +33,11 @@ class AngularBasis:
     """Real Fourier transforms with nodal (delta-k) storage.
 
     Mode ordering: ``(a_0, a_1, b_1, a_2, b_2, ..., a_M, b_M)`` for ``2M+1`` modes.
-    For ``n_quad = 2M+1`` the transforms are exact inverses.
+    Nodes are the *midpoint* grid ``theta_q = 2*pi*(q+1/2)/Nq``; the transforms
+    are exact inverses for any ``n_quad = Nq >= 2M+1``.  The midpoint grid is
+    invariant under both ``theta->-theta`` and (for even ``Nq``) ``theta->pi-theta``
+    -- the ``v_y->-v_y`` and ``v_x->-v_x`` wall reflections -- so callers that need
+    left-right contact symmetry pass an even ``Nq`` (see ``FermiSurface``).
     """
 
     def __init__(self, M: int, n_quad: int | None = None,
@@ -45,7 +49,12 @@ class AngularBasis:
         self.M = M
         self.dim = 2 * M + 1
         self.N_theta = Nq
-        theta = 2.0 * np.pi * np.arange(Nq) / Nq
+        # Midpoint (half-offset) nodes.  Unlike the endpoint grid 2*pi*q/Nq, this
+        # set is symmetric under theta->-theta and (even Nq) theta->pi-theta, i.e.
+        # the v_y->-v_y and v_x->-v_x reflections; the endpoint grid breaks
+        # v_x->-v_x for odd Nq, destroying left-right contact symmetry in the
+        # collisionless limit.  Discrete Fourier orthogonality holds for Nq>=2M+1.
+        theta = 2.0 * np.pi * (np.arange(Nq) + 0.5) / Nq
         # modes -> nodes:  T_from_modes[q, c] s.t. f(theta_q) = sum_c T_fm[q,c] a_c
         Tfm = np.zeros((Nq, self.dim))
         Tfm[:, 0] = 1.0
@@ -58,7 +67,7 @@ class AngularBasis:
         for m in range(1, M + 1):
             Ttm[2 * m - 1, :] = (2.0 / Nq) * np.cos(m * theta)
             Ttm[2 * m, :]     = (2.0 / Nq) * np.sin(m * theta)
-        # cyclotron generator G: block-skew per harmonic; (G a)_m = m * (b_m, -a_m)
+        # cyclotron generator G: block-skew per harmonic; (G a)_m = m*(b_m,-a_m)
         G = np.zeros((self.dim, self.dim))
         for m in range(1, M + 1):
             G[2 * m - 1, 2 * m] = -m
@@ -179,7 +188,13 @@ class FermiSurface(Material):
         self.tau_inv_p  = 1.0 / tau_p
         self.tau_inv_ee = 1.0 / tau_ee
         self.specularity = specularity
-        N_theta = 2 * M_theta + 1
+        # Even angular-node count (rounded up to a multiple of 4, >= 2M+1): with
+        # the midpoint quadrature this is symmetric under both v_x->-v_x and
+        # v_y->-v_y and places no node tangent to an axis-aligned wall (avoids a
+        # 0/0 in the specular reflector).  Keeps source/drain (left-right)
+        # symmetry exact even in the ballistic limit; an odd 2M+1 grid breaks it.
+        # The retained mode count (2M+1) is unchanged.
+        N_theta = -(-(2 * M_theta + 1) // 4) * 4
         N_k = Nr * N_theta
         self.initialize(wk=1.0, nk=N_k, n_bands=1, n_dim=2,
                         process_grid=process_grid)

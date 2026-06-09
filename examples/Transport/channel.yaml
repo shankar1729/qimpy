@@ -1,0 +1,12 @@
+# Channel device [0,1]x[0,1.25]: source on the left edge (x=0, y in [0,0.25]),
+# drain on the right edge (x=1, y in [0,0.25]); other boundaries reflective.
+# Generate the mesh first:  python make_channel_mesh.py --out channel.npz
+fermi_surface: {kF: 1.0, vF: 1.0, M_theta: 16, Nr: 1, tau_p: .inf, tau_ee: .inf, r_c: .inf, specularity: 1.0}
+tri_set:
+  mesh_file: channel.npz
+  cfl: 1.2
+  contacts:
+    source: {dmu: +0.1}
+    drain: {dmu: -0.1}
+time_evolution: {t_max: 100.0, dt_save: 25.0, n_collate: 4, integrator: RK2}
+checkpoint_out: channel_out/advect_{:04d}.h5

@@ -41,10 +41,22 @@ class Checkpoint(h5py.File):
             filename_open = filename  # Directly open the target filename,
             self.filename_move = ""  # and don't move at the end
         mode = "w" if writable else "r"  # don't allow r+, a etc. for safety
+        # Gather mode: multiple processes but an h5py without parallel-HDF5
+        # (mpio) support. Only the head holds the on-disk file; other ranks open
+        # a throwaway in-memory file and `write_slice` gathers their slices to
+        # the head. This lets multi-process runs checkpoint on a serial h5py
+        # build (collective metadata still works locally on every rank).
+        self.gather = (rc.n_procs > 1) and (not h5py.get_config().mpi)
         if rc.n_procs == 1:
             # Serial run: avoid the parallel-HDF5 (mpio) driver, which requires
             # an MPI-enabled h5py build. Plain h5py is sufficient on one process.
             super().__init__(filename_open, mode)
+        elif self.gather:
+            if rc.is_head:
+                super().__init__(filename_open, mode)
+            else:
+                super().__init__(filename_open, mode, driver="core",
+                                 backing_store=False)
         else:
             super().__init__(filename_open, mode, driver="mpio", comm=rc.comm)
         mode_name = "writing:" if writable else "reading"
@@ -70,10 +82,19 @@ class Checkpoint(h5py.File):
         written from current process.
         This may be called from any subset of MPI processes independently,
         as no metadata modification such as dataset creation is done here.
+        In gather mode (serial h5py + MPI) every rank's slice is collected on
+        the head, which performs the writes into the single on-disk file.
         """
         assert self.writable
         assert len(offset) == len(data.shape)
         assert len(offset) == len(dset.shape)
+        if self.gather:
+            payloads = rc.comm.gather((tuple(offset), data.to(rc.cpu).numpy()), root=0)
+            if rc.is_head:
+                for off, arr in payloads:
+                    dset[tuple(slice(off[i], off[i] + s) for i, s in
+                               enumerate(arr.shape))] = arr
+            return
         index = tuple(
             slice(offset[i], offset[i] + s_i) for i, s_i in enumerate(data.shape)
         )
