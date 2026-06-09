@@ -182,7 +182,7 @@ def test_reflector_mass_conservation(phi_deg: float, s: float) -> None:
     phi = np.deg2rad(phi_deg)
     n = torch.tensor([[np.cos(phi), np.sin(phi)]], dtype=torch.float64)
     refl = _FermiSurfaceReflector(fs, n, specularity=s)
-    rng = torch.Generator().manual_seed(0)
+    rng = torch.Generator(device=rc.device).manual_seed(0)
     u_in = torch.randn(1, 1, fs.angular.N_theta, dtype=torch.float64,
                        generator=rng)
     u_out = refl(u_in)
@@ -210,7 +210,7 @@ def test_reflector_tang_momentum_conservation(phi_deg: float, s: float) -> None:
     phi = np.deg2rad(phi_deg)
     n = torch.tensor([[np.cos(phi), np.sin(phi)]], dtype=torch.float64)
     refl = _FermiSurfaceReflector(fs, n, specularity=s)
-    rng = torch.Generator().manual_seed(0)
+    rng = torch.Generator(device=rc.device).manual_seed(0)
     u_in = torch.randn(1, 1, fs.angular.N_theta, dtype=torch.float64,
                        generator=rng)
     u_out = refl(u_in)
@@ -238,7 +238,7 @@ def test_reflector_energy_conservation(phi_deg: float, s: float) -> None:
     phi = np.deg2rad(phi_deg)
     n = torch.tensor([[np.cos(phi), np.sin(phi)]], dtype=torch.float64)
     refl = _FermiSurfaceReflector(fs, n, specularity=s)
-    rng = torch.Generator().manual_seed(0)
+    rng = torch.Generator(device=rc.device).manual_seed(0)
     u_in = torch.randn(1, 1, fs.angular.N_theta, dtype=torch.float64,
                        generator=rng)
     u_out = refl(u_in)
