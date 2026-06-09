@@ -5,7 +5,7 @@ from qimpy.rc import MPI
 from qimpy.io import CheckpointPath, Checkpoint, CheckpointContext
 from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
-from .geometry import Geometry, ParameterGrid, TriSet
+from .geometry import Geometry, TriSet
 from .material import Material, FermiSurface
 from .material.ab_initio import AbInitio
 from .material.single_band import SingleBand
@@ -24,7 +24,6 @@ class Transport(TreeNode):
         fermi_surface: Optional[Union[FermiSurface, dict]] = None,
         single_band: Optional[Union[SingleBand, dict]] = None,
         tri_set: Optional[Union[TriSet, dict]] = None,
-        parameter_grid: Optional[Union[ParameterGrid, dict]] = None,
         time_evolution: Optional[Union[TimeEvolution, dict]] = None,
         checkpoint: Optional[str] = None,
         checkpoint_out: Optional[str] = None,
@@ -106,13 +105,6 @@ class Transport(TreeNode):
                 "tri_set",
                 TriSet,
                 tri_set,
-                material=self.material,
-                process_grid=self.process_grid,
-            ),
-            TreeNode.ChildOptions(
-                "parameter_grid",
-                ParameterGrid,
-                parameter_grid,
                 material=self.material,
                 process_grid=self.process_grid,
             ),
