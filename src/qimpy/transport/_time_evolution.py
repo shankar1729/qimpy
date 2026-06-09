@@ -191,7 +191,7 @@ class TimeEvolution(TreeNode):
         rho_shape = geometry.rho[0].shape  # (n_cells, n_channels)
         if self.rho0_path:
             with h5py.File(self.rho0_path, "r") as cp:
-                rho_f = np.array(cp["/geometry"]["fv_rho"])
+                rho_f = np.array(cp["/geometry"]["rho"])
                 t_f = cp["/time_evolution"].attrs["t"]
             rho_f = torch.from_numpy(rho_f).to(rc.device, geometry.rho[0].dtype)
             material = transport.material
