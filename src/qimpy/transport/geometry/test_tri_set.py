@@ -133,6 +133,17 @@ def _make_disk_mesh(R, n_seg, max_area, path, center=(50.0, 30.0)):
 # --------------------------------------------------------------------------- #
 #  builders
 # --------------------------------------------------------------------------- #
+def _make_line_mesh(nx, path, Lx=1.0, ends=("source", "drain")):
+    """1D line mesh: nx interval cells on [0, Lx] (y=0); the two ends are tagged
+    ``ends`` (default source/drain)."""
+    x = np.linspace(0.0, Lx, nx + 1)
+    V = np.column_stack([x, np.zeros(nx + 1)])
+    cells = np.column_stack([np.arange(nx), np.arange(1, nx + 1)])
+    be = np.array([[0, 0], [nx, nx]], int)                # ends as degenerate (v,v)
+    save_mesh(path, V, cells, be, list(ends))
+    return path
+
+
 def _build_fv(contacts, *, mesh_path=None, gs=12.0, vF=1.5, M=8, **mat_kw):
     """FermiSurface(Nr=1) device on a triangle mesh, wrapped in a TriSet geometry."""
     tmp = tempfile.mkdtemp()
@@ -432,6 +443,29 @@ def _decomp_worker() -> None:
         else:
             u = full
         np.save(os.environ["FV_MPI_OUT"], u)
+
+
+def test_1d_line_mesh_ballistic_is_antisymmetric() -> None:
+    """A 1D wire (interval cells, 2 faces/cell) with source/drain dmu=+/-0.1 runs
+    stably through the TriSet 1D geometry path.  Its ballistic steady state is
+    antisymmetric, n(L-x) = -n(x), with a spatially uniform current: the +/-x
+    populations cancel in the density and carry the current straight through."""
+    torch.set_default_dtype(torch.float64)
+    tmp = tempfile.mkdtemp()
+    mesh = _make_line_mesh(40, os.path.join(tmp, "line.npz"))
+    geom, mat = _build_fv({"source": {"dmu": 0.1}, "drain": {"dmu": -0.1}},
+                          mesh_path=mesh)
+    assert geom._nf == 2                                   # interval cells -> 2 faces
+    _step(geom, _steps_for(geom, 20.0))
+    x = geom.geom.centroid_np[:, 0]
+    obs = torch.einsum("oc,kc->ko", mat.get_observables(0.0), geom._u)
+    n = obs[:, 0].cpu().numpy()
+    jx = obs[:, 1].cpu().numpy()
+    assert np.isfinite(n).all(), "1D solution diverged"
+    mirror = np.array([int(np.argmin(np.abs(x - (1.0 - xi)))) for xi in x])
+    assert np.linalg.norm(n + n[mirror]) / (np.linalg.norm(n) + 1e-30) < 1e-9
+    assert abs(jx.mean()) > 1e-3, "no ballistic current"
+    assert jx.std() / abs(jx.mean()) < 1e-2, "ballistic current not uniform"
 
 
 def test_decomp_matches_serial() -> None:
