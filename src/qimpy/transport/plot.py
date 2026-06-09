@@ -35,7 +35,7 @@ def run(
     dpi: int = 200,
     **ignored,
 ) -> None:
-    """Render finite-volume (TriSet) transport checkpoints.
+    """Render finite-volume (FiniteVolume) transport checkpoints.
 
     ``**ignored`` absorbs legacy keys from older input files for compatibility.
     """
@@ -48,16 +48,16 @@ def run(
         geom_type = cp["/geometry"].attrs.get("variant_name", b"")
         geom_type = (geom_type.decode() if isinstance(geom_type, bytes)
                      else str(geom_type))
-    if geom_type != "tri_set":
+    if geom_type != "finite_volume":
         raise ValueError(
-            "qimpy.transport.plot renders the finite-volume 'tri_set' geometry; "
+            "qimpy.transport.plot renders the finite-volume 'finite_volume' geometry; "
             f"checkpoint has variant_name={geom_type!r}."
         )
-    run_tri_set(file_list, mine, output, density, streamlines, dpi)
+    run_finite_volume(file_list, mine, output, density, streamlines, dpi)
 
 
-def run_tri_set(file_list, mine, output, density, streamlines, dpi) -> None:
-    """Frame-parallel, mesh-native rendering of TriSet (finite-volume) output.
+def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> None:
+    """Frame-parallel, mesh-native rendering of FiniteVolume (finite-volume) output.
 
     The finite-volume state is one average per triangle, so the density is drawn
     as a flat-shaded ``tripcolor`` (piecewise-constant, the honest FV picture)

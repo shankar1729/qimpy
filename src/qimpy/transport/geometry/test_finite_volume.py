@@ -1,4 +1,4 @@
-"""Tests for the cell-centered finite-volume solver (:class:`TriSet`).
+"""Tests for the cell-centered finite-volume solver (:class:`FiniteVolume`).
 
 Covers the geometry operators (least-squares gradient, periodic edge pairing),
 conservation (closed-domain mass, conservative contact-current readout) and the
@@ -17,7 +17,7 @@ from qimpy import rc
 from qimpy.mpi import ProcessGrid
 from ..material import FermiSurface
 from ._mesh import load_mesh, save_mesh
-from ._tri_set import TriSet, build_fv_geom
+from ._finite_volume import FiniteVolume, build_fv_geom
 
 
 # --------------------------------------------------------------------------- #
@@ -145,7 +145,7 @@ def _make_line_mesh(nx, path, Lx=1.0, ends=("source", "drain")):
 
 
 def _build_fv(contacts, *, mesh_path=None, gs=12.0, vF=1.5, M=8, **mat_kw):
-    """FermiSurface(Nr=1) device on a triangle mesh, wrapped in a TriSet geometry."""
+    """FermiSurface(Nr=1) device on a triangle mesh, wrapped in a FiniteVolume geometry."""
     tmp = tempfile.mkdtemp()
     path = mesh_path or _make_rect_mesh(gs, os.path.join(tmp, "rect.npz"))
     pg = ProcessGrid(rc.comm, "rk", (1, 1))
@@ -153,7 +153,7 @@ def _build_fv(contacts, *, mesh_path=None, gs=12.0, vF=1.5, M=8, **mat_kw):
               tau_p=np.inf, tau_ee=np.inf, r_c=np.inf, specularity=1.0)
     kw.update(mat_kw)
     material = FermiSurface(process_grid=pg, **kw)
-    geom = TriSet(material=material, mesh_file=path, contacts=contacts,
+    geom = FiniteVolume(material=material, mesh_file=path, contacts=contacts,
                  process_grid=pg)
     return geom, material
 
@@ -423,7 +423,7 @@ def _decomp_worker() -> None:
     mat = FermiSurface(kF=1.0, vF=1.5, M_theta=8, Nr=1, T=1.0,
                        tau_p=15.0, tau_ee=8.0, r_c=np.inf, specularity=1.0,
                        process_grid=pg)
-    geom = TriSet(material=mat, mesh_file=os.environ["FV_MPI_MESH"],
+    geom = FiniteVolume(material=mat, mesh_file=os.environ["FV_MPI_MESH"],
                   contacts={"source": {"dmu": 0.1}, "drain": {"floating": True}},
                   process_grid=pg)
     cen = torch.from_numpy(geom.geom.centroid_np).to(rc.device)
@@ -447,7 +447,7 @@ def _decomp_worker() -> None:
 
 def test_1d_line_mesh_ballistic_is_antisymmetric() -> None:
     """A 1D wire (interval cells, 2 faces/cell) with source/drain dmu=+/-0.1 runs
-    stably through the TriSet 1D geometry path.  Its ballistic steady state is
+    stably through the FiniteVolume 1D geometry path.  Its ballistic steady state is
     antisymmetric, n(L-x) = -n(x), with a spatially uniform current: the +/-x
     populations cancel in the density and carry the current straight through."""
     torch.set_default_dtype(torch.float64)
@@ -477,7 +477,7 @@ def test_decomp_matches_serial() -> None:
     import sys
     tmp = tempfile.mkdtemp()
     mesh = _make_rect_mesh(12.0, os.path.join(tmp, "rect.npz"))
-    mod = "qimpy.transport.geometry.test_tri_set"
+    mod = "qimpy.transport.geometry.test_finite_volume"
     f1, f2 = os.path.join(tmp, "u1.npy"), os.path.join(tmp, "u2.npy")
     env = dict(os.environ, FV_MPI_MESH=mesh)
     subprocess.run([sys.executable, "-m", mod], check=True, env=dict(env, FV_MPI_OUT=f1))

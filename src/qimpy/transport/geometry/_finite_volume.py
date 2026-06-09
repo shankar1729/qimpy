@@ -416,7 +416,7 @@ class _Contact:
     level: float = 0.0                         # feedback: last solved level
 
 
-class TriSet(Geometry):
+class FiniteVolume(Geometry):
     """Cell-centered finite-volume geometry on an external triangle mesh."""
 
     def __init__(

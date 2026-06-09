@@ -2,7 +2,7 @@
 
 qimpy does not mesh; this is the external tooling step. Produces a rect-domain
 [5,105]x[5,55] mesh with source/drain contact faces, written in the format
-qimpy.transport.geometry.TriSet consumes (see _mesh.load_mesh).
+qimpy.transport.geometry.FiniteVolume consumes (see _mesh.load_mesh).
 
 The triangulation is a structured criss-cross grid -- each rectangle split into
 four triangles about its centre node -- which is PERFECTLY SYMMETRIC about both

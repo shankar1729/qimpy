@@ -1,5 +1,5 @@
 # rect-domain driven by source/drain contacts, solved with the finite-volume
-# triangle-mesh transport (tri_set). The mesh is supplied externally (qimpy does
+# triangle-mesh transport (finite_volume). The mesh is supplied externally (qimpy does
 # not mesh); generate it first with:
 #     python make_rect_mesh.py --out rect-domain-tri.npz
 fermi_surface:
@@ -11,7 +11,7 @@ fermi_surface:
   tau_ee: .inf
   r_c: 10.0
 
-tri_set:
+finite_volume:
   mesh_file: rect-domain-tri.npz
   contacts:
     source:

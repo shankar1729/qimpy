@@ -5,7 +5,7 @@ from qimpy.rc import MPI
 from qimpy.io import CheckpointPath, Checkpoint, CheckpointContext
 from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
-from .geometry import Geometry, TriSet
+from .geometry import Geometry, FiniteVolume
 from .material import Material, FermiSurface
 from .material.ab_initio import AbInitio
 from .material.single_band import SingleBand
@@ -23,7 +23,7 @@ class Transport(TreeNode):
         ab_initio: Optional[Union[AbInitio, dict]] = None,
         fermi_surface: Optional[Union[FermiSurface, dict]] = None,
         single_band: Optional[Union[SingleBand, dict]] = None,
-        tri_set: Optional[Union[TriSet, dict]] = None,
+        finite_volume: Optional[Union[FiniteVolume, dict]] = None,
         time_evolution: Optional[Union[TimeEvolution, dict]] = None,
         checkpoint: Optional[str] = None,
         checkpoint_out: Optional[str] = None,
@@ -46,11 +46,9 @@ class Transport(TreeNode):
         single_band
             :yaml:`Single-band model material for energy-resolved charge transport.`
             Exactly one supported material type must be specified.
-        tri_set
-            :yaml:`Finite-volume transport on an external unstructured triangle mesh.`
-            Exactly one supported geometry type must be specified.
-        parameter_grid
-            :yaml:`Virtual geometry of disconnected points for batched dynamics.`
+        finite_volume
+            :yaml:`Cell-centered finite-volume transport on an external mesh
+            (triangles in 2D, line segments in 1D).`
             Exactly one supported geometry type must be specified.
         time_evolution
             :yaml:`Time integration options.`
@@ -102,9 +100,9 @@ class Transport(TreeNode):
             "geometry",
             checkpoint_in,
             TreeNode.ChildOptions(
-                "tri_set",
-                TriSet,
-                tri_set,
+                "finite_volume",
+                FiniteVolume,
+                finite_volume,
                 material=self.material,
                 process_grid=self.process_grid,
             ),

@@ -6,7 +6,7 @@ graded fine at the central junction and coarse out in the arms, and tags the
 physical faces:
     source = bottom arm end (y = -R)      drain = left arm end (x = -R)
     wall   = everything else (incl. the top/right reflective probe arms)
-Written in the format qimpy.transport.geometry.TriSet consumes (_dg_mesh).
+Written in the format qimpy.transport.geometry.FiniteVolume consumes (_dg_mesh).
 
     python make_mixer_mesh.py                 # -> mixer-tri.npz
     python make_mixer_mesh.py --h0 0.6        # coarser junction
