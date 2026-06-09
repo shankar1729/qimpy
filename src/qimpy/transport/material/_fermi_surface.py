@@ -356,6 +356,7 @@ class _FermiSurfaceContactor:
         dmu: float = 0.0, vD: float = 0.0,
     ) -> None:
         # Build the modal contact distribution in (Nr_modes, dim_theta).
+        n = n.to(rc.device)  # accept normals supplied on any device
         Nsel = n.shape[0]
         dim_theta = fs.angular.dim
         contact_modal = torch.zeros(
@@ -401,6 +402,7 @@ class _FermiSurfaceReflector:
     def __init__(
         self, fs: "FermiSurface", n: torch.Tensor, specularity: float,
     ) -> None:
+        n = n.to(rc.device)  # accept normals supplied on any device
         self.fs = fs
         self.s = float(specularity)
         self.M_theta = fs.M_theta
