@@ -1,9 +1,9 @@
 __all__ = (
     "TensorList",
     "Geometry",
-    "TriSet",
+    "FiniteVolume",
 )
 
 from ._tensor_list import TensorList
 from ._geometry import Geometry
-from ._tri_set import TriSet
+from ._finite_volume import FiniteVolume

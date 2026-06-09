@@ -2,8 +2,8 @@
 
 qimpy does NOT generate meshes. The triangle mesh is produced by external
 tooling (e.g. Shewchuk's `triangle`, gmsh, or a hand-written generator) and
-supplied to ``TriSet`` as a file. This module defines the in-memory container
-that ``TriSet`` consumes (``MeshResult``) and the loader/saver for the external
+supplied to ``FiniteVolume`` as a file. This module defines the in-memory container
+that ``FiniteVolume`` consumes (``MeshResult``) and the loader/saver for the external
 mesh format.
 
 External mesh format (NumPy ``.npz``)
@@ -28,7 +28,7 @@ import numpy as np
 
 @dataclass
 class MeshResult:
-    """The mesh as :class:`TriSet` consumes it (output of :func:`load_mesh`)."""
+    """The mesh as :class:`FiniteVolume` consumes it (output of :func:`load_mesh`)."""
     VX: np.ndarray
     VY: np.ndarray
     EToV: np.ndarray

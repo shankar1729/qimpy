@@ -2,7 +2,7 @@
 # drain on the right edge (x=1, y in [0,0.25]); other boundaries reflective.
 # Generate the mesh first:  python make_channel_mesh.py --out channel.npz
 fermi_surface: {kF: 1.0, vF: 1.0, M_theta: 16, Nr: 1, tau_p: .inf, tau_ee: .inf, r_c: .inf, specularity: 1.0}
-tri_set:
+finite_volume:
   mesh_file: channel.npz
   cfl: 1.2
   contacts:

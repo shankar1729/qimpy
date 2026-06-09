@@ -1,8 +1,8 @@
-"""Generate a 1D line-domain mesh for qimpy.transport (TriSet).
+"""Generate a 1D line-domain mesh for qimpy.transport (FiniteVolume).
 
 Domain [0, Lx] split into nx interval cells on a line (y = 0): a 1D wire with a
 source contact at the left end (x=0) and a drain at the right end (x=Lx).  Cells
-are intervals; TriSet's 1D path treats each with two endpoint faces (length is
+are intervals; FiniteVolume's 1D path treats each with two endpoint faces (length is
 the cell measure, +/- x the face normals).  The material is unchanged -- the
 Fermi surface stays 2D, and only v_x = v.n streams along the line.
 

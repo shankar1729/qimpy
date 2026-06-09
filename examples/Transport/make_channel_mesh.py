@@ -1,4 +1,4 @@
-"""Generate a channel-domain triangle mesh for qimpy.transport (TriSet).
+"""Generate a channel-domain triangle mesh for qimpy.transport (FiniteVolume).
 
 Domain [0, Lx] x [0, Ly] with a source contact on the left edge (x=0) and a
 drain on the right edge (x=Lx), each spanning y in [0, contact_y]; all other

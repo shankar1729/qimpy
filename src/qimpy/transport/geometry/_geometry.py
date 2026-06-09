@@ -15,7 +15,7 @@ class Geometry(TreeNode):
     derivative ``rho_dot`` (spatial advection + the material's local dynamics),
     the maximum stable time step ``dt_max``, and ``update_stash`` to accumulate
     per-step observables for checkpointing.  The concrete implementation is
-    :class:`TriSet` (cell-centered finite volume on triangle / line meshes).
+    :class:`FiniteVolume` (cell-centered finite volume on triangle / line meshes).
     """
 
     comm: MPI.Comm  #: Communicator for the real-space (cell) split
