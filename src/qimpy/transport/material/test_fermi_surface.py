@@ -330,3 +330,31 @@ def test_reflector_tang_momentum_radial(phi_deg: float, s: float) -> None:
     F_in = (w_r[:, None] * (vdn.clamp(max=0) * vtg)[None, :] * uo).sum()
     expected = (1.0 - s) * F_out
     assert float((F_out + F_in - expected).abs()) / max(float(F_out.abs()), 1e-30) < 1e-11
+
+
+@pytest.mark.xfail(
+    reason="The current relaxation-time collision damps the n>=1 radial (energy) "
+    "modes at 1/tau_ee, so e-e scattering does not conserve energy. A "
+    "momentum-conserving e-e operator (the microscopic-L matrix) must conserve "
+    "energy too; remove this xfail once that operator replaces the placeholder.",
+    strict=False,
+)
+@pytest.mark.parametrize("Nr", [2, 4])
+def test_collision_conserves_energy_radial(Nr: int) -> None:
+    """Electron-electron scattering conserves energy: it only relaxes the
+    distribution shape toward local equilibrium, not its energy content.  The
+    energy moment is E ~ sum_r w_r * xi_r over the isotropic (m=0) part (energy is
+    orthogonal to the n=0 mass mode since <xi>_w = 0).  Under pure e-e (no
+    impurities tau_p=inf, no field r_c=inf), d/dt <E> must vanish."""
+    torch.set_default_dtype(torch.float64)
+    fs = _make(M_theta=8, Nr=Nr, tau_p=np.inf, tau_ee=2.0, r_c=np.inf)
+    Nth = fs.angular.N_theta
+    w_r, xi = fs.radial.quad_w, fs.radial.xi
+    E_obs = (w_r[:, None] * xi[:, None]
+             * torch.ones(Nr, Nth, dtype=torch.float64) / Nth).reshape(-1)
+    rng = torch.Generator(device=rc.device).manual_seed(3)
+    rho = torch.randn(9, fs.v.shape[0], dtype=torch.float64, generator=rng)
+    rdot = fs.rho_dot(rho, 0.0, 0)
+    e_rate = (E_obs[None, :] * rdot).sum(-1)
+    e_val = (E_obs[None, :] * rho).sum(-1)
+    assert float((e_rate / e_val.abs().clamp(min=1e-30)).abs().max()) < 1e-11
