@@ -27,15 +27,23 @@ class EECollisions(TreeNode):
     by construction (null-space projection) and the operator is
     symmetric positive-semidefinite (eigenvalue clipping).
 
-    Nonlinear part (optional): the cubic pure-momentum-exchange vertex
-    acting on the ``n = 0`` radial (surface) modes, evaluated in the
-    manifestly-finite combination
-    ``Phi_dot = A/(4T)^2 [ (g+h) K*(gh) - gh K*(g+h) ]``,
-    ``h(phi) = g(phi+pi)``, where ``K*`` is the angular convolution with
-    eigenvalues ``K_m`` (even ``m`` only) -- equivalent to the mode-sum
-    vertex ``-2A (-1)^t (K_s - K_{s+t})`` of the derivation notes but
-    free of its individually-divergent odd-``m`` coefficients.  Evaluated
-    on a dealiased angular grid (exact through the cubic order).
+    Nonlinear part (optional): the exact finite-temperature reduction of
+    ``(B - F)`` beyond linear order, precomputed at initialization from the
+    same thermal-shell kinematics as the linear blocks (no free parameter --
+    every coefficient comes from the kinematic integral):
+
+    * cubic (``f0``-independent) vertex
+      ``C3 = d1 d2 (d3+d4) - d3 d4 (d1+d2)`` on the ``l = 0`` surface
+      angular modes (the physical surface-deformation self-interaction),
+      projected onto all radial output modes; odd output harmonics are
+      gated to zero (parity selection -- odd harmonics do not relax);
+    * quadratic particle-hole-odd (thermoelectric) vertex ``Q2``, which
+      vanishes on the Fermi surface (``O(T/E_F)``) and couples opposite
+      energy parities -- full radial on both inputs and outputs.
+
+    Both are projected onto the conservation null space (number, momentum,
+    energy) so that the nonlinear terms conserve exactly, like the linear
+    matrix.
     """
 
     fermi_surface: FermiSurface
@@ -44,7 +52,7 @@ class EECollisions(TreeNode):
     m_star: float  #: effective mass
     E_F: float  #: Fermi energy
     well_width: float  #: quantum-well width for form factor (0 = ideal 2D)
-    nonlinear: bool  #: include cubic momentum-exchange vertex
+    nonlinear: bool  #: include the exact cubic and quadratic e-e vertices
     rates: str  #: "exact" or "closed_form"
     K: torch.Tensor  #: angular kernels K_m, m = 0 .. 2 M_theta
     L_coeff: torch.Tensor  #: (dim_theta, Nr, Nr) linear decay blocks
@@ -58,7 +66,6 @@ class EECollisions(TreeNode):
         m_star: float = 0.0,
         well_width: float = 0.0,
         nonlinear: bool = True,
-        cubic_scale: float = 1.0,
         rates: str = "exact",
         n_alpha: int = 4096,
         n_xi: int = 32,
@@ -83,13 +90,10 @@ class EECollisions(TreeNode):
             :yaml:`Quantum-well width (a.u.) for the finite-thickness form factor.`
             0 (default) is the ideal zero-thickness 2DEG of the notes.
         nonlinear
-            :yaml:`Include the cubic momentum-exchange vertex.`
-        cubic_scale
-            :yaml:`Overall scale applied to the cubic vertex.`
-            The vertex is the Fermi-surface-confined (T = 0 kinematics)
-            limit; against the exact nonlinear operator at T/E_F = 0.032
-            the thermal-shell dressing is ~0.75 (m=2 self-interaction)
-            to ~0.61 (2+2+2 -> 6 pumping).  Default 1 (undressed).
+            :yaml:`Include the exact cubic and quadratic e-e vertices.`
+            Both are computed from the thermal-shell kinematics at
+            initialization (the finite-T dressing is computed, not scaled);
+            there is no free parameter.
         rates
             :yaml:`Linear rates: "exact" (init-time quadrature) or "closed_form".`
             "closed_form" is leading order in T/E_F (pointwise at the
@@ -113,7 +117,6 @@ class EECollisions(TreeNode):
         self.E_F = 0.5 * fs.kF**2 / self.m_star
         self.well_width = well_width
         self.nonlinear = nonlinear
-        self.cubic_scale = cubic_scale
         self.rates = rates
         self.n_alpha = n_alpha
         self.n_xi, self.xi_cut, self.n_phi = n_xi, xi_cut, n_phi
@@ -180,42 +183,43 @@ class EECollisions(TreeNode):
                 )
             )
 
-        # ---- Cubic vertex setup (dealiased fine angular grid) ----
+        # ---- Nonlinear vertices (exact cubic + quadratic) ----
         if nonlinear:
-            from qimpy.transport.material._fermi_surface import AngularBasis
-
-            N2 = -(-(4 * M + 1) // 4) * 4  # multiple of 4, >= 4M+1
-            fine = AngularBasis(2 * M, n_quad=N2, dtype=torch.float64)
-            kvec2 = torch.zeros(fine.dim, dtype=torch.float64)
-            for m in range(1, 2 * M + 1):
-                kvec2[2 * m - 1] = kvec2[2 * m] = self.K[m]
-            Kop = fine.T_from_modes @ (kvec2[:, None] * fine.T_to_modes)
-            self._T_up = fine.T_from_modes[:, :dim].to(dtype=dtype, device=device)
-            self._T_down = fine.T_to_modes[:dim, :].to(dtype=dtype, device=device)
-            self._Kop = Kop.to(dtype=dtype, device=device)
-            self._N2 = N2
-            self._cubic_prefac = cubic_scale * _kernels.cubic_prefactor(
-                m_star=self.m_star, E_F=self.E_F
-            )
+            V_cubic, V_quad = self._nonlinear_vertices(T)
+            self._V_cubic = V_cubic.to(dtype=dtype, device=device)
+            self._V_quad = V_quad.to(dtype=dtype, device=device)
             log.info(
-                f"Cubic vertex enabled: prefactor = {self._cubic_prefac:.4g},"
-                f" dealiased angular grid N = {N2}"
+                "Nonlinear e-e vertices enabled (exact cubic + quadratic):"
+                f" cubic {tuple(self._V_cubic.shape)},"
+                f" quadratic {tuple(self._V_quad.shape)}"
             )
 
-    def _exact_L_blocks(self, T: float) -> torch.Tensor:
-        """Exact-kinematics linear blocks, Galerkin in the code's radial basis."""
-        fs = self.fermi_surface
-        M, Nr = fs.M_theta, fs.Nr
-        t_ratio = T / self.E_F
+    def _radial_galerkin(self, T: float):
+        """Shared radial Galerkin machinery for the exact-kinematics path.
 
-        # Radial basis as polynomials in x = xi/T (exact: it is polynomial):
+        Returns ``(psi_coeff, x_fine, P, Ginv, psi0_norm)`` where
+        ``psi_coeff[p, l]`` are the power-basis coefficients of the radial
+        basis ``psi_l(x) = sum_p psi_coeff[p, l] x^p`` (``x = xi/T``),
+        ``x_fine`` the fine Galerkin nodes, ``P[l, f]`` the projection
+        covector ``<psi_l | . >_w`` in the fine measure, ``Ginv`` the inverse
+        Gram (``~ identity``), and ``psi0_norm`` the constant value of the
+        ``l = 0`` radial basis function (the surface mode).
+        """
+        fs = self.fermi_surface
+        Nr = fs.Nr
+        t_ratio = T / self.E_F
         xi_c = fs.radial.xi.to(torch.float64).cpu()  # collocation nodes
         Tfm = fs.radial.T_from_modes.to(torch.float64).cpu()  # psi_l(xi_c)
         V = torch.vander(xi_c, Nr, increasing=True)  # (Nr, Nr)
-        psi_coeff = torch.linalg.solve(V, Tfm) if Nr > 1 else torch.ones(1, 1, dtype=torch.float64)
+        psi_coeff = (
+            torch.linalg.solve(V, Tfm)
+            if Nr > 1
+            else torch.ones(1, 1, dtype=torch.float64)
+        )
+        psi0_norm = float(Tfm[0, 0])  # constant l=0 basis value
 
-        # Fine radial quadrature for the Galerkin projection.  Keep all
-        # nodes above the band bottom (xi/T > -1/t for parabolic bands):
+        # Fine radial quadrature for the Galerkin projection.  Keep all nodes
+        # above the band bottom (xi/T > -1/t for parabolic bands):
         xg, xw = np.polynomial.legendre.leggauss(self.n_xi_proj)
         x_span = max(8.0, float(xi_c.abs().max()) + 2.0) if Nr > 1 else 8.0
         x_span = min(x_span, 0.9 / t_ratio)
@@ -229,7 +233,6 @@ class EECollisions(TreeNode):
         w_fine = torch.tensor(x_span * xw, dtype=torch.float64)
         w_eq = 0.25 / torch.cosh(x_fine / 2) ** 2 / T  # (1/4T) sech^2(x/2)
 
-        # psi values on the fine grid:
         def psi_eval(x):
             res = torch.zeros(x.shape + (Nr,), dtype=torch.float64)
             for p in range(psi_coeff.shape[0] - 1, -1, -1):
@@ -239,6 +242,30 @@ class EECollisions(TreeNode):
         Psi = psi_eval(x_fine)  # (n_fine, Nr)
         P = Psi.T * (w_fine * w_eq)  # (Nr, n_fine): <psi_l| . >_w
         G = P @ Psi  # Gram in the fine measure (~ identity)
+        return psi_coeff, x_fine, P, torch.linalg.inv(G), psi0_norm
+
+    def _null_covectors(self, T: float) -> "dict[int, list[torch.Tensor]]":
+        """Conservation null covectors per angular harmonic, in the code's
+        discrete radial measure (number/energy at m=0, momentum at m=1)."""
+        fs = self.fermi_surface
+        Nr = fs.Nr
+        t_ratio = T / self.E_F
+        xi_c = fs.radial.xi.to(torch.float64).cpu()
+        Ttm_r = fs.radial.T_to_modes.to(torch.float64).cpu()
+        nulls: dict[int, list[torch.Tensor]] = {0: [], 1: []}
+        nulls[0].append(Ttm_r @ torch.ones(Nr, dtype=torch.float64))  # number
+        if Nr > 1:
+            nulls[0].append(Ttm_r @ xi_c)  # energy
+        nulls[1].append(Ttm_r @ torch.sqrt(1.0 + t_ratio * xi_c))  # momentum
+        return nulls
+
+    def _exact_L_blocks(self, T: float) -> torch.Tensor:
+        """Exact-kinematics linear blocks, Galerkin in the code's radial basis."""
+        fs = self.fermi_surface
+        M, Nr = fs.M_theta, fs.Nr
+        t_ratio = T / self.E_F
+        xi_c = fs.radial.xi.to(torch.float64).cpu()
+        psi_coeff, x_fine, P, Ginv, _ = self._radial_galerkin(T)
 
         log.info(
             f"Computing exact e-e rates: m = 0..{M}, quadrature"
@@ -259,20 +286,11 @@ class EECollisions(TreeNode):
             n_phi=self.n_phi,
         )  # (M+1, n_fine, Nr): minus Phi_dot at fine nodes
 
-        Ginv = torch.linalg.inv(G)
         L_m = torch.einsum("ij,jf,mfl->mil", Ginv, P, R)  # (M+1, Nr, Nr)
 
         # Exact conservation: null-space projection per harmonic, in the
         # code's discrete radial measure; then symmetrize and clip to PSD.
-        quad_w = fs.radial.quad_w.to(torch.float64).cpu()
-        Ttm_r = fs.radial.T_to_modes.to(torch.float64).cpu()
-        nulls: dict[int, list[torch.Tensor]] = {0: [], 1: []}
-        ones_c = Ttm_r @ torch.ones(Nr, dtype=torch.float64)
-        nulls[0].append(ones_c)  # particle number
-        if Nr > 1:
-            nulls[0].append(Ttm_r @ xi_c)  # energy
-        k_c = Ttm_r @ torch.sqrt(1.0 + t_ratio * xi_c)  # momentum ~ k(xi)
-        nulls[1].append(k_c)
+        nulls = self._null_covectors(T)
         for m in range(M + 1):
             Lm = 0.5 * (L_m[m] + L_m[m].T)
             if m in nulls:
@@ -293,6 +311,82 @@ class EECollisions(TreeNode):
             L[2 * m] = L_m[m]
         return L
 
+    def _radial_null_projectors(self, T: float) -> torch.Tensor:
+        """Per-angular-mode radial null projectors ``Proj[co]`` (shape
+        ``(dim_theta, Nr, Nr)``) that annihilate the conservation nulls on the
+        output radial axis: number/energy at ``m = 0`` (``co = 0``), momentum
+        at ``m = 1`` (``co = 1, 2``); identity for all other output modes."""
+        fs = self.fermi_surface
+        M, Nr = fs.M_theta, fs.Nr
+        dim = fs.angular.dim
+        nulls = self._null_covectors(T)
+        eye = torch.eye(Nr, dtype=torch.float64)
+        proj_by_harm: dict[int, torch.Tensor] = {}
+        for m, vecs in nulls.items():
+            if vecs:
+                Vn = torch.stack(vecs, dim=1)  # (Nr, n_null)
+                Q, _ = torch.linalg.qr(Vn)
+                proj_by_harm[m] = eye - Q @ Q.T
+        Proj = torch.zeros(dim, Nr, Nr, dtype=torch.float64)
+        Proj[0] = proj_by_harm.get(0, eye)  # m = 0 output mode
+        for m in range(1, M + 1):
+            Pm = proj_by_harm.get(m, eye)
+            Proj[2 * m - 1] = Pm
+            Proj[2 * m] = Pm
+        return Proj
+
+    def _nonlinear_vertices(self, T: float):
+        """Exact cubic and quadratic vertices, Galerkin-projected onto the
+        radial modes and null-projected for exact conservation.
+
+        Returns ``(V_cubic, V_quad)``:
+
+        * ``V_cubic[lo, co, a, b, c]`` (shape ``(Nr, dim, dim, dim, dim)``):
+          contract with the ``l = 0`` surface coefficients three times to get
+          ``a_dot[lo, co]`` (the cubic surface self-interaction);
+        * ``V_quad[lo, co, la, a, lb, b]`` (shape
+          ``(Nr, dim, Nr, dim, Nr, dim)``): contract with the full modal
+          coefficients twice to get the thermoelectric quadratic
+          ``a_dot[lo, co]``.
+        """
+        fs = self.fermi_surface
+        M, Nr = fs.M_theta, fs.Nr
+        dim = fs.angular.dim
+        psi_coeff, x_fine, P, Ginv, psi0_norm = self._radial_galerkin(T)
+        kin = dict(
+            kF=fs.kF,
+            m_star=self.m_star,
+            T=T,
+            epsilon_bg=self.epsilon_bg,
+            kappa=self.kappa,
+            well_width=self.well_width,
+            n_xi=self.n_xi,
+            xi_cut=self.xi_cut,
+            n_phi=self.n_phi,
+        )
+        log.info(
+            f"Computing exact nonlinear e-e vertices (M = {M}, Nr = {Nr}),"
+            f" quadrature {self.n_xi}^2 x {self.n_phi} x {self.n_xi_proj}"
+        )
+        # Cubic: V_node[f, co, a, b, c] -> Galerkin project node f onto lo.
+        Vc_node = _kernels.cubic_vertex(
+            x_nodes=x_fine, psi0_norm=psi0_norm, M=M, **kin
+        )
+        GP = Ginv @ P  # (Nr, n_fine): radial Galerkin projector
+        V_cubic = torch.einsum("lf,fcabd->lcabd", GP, Vc_node)
+        # Quadratic: V_node[f, co, la, a, lb, b] -> project node f onto lo.
+        Vq_node = _kernels.quadratic_vertex(
+            x_nodes=x_fine, psi_coeff=psi_coeff, M=M, **kin
+        )
+        V_quad = torch.einsum("lf,fcxayb->lcxayb", GP, Vq_node)
+
+        # Exact conservation: project the OUTPUT (lo, co) onto the null
+        # complement.  Number/energy gate the m=0 output; momentum gates m=1.
+        Proj = self._radial_null_projectors(T)  # (dim, Nr, Nr)
+        V_cubic = torch.einsum("cLl,lcabd->Lcabd", Proj, V_cubic)
+        V_quad = torch.einsum("cLl,lcxayb->Lcxayb", Proj, V_quad)
+        return V_cubic, V_quad
+
     def a_dot(self, a: torch.Tensor) -> torch.Tensor:
         """Collision contribution to modal coefficients' time derivative.
 
@@ -306,16 +400,16 @@ class EECollisions(TreeNode):
         # Linear: block-diagonal in harmonic, matrix over radial modes:
         out = -torch.einsum("cij,...jc->...ic", self.L_coeff, a4)
         if self.nonlinear:
-            a0 = a4[..., 0, :]  # surface (n = 0) modes
-            g = a0 @ self._T_up.T  # (..., N2) nodal on fine grid
-            h = g.roll(self._N2 // 2, dims=-1)  # phi -> phi + pi (exact)
-            s = g + h
-            p = g * h
-            Ks = s @ self._Kop.T
-            Kp = p @ self._Kop.T
-            cubic = (s * Kp - p * Ks) @ self._T_down.T  # (..., dim)
-            out = out.clone()
-            out[..., 0, :] += self._cubic_prefac * cubic
+            # Cubic surface self-interaction (l = 0 inputs, all radial outputs):
+            a0 = a4[..., 0, :]  # surface (n = 0) angular modes
+            cubic = torch.einsum(
+                "lcabd,...a,...b,...d->...lc", self._V_cubic, a0, a0, a0
+            )
+            # Quadratic thermoelectric (full modal inputs and outputs):
+            quad = torch.einsum(
+                "lcxayb,...xa,...yb->...lc", self._V_quad, a4, a4
+            )
+            out = out + cubic + quad
         return out.reshape(shape_in)
 
     def _save_checkpoint(
@@ -327,7 +421,6 @@ class EECollisions(TreeNode):
         attrs["m_star"] = self.m_star
         attrs["well_width"] = self.well_width
         attrs["nonlinear"] = self.nonlinear
-        attrs["cubic_scale"] = self.cubic_scale
         attrs["rates"] = self.rates
         attrs["n_alpha"] = self.n_alpha
         attrs["n_xi"] = self.n_xi

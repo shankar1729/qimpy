@@ -137,3 +137,4 @@ dmypy.json
 # vim swap files
 *.sw*
 animation/
+_scratch_ee/
