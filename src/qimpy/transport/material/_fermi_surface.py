@@ -15,7 +15,7 @@ Per-operator basis is chosen for each operator's natural form:
     - observables {n, jx, jy}   : delta-k weighted sums
 """
 from __future__ import annotations
-from typing import Callable
+from typing import Callable, Optional, Union
 import numpy as np
 import torch
 
@@ -23,6 +23,7 @@ from qimpy import rc
 from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext, InvalidInputException
+from qimpy.transport.collide import EECollisions
 from . import Material
 
 
@@ -162,6 +163,9 @@ class FermiSurface(Material):
         Phenomenological momentum-relaxation time, electron-electron-collision
         time, cyclotron radius (``inf`` for no field), and wall specularity
         ``s in [0, 1]`` (``s=1`` pure specular, ``s=0`` fully diffuse).
+    ee
+        Microscopic e-e collision operator (`collide.EECollisions`);
+        mutually exclusive with the phenomenological ``tau_ee``.
     """
 
     kF: float; vF: float; M_theta: int; Nr: int
@@ -177,6 +181,7 @@ class FermiSurface(Material):
         Nr: int = 1, T: float = 1.0, xi_max: float = 6.0,
         tau_p: float = np.inf, tau_ee: float = np.inf,
         r_c: float = np.inf, specularity: float = 1.0,
+        ee: Optional[Union[EECollisions, dict]] = None,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
@@ -236,6 +241,17 @@ class FermiSurface(Material):
             rates.reshape(-1), dtype=dtype, device=rc.device
         )
 
+        # Microscopic e-e collisions (replaces the tau_ee placeholder):
+        if (ee is not None) or checkpoint_in.member("ee"):
+            if np.isfinite(tau_ee):
+                raise InvalidInputException(
+                    "Specify either the phenomenological tau_ee or the"
+                    " microscopic ee collision operator, not both"
+                )
+            self.add_child(
+                "ee", EECollisions, ee, checkpoint_in, fermi_surface=self
+            )
+
     # ---- transforms (tensor product of radial and angular pieces) ----
 
     def to_modes(self, f: torch.Tensor) -> torch.Tensor:
@@ -276,10 +292,17 @@ class FermiSurface(Material):
         and (if r_c is finite) the exact cyclotron generator G acting on the
         angular block within each radial mode, then transforms back.
         """
-        if self.rates_modal.abs().sum() == 0 and self.k_speed == 0.0:
+        has_ee = hasattr(self, "ee")
+        if (
+            self.rates_modal.abs().sum() == 0
+            and self.k_speed == 0.0
+            and not has_ee
+        ):
             return torch.zeros_like(rho)                       # ballistic, no field
         a = self.to_modes(rho)                                 # (..., Nr*dim_theta)
         a_dot = -self.rates_modal * a
+        if has_ee:
+            a_dot = a_dot + self.ee.a_dot(a)
         if self.k_speed:
             Nr, dim_t = self.Nr, self.angular.dim
             a4 = a.reshape(*a.shape[:-1], Nr, dim_t)
