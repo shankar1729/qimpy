@@ -238,6 +238,18 @@ def test_closed_domain_conserves_mass() -> None:
     assert abs(_mass_rate(geom)) < 1e-9
 
 
+def test_closed_domain_conserves_mass_radial() -> None:
+    """Closed-domain mass conservation survives a non-trivial radial basis (Nr>1):
+    advection stays conservative and the per-radial-mode reflector holds the n=0
+    (mass) wall flux at zero, so the total mass rate is ~0 for an arbitrary state."""
+    torch.set_default_dtype(torch.float64)
+    tmp = tempfile.mkdtemp()
+    path = _make_rect_mesh(12.0, os.path.join(tmp, "rect.npz"), all_walls=True)
+    geom, _ = _build_fv({}, mesh_path=path, Nr=4, tau_p=2.0, tau_ee=3.0)
+    geom._u = torch.randn(geom.K, geom.Nk, device=rc.device)
+    assert abs(_mass_rate(geom)) < 1e-9
+
+
 def test_contact_current_readout_is_conservative() -> None:
     """Sum of contact currents equals minus the total mass rate (walls carry no
     current), so the readout exactly accounts for the device's charge balance."""
