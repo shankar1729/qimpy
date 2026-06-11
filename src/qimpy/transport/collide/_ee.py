@@ -33,10 +33,14 @@ class EECollisions(TreeNode):
     every coefficient comes from the kinematic integral):
 
     * cubic (``f0``-independent) vertex
-      ``C3 = d1 d2 (d3+d4) - d3 d4 (d1+d2)`` on the ``l = 0`` surface
-      angular modes (the physical surface-deformation self-interaction),
-      projected onto all radial output modes; odd output harmonics are
-      gated to zero (parity selection -- odd harmonics do not relax);
+      ``C3 = d1 d2 (d3+d4) - d3 d4 (d1+d2)`` over the FULL modal basis --
+      every radial/energy mode and angular harmonic on all three input legs
+      (complete to cubic order), projected onto all radial output modes.
+      The exact integral carries the angular parity selection on its own
+      (a purely even input field produces purely even output), so no parity
+      gate is imposed; odd output harmonics are kept where the kinematics
+      genuinely populate them (a field with odd content relaxes through the
+      cubic);
     * quadratic particle-hole-odd (thermoelectric) vertex ``Q2``, which
       vanishes on the Fermi surface (``O(T/E_F)``) and couples opposite
       energy parities -- full radial on both inputs and outputs.
@@ -341,9 +345,10 @@ class EECollisions(TreeNode):
 
         Returns ``(V_cubic, V_quad)``:
 
-        * ``V_cubic[lo, co, a, b, c]`` (shape ``(Nr, dim, dim, dim, dim)``):
-          contract with the ``l = 0`` surface coefficients three times to get
-          ``a_dot[lo, co]`` (the cubic surface self-interaction);
+        * ``V_cubic[lo, co, la, a, lb, b, lc, c]`` (shape
+          ``(Nr, dim, Nr, dim, Nr, dim, Nr, dim)``): contract with the full
+          modal coefficients three times to get the cubic ``a_dot[lo, co]``
+          (complete to cubic order -- every radial/energy input mode included);
         * ``V_quad[lo, co, la, a, lb, b]`` (shape
           ``(Nr, dim, Nr, dim, Nr, dim)``): contract with the full modal
           coefficients twice to get the thermoelectric quadratic
@@ -352,7 +357,7 @@ class EECollisions(TreeNode):
         fs = self.fermi_surface
         M, Nr = fs.M_theta, fs.Nr
         dim = fs.angular.dim
-        psi_coeff, x_fine, P, Ginv, psi0_norm = self._radial_galerkin(T)
+        psi_coeff, x_fine, P, Ginv, _ = self._radial_galerkin(T)
         kin = dict(
             kF=fs.kF,
             m_star=self.m_star,
@@ -368,12 +373,13 @@ class EECollisions(TreeNode):
             f"Computing exact nonlinear e-e vertices (M = {M}, Nr = {Nr}),"
             f" quadrature {self.n_xi}^2 x {self.n_phi} x {self.n_xi_proj}"
         )
-        # Cubic: V_node[f, co, a, b, c] -> Galerkin project node f onto lo.
+        # Cubic: full-radial V_node[f, co, la, a, lb, b, lc, c] -> Galerkin
+        # project the output-energy node f onto the radial mode lo.
         Vc_node = _kernels.cubic_vertex(
-            x_nodes=x_fine, psi0_norm=psi0_norm, M=M, **kin
+            x_nodes=x_fine, psi_coeff=psi_coeff, M=M, **kin
         )
         GP = Ginv @ P  # (Nr, n_fine): radial Galerkin projector
-        V_cubic = torch.einsum("lf,fcabd->lcabd", GP, Vc_node)
+        V_cubic = torch.einsum("lf,fcxaybzd->lcxaybzd", GP, Vc_node)
         # Quadratic: V_node[f, co, la, a, lb, b] -> project node f onto lo.
         Vq_node = _kernels.quadratic_vertex(
             x_nodes=x_fine, psi_coeff=psi_coeff, M=M, **kin
@@ -383,7 +389,7 @@ class EECollisions(TreeNode):
         # Exact conservation: project the OUTPUT (lo, co) onto the null
         # complement.  Number/energy gate the m=0 output; momentum gates m=1.
         Proj = self._radial_null_projectors(T)  # (dim, Nr, Nr)
-        V_cubic = torch.einsum("cLl,lcabd->Lcabd", Proj, V_cubic)
+        V_cubic = torch.einsum("cLl,lcxaybzd->Lcxaybzd", Proj, V_cubic)
         V_quad = torch.einsum("cLl,lcxayb->Lcxayb", Proj, V_quad)
         return V_cubic, V_quad
 
@@ -400,10 +406,11 @@ class EECollisions(TreeNode):
         # Linear: block-diagonal in harmonic, matrix over radial modes:
         out = -torch.einsum("cij,...jc->...ic", self.L_coeff, a4)
         if self.nonlinear:
-            # Cubic surface self-interaction (l = 0 inputs, all radial outputs):
-            a0 = a4[..., 0, :]  # surface (n = 0) angular modes
+            # Cubic (full modal inputs over all radial/energy modes, all radial
+            # outputs) -- complete to cubic order:
             cubic = torch.einsum(
-                "lcabd,...a,...b,...d->...lc", self._V_cubic, a0, a0, a0
+                "lcxaybzd,...xa,...yb,...zd->...lc",
+                self._V_cubic, a4, a4, a4,
             )
             # Quadratic thermoelectric (full modal inputs and outputs):
             quad = torch.einsum(

@@ -108,10 +108,12 @@ def _reference_eps_terms(df_of_phi, x1, phi1, n_phi, order):
 
 
 def test_cubic_vertex_vs_reference():
-    """Criterion 1: the exact cubic vertex reproduces the eps^3 term of the
-    brute-force reference at phi1=0 (rotationally consistent: identical
-    quadrature node placement) to the quadrature floor, and the residual at
-    rotated phi1 is the shared van-Hove edge error decreasing with n_phi."""
+    """Criterion 2: the exact cubic vertex reproduces the eps^3 term of the
+    brute-force reference for a SURFACE (l=0) field at phi1=0 (rotationally
+    consistent: identical quadrature node placement) to the quadrature floor,
+    and the residual at rotated phi1 is the shared van-Hove edge error
+    decreasing with n_phi.  This is the l=0 special case of the full vertex
+    (Nr=1, constant psi_0)."""
     # Even-only surface field with a single base harmonic m=2, so the full
     # cubic output (harmonics 2 +/- 2 +/- 2 in {2, 6}) lies within the
     # retained band |m| <= M = 6 -- the tensor and the (un-truncated)
@@ -120,9 +122,9 @@ def test_cubic_vertex_vs_reference():
     M = 6
     g_pos = {2: 1.0}
     nh = 2 * M + 1
-    c = torch.zeros(nh, dtype=torch.float64)
+    c = torch.zeros(1, nh, dtype=torch.float64)  # (Nr=1, nh) modal field
     for m, gm in g_pos.items():
-        c[2 * m - 1] = 2 * gm  # g(phi) = sum_m 2 gm cos(m phi)
+        c[0, 2 * m - 1] = 2 * gm  # g(phi) = sum_m 2 gm cos(m phi)
 
     def g_of(phi):
         out = torch.zeros_like(phi)
@@ -134,21 +136,21 @@ def test_cubic_vertex_vs_reference():
         return _w_occ(x) * g_of(phi) / T0  # delta_f = w_eq Phi, Phi = g
 
     common = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
-    ghat = _real_coeffs(c, M)
-    ps = torch.arange(-M, M + 1)
-    mo_idx = ps[:, None, None] + ps[None, :, None] + ps[None, None, :]
     phi1 = torch.tensor(np.linspace(0, 2 * np.pi, 16, endpoint=False))
     x1 = torch.zeros_like(phi1)
 
     rels0, rels_grid = [], []
     for n_phi in (256, 512):
-        # Vertex value -Phi_dot real coeffs at x1=0 (conv=4): reconstruct the
-        # complex output harmonics, then Phi_dot(phi1).
+        # Full-radial cubic at Nr=1 with constant psi_0 = 1 (the surface mode):
+        # V[node, co, la, a, lb, b, lc, c].  -Phi_dot real coeffs at x1=0
+        # (conv=4): reconstruct the output harmonics, then Phi_dot(phi1).
         V = _kernels.cubic_vertex(
-            x_nodes=torch.zeros(1), psi0_norm=1.0, M=M,
+            x_nodes=torch.zeros(1), psi_coeff=torch.ones(1, 1), M=M,
             n_xi=24, xi_cut=10.0, n_phi=n_phi, **common,
         )
-        coeff = torch.einsum("cabd,a,b,d->c", V[0], c, c, c)  # -Phi_dot^c
+        coeff = torch.einsum(
+            "oxaybzd,xa,yb,zd->o", V[0], c, c, c
+        )  # -Phi_dot^co
         # Vc returns -Phi_dot coeffs (decay/conv convention); recover f_dot
         # real coeffs: f_dot_coeffs = -coeff / conv, conv = 4 at x1 = 0:
         fdot_re = -coeff / 4.0
@@ -173,6 +175,105 @@ def test_cubic_vertex_vs_reference():
     # phi1=0 match is machine precision at both resolutions:
     assert max(rels0) < 1e-6
     assert max(rels_grid) < 0.3
+
+
+def test_cubic_vertex_energy_structured_vs_reference():
+    """Criterion 1 (DISCRIMINATING): the FULL-radial cubic reproduces the eps^3
+    term of the brute-force reference for an ENERGY-STRUCTURED field (Nr>=2 with
+    l>=1 content, e.g. an energy-weighted shear coefficient a_{2,1}) at phi1=0,
+    while the l=0-restricted cubic (ignoring the l>0 inputs) MISMATCHES the same
+    reference.  This proves the l>0 input legs are actually included and exact.
+
+    All base harmonics are kept to |m| <= 2 so every cubic output harmonic
+    (|m| <= 6) fits the retained band M = 6; the tensor and the un-truncated
+    reference then describe the SAME quantity at phi1 = 0."""
+    from qimpy.transport.material._fermi_surface import RadialBasis
+
+    M, Nr = 6, 2
+    rb = RadialBasis(Nr, T_temp=T0, xi_max=6.0)
+    xi_c = rb.xi.to(torch.float64)
+    Tfm = rb.T_from_modes.to(torch.float64)
+    psi_coeff = torch.linalg.solve(
+        torch.vander(xi_c, Nr, increasing=True), Tfm
+    )
+    nh = 2 * M + 1
+    common = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
+
+    # Energy-structured field: l=0 and l=1 content, harmonics up to m=2.  The
+    # l=1 cos(2) coefficient is the energy-weighted shear that the l=0-only
+    # cubic cannot see.
+    amod = torch.zeros(Nr, nh, dtype=torch.float64)
+    amod[0, 3] = 0.8    # l=0, cos(2 phi)
+    amod[1, 3] = 0.6    # l=1, cos(2 phi)  <- energy-weighted shear discriminator
+    amod[1, 1] = 0.4    # l=1, cos(1 phi)
+    amod[0, 4] = -0.3   # l=0, sin(2 phi)
+
+    def psi_eval(x):
+        res = np.zeros(x.shape + (Nr,))
+        pc = psi_coeff.numpy()
+        for p in range(pc.shape[0] - 1, -1, -1):
+            res = res * x[..., None] + pc[p]
+        return res
+
+    def ec_real(phi):
+        cols = [np.ones_like(phi)]
+        for m in range(1, M + 1):
+            cols.append(np.cos(m * phi))
+            cols.append(np.sin(m * phi))
+        return np.stack(cols, axis=-1)
+
+    def df_struct(x, phi):
+        xpsi = psi_eval(x.numpy())
+        eph = ec_real(phi.numpy())
+        Phi = np.einsum("...l,...c,lc->...", xpsi, eph, amod.numpy())
+        return torch.as_tensor(_w_occ(x).numpy() * Phi / T0)
+
+    phi1 = torch.zeros(1)
+    x1 = torch.zeros(1)
+    rels_full, rels_l0 = [], []
+    for n_phi in (256, 512):
+        Vc = _kernels.cubic_vertex(
+            x_nodes=torch.zeros(1), psi_coeff=psi_coeff, M=M,
+            n_xi=24, xi_cut=10.0, n_phi=n_phi, **common,
+        )
+
+        def fdot0_from(field):
+            # Vc[node, co, la, a, lb, b, lc, c]; node x1=0 (conv=4) ->
+            # -4 Phi_dot coeffs.  Recover f_dot real coeffs and evaluate at
+            # phi1 = 0 (only cos channels contribute, e_co(0) = 1):
+            coeff = torch.einsum(
+                "oxaybzd,xa,yb,zd->o", Vc[0], field, field, field
+            )
+            fdot_re = -coeff / 4.0
+            val = fdot_re[0]
+            for m in range(1, M + 1):
+                val = val + fdot_re[2 * m - 1]
+            return val.item()
+
+        full = fdot0_from(amod)
+        # l=0-restricted input: zero the l>0 radial modes (what a cubic that
+        # only sees the Fermi-surface deformation would compute):
+        amod_l0 = amod.clone()
+        amod_l0[1:, :] = 0.0
+        l0_only = fdot0_from(amod_l0)
+
+        C_ref = _reference_eps_terms(df_struct, x1, phi1, n_phi, order=3)[0]
+        rels_full.append(abs(full - C_ref.item()) / abs(C_ref.item()))
+        rels_l0.append(abs(l0_only - C_ref.item()) / abs(C_ref.item()))
+
+    # The full cubic matches the reference to the quadrature floor at phi1=0
+    # (identical node placement); the l=0-only restriction is off by O(10%) --
+    # the l>0 inputs carry a real, distinct contribution that is now exact.
+    assert rels_full[-1] < 1e-6, (
+        f"full cubic vs reference (energy-structured): {rels_full}"
+    )
+    assert max(rels_full) < 1e-6
+    # the l=0-only cubic FAILS the same test by a wide, resolution-independent
+    # margin (NOT a quadrature artifact) -- proof that l>0 matters:
+    assert min(rels_l0) > 1e-3, (
+        f"l=0-only should mismatch but matched: {rels_l0}"
+    )
+    assert min(rels_l0) > 1e3 * max(rels_full)  # full is orders better
 
 
 def test_quadratic_vertex_vs_reference():
@@ -251,7 +352,7 @@ def test_quadratic_vertex_vs_reference():
     a_surf = torch.zeros(Nr, nh, dtype=torch.float64)
     a_surf[0, 3] = 0.8  # l=0 cos(2 phi)
     Vc = _kernels.cubic_vertex(
-        x_nodes=torch.zeros(1), psi0_norm=float(Tfm[0, 0]), M=M,
+        x_nodes=torch.zeros(1), psi_coeff=psi_coeff, M=M,
         n_xi=24, xi_cut=10.0, n_phi=512, **common,
     )
     Vq2 = _kernels.quadratic_vertex(
@@ -260,7 +361,7 @@ def test_quadratic_vertex_vs_reference():
     )
     q_out = torch.einsum("oxayb,xa,yb->o", Vq2[0], a_surf, a_surf).abs().max()
     c_out = torch.einsum(
-        "cabd,a,b,d->c", Vc[0], a_surf[0], a_surf[0], a_surf[0]
+        "oxaybzd,xa,yb,zd->o", Vc[0], a_surf, a_surf, a_surf
     ).abs().max()
     ratio = (q_out / c_out).item()
     assert ratio < 2e-3, f"Q2 surface/cubic = {ratio:.2e} (expected ~1e-3)"
@@ -310,9 +411,13 @@ def test_nonlinear_conservation():
 
 
 def test_even_m_selection():
-    """Criterion 4: the surface cubic gates odd output harmonics to zero, so
-    odd modes do not relax through the cubic; a pure even field pumps even
-    outputs (including the 2+2+2 -> 6 channel)."""
+    """Criterion 4: the EXACT cubic carries the angular parity selection by
+    itself (no gate).  A purely even input field produces purely even output
+    (even+even+even=even) to machine precision; but a field carrying odd
+    angular content genuinely populates odd output channels (1+1+1=3,
+    3+3-2=4, ...) -- odd modes DO relax through the cubic when present.  This
+    is the correct physics confirmed against the brute-force reference, not
+    the artifact of forcing odd outputs to zero."""
     fs = make_fs(
         M_theta=6,
         ee=dict(
@@ -323,34 +428,35 @@ def test_even_m_selection():
     dim = fs.angular.dim
     amp = 0.3 * 4 * T0
 
-    def cubic_only(a):  # isolate the cubic term of a_dot (l=0 surface inputs)
-        a0 = a.reshape(*a.shape[:-1], fs.Nr, dim)[..., 0, :]
-        return torch.einsum("lcabd,...a,...b,...d->...lc", fs.ee._V_cubic,
-                            a0, a0, a0)[..., 0, :]
+    def cubic_only(a):  # isolate the cubic term of a_dot (full modal inputs)
+        a4 = a.reshape(*a.shape[:-1], fs.Nr, dim)
+        return torch.einsum("lcxaybzd,...xa,...yb,...zd->...lc",
+                            fs.ee._V_cubic, a4, a4, a4)[..., 0, :]
 
-    # pure odd deformation: the CUBIC output is exactly zero (odd harmonics
-    # gated -> odd modes do not relax through the cubic):
-    a_odd = torch.zeros(1, dim, dtype=fs.v.dtype, device=rc.device)
-    a_odd[0, 5] = amp  # cos(3 phi)
-    assert cubic_only(a_odd).abs().max() < 1e-20
-    # pure even field cos(2 phi) -> even cubic outputs (m=2 self, m=6 pumped):
+    # pure even field cos(2 phi) -> purely even cubic output (m=2 self, m=6
+    # pumped); odd output channels are EXACTLY zero by the natural selection:
     a_even = torch.zeros(1, dim, dtype=fs.v.dtype, device=rc.device)
     a_even[0, 3] = amp
     cub_even = cubic_only(a_even)[0]
     assert cub_even[3].abs() > 0  # m=2 self-interaction
     assert cub_even[11].abs() > 0  # m=6 pumped (2+2+2)
-    # odd cubic output channels are exactly zero:
-    for m in (1, 3, 5):
-        assert cub_even[2 * m - 1].abs() < 1e-20
-        assert cub_even[2 * m].abs() < 1e-20
-    # mixed odd+even: the cubic pumps an even channel (3+3-2 = 4) while the
-    # odd output (cos(3 phi)) stays exactly zero (odd modes do not relax):
+    for m in (1, 3, 5):  # odd channels exactly zero for a purely even field
+        assert cub_even[2 * m - 1].abs() < 1e-18 * cub_even.abs().max()
+        assert cub_even[2 * m].abs() < 1e-18 * cub_even.abs().max()
+    # pure odd deformation cos(3 phi): the cubic output is NONZERO -- odd modes
+    # relax through the cubic (3+3-3=3 channel populated):
+    a_odd = torch.zeros(1, dim, dtype=fs.v.dtype, device=rc.device)
+    a_odd[0, 5] = amp  # cos(3 phi)
+    cub_odd = cubic_only(a_odd)[0]
+    assert cub_odd[5].abs() > 0  # cos(3 phi) output: pure-odd field relaxes
+    # mixed odd+even: pumps both an even channel (3+3-2 = 4) AND the odd cos(3)
+    # channel (genuine, not gated):
     a_mix = torch.zeros(1, dim, dtype=fs.v.dtype, device=rc.device)
     a_mix[0, 5] = amp  # cos(3 phi)
     a_mix[0, 3] = 0.7 * amp  # cos(2 phi)
     cub_mix = cubic_only(a_mix)[0]
     assert cub_mix[7].abs() > 0  # cos(4 phi) output present
-    assert cub_mix[5].abs() < 1e-20  # cos(3 phi): odd modes do not relax
+    assert cub_mix[5].abs() > 0  # cos(3 phi) output present (odd relaxes)
 
 
 def test_no_free_parameter():

@@ -443,7 +443,7 @@ def _complex_to_real(M: int) -> torch.Tensor:
 def cubic_vertex(
     *,
     x_nodes: torch.Tensor,
-    psi0_norm: float,
+    psi_coeff: torch.Tensor,
     M: int,
     kF: float,
     m_star: float,
@@ -454,6 +454,7 @@ def cubic_vertex(
     n_xi: int = 24,
     xi_cut: float = 10.0,
     n_phi: int = 512,
+    gate_odd: bool = False,
 ) -> torch.Tensor:
     """Finite-T cubic e-e vertex on the radial-output collocation nodes.
 
@@ -462,31 +463,49 @@ def cubic_vertex(
     the exact thermal-shell kinematics, projected to real output coefficients.
     The angular structure is accumulated as the validated complex harmonic
     tensor (leg-triple signs/phases of the derivation), then folded to the
-    real cos/sin basis with odd output harmonics gated to zero (the parity
-    selection of the notes: odd harmonics do not relax at leading order).
+    real cos/sin basis and binned by the additive output harmonic
+    ``mo = ma + mb + mc``.
 
-    SCOPE: the inputs are restricted to the ``l = 0`` surface angular modes --
-    the physical surface-deformation self-interaction ``c_{p0} c_{s0} c_{t0}``
-    of the derivation, which is the leading nonlinearity.  Output is projected
-    onto ALL radial nodes (works for ``Nr > 1``) and angular harmonics.
+    SCOPE: the three input legs run over the FULL modal basis -- every
+    radial/energy mode ``l`` and angular harmonic ``m`` -- so the vertex is
+    complete to cubic order (not restricted to the ``l = 0`` Fermi-surface
+    deformation).  Output is projected onto all radial nodes and angular
+    harmonics.  ``delta_f`` at each leg is the full modal field
 
-    ``delta_f`` at each leg is ``w_eq(x_leg) psi0_norm g(phi_leg)`` with
-    ``w_eq = sech^2(x/2)/(4T)``, ``psi0_norm`` the (constant) ``l=0`` radial
-    basis value, and ``g = sum_c a_{0,c} e_c(phi)`` the surface field.
+        ``delta_f(x_leg, phi_leg) = w_eq(x_leg)
+            sum_l psi_l(x_leg) [ sum_m a_{l,m} e_m(phi_leg) ]``
 
-    Returns the real tensor ``V[i, co, a, b, c]`` of shape
-    ``(len(x_nodes), 2M+1, 2M+1, 2M+1, 2M+1)`` giving minus the rate of change
-    of the solver field ``Phi`` at node ``x_nodes[i]`` and output angular mode
-    ``co`` per unit product of input surface coefficients ``a_a a_b a_c``
-    (``Phi_dot = -V[i,co] : a a a``, with the ``conv = 4 cosh^2(x_i/2)`` and
-    decay-sign convention of ``L_blocks``).  The caller Galerkin-projects the
-    node axis onto radial modes.
+    with ``w_eq = sech^2(x/2)/(4T)`` and ``psi_coeff[p, l]`` the power-basis
+    coefficients ``psi_l(x) = sum_p psi_coeff[p, l] x^p`` (as in ``L_blocks``
+    and ``quadratic_vertex``); each leg therefore carries its own radial factor
+    ``psi_l`` evaluated at that leg's energy (``x2``, ``x3`` or ``x4`` for the
+    integration legs, ``x1`` for the output-energy leg, with
+    ``x4 = x1 + x2 - x3`` resolved on the shell).
+
+    Returns the real tensor ``V[i, co, (la, a), (lb, b), (lc, c)]`` reshaped as
+    ``(len(x_nodes), 2M+1, Nr, 2M+1, Nr, 2M+1, Nr, 2M+1)`` giving minus the rate
+    of change of the solver field ``Phi`` at node ``x_nodes[i]`` and output
+    angular mode ``co`` per unit product of input modal coefficients
+    ``a_{la,a} a_{lb,b} a_{lc,c}`` (``Phi_dot = -V[i,co] : a a a``, with the
+    ``conv = 4 cosh^2(x_i/2)`` and decay-sign convention of ``L_blocks``).  The
+    caller Galerkin-projects the node axis onto output radial modes.
+
+    ``gate_odd`` (default ``False``) optionally forces odd output harmonics to
+    exactly zero.  This is NOT needed and is OFF by default: the exact kinematic
+    integral already enforces the angular parity selection on its own -- a purely
+    even input field produces purely even output to machine precision (verified
+    against the brute-force reference) -- while a field carrying odd angular
+    content genuinely populates odd output channels (``1 + 1 + 1 = 3``), which
+    the reference confirms are nonzero.  Gating those to zero would contradict
+    the exact operator, so it is disabled; the flag is retained only for
+    diagnostics on purely-even fields.
     """
     E_F = 0.5 * kF**2 / m_star
     t = T / E_F
     dd = dict(dtype=torch.float64)
     Nx1 = len(x_nodes)
     nharm = 2 * M + 1
+    Nr = psi_coeff.shape[1]
     ps = torch.arange(-M, M + 1)
 
     # Energy / angle quadrature (mirror L_blocks).
@@ -502,13 +521,25 @@ def cubic_vertex(
         return kF * torch.sqrt(torch.clamp(1.0 + t * x, min=0.0))
 
     def weq(x: torch.Tensor) -> torch.Tensor:
-        return 0.25 / torch.cosh(x / 2) ** 2 / T * psi0_norm
+        return 0.25 / torch.cosh(x / 2) ** 2 / T
+
+    def psi_eval(x: torch.Tensor) -> torch.Tensor:  # (...,) -> (..., Nr)
+        res = torch.zeros(x.shape + (Nr,), **dd)
+        for p in range(psi_coeff.shape[0] - 1, -1, -1):
+            res = res * x[..., None] + psi_coeff[p]
+        return res
+
+    def leg_factor(x: torch.Tensor) -> torch.Tensor:  # w_eq psi_l: (..., Nr)
+        return weq(x)[..., None] * psi_eval(x)
 
     def phase(dphi: torch.Tensor) -> torch.Tensor:  # (...,) -> (..., nharm)
         return torch.exp(1j * dphi[..., None] * ps)
 
     pref = m_star**3 / (2 * np.pi) ** 3
-    Tc = torch.zeros(Nx1, nharm, nharm, nharm, dtype=torch.complex128)
+    nrh = Nr * nharm  # combined (radial, harmonic) leg index
+    # Complex tensor Tc[ix1, (la, ma), (lb, mb), (lc, mc)] with each leg index
+    # flattening the radial mode la and angular harmonic ma together:
+    Tc = torch.zeros(Nx1, nrh, nrh, nrh, dtype=torch.complex128)
     x1t = x_nodes.to(torch.float64)
     cosB = torch.cos(beta)  # (n_phi,)
     sinB = torch.sin(beta)
@@ -516,7 +547,7 @@ def cubic_vertex(
     for ix1 in range(Nx1):  # phi1 = 0 canonical (isotropy); stream over x1
         x1v = x1t[ix1]
         k1 = k_of(x1v)
-        we1v = weq(x1v)
+        lf1 = leg_factor(x1v.reshape(1))[0]  # (Nr,) radial factor at leg 1
         X2 = x2[:, None]  # (n_xi, 1)
         k2 = k_of(X2)
         for i3 in range(n_xi):  # stream over x3 to bound memory
@@ -540,9 +571,10 @@ def cubic_vertex(
                 q, epsilon_bg=epsilon_bg, kappa=kappa, well_width=well_width
             ).expand(n_xi, n_phi)
             wt = (w2[:, None] * wbeta[None, :]) * (T**2)
-            we2 = weq(X2).expand(n_xi, n_phi)
-            we3v = weq(x3v)
-            we4 = weq(X4).expand(n_xi, n_phi)
+            # Per-leg radial factors w_eq(x_leg) psi_l(x_leg):
+            lf2 = leg_factor(X2.reshape(n_xi))  # (n_xi, Nr)
+            lf3 = leg_factor(x3v.reshape(1))[0]  # (Nr,)
+            lf4 = leg_factor(X4.reshape(n_xi))  # (n_xi, Nr)
             # leg-1 (phi=0) and leg-3 (phi=beta) phases are x1/sgn-independent
             # but cheap; build per (i3, sgn).  Pre-form constant leg phases:
             ph1 = phase(torch.zeros(n_phi, **dd))[None, :, :]  # (1, n_phi, nh)
@@ -558,10 +590,23 @@ def cubic_vertex(
                 Wk = Wk * wt * pref * w3v  # (n_xi, n_phi)
                 ph2 = phase(phi2)  # (n_xi, n_phi, nharm)
                 ph4 = phase(phi4)
-                p1 = ph1.expand(n_xi, n_phi, nharm) * we1v
-                p2 = ph2 * we2[..., None]
-                p3 = ph3.expand(n_xi, n_phi, nharm) * we3v
-                p4 = ph4 * we4[..., None]
+                # Per-leg combined (radial, harmonic) factor on the grid:
+                # P_leg[g, l, m] = psi_l(x_leg) w_eq(x_leg) e^{i m Dphi_leg}.
+                ng = n_xi * n_phi
+                p1 = (
+                    lf1[None, None, :, None]
+                    * ph1.expand(n_xi, n_phi, nharm)[..., None, :]
+                ).reshape(ng, nrh)
+                p2 = (lf2[:, None, :, None] * ph2[..., None, :]).reshape(
+                    ng, nrh
+                )
+                p3 = (
+                    lf3[None, None, :, None]
+                    * ph3.expand(n_xi, n_phi, nharm)[..., None, :]
+                ).reshape(ng, nrh)
+                p4 = (lf4[:, None, :, None] * ph4[..., None, :]).reshape(
+                    ng, nrh
+                )
                 # 4 leg-triples with signs: (1,2,3)+ (1,2,4)+ (1,3,4)- (2,3,4)-
                 triples = [
                     (+1.0, p1, p2, p3),
@@ -569,29 +614,35 @@ def cubic_vertex(
                     (-1.0, p1, p3, p4),
                     (-1.0, p2, p3, p4),
                 ]
+                Wkf = Wk.reshape(ng)
                 for s3, pa, pb, pc in triples:
-                    wa = (pa * (Wk * s3)[..., None]).reshape(-1, nharm)
-                    pbf = pb.reshape(-1, nharm)
-                    pcf = pc.reshape(-1, nharm)
-                    Tc[ix1] += torch.einsum("ga,gb,gc->abc", wa, pbf, pcf)
+                    wa = pa * (Wkf * s3)[:, None]  # (ng, nrh)
+                    Tc[ix1] += torch.einsum("ga,gb,gc->abc", wa, pb, pc)
 
-    # Fold complex harmonics -> real basis, bin by output harmonic mo=a+b+c,
-    # and gate odd output harmonics to zero (parity selection).
+    # Fold complex harmonics -> real basis on each leg, bin by output harmonic
+    # mo = ma + mb + mc, and (optionally) gate odd output harmonics to zero.
+    # Reshape leg axes (la, ma) -> separate radial and harmonic axes first.
     U = _real_to_complex(M)
     R = _complex_to_real(M)
+    Tc = Tc.reshape(Nx1, Nr, nharm, Nr, nharm, Nr, nharm)
     mo_idx = ps[:, None, None] + ps[None, :, None] + ps[None, None, :]
     Rfull = torch.zeros(nharm, nharm, nharm, nharm, dtype=torch.complex128)
     for ia in range(nharm):
         for ib in range(nharm):
             for ic in range(nharm):
                 mo = int(mo_idx[ia, ib, ic].item())
-                if (-M <= mo <= M) and (mo % 2 == 0):  # retained & even
+                keep = (-M <= mo <= M) and (mo % 2 == 0 or not gate_odd)
+                if keep:
                     Rfull[:, ia, ib, ic] = R[:, M + mo]
-    tmp = Rfull[None] * Tc[:, None]  # (ix1, co, ma, mb, mc)
-    V = torch.einsum("zoABC,Ai,Bj,Ck->zoijk", tmp, U, U, U).real
-
+    # Fold to the real basis: contract the three complex input harmonic axes
+    # with U (real->complex) and the output binning Rfull (complex->real).  The
+    # leg radial axes (la, lb, lc) pass through untouched.  Result indexed
+    # (ix1, co, la, a, lb, b, lc, c):
+    V = torch.einsum(
+        "ZXAYBWC,oABC,Ai,Bj,Ck->ZoXiYjWk", Tc, Rfull, U, U, U
+    ).real
     conv = 4 * torch.cosh(x1t / 2) ** 2
-    return -V * conv[:, None, None, None, None]
+    return -V * conv[:, None, None, None, None, None, None, None]
 
 
 def quadratic_vertex(
