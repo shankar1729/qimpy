@@ -430,8 +430,11 @@ def test_even_m_selection():
 
     def cubic_only(a):  # isolate the cubic term of a_dot (full modal inputs)
         a4 = a.reshape(*a.shape[:-1], fs.Nr, dim)
-        return torch.einsum("lcxaybzd,...xa,...yb,...zd->...lc",
-                            fs.ee._V_cubic, a4, a4, a4)[..., 0, :]
+        ahat = fs.ee._to_complex(a4)
+        # cubic-only binned output, then the shared null projection + real fold
+        # (matches the old null-projected V_cubic contraction):
+        Fhat = fs.ee._apply_cubic(ahat)
+        return fs.ee._finalize_nonlinear(Fhat)[..., 0, :]
 
     # pure even field cos(2 phi) -> purely even cubic output (m=2 self, m=6
     # pumped); odd output channels are EXACTLY zero by the natural selection:
@@ -566,3 +569,35 @@ def test_L_blocks_pointwise_vs_reference():
     )
     phidot = fdot * 4 * T0 * torch.cosh(x_chk / 2) ** 2
     assert torch.allclose(R[0, :, 0], -phidot, rtol=1e-10)
+
+
+def test_a_dot_regression_baseline():
+    """The optimized (convolution-form) a_dot reproduces the pre-optimization
+    operator bit-for-bit (<= 1e-11).  Baseline saved by the regression harness
+    at _scratch_ee/baseline_adot.npz (keys '{M}_{Nr}_a', '{M}_{Nr}_out' built
+    with rates='exact', nonlinear=True, n_xi=16, n_phi=256, n_xi_proj=8);
+    skipped gracefully if the file is absent."""
+    import os
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    # repo root is .../qimpy-collisions; the baseline lives under _scratch_ee:
+    root = os.path.abspath(os.path.join(here, "..", "..", "..", ".."))
+    npz = os.path.join(root, "_scratch_ee", "baseline_adot.npz")
+    if not os.path.exists(npz):
+        pytest.skip(f"regression baseline absent ({npz})")
+    data = np.load(npz)
+    for (M, Nr) in ((4, 2), (6, 2)):
+        key_a, key_o = f"{M}_{Nr}_a", f"{M}_{Nr}_out"
+        if key_a not in data:
+            continue
+        a = torch.as_tensor(data[key_a])
+        out_ref = torch.as_tensor(data[key_o])
+        fs = make_fs(
+            M_theta=M, Nr=Nr,
+            ee=dict(epsilon_bg=EPS_B, rates="exact", nonlinear=True,
+                    n_xi=16, n_phi=256, n_xi_proj=8),
+        )
+        a_dev = a.to(dtype=fs.v.dtype, device=rc.device)
+        out = fs.ee.a_dot(a_dev).to(dtype=out_ref.dtype, device="cpu")
+        rel = (out - out_ref).abs().max().item() / out_ref.abs().max().item()
+        assert rel <= 1e-11, f"a_dot regression (M={M}, Nr={Nr}): rel={rel:.3e}"

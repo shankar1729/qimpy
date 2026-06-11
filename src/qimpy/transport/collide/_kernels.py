@@ -438,8 +438,209 @@ def _complex_to_real(M: int) -> torch.Tensor:
 
 
 # ----------------------------------------------------------------------------
+# Shared thermal-shell kinematics for the nonlinear vertices
+# ----------------------------------------------------------------------------
+def _shell_quadrature(T: float, E_F: float, n_xi: int, xi_cut: float, n_phi: int):
+    """Energy (x2) and azimuth (beta = phi3 - phi1) Gauss-Legendre grids.
+
+    Identical placement to ``L_blocks`` / ``cubic_vertex`` / ``quadratic_vertex``
+    (factored out so they share one definition).  Returns
+    ``(x2, w2, beta, wbeta, cosB, sinB)`` in float64.
+    """
+    t = T / E_F
+    dd = dict(dtype=torch.float64)
+    lo = -min(xi_cut, 0.8 / t)
+    xg, xw = np.polynomial.legendre.leggauss(n_xi)
+    x2 = torch.tensor(0.5 * (xi_cut + lo) + 0.5 * (xi_cut - lo) * xg, **dd)
+    w2 = torch.tensor(0.5 * (xi_cut - lo) * xw, **dd)
+    pg, pw = np.polynomial.legendre.leggauss(n_phi)
+    beta = torch.tensor(np.pi * (pg + 1.0), **dd)
+    wbeta = torch.tensor(np.pi * pw, **dd)
+    return x2, w2, beta, wbeta, torch.cos(beta), torch.sin(beta)
+
+
+def _shell_geometry(
+    *, x1v, X2, k1, k2, x3v, w2, w3v, beta, wbeta, cosB, sinB, T, t, kF,
+    m_star, epsilon_bg, kappa, well_width, n_xi, n_phi,
+):
+    """Resolve the thermal-shell kinematics at one ``(x1, x3, sgn-pair)``.
+
+    Computes the energy-shell quantities shared by both nonlinear vertices
+    (``q``, ``|M_q|^2``, the root mask and the two azimuthal roots, the
+    Jacobian) once per ``(x1, x3)``.  Returns a callable ``weight_phase(sgn)``
+    yielding ``(Wk, phi2, phi4)`` for ``sgn = +-1`` -- minus duplicating the
+    geometry between the cubic and quadratic builders and between the two
+    leg-triple/pair accumulations.  ``Wk`` carries the full quadrature weight
+    ``w2 wbeta w3 T^2 pref`` (energy x2, azimuth, energy x3, thermal phase
+    space, kinematic prefactor) just as the original inline builders did.
+    """
+    X4 = x1v + X2 - x3v  # (n_xi, 1)
+    k3 = k_fermi(x3v, kF, t)
+    k4 = k_fermi(X4, kF, t)
+    band_ok = (1.0 + t * X4) > 0.05
+    q_sq = k1**2 + k3**2 - 2 * k1 * k3 * cosB[None, :]
+    q = torch.sqrt(torch.clamp(q_sq, min=1e-300))
+    Px = (k1 - k3 * cosB)[None, :].expand(n_xi, n_phi)
+    Py = (-k3 * sinB)[None, :].expand(n_xi, n_phi)
+    phiP = torch.atan2(Py, Px)
+    cos_arg = (k4**2 - q_sq - k2**2) / torch.clamp(2 * q * k2, min=1e-300)
+    root_ok = band_ok & (cos_arg.abs() <= 1.0 - EDGE_EPS)
+    dlt = torch.arccos(torch.clamp(cos_arg, -1.0, 1.0))
+    Msq = matrix_element_sq(
+        q, epsilon_bg=epsilon_bg, kappa=kappa, well_width=well_width
+    ).expand(n_xi, n_phi)
+    # Full quadrature weight x kinematic prefactor (per (n_xi, n_phi) grid cell):
+    wt = (w2[:, None] * wbeta[None, :]) * (T**2)
+    wt_pref = wt * (m_star**3 / (2 * np.pi) ** 3) * w3v
+
+    def weight_phase(sgn: float):
+        phi2 = phiP + sgn * dlt
+        phi4 = torch.atan2(Py + k2 * torch.sin(phi2), Px + k2 * torch.cos(phi2))
+        sin42 = torch.sin(phi4 - phi2).abs()
+        jac = 1.0 / torch.clamp(k2 * k4 * sin42, min=1e-14)
+        Wk = torch.where(root_ok, Msq * jac, torch.zeros_like(jac))
+        return Wk * wt_pref, phi2, phi4
+
+    return weight_phase, X4
+
+
+def k_fermi(x: torch.Tensor, kF: float, t: float) -> torch.Tensor:
+    """Fermi-shell wavevector ``kF sqrt(1 + t x)`` (clamped at the band bottom)."""
+    return kF * torch.sqrt(torch.clamp(1.0 + t * x, min=0.0))
+
+
+# ----------------------------------------------------------------------------
 # Exact nonlinear vertices (cubic + quadratic) as precomputed harmonic tensors
 # ----------------------------------------------------------------------------
+def _cubic_complex(
+    *,
+    x_nodes: torch.Tensor,
+    psi_coeff: torch.Tensor,
+    M: int,
+    kF: float,
+    m_star: float,
+    T: float,
+    epsilon_bg: float,
+    kappa: float,
+    well_width: float = 0.0,
+    n_xi: int = 24,
+    xi_cut: float = 10.0,
+    n_phi: int = 512,
+):
+    """Cubic e-e vertex accumulated as compact complex harmonic tensors.
+
+    Returns ``(Tc_full, Tc_leg1, conv)`` for the cubic part
+    ``C3 = d1 d2 (d3+d4) - d3 d4 (d1+d2)`` of ``(B-F)``, BEFORE any radial
+    Galerkin/null projection and BEFORE the ``-conv`` solver-field scaling
+    (the caller applies those).  Both tensors are indexed by the output-energy
+    collocation node ``f``:
+
+    * ``Tc_full[f, la, A, lb, B, lc, C]`` (complex, shape
+      ``(Nx1, Nr, 2M+1, Nr, 2M+1, Nr, 2M+1)``): the single ``(2,3,4)-`` leg
+      triple whose three legs all carry a nontrivial azimuthal phase, kept at
+      full rank-3 angular resolution;
+    * ``Tc_leg1[f, la, lp, P, lq, Q]`` (complex, shape
+      ``(Nx1, Nr, Nr, 2M+1, Nr, 2M+1)``): the SUM of the three leg-triples that
+      contain the output leg 1 -- ``(1,2,3)+``, ``(1,2,4)+``, ``(1,3,4)-`` --
+      with leg 1's angular-harmonic axis ELIDED.  Leg 1 sits at ``phi1 = 0`` so
+      its phase ``e^{i p . 0} == 1`` is constant in its harmonic index; the
+      three triples therefore contribute no leg-1 angular structure and are
+      accumulated over the radial index ``la`` alone (a ``(2M+1)x`` smaller and
+      cheaper accumulation than the full triple).  At apply time leg 1 acts as a
+      convolution: its harmonic is fixed to ``mo - P - Q`` by the output
+      selection ``mo = pA + pB + pC``.
+
+    The full complex vertex of the dense path is recovered as ``Tc_full +
+    Tc_leg1`` broadcast over leg 1's harmonic axis (verified bit-for-bit).
+    """
+    E_F = 0.5 * kF**2 / m_star
+    t = T / E_F
+    dd = dict(dtype=torch.float64)
+    Nx1 = len(x_nodes)
+    nharm = 2 * M + 1
+    Nr = psi_coeff.shape[1]
+    ps = torch.arange(-M, M + 1)
+
+    x2, w2, beta, wbeta, cosB, sinB = _shell_quadrature(
+        T, E_F, n_xi, xi_cut, n_phi
+    )
+
+    def weq(x: torch.Tensor) -> torch.Tensor:
+        return 0.25 / torch.cosh(x / 2) ** 2 / T
+
+    def psi_eval(x: torch.Tensor) -> torch.Tensor:
+        res = torch.zeros(x.shape + (Nr,), **dd)
+        for p in range(psi_coeff.shape[0] - 1, -1, -1):
+            res = res * x[..., None] + psi_coeff[p]
+        return res
+
+    def leg_factor(x: torch.Tensor) -> torch.Tensor:  # w_eq psi_l: (..., Nr)
+        return weq(x)[..., None] * psi_eval(x)
+
+    def phase(dphi: torch.Tensor) -> torch.Tensor:
+        return torch.exp(1j * dphi[..., None] * ps)
+
+    nrh = Nr * nharm
+    ng = n_xi * n_phi
+    # (2,3,4)- triple at full rank-3 angular; leg-1 triples with leg-1 harmonic
+    # elided (constant phase at phi1 = 0):
+    Tc_full = torch.zeros(Nx1, nrh, nrh, nrh, dtype=torch.complex128)
+    Tc_leg1 = torch.zeros(Nx1, Nr, nrh, nrh, dtype=torch.complex128)
+    x1t = x_nodes.to(torch.float64)
+
+    for ix1 in range(Nx1):  # phi1 = 0 canonical (isotropy); stream over x1
+        x1v = x1t[ix1]
+        k1 = k_fermi(x1v, kF, t)
+        lf1 = leg_factor(x1v.reshape(1))[0]  # (Nr,) radial factor at leg 1
+        X2 = x2[:, None]  # (n_xi, 1)
+        k2 = k_fermi(X2, kF, t)
+        ph3 = phase(beta)[None, :, :]  # (1, n_phi, nharm), leg-3 phase e^{i p beta}
+        for i3 in range(n_xi):  # stream over x3 to bound memory
+            x3v = x2[i3]
+            w3v = w2[i3]
+            weight_phase, X4 = _shell_geometry(
+                x1v=x1v, X2=X2, k1=k1, k2=k2, x3v=x3v, w2=w2, w3v=w3v,
+                beta=beta, wbeta=wbeta, cosB=cosB, sinB=sinB, T=T, t=t, kF=kF,
+                m_star=m_star, epsilon_bg=epsilon_bg, kappa=kappa,
+                well_width=well_width, n_xi=n_xi, n_phi=n_phi,
+            )
+            lf2 = leg_factor(X2.reshape(n_xi))  # (n_xi, Nr)
+            lf3 = leg_factor(x3v.reshape(1))[0]  # (Nr,)
+            lf4 = leg_factor(X4.reshape(n_xi))  # (n_xi, Nr)
+            for sgn in (+1.0, -1.0):
+                Wk, phi2, phi4 = weight_phase(sgn)
+                ph2 = phase(phi2)  # (n_xi, n_phi, nharm)
+                ph4 = phase(phi4)
+                # Combined (radial, harmonic) factors on the grid for legs 2-4:
+                p2 = (lf2[:, None, :, None] * ph2[..., None, :]).reshape(ng, nrh)
+                p3 = (
+                    lf3[None, None, :, None]
+                    * ph3.expand(n_xi, n_phi, nharm)[..., None, :]
+                ).reshape(ng, nrh)
+                p4 = (lf4[:, None, :, None] * ph4[..., None, :]).reshape(ng, nrh)
+                Wkf = Wk.reshape(ng)
+                # (2,3,4)- triple, full rank-3 angular:
+                wa = p2 * (-Wkf)[:, None]
+                Tc_full[ix1] += torch.einsum("ga,gb,gc->abc", wa, p3, p4)
+                # leg-1 triples (1,2,3)+,(1,2,4)+,(1,3,4)-: leg 1 contributes
+                # only its radial factor lf1[la] (phase == 1), accumulated over
+                # the radial index; the two partner legs keep full (radial,
+                # harmonic) structure:
+                lf1g = lf1[None, :].expand(ng, Nr)  # (ng, Nr)
+                for s3, pp, pq in (
+                    (+1.0, p2, p3),
+                    (+1.0, p2, p4),
+                    (-1.0, p3, p4),
+                ):
+                    wla = lf1g * (Wkf * s3)[:, None]  # (ng, Nr)
+                    Tc_leg1[ix1] += torch.einsum("gl,gp,gq->lpq", wla, pp, pq)
+
+    Tc_full = Tc_full.reshape(Nx1, Nr, nharm, Nr, nharm, Nr, nharm)
+    Tc_leg1 = Tc_leg1.reshape(Nx1, Nr, Nr, nharm, Nr, nharm)
+    conv = 4 * torch.cosh(x1t / 2) ** 2
+    return Tc_full, Tc_leg1, conv
+
+
 def cubic_vertex(
     *,
     x_nodes: torch.Tensor,
@@ -499,132 +700,29 @@ def cubic_vertex(
     the reference confirms are nonzero.  Gating those to zero would contradict
     the exact operator, so it is disabled; the flag is retained only for
     diagnostics on purely-even fields.
+
+    This dense rank-8 form is retained for the reference-oracle acceptance
+    tests; the production operator stores the compact complex tensors of
+    ``_cubic_complex`` and applies them by convolution (``(2M+1)x`` less
+    storage / work, bit-for-bit identical).
     """
-    E_F = 0.5 * kF**2 / m_star
-    t = T / E_F
-    dd = dict(dtype=torch.float64)
-    Nx1 = len(x_nodes)
     nharm = 2 * M + 1
     Nr = psi_coeff.shape[1]
     ps = torch.arange(-M, M + 1)
-
-    # Energy / angle quadrature (mirror L_blocks).
-    lo = -min(xi_cut, 0.8 / t)
-    xg, xw = np.polynomial.legendre.leggauss(n_xi)
-    x2 = torch.tensor(0.5 * (xi_cut + lo) + 0.5 * (xi_cut - lo) * xg, **dd)
-    w2 = torch.tensor(0.5 * (xi_cut - lo) * xw, **dd)
-    pg, pw = np.polynomial.legendre.leggauss(n_phi)
-    beta = torch.tensor(np.pi * (pg + 1.0), **dd)  # phi3 - phi1 = beta
-    wbeta = torch.tensor(np.pi * pw, **dd)
-
-    def k_of(x: torch.Tensor) -> torch.Tensor:
-        return kF * torch.sqrt(torch.clamp(1.0 + t * x, min=0.0))
-
-    def weq(x: torch.Tensor) -> torch.Tensor:
-        return 0.25 / torch.cosh(x / 2) ** 2 / T
-
-    def psi_eval(x: torch.Tensor) -> torch.Tensor:  # (...,) -> (..., Nr)
-        res = torch.zeros(x.shape + (Nr,), **dd)
-        for p in range(psi_coeff.shape[0] - 1, -1, -1):
-            res = res * x[..., None] + psi_coeff[p]
-        return res
-
-    def leg_factor(x: torch.Tensor) -> torch.Tensor:  # w_eq psi_l: (..., Nr)
-        return weq(x)[..., None] * psi_eval(x)
-
-    def phase(dphi: torch.Tensor) -> torch.Tensor:  # (...,) -> (..., nharm)
-        return torch.exp(1j * dphi[..., None] * ps)
-
-    pref = m_star**3 / (2 * np.pi) ** 3
-    nrh = Nr * nharm  # combined (radial, harmonic) leg index
-    # Complex tensor Tc[ix1, (la, ma), (lb, mb), (lc, mc)] with each leg index
-    # flattening the radial mode la and angular harmonic ma together:
-    Tc = torch.zeros(Nx1, nrh, nrh, nrh, dtype=torch.complex128)
-    x1t = x_nodes.to(torch.float64)
-    cosB = torch.cos(beta)  # (n_phi,)
-    sinB = torch.sin(beta)
-
-    for ix1 in range(Nx1):  # phi1 = 0 canonical (isotropy); stream over x1
-        x1v = x1t[ix1]
-        k1 = k_of(x1v)
-        lf1 = leg_factor(x1v.reshape(1))[0]  # (Nr,) radial factor at leg 1
-        X2 = x2[:, None]  # (n_xi, 1)
-        k2 = k_of(X2)
-        for i3 in range(n_xi):  # stream over x3 to bound memory
-            x3v = x2[i3]
-            w3v = w2[i3]
-            X4 = x1v + X2 - x3v  # (n_xi, 1)
-            k3 = k_of(x3v)
-            k4 = k_of(X4)
-            band_ok = (1.0 + t * X4) > 0.05
-            q_sq = k1**2 + k3**2 - 2 * k1 * k3 * cosB[None, :]
-            q = torch.sqrt(torch.clamp(q_sq, min=1e-300))
-            Px = (k1 - k3 * cosB)[None, :].expand(n_xi, n_phi)
-            Py = (-k3 * sinB)[None, :].expand(n_xi, n_phi)
-            phiP = torch.atan2(Py, Px)
-            cos_arg = (k4**2 - q_sq - k2**2) / torch.clamp(
-                2 * q * k2, min=1e-300
-            )
-            root_ok = band_ok & (cos_arg.abs() <= 1.0 - EDGE_EPS)
-            dlt = torch.arccos(torch.clamp(cos_arg, -1.0, 1.0))
-            Msq = matrix_element_sq(
-                q, epsilon_bg=epsilon_bg, kappa=kappa, well_width=well_width
-            ).expand(n_xi, n_phi)
-            wt = (w2[:, None] * wbeta[None, :]) * (T**2)
-            # Per-leg radial factors w_eq(x_leg) psi_l(x_leg):
-            lf2 = leg_factor(X2.reshape(n_xi))  # (n_xi, Nr)
-            lf3 = leg_factor(x3v.reshape(1))[0]  # (Nr,)
-            lf4 = leg_factor(X4.reshape(n_xi))  # (n_xi, Nr)
-            # leg-1 (phi=0) and leg-3 (phi=beta) phases are x1/sgn-independent
-            # but cheap; build per (i3, sgn).  Pre-form constant leg phases:
-            ph1 = phase(torch.zeros(n_phi, **dd))[None, :, :]  # (1, n_phi, nh)
-            ph3 = phase(beta)[None, :, :]  # (1, n_phi, nh)
-            for sgn in (+1.0, -1.0):
-                phi2 = phiP + sgn * dlt
-                phi4 = torch.atan2(
-                    Py + k2 * torch.sin(phi2), Px + k2 * torch.cos(phi2)
-                )
-                sin42 = torch.sin(phi4 - phi2).abs()
-                jac = 1.0 / torch.clamp(k2 * k4 * sin42, min=1e-14)
-                Wk = torch.where(root_ok, Msq * jac, torch.zeros_like(jac))
-                Wk = Wk * wt * pref * w3v  # (n_xi, n_phi)
-                ph2 = phase(phi2)  # (n_xi, n_phi, nharm)
-                ph4 = phase(phi4)
-                # Per-leg combined (radial, harmonic) factor on the grid:
-                # P_leg[g, l, m] = psi_l(x_leg) w_eq(x_leg) e^{i m Dphi_leg}.
-                ng = n_xi * n_phi
-                p1 = (
-                    lf1[None, None, :, None]
-                    * ph1.expand(n_xi, n_phi, nharm)[..., None, :]
-                ).reshape(ng, nrh)
-                p2 = (lf2[:, None, :, None] * ph2[..., None, :]).reshape(
-                    ng, nrh
-                )
-                p3 = (
-                    lf3[None, None, :, None]
-                    * ph3.expand(n_xi, n_phi, nharm)[..., None, :]
-                ).reshape(ng, nrh)
-                p4 = (lf4[:, None, :, None] * ph4[..., None, :]).reshape(
-                    ng, nrh
-                )
-                # 4 leg-triples with signs: (1,2,3)+ (1,2,4)+ (1,3,4)- (2,3,4)-
-                triples = [
-                    (+1.0, p1, p2, p3),
-                    (+1.0, p1, p2, p4),
-                    (-1.0, p1, p3, p4),
-                    (-1.0, p2, p3, p4),
-                ]
-                Wkf = Wk.reshape(ng)
-                for s3, pa, pb, pc in triples:
-                    wa = pa * (Wkf * s3)[:, None]  # (ng, nrh)
-                    Tc[ix1] += torch.einsum("ga,gb,gc->abc", wa, pb, pc)
+    # Compact complex accumulation (leg-1 reduction), then reconstruct the full
+    # complex vertex Tc[i, la,A, lb,B, lc,C] = Tc_full + Tc_leg1 (broadcast over
+    # leg-1's harmonic axis A, whose phase is constant at phi1 = 0):
+    Tc_full, Tc_leg1, conv = _cubic_complex(
+        x_nodes=x_nodes, psi_coeff=psi_coeff, M=M, kF=kF, m_star=m_star, T=T,
+        epsilon_bg=epsilon_bg, kappa=kappa, well_width=well_width, n_xi=n_xi,
+        xi_cut=xi_cut, n_phi=n_phi,
+    )
+    Tc = Tc_full + Tc_leg1[:, :, None, :, :, :, :]
 
     # Fold complex harmonics -> real basis on each leg, bin by output harmonic
     # mo = ma + mb + mc, and (optionally) gate odd output harmonics to zero.
-    # Reshape leg axes (la, ma) -> separate radial and harmonic axes first.
     U = _real_to_complex(M)
     R = _complex_to_real(M)
-    Tc = Tc.reshape(Nx1, Nr, nharm, Nr, nharm, Nr, nharm)
     mo_idx = ps[:, None, None] + ps[None, :, None] + ps[None, None, :]
     Rfull = torch.zeros(nharm, nharm, nharm, nharm, dtype=torch.complex128)
     for ia in range(nharm):
@@ -641,8 +739,147 @@ def cubic_vertex(
     V = torch.einsum(
         "ZXAYBWC,oABC,Ai,Bj,Ck->ZoXiYjWk", Tc, Rfull, U, U, U
     ).real
-    conv = 4 * torch.cosh(x1t / 2) ** 2
     return -V * conv[:, None, None, None, None, None, None, None]
+
+
+def _quadratic_complex(
+    *,
+    x_nodes: torch.Tensor,
+    psi_coeff: torch.Tensor,
+    M: int,
+    kF: float,
+    m_star: float,
+    T: float,
+    epsilon_bg: float,
+    kappa: float,
+    well_width: float = 0.0,
+    n_xi: int = 24,
+    xi_cut: float = 10.0,
+    n_phi: int = 512,
+):
+    """Quadratic (thermoelectric) e-e vertex as compact complex harmonic tensors.
+
+    Returns ``(Qc_full, Qc_leg1, conv)`` for ``Q2`` (see ``quadratic_vertex``),
+    BEFORE radial Galerkin/null projection and BEFORE the ``-conv`` scaling.
+    Both are indexed by the output-energy node ``f``:
+
+    * ``Qc_full[f, la, A, lb, B]`` (complex, shape
+      ``(Nx1, Nr, 2M+1, Nr, 2M+1)``): the three pair-terms NOT containing the
+      output leg 1 -- ``d2 d3``, ``d2 d4``, ``d3 d4`` -- at full rank-2 angular;
+    * ``Qc_leg1[f, la, lb, B]`` (complex, shape ``(Nx1, Nr, Nr, 2M+1)``): the
+      SUM of the three pair-terms that DO contain leg 1 -- ``d1 d2``, ``d1 d3``,
+      ``d1 d4`` -- with leg 1's angular-harmonic axis elided (its phase is
+      constant at ``phi1 = 0``); ``la`` is leg 1's radial index and ``(lb, B)``
+      the partner leg's (radial, harmonic).  At apply time leg 1 is a
+      convolution: its harmonic is fixed to ``mo - B`` by ``mo = ma + mb``.
+
+    The dense complex ``Qc[f, la, lb, ma, mb]`` of the reference path is
+    recovered as ``Qc_full + Qc_leg1`` broadcast over leg 1's harmonic ``ma``.
+    """
+    E_F = 0.5 * kF**2 / m_star
+    t = T / E_F
+    dd = dict(dtype=torch.float64)
+    Nx1 = len(x_nodes)
+    nharm = 2 * M + 1
+    Nr = psi_coeff.shape[1]
+    ps = torch.arange(-M, M + 1)
+
+    x2, w2, beta, wbeta, cosB, sinB = _shell_quadrature(
+        T, E_F, n_xi, xi_cut, n_phi
+    )
+
+    def weq(x: torch.Tensor) -> torch.Tensor:
+        return 0.25 / torch.cosh(x / 2) ** 2 / T
+
+    def f0(x: torch.Tensor) -> torch.Tensor:
+        return torch.sigmoid(-x)
+
+    def psi_eval(x: torch.Tensor) -> torch.Tensor:  # (...,) -> (..., Nr)
+        res = torch.zeros(x.shape + (Nr,), **dd)
+        for p in range(psi_coeff.shape[0] - 1, -1, -1):
+            res = res * x[..., None] + psi_coeff[p]
+        return res
+
+    def phase(dphi: torch.Tensor) -> torch.Tensor:
+        return torch.exp(1j * dphi[..., None] * ps)
+
+    # Qc_full[f, la, A, lb, B] (non-leg-1 pairs); Qc_leg1[f, la, lb, B] (leg-1
+    # pairs with leg-1 harmonic elided):
+    Qc_full = torch.zeros(Nx1, Nr, nharm, Nr, nharm, dtype=torch.complex128)
+    Qc_leg1 = torch.zeros(Nx1, Nr, Nr, nharm, dtype=torch.complex128)
+    x1t = x_nodes.to(torch.float64)
+
+    for ix1 in range(Nx1):
+        x1v = x1t[ix1]
+        k1 = k_fermi(x1v, kF, t)
+        f1 = f0(x1v)
+        we1 = weq(x1v)
+        psi1 = psi_eval(x1v.reshape(1))[0]  # (Nr,)
+        A1r = we1 * psi1  # (Nr,) leg-1 radial amplitude (phase == 1)
+        X2 = x2[:, None]
+        k2 = k_fermi(X2, kF, t)
+        ph3 = phase(beta)  # (n_phi, nharm) leg-3 phase
+        for i3 in range(n_xi):
+            x3v = x2[i3]
+            w3v = w2[i3]
+            weight_phase, X4 = _shell_geometry(
+                x1v=x1v, X2=X2, k1=k1, k2=k2, x3v=x3v, w2=w2, w3v=w3v,
+                beta=beta, wbeta=wbeta, cosB=cosB, sinB=sinB, T=T, t=t, kF=kF,
+                m_star=m_star, epsilon_bg=epsilon_bg, kappa=kappa,
+                well_width=well_width, n_xi=n_xi, n_phi=n_phi,
+            )
+            f2 = f0(X2).expand(n_xi, n_phi)
+            f3 = f0(x3v)
+            f4 = f0(X4).expand(n_xi, n_phi)
+            we2 = weq(X2)
+            we3 = weq(x3v)
+            we4 = weq(X4)
+            psi2 = psi_eval(X2.reshape(n_xi))  # (n_xi, Nr)
+            psi3 = psi_eval(x3v.reshape(1))[0]  # (Nr,)
+            psi4 = psi_eval(X4.reshape(n_xi))  # (n_xi, Nr)
+            for sgn in (+1.0, -1.0):
+                Wk, phi2, phi4 = weight_phase(sgn)  # (n_xi, n_phi)
+                gshape = (n_xi, n_phi)
+                # partner-leg (radial, harmonic) amplitudes on the grid:
+                A2 = (we2 * psi2)[:, None, :].expand(*gshape, Nr)
+                A3 = (we3 * psi3)[None, None, :].expand(*gshape, Nr)
+                A4 = (we4 * psi4)[:, None, :].expand(*gshape, Nr)
+                ph2 = phase(phi2)
+                ph3g = ph3[None, :, :].expand(*gshape, nharm)
+                ph4 = phase(phi4)
+                ng = n_xi * n_phi
+                # leg-1 pairs: leg 1 contributes radial A1r only; accumulate the
+                # partner leg's (radial, harmonic).  cf is the f0 coefficient.
+                for AB, phB, cf in (
+                    (A2, ph2, f3 + f4 - 1.0),
+                    (A3, ph3g, f2 - f4),
+                    (A4, ph4, f2 - f3),
+                ):
+                    wgt = (Wk * cf).reshape(ng)
+                    # leg-1 radial weighted by the term weight (cast real legs
+                    # to complex to match the complex phase factor):
+                    LA = (A1r[None, :].expand(ng, Nr)
+                          * wgt[:, None]).to(torch.complex128)  # (ng, Nr)
+                    LB = AB.reshape(ng, Nr).to(torch.complex128)
+                    PB = phB.reshape(ng, nharm)
+                    Qc_leg1[ix1] += torch.einsum("gl,gp,gb->lpb", LA, LB, PB)
+                # non-leg-1 pairs (2,3),(2,4),(3,4): full rank-2 angular.
+                for AA, phA, AB, phB, cf in (
+                    (A2, ph2, A3, ph3g, f1 - f4),
+                    (A2, ph2, A4, ph4, f1 - f3),
+                    (A3, ph3g, A4, ph4, -(f1 + f2 - 1.0)),
+                ):
+                    wgt = (Wk * cf).reshape(ng)
+                    LA = AA.reshape(ng, Nr) * wgt[:, None]
+                    LB = AB.reshape(ng, Nr)
+                    PA = phA.reshape(ng, nharm)
+                    PB = phB.reshape(ng, nharm)
+                    Qc_full[ix1] += torch.einsum(
+                        "gx,ga,gy,gb->xayb", LA, PA, LB, PB
+                    )
+
+    conv = 4 * torch.cosh(x1t / 2) ** 2
+    return Qc_full, Qc_leg1, conv
 
 
 def quadratic_vertex(
@@ -683,127 +920,26 @@ def quadratic_vertex(
     product of input modal coefficients ``a_{la,a} a_{lb,b}`` (with the
     ``conv``/decay-sign convention of ``L_blocks``).  The caller Galerkin-
     projects the node axis onto output radial modes.
+
+    This dense form is retained for the reference-oracle acceptance tests; the
+    production operator stores the compact complex tensors of
+    ``_quadratic_complex`` and applies them by convolution.
     """
-    E_F = 0.5 * kF**2 / m_star
-    t = T / E_F
-    dd = dict(dtype=torch.float64)
-    Nx1 = len(x_nodes)
     nharm = 2 * M + 1
-    Nr = psi_coeff.shape[1]
     ps = torch.arange(-M, M + 1)
-
-    lo = -min(xi_cut, 0.8 / t)
-    xg, xw = np.polynomial.legendre.leggauss(n_xi)
-    x2 = torch.tensor(0.5 * (xi_cut + lo) + 0.5 * (xi_cut - lo) * xg, **dd)
-    w2 = torch.tensor(0.5 * (xi_cut - lo) * xw, **dd)
-    pg, pw = np.polynomial.legendre.leggauss(n_phi)
-    beta = torch.tensor(np.pi * (pg + 1.0), **dd)
-    wbeta = torch.tensor(np.pi * pw, **dd)
-
-    def k_of(x: torch.Tensor) -> torch.Tensor:
-        return kF * torch.sqrt(torch.clamp(1.0 + t * x, min=0.0))
-
-    def weq(x: torch.Tensor) -> torch.Tensor:
-        return 0.25 / torch.cosh(x / 2) ** 2 / T
-
-    def f0(x: torch.Tensor) -> torch.Tensor:
-        return torch.sigmoid(-x)
-
-    def psi_eval(x: torch.Tensor) -> torch.Tensor:  # (...,) -> (..., Nr)
-        res = torch.zeros(x.shape + (Nr,), **dd)
-        for p in range(psi_coeff.shape[0] - 1, -1, -1):
-            res = res * x[..., None] + psi_coeff[p]
-        return res
-
-    def phase(dphi: torch.Tensor) -> torch.Tensor:
-        return torch.exp(1j * dphi[..., None] * ps)
-
-    pref = m_star**3 / (2 * np.pi) ** 3
-    # Complex tensor Qc[ix1, la, lb, ma, mb] (radial inputs la,lb; harmonics).
-    Qc = torch.zeros(Nx1, Nr, Nr, nharm, nharm, dtype=torch.complex128)
-    x1t = x_nodes.to(torch.float64)
-    cosB = torch.cos(beta)
-    sinB = torch.sin(beta)
-
-    for ix1 in range(Nx1):
-        x1v = x1t[ix1]
-        k1 = k_of(x1v)
-        f1 = f0(x1v)
-        we1 = weq(x1v)
-        psi1 = psi_eval(x1v.reshape(1))[0]  # (Nr,)
-        X2 = x2[:, None]
-        k2 = k_of(X2)
-        for i3 in range(n_xi):
-            x3v = x2[i3]
-            w3v = w2[i3]
-            X4 = x1v + X2 - x3v
-            k3 = k_of(x3v)
-            k4 = k_of(X4)
-            band_ok = (1.0 + t * X4) > 0.05
-            q_sq = k1**2 + k3**2 - 2 * k1 * k3 * cosB[None, :]
-            q = torch.sqrt(torch.clamp(q_sq, min=1e-300))
-            Px = (k1 - k3 * cosB)[None, :].expand(n_xi, n_phi)
-            Py = (-k3 * sinB)[None, :].expand(n_xi, n_phi)
-            phiP = torch.atan2(Py, Px)
-            cos_arg = (k4**2 - q_sq - k2**2) / torch.clamp(
-                2 * q * k2, min=1e-300
-            )
-            root_ok = band_ok & (cos_arg.abs() <= 1.0 - EDGE_EPS)
-            dlt = torch.arccos(torch.clamp(cos_arg, -1.0, 1.0))
-            Msq = matrix_element_sq(
-                q, epsilon_bg=epsilon_bg, kappa=kappa, well_width=well_width
-            ).expand(n_xi, n_phi)
-            wt = (w2[:, None] * wbeta[None, :]) * (T**2)
-            f2 = f0(X2).expand(n_xi, n_phi)
-            f3 = f0(x3v)
-            f4 = f0(X4).expand(n_xi, n_phi)
-            we2 = weq(X2)
-            we3 = weq(x3v)
-            we4 = weq(X4)
-            psi2 = psi_eval(X2.reshape(n_xi))  # (n_xi, Nr)
-            psi3 = psi_eval(x3v.reshape(1))[0]  # (Nr,)
-            psi4 = psi_eval(X4.reshape(n_xi))  # (n_xi, Nr)
-            for sgn in (+1.0, -1.0):
-                phi2 = phiP + sgn * dlt
-                phi4 = torch.atan2(
-                    Py + k2 * torch.sin(phi2), Px + k2 * torch.cos(phi2)
-                )
-                sin42 = torch.sin(phi4 - phi2).abs()
-                jac = 1.0 / torch.clamp(k2 * k4 * sin42, min=1e-14)
-                Wk = torch.where(root_ok, Msq * jac, torch.zeros_like(jac))
-                Wk = Wk * wt * pref * w3v  # (n_xi, n_phi)
-                # radial-weighted leg amplitudes A_leg = w_eq psi_l(x_leg):
-                gshape = (n_xi, n_phi)
-                A1 = (we1 * psi1)[None, None, :].expand(*gshape, Nr)
-                A2 = (we2 * psi2)[:, None, :].expand(*gshape, Nr)
-                A3 = (we3 * psi3)[None, None, :].expand(*gshape, Nr)
-                A4 = (we4 * psi4)[:, None, :].expand(*gshape, Nr)
-                ph1 = phase(torch.zeros_like(phi2))
-                ph2 = phase(phi2)
-                ph3 = phase(beta[None, :].expand(*gshape))
-                ph4 = phase(phi4)
-                # 6 pair-terms (legA, phaseA, legB, phaseB, f0-coefficient):
-                terms = [
-                    (A1, ph1, A2, ph2, f3 + f4 - 1.0),
-                    (A1, ph1, A3, ph3, f2 - f4),
-                    (A1, ph1, A4, ph4, f2 - f3),
-                    (A2, ph2, A3, ph3, f1 - f4),
-                    (A2, ph2, A4, ph4, f1 - f3),
-                    (A3, ph3, A4, ph4, -(f1 + f2 - 1.0)),
-                ]
-                for AA, phA, AB, phB, cf in terms:
-                    wgt = (Wk * cf).reshape(-1)
-                    LA = AA.reshape(-1, Nr) * wgt[:, None]
-                    LB = AB.reshape(-1, Nr)
-                    PA = phA.reshape(-1, nharm)
-                    PB = phB.reshape(-1, nharm)
-                    Qc[ix1] += torch.einsum(
-                        "gx,ga,gy,gb->xyab", LA, PA, LB, PB
-                    )
+    # Compact complex accumulation (leg-1 reduction), then reconstruct the dense
+    # complex Qc[i, la, lb, ma, mb] = Qc_full + Qc_leg1 (broadcast over leg-1's
+    # harmonic ma, whose phase is constant at phi1 = 0):
+    Qc_full, Qc_leg1, conv = _quadratic_complex(
+        x_nodes=x_nodes, psi_coeff=psi_coeff, M=M, kF=kF, m_star=m_star, T=T,
+        epsilon_bg=epsilon_bg, kappa=kappa, well_width=well_width, n_xi=n_xi,
+        xi_cut=xi_cut, n_phi=n_phi,
+    )
+    # Qc_full[f, la, A, lb, B] -> Qc[f, la, lb, A, B]; add leg-1 (ma broadcast):
+    Qc = Qc_full.permute(0, 1, 3, 2, 4).contiguous()
+    Qc = Qc + Qc_leg1[:, :, :, None, :]  # insert ma axis (size 1 -> broadcast)
 
     # Fold complex harmonics -> real basis, bin by output harmonic mo=ma+mb.
-    # (No parity gating: Q2 follows the additive selection of its inputs and is
-    # validated against the reference oracle to machine precision.)
     U = _real_to_complex(M)
     R = _complex_to_real(M)
     mo_idx = ps[:, None] + ps[None, :]
@@ -817,6 +953,4 @@ def quadratic_vertex(
     V = torch.einsum("zxyoAB,Ai,Bj->zxyoij", tmp, U, U).real
     # reorder to (ix1, co, la, a, lb, b):
     V = V.permute(0, 3, 1, 4, 2, 5).contiguous()
-
-    conv = 4 * torch.cosh(x1t / 2) ** 2
     return -V * conv[:, None, None, None, None, None]
