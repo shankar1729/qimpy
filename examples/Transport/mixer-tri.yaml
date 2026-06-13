@@ -1,5 +1,5 @@
 # Mixer/cross device solved with the finite-volume triangle-mesh transport
-# (finite_volume). The mesh is external (qimpy does not mesh); generate it first with:
+# (spatial_transport). The mesh is external (qimpy does not mesh); generate it first with:
 #     python make_mixer_mesh.py --out mixer-tri.npz
 # Ballistic limit (tau, r_c = inf): source/drain on two arms; the other two
 # arms default to reflective walls.
@@ -13,7 +13,7 @@ fermi_surface:
   r_c: .inf
   specularity: 1.0
 
-finite_volume:
+spatial_transport:
   mesh_file: mixer-tri.npz
   compile: true   # fuse the per-step kernels (~2.5x on GPU); one-time compile cost
   contacts:

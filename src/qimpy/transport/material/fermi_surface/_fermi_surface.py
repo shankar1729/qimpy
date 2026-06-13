@@ -23,8 +23,8 @@ from qimpy import rc
 from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext, InvalidInputException
-from qimpy.transport.collide import EECollisions
-from . import Material
+from .scattering import EEScattering
+from .._material import Material
 
 
 # ----------------------------------------------------------------------------
@@ -163,8 +163,8 @@ class FermiSurface(Material):
         Phenomenological momentum-relaxation time, electron-electron-collision
         time, cyclotron radius (``inf`` for no field), and wall specularity
         ``s in [0, 1]`` (``s=1`` pure specular, ``s=0`` fully diffuse).
-    ee
-        Microscopic e-e collision operator (`collide.EECollisions`);
+    ee_scattering
+        Microscopic e-e collision operator (`scattering.EEScattering`);
         mutually exclusive with the phenomenological ``tau_ee``.
     """
 
@@ -181,7 +181,7 @@ class FermiSurface(Material):
         Nr: int = 1, T: float = 1.0, xi_max: float = 6.0,
         tau_p: float = np.inf, tau_ee: float = np.inf,
         r_c: float = np.inf, specularity: float = 1.0,
-        ee: Optional[Union[EECollisions, dict]] = None,
+        ee_scattering: Optional[Union[EEScattering, dict]] = None,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
@@ -242,14 +242,15 @@ class FermiSurface(Material):
         )
 
         # Microscopic e-e collisions (replaces the tau_ee placeholder):
-        if (ee is not None) or checkpoint_in.member("ee"):
+        if (ee_scattering is not None) or checkpoint_in.member("ee_scattering"):
             if np.isfinite(tau_ee):
                 raise InvalidInputException(
                     "Specify either the phenomenological tau_ee or the"
-                    " microscopic ee collision operator, not both"
+                    " microscopic ee_scattering collision operator, not both"
                 )
             self.add_child(
-                "ee", EECollisions, ee, checkpoint_in, fermi_surface=self
+                "ee_scattering", EEScattering, ee_scattering, checkpoint_in,
+                fermi_surface=self,
             )
 
     # ---- transforms (tensor product of radial and angular pieces) ----
@@ -292,7 +293,7 @@ class FermiSurface(Material):
         and (if r_c is finite) the exact cyclotron generator G acting on the
         angular block within each radial mode, then transforms back.
         """
-        has_ee = hasattr(self, "ee")
+        has_ee = hasattr(self, "ee_scattering")
         if (
             self.rates_modal.abs().sum() == 0
             and self.k_speed == 0.0
@@ -302,7 +303,7 @@ class FermiSurface(Material):
         a = self.to_modes(rho)                                 # (..., Nr*dim_theta)
         a_dot = -self.rates_modal * a
         if has_ee:
-            a_dot = a_dot + self.ee.a_dot(a)
+            a_dot = a_dot + self.ee_scattering.a_dot(a)
         if self.k_speed:
             Nr, dim_t = self.Nr, self.angular.dim
             a4 = a.reshape(*a.shape[:-1], Nr, dim_t)

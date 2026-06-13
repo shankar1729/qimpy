@@ -48,10 +48,10 @@ def run(
         geom_type = cp["/geometry"].attrs.get("variant_name", b"")
         geom_type = (geom_type.decode() if isinstance(geom_type, bytes)
                      else str(geom_type))
-    if geom_type != "finite_volume":
+    if geom_type != "spatial_transport":
         raise ValueError(
-            "qimpy.transport.plot renders the finite-volume 'finite_volume' geometry; "
-            f"checkpoint has variant_name={geom_type!r}."
+            "qimpy.transport.plot renders the finite-volume 'spatial_transport'"
+            f" geometry; checkpoint has variant_name={geom_type!r}."
         )
     run_finite_volume(file_list, mine, output, density, streamlines, dpi)
 

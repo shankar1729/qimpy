@@ -27,7 +27,7 @@ def make_fs(M_theta=8, Nr=1, ee=None, **kwargs):
     process_grid = ProcessGrid(rc.comm, "rk", (-1, 1))
     return FermiSurface(
         kF=KF, vF=KF / M_STAR, M_theta=M_theta, Nr=Nr, T=T0,
-        process_grid=process_grid, ee=ee, **kwargs,
+        process_grid=process_grid, ee_scattering=ee, **kwargs,
     )
 
 
@@ -47,6 +47,25 @@ def test_closed_form_rate():
     K = _kernels.K_table(2, kF=KF, epsilon_bg=EPS_B, kappa=KAPPA)
     gam = _kernels.gamma_linear(K, m_star=M_STAR, T=T0, E_F=E_F)
     assert abs(gam[2] / T0**2 - 1086.8) < 1.0
+
+
+def test_on_shell_rates():
+    """on_shell=True applies the closed-form surface rate (Nr=1 only); the exact
+    default (on_shell=False) is the larger finite-T/E_F thermal-shell rate."""
+    K = _kernels.K_table(4, kF=KF, epsilon_bg=EPS_B, kappa=KAPPA)
+    gam = _kernels.gamma_linear(K, m_star=M_STAR, T=T0, E_F=E_F)
+    fs = make_fs(M_theta=4,
+                 ee=dict(epsilon_bg=EPS_B, on_shell=True, nonlinear=False))
+    # the m=2 (cos) block, l=0 diagonal, equals the closed-form gamma_2 exactly:
+    assert abs(fs.ee_scattering.L_coeff[3, 0, 0].item() - gam[2].item()) \
+        < 1e-12 * gam[2].item()
+    # the exact default is ~30% larger for the shear mode at T/E_F ~ 0.03:
+    fs_x = make_fs(M_theta=4, ee=dict(epsilon_bg=EPS_B, nonlinear=False,
+                                      n_xi=24, n_phi=512, n_xi_proj=12))
+    assert fs_x.ee_scattering.L_coeff[3, 0, 0].item() > 1.2 * gam[2].item()
+    # on_shell=True with the radial (energy) tower Nr>1 is rejected:
+    with pytest.raises(Exception):
+        make_fs(M_theta=4, Nr=2, ee=dict(epsilon_bg=EPS_B, on_shell=True))
 
 
 def test_form_factor():
@@ -152,8 +171,8 @@ def test_cubic_vertex_vs_reference():
             "oxaybzd,xa,yb,zd->o", V[0], c, c, c
         )  # -Phi_dot^co
         # Vc returns -Phi_dot coeffs (decay/conv convention); recover f_dot
-        # real coeffs: f_dot_coeffs = -coeff / conv, conv = 4 at x1 = 0:
-        fdot_re = -coeff / 4.0
+        # real coeffs: f_dot_coeffs = -coeff / conv, conv = 4 T0 at x1 = 0:
+        fdot_re = -coeff / (4.0 * T0)
         # reconstruct f_dot(phi1):
         cols = [torch.ones_like(phi1)]
         for m in range(1, M + 1):
@@ -169,12 +188,15 @@ def test_cubic_vertex_vs_reference():
             (fdot_tensor - C_ref).abs().max().item()
             / C_ref.abs().max().item()
         )
-    # phi1 = 0 (rotationally consistent) matches to the quadrature floor:
-    assert rels0[-1] < 1e-6, f"phi1=0 cubic vs reference: {rels0}"
-    # rotated-phi residual is the shared van-Hove error, order ~1e-1, and the
-    # phi1=0 match is machine precision at both resolutions:
-    assert max(rels0) < 1e-6
-    assert max(rels_grid) < 0.3
+    # The vertex (built at phi1 = 0) and the reference now share the SAME
+    # edge-clustered azimuth grid relative to phi1 (the reference grades phi3 =
+    # phi1 + beta around the beta = pi van-Hove edge, _kernels._beta_grid), so
+    # they sample identical relative kinematics at EVERY phi1 -- the rotated-phi1
+    # residual that used to be O(1e-1) (the unresolved backscattering edge) is
+    # now at float64 roundoff, not just at phi1 = 0:
+    assert rels0[-1] < 1e-9, f"phi1=0 cubic vs reference: {rels0}"
+    assert max(rels0) < 1e-9
+    assert max(rels_grid) < 1e-9, f"rotated-phi1 cubic vs reference: {rels_grid}"
 
 
 def test_cubic_vertex_energy_structured_vs_reference():
@@ -187,7 +209,7 @@ def test_cubic_vertex_energy_structured_vs_reference():
     All base harmonics are kept to |m| <= 2 so every cubic output harmonic
     (|m| <= 6) fits the retained band M = 6; the tensor and the un-truncated
     reference then describe the SAME quantity at phi1 = 0."""
-    from qimpy.transport.material._fermi_surface import RadialBasis
+    from qimpy.transport.material.fermi_surface import RadialBasis
 
     M, Nr = 6, 2
     rb = RadialBasis(Nr, T_temp=T0, xi_max=6.0)
@@ -238,13 +260,13 @@ def test_cubic_vertex_energy_structured_vs_reference():
         )
 
         def fdot0_from(field):
-            # Vc[node, co, la, a, lb, b, lc, c]; node x1=0 (conv=4) ->
-            # -4 Phi_dot coeffs.  Recover f_dot real coeffs and evaluate at
+            # Vc[node, co, la, a, lb, b, lc, c]; node x1=0 (conv=4 T0) ->
+            # -4 T0 Phi_dot coeffs.  Recover f_dot real coeffs and evaluate at
             # phi1 = 0 (only cos channels contribute, e_co(0) = 1):
             coeff = torch.einsum(
                 "oxaybzd,xa,yb,zd->o", Vc[0], field, field, field
             )
-            fdot_re = -coeff / 4.0
+            fdot_re = -coeff / (4.0 * T0)
             val = fdot_re[0]
             for m in range(1, M + 1):
                 val = val + fdot_re[2 * m - 1]
@@ -280,7 +302,7 @@ def test_quadratic_vertex_vs_reference():
     """Criterion 2: the exact quadratic (thermoelectric) vertex reproduces the
     eps^2 term of the reference for an energy-structured (Nr>=2) field at
     phi1=0, and VANISHES for a pure on-Fermi-surface (l=0) field."""
-    from qimpy.transport.material._fermi_surface import RadialBasis
+    from qimpy.transport.material.fermi_surface import RadialBasis
 
     M, Nr = 4, 2
     rb = RadialBasis(Nr, T_temp=T0, xi_max=6.0)
@@ -329,12 +351,12 @@ def test_quadratic_vertex_vs_reference():
             x_nodes=torch.zeros(1), psi_coeff=psi_coeff, M=M,
             n_xi=24, xi_cut=10.0, n_phi=n_phi, **common,
         )
-        # Vq[node, co, la, a, lb, b]; node x1=0 (conv=4): -4*Phi_dot coeffs.
+        # Vq[node, co, la, a, lb, b]; node x1=0 (conv=4 T0): -4 T0*Phi_dot coeffs.
         coeff = torch.einsum("oxayb,xa,yb->o", Vq[0], amod, amod)
         # Vq returns -Phi_dot coeffs (decay/conv convention); recover f_dot:
-        # f_dot_coeffs = -coeff / conv, conv = 4 at x1 = 0; then evaluate at
+        # f_dot_coeffs = -coeff / conv, conv = 4 T0 at x1 = 0; then evaluate at
         # phi1 = 0 (only cos channels contribute, e_co(0) = 1):
-        fdot_re = -coeff / 4.0
+        fdot_re = -coeff / (4.0 * T0)
         fdot0 = fdot_re[0]
         for m in range(1, M + 1):
             fdot0 = fdot0 + fdot_re[2 * m - 1]
@@ -376,7 +398,6 @@ def test_nonlinear_conservation():
             M_theta=M, Nr=Nr,
             ee=dict(
                 epsilon_bg=EPS_B,
-                rates=("closed_form" if Nr == 1 else "exact"),
                 nonlinear=True, n_xi=16, n_phi=256, n_xi_proj=8,
             ),
         )
@@ -390,10 +411,10 @@ def test_nonlinear_conservation():
         torch.manual_seed(3)
         a = 1e-2 * torch.randn(4, Nr * dim, dtype=fs.v.dtype, device=rc.device)
         a_lin = -torch.einsum(  # isolate the nonlinear part of a_dot
-            "cij,...jc->...ic", fs.ee.L_coeff,
+            "cij,...jc->...ic", fs.ee_scattering.L_coeff,
             a.reshape(4, Nr, dim),
         ).reshape(4, Nr * dim)
-        nl = (fs.ee.a_dot(a) - a_lin).reshape(4, Nr, dim)
+        nl = (fs.ee_scattering.a_dot(a) - a_lin).reshape(4, Nr, dim)
         scale = nl.abs().max().item()
         # number (m=0) and energy (m=0, l-weighted) at output mode co=0:
         num = torch.einsum("bl,l->b", nl[..., 0], ones_c.to(nl.dtype))
@@ -421,20 +442,23 @@ def test_even_m_selection():
     fs = make_fs(
         M_theta=6,
         ee=dict(
-            epsilon_bg=EPS_B, rates="closed_form", nonlinear=True,
+            epsilon_bg=EPS_B, nonlinear=True,
             n_xi=16, n_phi=256, n_xi_proj=8,
         ),
     )
     dim = fs.angular.dim
     amp = 0.3 * 4 * T0
 
-    def cubic_only(a):  # isolate the cubic term of a_dot (full modal inputs)
-        a4 = a.reshape(*a.shape[:-1], fs.Nr, dim)
-        ahat = fs.ee._to_complex(a4)
-        # cubic-only binned output, then the shared null projection + real fold
-        # (matches the old null-projected V_cubic contraction):
-        Fhat = fs.ee._apply_cubic(ahat)
-        return fs.ee._finalize_nonlinear(Fhat)[..., 0, :]
+    def cubic_only(a):  # cubic term of a_dot, isolated by amplitude parity
+        def nl(s):
+            aa = s * a
+            a4 = aa.reshape(*aa.shape[:-1], fs.Nr, dim)
+            lin = -torch.einsum("cij,...jc->...ic", fs.ee_scattering.L_coeff, a4)
+            return fs.ee_scattering.a_dot(aa) - lin.reshape(aa.shape)
+        o1 = 0.5 * (nl(1.0) - nl(-1.0))
+        o2 = 0.5 * (nl(2.0) - nl(-2.0))  # odd-parity stencil -> cubic
+        cub = (o2 - 2.0 * o1) / 6.0
+        return cub.reshape(*a.shape[:-1], fs.Nr, dim)[..., 0, :]
 
     # pure even field cos(2 phi) -> purely even cubic output (m=2 self, m=6
     # pumped); odd output channels are EXACTLY zero by the natural selection:
@@ -443,9 +467,9 @@ def test_even_m_selection():
     cub_even = cubic_only(a_even)[0]
     assert cub_even[3].abs() > 0  # m=2 self-interaction
     assert cub_even[11].abs() > 0  # m=6 pumped (2+2+2)
-    for m in (1, 3, 5):  # odd channels exactly zero for a purely even field
-        assert cub_even[2 * m - 1].abs() < 1e-18 * cub_even.abs().max()
-        assert cub_even[2 * m].abs() < 1e-18 * cub_even.abs().max()
+    for m in (1, 3, 5):  # odd channels vanish (to roundoff) for an even field
+        assert cub_even[2 * m - 1].abs() < 1e-12 * cub_even.abs().max()
+        assert cub_even[2 * m].abs() < 1e-12 * cub_even.abs().max()
     # pure odd deformation cos(3 phi): the cubic output is NONZERO -- odd modes
     # relax through the cubic (3+3-3=3 channel populated):
     a_odd = torch.zeros(1, dim, dtype=fs.v.dtype, device=rc.device)
@@ -466,9 +490,9 @@ def test_no_free_parameter():
     """Criterion 5: cubic_scale is gone everywhere (no tunable nonlinear
     scale); the constructor rejects it."""
     import inspect
-    from qimpy.transport.collide._ee import EECollisions
+    from ._ee import EEScattering
 
-    sig = inspect.signature(EECollisions.__init__)
+    sig = inspect.signature(EEScattering.__init__)
     assert "cubic_scale" not in sig.parameters
     with pytest.raises(TypeError):
         make_fs(ee=dict(epsilon_bg=EPS_B, cubic_scale=0.5))
@@ -478,29 +502,29 @@ def test_exact_rates_nr1():
     """Exact thermal-shell rates: corner ratios vs verified reference."""
     fs = make_fs(
         M_theta=4,
-        ee=dict(epsilon_bg=EPS_B, rates="exact", nonlinear=False,
+        ee=dict(epsilon_bg=EPS_B, nonlinear=False,
                 n_xi=24, n_phi=512, n_xi_proj=12),
     )
     K = _kernels.K_table(4, kF=KF, epsilon_bg=EPS_B, kappa=KAPPA)
     gam = _kernels.gamma_linear(K, m_star=M_STAR, T=T0, E_F=E_F)
-    r2 = fs.ee.L_coeff[3, 0, 0].item() / gam[2].item()
-    r4 = fs.ee.L_coeff[7, 0, 0].item() / gam[4].item()
+    r2 = fs.ee_scattering.L_coeff[3, 0, 0].item() / gam[2].item()
+    r4 = fs.ee_scattering.L_coeff[7, 0, 0].item() / gam[4].item()
     assert abs(r2 - 1.299) < 0.03  # reference evaluator: 1.2985
     assert abs(r4 - 1.156) < 0.03  # reference evaluator: 1.155
-    assert fs.ee.L_coeff[1, 0, 0] == 0.0  # momentum: exact null projection
-    assert fs.ee.L_coeff[0, 0, 0] == 0.0  # number
+    assert fs.ee_scattering.L_coeff[1, 0, 0] == 0.0  # momentum: exact null projection
+    assert fs.ee_scattering.L_coeff[0, 0, 0] == 0.0  # number
     # small genuine odd-m relaxation, positive:
-    assert 0.0 <= fs.ee.L_coeff[5, 0, 0] < 0.3 * fs.ee.L_coeff[3, 0, 0]
+    assert 0.0 <= fs.ee_scattering.L_coeff[5, 0, 0] < 0.3 * fs.ee_scattering.L_coeff[3, 0, 0]
 
 
 def test_exact_rates_radial_tower():
     """Nr > 1: conservation nulls, PSD, and the hydrodynamic hierarchy."""
     fs = make_fs(
         M_theta=2, Nr=3,
-        ee=dict(epsilon_bg=EPS_B, rates="exact", nonlinear=False,
+        ee=dict(epsilon_bg=EPS_B, nonlinear=False,
                 n_xi=24, n_phi=512, n_xi_proj=12),
     )
-    L = fs.ee.L_coeff.to(torch.float64)
+    L = fs.ee_scattering.L_coeff.to(torch.float64)
     # symmetry + PSD:
     for c in range(L.shape[0]):
         assert torch.allclose(L[c], L[c].T, atol=1e-18)
@@ -526,7 +550,7 @@ def test_material_integration():
     """FermiSurface.rho_dot with ee: shapes, decay, density conservation."""
     fs = make_fs(
         M_theta=6, tau_p=np.inf,
-        ee=dict(epsilon_bg=EPS_B, rates="closed_form", nonlinear=True,
+        ee=dict(epsilon_bg=EPS_B, nonlinear=True,
                 n_xi=16, n_phi=256, n_xi_proj=8),
     )
     Nk = fs.angular.N_theta
@@ -550,7 +574,7 @@ def test_material_integration():
     assert (a_s * a_dot_s).sum() < 0
     # tau_ee conflict is rejected:
     with pytest.raises(Exception):
-        make_fs(tau_ee=1.0, ee=dict(epsilon_bg=EPS_B, rates="closed_form"))
+        make_fs(tau_ee=1.0, ee=dict(epsilon_bg=EPS_B))
 
 
 def test_L_blocks_pointwise_vs_reference():
@@ -571,6 +595,67 @@ def test_L_blocks_pointwise_vs_reference():
     assert torch.allclose(R[0, :, 0], -phidot, rtol=1e-10)
 
 
+def test_unreduced_vs_reduced_reference():
+    """Independent, reduction-FREE validation of the kinematic reduction.
+
+    ``exact_collision_reference`` and the production vertices share ONE analytic
+    reduction of the collision integral: the momentum delta is resolved in the
+    azimuths, giving the Jacobian ``1/(k2 k4 |sin(phi4-phi2)|)``, two ``phi2``
+    roots and a van-Hove caustic.  Two codes that both use it cannot catch a
+    conceptual error *in* it.  ``unreduced_collision_reference`` shares none of
+    it -- it keeps the energy delta as a narrow Gaussian and integrates
+    ``(x2, phi2, x3, phi3)`` directly, with no kinematic Jacobian and no
+    root-finding (so no caustic).  Agreement therefore tests the reduction
+    itself; a wrong Jacobian, root multiplicity or phase-space prefactor would
+    disagree at O(1), not at the few-% quadrature level.
+
+    The evaluator is deterministic float64 quadrature (no RNG), so the residuals
+    are reproducible across machines.  This uses a fast CI config; the method
+    converges to ``exact_collision_reference`` as ``sigma -> 0`` with
+    ``n_xi2 ~ 1/sigma`` (demonstrated offline for these GaAs params: ``sigma =
+    0.3`` well resolved -> ``< 1 %``; Richardson ``sigma -> 0`` -> ``< 0.4 %``,
+    for both the linear and the full nonlinear bracket)."""
+    common = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
+    w_occ = lambda x: 0.25 / torch.cosh(x / 2) ** 2
+    x1 = torch.zeros(1, dtype=torch.float64)
+    phi1 = torch.tensor([0.3], dtype=torch.float64)  # generic (off-axis) point
+
+    # (1) Linearized operator on a shear (cos 2phi) Fermi-surface mode:
+    df = lambda x, phi: w_occ(x) * torch.cos(2 * phi) / T0
+    red = _kernels.exact_collision_reference(
+        df, x1, phi1, linearize=True, n_xi=32, xi_cut=9.0, n_phi=2048,
+        chunk=1, **common)[0].item()
+    unr = _kernels.unreduced_collision_reference(
+        df, x1, phi1, linearize=True, sigma=0.4, n_phi=128, n_xi3=24,
+        xi_cut=9.0, **common)[0].item()
+    rel_lin = abs(unr - red) / abs(red)
+    assert rel_lin < 0.015, (
+        f"linear reduction mismatch: reduced={red:.4e} unreduced={unr:.4e}"
+        f" (rel={rel_lin:.2e})")
+
+    # (2) FULL nonlinear bracket at a physical O(1) deformation (Phi = cos 2phi
+    # so delta_f = w_occ cos 2phi, |delta_f| <= 0.25, occupations stay in [0,1]).
+    # First confirm the nonlinear content is substantial (so this genuinely
+    # exercises the cubic/quadratic reduction, not just the linear part), then
+    # check the reduction-free value reproduces the reduced one:
+    dfn = lambda x, phi: w_occ(x) * torch.cos(2 * phi)
+    redL = _kernels.exact_collision_reference(
+        dfn, x1, phi1, linearize=True, n_xi=32, xi_cut=9.0, n_phi=2048,
+        chunk=1, **common)[0].item()
+    redF = _kernels.exact_collision_reference(
+        dfn, x1, phi1, linearize=False, n_xi=32, xi_cut=9.0, n_phi=2048,
+        chunk=1, **common)[0].item()
+    assert abs(redF - redL) / abs(redL) > 0.10, (
+        "nonlinear content too small to discriminate the reduction")
+    unrF = _kernels.unreduced_collision_reference(
+        dfn, x1, phi1, linearize=False, sigma=0.4, n_phi=128, n_xi3=24,
+        xi_cut=9.0, **common)[0].item()
+    rel_nl = abs(unrF - redF) / abs(redF)
+    assert rel_nl < 0.08, (
+        f"nonlinear reduction mismatch: reduced={redF:.4e} unreduced={unrF:.4e}"
+        f" (rel={rel_nl:.2e})")
+
+
 def test_a_dot_regression_baseline():
     """The optimized (convolution-form) a_dot reproduces the pre-optimization
     operator bit-for-bit (<= 1e-11).  Baseline saved by the regression harness
@@ -580,8 +665,11 @@ def test_a_dot_regression_baseline():
     import os
 
     here = os.path.dirname(os.path.abspath(__file__))
-    # repo root is .../qimpy-collisions; the baseline lives under _scratch_ee:
-    root = os.path.abspath(os.path.join(here, "..", "..", "..", ".."))
+    # repo root is .../qimpy-collisions; the baseline lives under _scratch_ee
+    # (test is at src/qimpy/transport/material/fermi_surface/scattering -> 6 up):
+    root = os.path.abspath(
+        os.path.join(here, "..", "..", "..", "..", "..", "..")
+    )
     npz = os.path.join(root, "_scratch_ee", "baseline_adot.npz")
     if not os.path.exists(npz):
         pytest.skip(f"regression baseline absent ({npz})")
@@ -594,10 +682,168 @@ def test_a_dot_regression_baseline():
         out_ref = torch.as_tensor(data[key_o])
         fs = make_fs(
             M_theta=M, Nr=Nr,
-            ee=dict(epsilon_bg=EPS_B, rates="exact", nonlinear=True,
+            ee=dict(epsilon_bg=EPS_B, nonlinear=True,
                     n_xi=16, n_phi=256, n_xi_proj=8),
         )
         a_dev = a.to(dtype=fs.v.dtype, device=rc.device)
-        out = fs.ee.a_dot(a_dev).to(dtype=out_ref.dtype, device="cpu")
+        out = fs.ee_scattering.a_dot(a_dev).to(dtype=out_ref.dtype, device="cpu")
         rel = (out - out_ref).abs().max().item() / out_ref.abs().max().item()
         assert rel <= 1e-11, f"a_dot regression (M={M}, Nr={Nr}): rel={rel:.3e}"
+
+
+# ---------------------------------------------------------------------------
+# Matrix-free (kinematic-generator) nonlinear operator: storage-optimal,
+# L-independent representation that must be numerically identical to the dense
+# vertex path to quadrature precision.
+# ---------------------------------------------------------------------------
+def _structured_field(M, Nr, seed=7, scale=1e-2):
+    """A random energy-structured (all radial modes) modal field
+    ``(n_batch, Nr*dim)`` for the matrix-free vs dense comparisons."""
+    dim = 2 * M + 1
+    torch.manual_seed(seed)
+    return scale * torch.randn(4, Nr * dim, dtype=torch.float64, device=rc.device)
+
+
+def _surface_field(M, Nr, scale=1e-2):
+    """A pure on-Fermi-surface (l=0) modal field with a few harmonics."""
+    dim = 2 * M + 1
+    a = torch.zeros(4, Nr, dim, dtype=torch.float64, device=rc.device)
+    torch.manual_seed(11)
+    a[:, 0, :] = scale * torch.randn(4, dim, dtype=torch.float64, device=rc.device)
+    return a.reshape(4, Nr * dim)
+
+
+def test_matrix_free_vs_kernel_reference():
+    """The matrix-free a_dot reproduces the dense-vertex kinematics to roundoff.
+    The dense cubic/quadratic vertices (``_kernels.cubic_vertex`` /
+    ``quadratic_vertex``) are validated against the brute-force reference
+    pointwise by ``test_cubic_vertex_*_vs_reference`` /
+    ``test_quadratic_vertex_vs_reference``.  Here we build the dense nonlinear
+    a_dot inline from those same kernels (with the operator's own radial Galerkin
+    + null projection) and check the matrix-free generator path matches it
+    term-by-term, transferring the reference guarantee to the production operator
+    without a second backend.  Matched quadrature -> agreement to float64
+    roundoff (far below the 1e-9 floor)."""
+    common = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
+
+    def dense_nonlinear(ee, a4):
+        """Dense nonlinear a_dot from the validated vertex kernels + the
+        operator's Galerkin/null projection (the old dense apply, inline)."""
+        fs = ee.fermi_surface
+        M = fs.M_theta
+        psi_coeff, x_fine, P, Ginv, _ = ee._radial_galerkin(T0)
+        kin = dict(M=M, well_width=ee.well_width, n_xi=ee.n_xi,
+                   xi_cut=ee.xi_cut, n_phi=ee.n_phi, **common)
+        Vc = _kernels.cubic_vertex(x_nodes=x_fine, psi_coeff=psi_coeff, **kin)
+        Vq = _kernels.quadratic_vertex(x_nodes=x_fine, psi_coeff=psi_coeff, **kin)
+        GP = Ginv @ P
+        V_cubic = torch.einsum("lf,fcxaybzd->lcxaybzd", GP, Vc)
+        V_quad = torch.einsum("lf,fcxayb->lcxayb", GP, Vq)
+        Proj = ee._radial_null_projectors(T0)
+        V_cubic = torch.einsum("cLl,lcxaybzd->Lcxaybzd", Proj, V_cubic)
+        V_quad = torch.einsum("cLl,lcxayb->Lcxayb", Proj, V_quad)
+        cub = torch.einsum(
+            "lcxaybzd,...xa,...yb,...zd->...lc", V_cubic, a4, a4, a4)
+        qd = torch.einsum("lcxayb,...xa,...yb->...lc", V_quad, a4, a4)
+        return (cub + qd).reshape(*a4.shape[:-2], fs.Nr * fs.angular.dim)
+
+    for (M, Nr) in ((3, 1), (3, 2), (4, 2)):
+        dim = 2 * M + 1
+        fs = make_fs(M_theta=M, Nr=Nr, ee=dict(
+            epsilon_bg=EPS_B, nonlinear=True, n_xi=12, n_phi=128, n_xi_proj=8))
+        ee = fs.ee_scattering
+        torch.manual_seed(7)
+        a = 1e-2 * torch.randn(4, Nr * dim, dtype=fs.v.dtype, device=rc.device)
+        a4 = a.reshape(4, Nr, dim)
+        nl_mf = ee.a_dot(a) + torch.einsum(
+            "cij,...jc->...ic", ee.L_coeff, a4).reshape(4, Nr * dim)
+        nl_ref = dense_nonlinear(ee, a4)
+        rel = (nl_mf - nl_ref).abs().max().item() / nl_ref.abs().max().item()
+        assert rel < 1e-9, f"matrix-free vs kernel (M={M}, Nr={Nr}): rel={rel:.2e}"
+
+
+def test_matrix_free_conservation():
+    """Criterion 3: the matrix-free nonlinear output annihilates number,
+    momentum and energy nulls (post the SAME null projection as the dense path)
+    at Nr=1 and Nr>=2."""
+    for Nr in (1, 3):
+        M = 2
+        fs = make_fs(
+            M_theta=M, Nr=Nr,
+            ee=dict(epsilon_bg=EPS_B,
+                    nonlinear=True,
+                    n_xi=16, n_phi=256, n_xi_proj=8),
+        )
+        dim = fs.angular.dim
+        Ttm = fs.radial.T_to_modes.to(torch.float64).cpu()
+        ones_c = Ttm @ torch.ones(Nr, dtype=torch.float64)
+        t_ratio = T0 / E_F
+        k_c = Ttm @ torch.sqrt(
+            1.0 + t_ratio * fs.radial.xi.to(torch.float64).cpu()
+        )
+        torch.manual_seed(3)
+        a = 1e-2 * torch.randn(4, Nr * dim, dtype=fs.v.dtype, device=rc.device)
+        a_lin = -torch.einsum(
+            "cij,...jc->...ic", fs.ee_scattering.L_coeff, a.reshape(4, Nr, dim),
+        ).reshape(4, Nr * dim)
+        nl = (fs.ee_scattering.a_dot(a) - a_lin).reshape(4, Nr, dim)
+        scale = nl.abs().max().item()
+        num = torch.einsum("bl,l->b", nl[..., 0], ones_c.to(nl.dtype))
+        assert num.abs().max().item() < 1e-10 * scale, "number"
+        if Nr > 1:
+            x_c = Ttm @ fs.radial.xi.to(torch.float64).cpu()
+            ene = torch.einsum("bl,l->b", nl[..., 0], x_c.to(nl.dtype))
+            assert ene.abs().max().item() < 1e-10 * scale, "energy"
+        mc = k_c.to(nl.dtype)
+        momx = torch.einsum("bl,l->b", nl[..., 1], mc)
+        momy = torch.einsum("bl,l->b", nl[..., 2], mc)
+        assert momx.abs().max().item() < 1e-10 * scale, "momentum x"
+        assert momy.abs().max().item() < 1e-10 * scale, "momentum y"
+
+
+def test_matrix_free_storage_flat_in_Nr():
+    """The matrix-free generator footprint is independent of the radial depth
+    L = Nr (it stores only the field-independent kinematic quadrature, plus the
+    tiny psi table), whereas the dense vertex grows steeply with Nr.  Check that
+    doubling Nr leaves the generator's dominant arrays unchanged in size."""
+    sizes = {}
+    for Nr in (2, 4):
+        fs = make_fs(
+            M_theta=4, Nr=Nr,
+            ee=dict(epsilon_bg=EPS_B, nonlinear=True,
+                    n_xi=8, n_phi=64, n_xi_proj=6),
+        )
+        ee = fs.ee_scattering
+        gen = sum(
+            getattr(ee, f"_mf_{k}").numel()
+            for k in ("x4", "dphi2", "dphi4", "Wk")
+        )
+        psi = ee._mf_psi_coeff.numel()
+        sizes[Nr] = (gen, psi)
+    # generator quadrature arrays identical across Nr; psi table tiny (~Nr^2):
+    assert sizes[2][0] == sizes[4][0], (
+        f"generator size changed with Nr: {sizes}"
+    )
+    assert sizes[4][1] <= 64, f"psi table not tiny: {sizes[4][1]}"
+
+
+def test_matrix_free_rho_dot_integration():
+    """The matrix-free operator drives FermiSurface.rho_dot end-to-end: density
+    conserved exactly per spatial point, and the small-amplitude free-energy
+    norm decays (the PSD linear operator dominates)."""
+    fs = make_fs(
+        M_theta=6, tau_p=np.inf,
+        ee=dict(epsilon_bg=EPS_B, nonlinear=True,
+                n_xi=16, n_phi=256, n_xi_proj=8),
+    )
+    Nk = fs.angular.N_theta
+    torch.manual_seed(0)
+    rho = 1e-4 * torch.randn(5, 7, Nk, dtype=fs.v.dtype, device=rc.device)
+    rho_dot = fs.rho_dot(rho, 0.0, 0)
+    assert rho_dot.shape == rho.shape
+    n_dot = rho_dot.mean(dim=-1)
+    assert n_dot.abs().max() < 1e-14 * rho_dot.abs().max()
+    rho_small = 1e-8 * torch.randn(5, 7, Nk, dtype=fs.v.dtype, device=rc.device)
+    a_s = fs.to_modes(rho_small)
+    a_dot_s = fs.to_modes(fs.rho_dot(rho_small, 0.0, 0))
+    assert (a_s * a_dot_s).sum() < 0

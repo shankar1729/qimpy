@@ -9,7 +9,7 @@
 # For a physical GaAs/AlGaAs 2DEG in atomic units (30 nm QW, n = 3.2e15 m^-2,
 # 4.2 K -- the structure of the growth notes) use instead:
 #   kF: 7.5e-3, vF: 0.11194 (m* = 0.067), T: 1.33e-5,
-#   ee: {epsilon_bg: 12.9, well_width: 567.0}   # 30 nm = 567 a.u.
+#   ee_scattering: {epsilon_bg: 12.9, well_width: 567.0}   # 30 nm = 567 a.u.
 # and a mesh with coordinates in a.u. (1 um = 1.89e4 a.u.).
 fermi_surface:
   kF: 1.0
@@ -19,12 +19,14 @@ fermi_surface:
   T: 0.12
   tau_p: .inf       # no impurity/phonon channel; e-e only
   specularity: 1.0  # specular walls: momentum-conserving boundaries
-  ee:
-    epsilon_bg: 0.25  # sets screened-interaction strength (kappa = 2 m*/eps_b)
-    rates: exact      # init-time exact-kinematics rates (thermal-shell)
-    nonlinear: true   # cubic momentum-exchange vertex
+  ee_scattering:
+    epsilon_bg: 0.25  # screened-interaction strength (kappa = 2 m*/eps_b);
+                      # tau_ee and mean free path l_ee are logged at init
+    nonlinear: true   # exact cubic + quadratic vertices
+    # on_shell: false # (default) exact thermal-shell rates; true = closed form (Nr=1)
+    # tol: 1.0e-3     # (default) single accuracy dial; quadrature auto-derived
 
-finite_volume:
+spatial_transport:
   mesh_file: rect-domain-tri.npz
   compile: true
   contacts:

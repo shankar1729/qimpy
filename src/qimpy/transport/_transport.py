@@ -23,7 +23,7 @@ class Transport(TreeNode):
         ab_initio: Optional[Union[AbInitio, dict]] = None,
         fermi_surface: Optional[Union[FermiSurface, dict]] = None,
         single_band: Optional[Union[SingleBand, dict]] = None,
-        finite_volume: Optional[Union[FiniteVolume, dict]] = None,
+        spatial_transport: Optional[Union[FiniteVolume, dict]] = None,
         time_evolution: Optional[Union[TimeEvolution, dict]] = None,
         checkpoint: Optional[str] = None,
         checkpoint_out: Optional[str] = None,
@@ -46,9 +46,9 @@ class Transport(TreeNode):
         single_band
             :yaml:`Single-band model material for energy-resolved charge transport.`
             Exactly one supported material type must be specified.
-        finite_volume
-            :yaml:`Cell-centered finite-volume transport on an external mesh
-            (triangles in 2D, line segments in 1D).`
+        spatial_transport
+            :yaml:`Cell-centered finite-volume spatial transport on an external
+            mesh (triangles in 2D, line segments in 1D).`
             Exactly one supported geometry type must be specified.
         time_evolution
             :yaml:`Time integration options.`
@@ -100,9 +100,9 @@ class Transport(TreeNode):
             "geometry",
             checkpoint_in,
             TreeNode.ChildOptions(
-                "finite_volume",
+                "spatial_transport",
                 FiniteVolume,
-                finite_volume,
+                spatial_transport,
                 material=self.material,
                 process_grid=self.process_grid,
             ),

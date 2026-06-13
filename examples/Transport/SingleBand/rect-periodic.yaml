@@ -13,7 +13,7 @@ single_band:
   T: 50 K
   v: 0.375
 
-finite_volume:
+spatial_transport:
   mesh_file: ../rect-domain-tri.npz
   cfl: 1.0
   contacts:

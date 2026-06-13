@@ -21,7 +21,7 @@ import pytest
 from qimpy import rc
 from qimpy.mpi import ProcessGrid
 from qimpy.transport.material import FermiSurface
-from qimpy.transport.material._fermi_surface import (
+from ._fermi_surface import (
     AngularBasis, RadialBasis, _FermiSurfaceReflector,
 )
 

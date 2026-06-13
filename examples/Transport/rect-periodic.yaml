@@ -7,7 +7,7 @@ ab_initio:
   T: 300 K
   mu: 0.528824 eV
 
-finite_volume:
+spatial_transport:
   mesh_file: rect-domain-tri.npz
   cfl: 1.0
   contacts:
