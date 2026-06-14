@@ -385,12 +385,17 @@ def unreduced_collision_reference(
             d2 = delta_f(X2.expand_as(k4), P2.expand_as(k4))
             d4 = delta_f(x4, phi4)
             if linearize:
+                # Phi_i = d_i / (f0_i (1 - f0_i)); clamp the denominator so the
+                # deep band tail (f0 -> 0 or 1, where d_i = w_eq Phi -> 0 too)
+                # gives 0 rather than 0/0 = NaN.  Unlike the energy-shell
+                # references, x4 here is unbounded above (no shell), so f0(x4)
+                # can underflow to exactly 0 at coarse resolution.
+                def _phi(d, f0):
+                    return d / (f0 * (1 - f0)).clamp_min(1e-300)
                 W = f10 * f20 * (1 - f30) * (1 - f40)
                 bmf = W * (
-                    d3 / (f30 * (1 - f30))
-                    + d4 / (f40 * (1 - f40))
-                    - d1 / (f10 * (1 - f10))
-                    - d2 / (f20 * (1 - f20))
+                    _phi(d3, f30) + _phi(d4, f40)
+                    - _phi(d1, f10) - _phi(d2, f20)
                 )
             else:
                 F1, F2 = f10 + d1, f20 + d2
