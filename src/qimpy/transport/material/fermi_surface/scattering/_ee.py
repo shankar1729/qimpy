@@ -79,6 +79,8 @@ class EEScattering(TreeNode):
         n_phi: int = 0,
         n_xi_proj: int = 0,
         check_convergence: bool = True,
+        backend: str = "auto",
+        recon: str = "auto",
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """
@@ -123,6 +125,33 @@ class EEScattering(TreeNode):
             n_phi is the binding (physics-tied) one -- it must dealias the
             cubic's 3M harmonics and resolve the collinear edge of angular
             width ~T/E_F.
+        backend
+            :yaml:`Nonlinear apply backend: 'auto' (default), 'dense' or
+            'matrix_free'.`  'dense' precontracts the cubic/quadratic vertices
+            into modal tensors and applies them as a few einsums -- per-cell cost
+            ~ (Nr*dim)^4 (a fast dense contraction) instead of the matrix-free
+            quadrature over ~1e5 points, i.e. orders of magnitude faster for
+            small/moderate (M, Nr), but its storage grows as (Nr*dim)^4.
+            'matrix_free' evaluates the reduced operator by quadrature over the
+            stored kinematic generator -- storage flat in Nr, the only option at
+            large (M, Nr).  'auto' uses 'dense' when the vertex fits a fixed
+            storage cap (~0.5 GiB) and 'matrix_free' otherwise.  Both are the
+            same operator (agree to roundoff); this only trades speed vs memory.
+        recon
+            :yaml:`Angular leg-reconstruction backend: 'auto' (default), 'gemm'
+            or 'fft'.`  Only used by the matrix-free backend.  The nonlinear
+            apply rebuilds delta_f at the output-angle grid from its harmonics
+            every call.  The field is real, so the reconstruction is done from
+            the m >= 0 harmonics alone (Hermitian symmetry).  'gemm' uses two
+            real (M+1, Nout) synthesis matmuls (cos/sin) -- faster for
+            small/moderate M and far better on GPU (where the many size-Nout
+            transforms are launch-bound).  'fft' uses a half-spectrum inverse
+            real FFT (irfft), with asymptotically fewer FLOPs at very large M
+            (Nout log Nout vs Nout*M).  'auto' micro-benchmarks both on
+            this machine/device at construction and keeps the faster -- no user
+            tuning, and it adapts to M, dtype and CPU-vs-GPU.  All three are
+            mathematically identical (agree to float64 roundoff); the choice
+            only trades speed.
         """
         super().__init__()
         fs = fermi_surface
@@ -135,6 +164,17 @@ class EEScattering(TreeNode):
         self.nonlinear = nonlinear
         self.on_shell = on_shell
         self.tol = tol
+        if backend not in ("auto", "dense", "matrix_free"):
+            raise InvalidInputException(
+                f"backend must be 'auto', 'dense' or 'matrix_free',"
+                f" got {backend!r}"
+            )
+        self.backend = backend
+        if recon not in ("auto", "gemm", "fft"):
+            raise InvalidInputException(
+                f"recon must be 'auto', 'gemm' or 'fft', got {recon!r}"
+            )
+        self.recon = recon
 
         T = fs.T_temp
         t_ratio = T / self.E_F
@@ -245,17 +285,58 @@ class EEScattering(TreeNode):
             lines.append(rule)
             log.info("\n" + "\n".join(lines))
 
-        # ---- Nonlinear operator (exact cubic + quadratic, matrix-free) ----
+        # ---- Nonlinear operator (exact cubic + quadratic) ----
+        # Two apply backends, same operator: 'dense' precontracts the vertices
+        # into selection-compact complex kernels (fast convolution apply, storage
+        # ~ Nr^4 dim^3) and 'matrix_free' evaluates by quadrature (storage flat
+        # in Nr).  'auto' uses dense when the kernel fits a fixed cap, else
+        # matrix-free.
         if nonlinear:
-            self._build_matrix_free_generator(T)
-            ngen = self._mf_Wk.numel()
-            log.info(
-                "Nonlinear e-e operator enabled (matrix-free kinematic"
-                " generator, L-independent storage):"
-                f" {self._mf_nf} output nodes x {self._mf_nq} quadrature"
-                f" points, {4 * ngen * 8 / 1e6:.1f} MB generator"
-                " (independent of Nr beyond the psi table)"
-            )
+            # Sparse-symmetric dense kernel: persistent storage is tiny
+            # (~Nr (Nr dim)^3 / 36).  The kernel is assembled one output node at a
+            # time, so the binding build memory is a SINGLE node's complex vertex
+            # ~ (Nr dim)^3 (not n_xi_proj x that).  Gate 'auto' on that:
+            Pf = Nr * dim
+            g = self.n_xi * self.n_phi
+            P3 = Pf**3
+            # per-node build peak: the g*Pf^2 GEMM intermediate + one node's
+            # complex (Nr dim)^3 vertex.  This tracks build time too (~Pf^3), so
+            # gating 'auto' on it keeps auto-dense builds fast (~<= a minute);
+            # the construction is feasible well beyond this (no g*Pf^3 blow-up),
+            # so larger sizes can still be forced with backend='dense'.
+            build_bytes = (g * Pf * Pf + P3) * 16 * 2
+            # gate conservatively: this also tracks build time (~Pf^3), so 'auto'
+            # picks dense only where the one-time build is fast (~<= a minute);
+            # the construction no longer blows up (no g*Pf^3), so much larger
+            # sizes remain buildable on demand via backend='dense' (slower).
+            mem_cap = 512 * 1024**2  # ~0.5 GiB per-node build transient
+            if self.backend == "auto":
+                self.backend = (
+                    "dense" if build_bytes <= mem_cap else "matrix_free"
+                )
+            if self.backend == "dense":
+                self._build_dense_vertices(T)
+                vb = (self._sp_S.numel() * self._sp_S.element_size()
+                      + self._sq_S.numel() * self._sq_S.element_size())
+                log.info(
+                    "Nonlinear e-e operator enabled (dense sparse-symmetric"
+                    f" kernel): backend=dense, {self._sp_S.shape[1]} cubic +"
+                    f" {self._sq_S.shape[1]} quadratic packed triples,"
+                    f" {vb / 1e6:.2f} MB (selection + permutation + reality)"
+                )
+            else:
+                self._build_matrix_free_generator(T)
+                if self.recon == "auto":  # self-calibrate the recon backend
+                    self.recon = self._benchmark_recon()
+                ngen = self._mf_Wk.numel()
+                log.info(
+                    "Nonlinear e-e operator enabled (matrix-free kinematic"
+                    " generator, L-independent storage):"
+                    f" {self._mf_nf} output nodes x {self._mf_nq} quadrature"
+                    f" points, {ngen * self._mf_Wk.element_size() / 1e6:.1f} MB"
+                    f" generator (independent of Nr beyond the psi table),"
+                    f" recon={self.recon}"
+                )
 
     def _radial_galerkin(self, T: float):
         """Shared radial Galerkin machinery for the exact-kinematics path.
@@ -484,6 +565,134 @@ class EEScattering(TreeNode):
         self._nh = nh
         self._ps = torch.arange(-M, M + 1).to(device)
 
+    def _build_dense_vertices(self, T: float) -> None:
+        """Precontract the cubic + quadratic vertices into a fully-reduced SPARSE
+        SYMMETRIC modal kernel for the dense backend, exploiting every exact
+        symmetry simultaneously:
+
+        * additive angular selection ``mo = sum of input m`` AND output
+          truncation (only triples with ``0 <= mo <= M`` are kept -- harmonics
+          outside the retained band are projected out anyway);
+        * permutation symmetry of the (identical-field) input legs -- store one
+          entry per UNORDERED ``(l, m)`` triple, with the leg-ordering
+          multiplicity folded into the value;
+        * output reality (``f_dot`` is real -> Hermitian harmonics), so only the
+          ``mo >= 0`` half is stored and the ``mo < 0`` half is the conjugate;
+        * reflection (``phi -> -phi``) symmetry of the isotropic operator, which
+          with reality makes the complex-harmonic kernel REAL -> stored real
+          (another 2x, and the apply is real-kernel x complex-field).
+
+        Storage and apply both scale as ``~ Nr (Nr dim)^3 / 36`` (vs the dense
+        ``Nr^4 dim^4``).  The energy-parity ('even sigma') radial selection is
+        NOT exploited: it is only leading order in ``T/E_F`` (broken by band
+        curvature), so using it would be an approximation, not an exact symmetry.
+        Built in fp64, stored in the working precision; the per-output-harmonic
+        null projection + real fold are shared with the matrix-free path via
+        ``_finalize_nonlinear``."""
+        fs = self.fermi_surface
+        device = rc.device
+        self._build_harmonic_tables()  # _U, _R, _null_proj
+        M = fs.M_theta
+        nh = 2 * M + 1
+        Nr = fs.Nr
+        Pflat = Nr * nh  # flat leg index p = l*nh + (m + M)
+        psi_coeff, x_fine, P, Ginv, _ = self._radial_galerkin(T)
+        # Run the build GEMM/accumulator in the working precision and on
+        # rc.device: complex64 -> ~2x faster, half-memory fp32 build (q-sum error
+        # << tol); an accelerator device -> the GEMM (the build bottleneck) runs
+        # on the GPU (kinematics stay fp64 on host for accuracy).
+        wdt = torch.complex64 if fs.v.dtype == torch.float32 else torch.complex128
+        kin = dict(
+            M=M, kF=fs.kF, m_star=self.m_star, T=T, epsilon_bg=self.epsilon_bg,
+            kappa=self.kappa, well_width=self.well_width, n_xi=self.n_xi,
+            xi_cut=self.xi_cut, n_phi=self.n_phi,
+            work_dtype=wdt, work_device=device,
+        )
+        pm = (torch.arange(Pflat, device=device) % nh) - M  # m of each leg index
+
+        # Enumerate the kept UNORDERED triples / pairs once (output-node
+        # independent): selection + output truncation + reality (0 <= sum m <= M)
+        # AND permutation packing (p1 <= p2 <= p3).
+        tri = torch.combinations(
+            torch.arange(Pflat, device=device), r=3, with_replacement=True)
+        sm = pm[tri[:, 0]] + pm[tri[:, 1]] + pm[tri[:, 2]]
+        keep = (sm >= 0) & (sm <= M)
+        tri, sm = tri[keep], sm[keep]
+        p1, p2, p3 = tri[:, 0], tri[:, 1], tri[:, 2]
+        e1, e2 = (p1 == p2), (p2 == p3)
+        mult = torch.where(e1 & e2, 1, torch.where(e1 | e2, 3, 6))
+        pr = torch.combinations(
+            torch.arange(Pflat, device=device), r=2, with_replacement=True)
+        smq = pm[pr[:, 0]] + pm[pr[:, 1]]
+        keepq = (smq >= 0) & (smq <= M)
+        pr, smq = pr[keepq], smq[keepq]
+        q1, q2 = pr[:, 0], pr[:, 1]
+        multq = torch.where(q1 == q2, 1, 2)
+
+        # radial node -> output-mode projection with the (-conv) decay/solver-
+        # field scaling folded in (conv = 1 / w_eq = 4 T cosh^2(x1/2)):
+        conv = 4.0 * T * torch.cosh(x_fine.to(torch.float64) / 2) ** 2
+        GPc = ((Ginv @ P) * (-conv)[None, :]).to(device)  # (Nr, n_fine), real
+        Nx1 = x_fine.shape[0]
+        Sc = torch.zeros(Nr, p1.shape[0], dtype=wdt, device=device)
+        Sq = torch.zeros(Nr, q1.shape[0], dtype=wdt, device=device)
+        # CONSTRUCTION: assemble the reduced kernel directly, building the complex
+        # vertex ONE output node at a time and packing it -- peak build memory is
+        # a single node's (Nr dim)^3, never the full n_xi_proj (Nr dim)^3 tensor.
+        # The symmetric value at each unordered triple is the mean over the 6 leg
+        # orderings (gathered directly, no full symmetric tensor formed).  Per-node
+        # contributions are independent, so summing GPc[:, f] * packed(Tc_f) over
+        # nodes reproduces the full-tensor build exactly.
+        for f in range(Nx1):
+            Tc1, _c = _kernels.cubic_kernel_complex(
+                x_nodes=x_fine[f:f + 1], psi_coeff=psi_coeff, **kin)
+            Tc1 = Tc1.reshape(Pflat, Pflat, Pflat)
+            s0 = (Tc1[p1, p2, p3] + Tc1[p1, p3, p2] + Tc1[p2, p1, p3]
+                  + Tc1[p2, p3, p1] + Tc1[p3, p1, p2] + Tc1[p3, p2, p1]) / 6.0
+            Sc += GPc[:, f:f + 1].to(s0.dtype) * s0[None, :]
+            del Tc1, s0
+            Qc1, _c = _kernels.quadratic_kernel_complex(
+                x_nodes=x_fine[f:f + 1], psi_coeff=psi_coeff, **kin)
+            Qc1 = Qc1.reshape(Pflat, Pflat)
+            q0 = 0.5 * (Qc1[q1, q2] + Qc1[q2, q1])
+            Sq += GPc[:, f:f + 1].to(q0.dtype) * q0[None, :]
+            del Qc1, q0
+        # reflection (phi -> -phi) symmetry of the isotropic operator + reality
+        # make the complex-harmonic kernel REAL (verified to ~1e-14) -> store real
+        # (2x less memory, real x complex applies):
+        self._sp_S = (Sc * mult[None, :]).real.to(dtype=fs.v.dtype, device=device)
+        self._sp_p1, self._sp_p2, self._sp_p3 = p1, p2, p3
+        self._sp_mo = sm  # output harmonic in 0..M (the mo >= 0 half)
+        self._sq_S = (Sq * multq[None, :]).real.to(dtype=fs.v.dtype, device=device)
+        self._sq_q1, self._sq_q2 = q1, q2
+        self._sq_mo = smq
+        self._dc_M, self._dc_nh = M, nh
+
+    def _apply_dense(self, a4: torch.Tensor) -> torch.Tensor:
+        """Sparse-symmetric dense apply.  Gather the field at each packed
+        ``(l, m)`` triple/pair, multiply by the (multiplicity-folded) symmetric
+        kernel, scatter into the ``mo >= 0`` half by the additive rule, mirror
+        the ``mo < 0`` half by conjugation (output reality), and finish with the
+        SAME null projection + real fold as the matrix-free path.  ``a4``:
+        (..., Nr, dim) -> (..., Nr, dim)."""
+        cdt = self._U.dtype
+        M, nh = self._dc_M, self._dc_nh
+        Nr = a4.shape[-2]
+        ahat = torch.einsum("mc,...lc->...lm", self._U, a4.to(cdt))
+        v = ahat.reshape(*ahat.shape[:-2], -1)  # (.., P) flat (l, m)
+        Fhalf = ahat.new_zeros(*v.shape[:-1], Nr, M + 1)  # mo = 0..M
+        # cubic:
+        vvv = v[..., self._sp_p1] * v[..., self._sp_p2] * v[..., self._sp_p3]
+        Fhalf.index_add_(-1, self._sp_mo, self._sp_S * vvv[..., None, :])
+        # quadratic:
+        vv = v[..., self._sq_q1] * v[..., self._sq_q2]
+        Fhalf.index_add_(-1, self._sq_mo, self._sq_S * vv[..., None, :])
+        # assemble full Hermitian Fhat[.., Nr, nh]: mo>=0 direct, mo<0 conjugate:
+        Fhat = ahat.new_zeros(*Fhalf.shape[:-1], nh)
+        Fhat[..., M:] = Fhalf                       # mo = 0..M -> idx M..2M
+        Fhat[..., :M] = Fhalf[..., 1:].flip(-1).conj()  # mo = -M..-1
+        return self._finalize_nonlinear(Fhat)
+
     def a_dot(self, a: torch.Tensor) -> torch.Tensor:
         """Collision contribution to modal coefficients' time derivative.
 
@@ -497,10 +706,12 @@ class EEScattering(TreeNode):
         # Linear: block-diagonal in harmonic, matrix over radial modes:
         out = -torch.einsum("cij,...jc->...ic", self.L_coeff, a4)
         if self.nonlinear:
-            # Matrix-free: evaluate the reduced (cubic + quadratic) operator by
-            # quadrature over the stored field-independent generator -- no mode
-            # tensor formed.  The linear part stays in L_coeff above.
-            out = out + self._apply_matrix_free(a4).to(out.dtype)
+            # Add the exact cubic + quadratic operator via the selected backend
+            # (dense precontracted vertex, or matrix-free quadrature).  The
+            # linear part stays in L_coeff above.
+            nl = (self._apply_dense(a4) if self.backend == "dense"
+                  else self._apply_matrix_free(a4))
+            out = out + nl.to(out.dtype)
         return out.reshape(shape_in)
 
     def _finalize_nonlinear(self, Fhat: torch.Tensor) -> torch.Tensor:
@@ -605,7 +816,13 @@ class EEScattering(TreeNode):
         cdtype = torch.complex64 if dtype == torch.float32 else torch.complex128
 
         def _to(x):
-            return x.to(dtype=torch.float64, device=device)
+            # Store the generator in the WORKING precision (fp64 default, fp32
+            # when requested): the kinematics are built in fp64 above, this only
+            # sets storage/apply precision.  fp32 ~halves memory and roughly
+            # doubles apply throughput; the q-sum error (~sqrt(nq) eps32 ~ 1e-4)
+            # stays well under the ~1e-3 quadrature tolerance, and conservation
+            # is exact by the null projection regardless of dtype.
+            return x.to(dtype=dtype, device=device)
 
         # x1 is constant per output node (stored as (Nf, 1) -> broadcasts over
         # the quadrature axis); x2, x3, dphi3 = beta tile across it (stored as
@@ -651,6 +868,28 @@ class EEScattering(TreeNode):
         self._mf_expmn = (
             torch.exp(-1j * phi1[None, :] * ps[:, None]) / Nout
         ).to(dtype=cdtype, device=device)  # (nh, Nout)
+        # Real (Hermitian) SYNTHESIS of the leg field at the output-angle grid.
+        # The modal field is real, so ahat[-m] = conj(ahat[m]); the leg phase
+        # e^{i m dphi} preserves this (B[-m] = conj(B[m])) and the reconstructed
+        # Phi(phi1) = sum_m B_m e^{i m phi1} is REAL.  Synthesize it from the
+        # m >= 0 half alone:
+        #   Phi = Re B_0 + 2 sum_{m>0} [Re B_m cos(m phi1) - Im B_m sin(m phi1)]
+        #       = ReB . cos_syn - ImB . sin_syn ,
+        # with the doubling (1, 2, 2, ...) folded into the (M+1, Nout) real
+        # matrices.  This halves the leg contraction (only the m >= 0 half of
+        # ahat enters) and replaces the complex (2M+1, Nout) synthesis with two
+        # real (M+1, Nout) GEMMs -- ~2-4x less work, real arithmetic, and Phi is
+        # real with no discarded imaginary part.  The fft backend uses the
+        # equivalent half-spectrum irfft (see _apply_matrix_free_chunk):
+        ps_pos = torch.arange(0, M + 1, dtype=torch.float64)  # m = 0..M
+        cfac = torch.full((M + 1,), 2.0, dtype=torch.float64)
+        cfac[0] = 1.0
+        ang = ps_pos[:, None] * phi1[None, :]  # (M+1, Nout)
+        self._mf_cos = (cfac[:, None] * torch.cos(ang)).to(
+            dtype=dtype, device=device)  # (M+1, Nout) real
+        self._mf_sin = (cfac[:, None] * torch.sin(ang)).to(
+            dtype=dtype, device=device)  # (M+1, Nout) real
+        self._mf_ps_pos = ps_pos.to(dtype=dtype, device=device)  # (M+1,) phase
         self._mf_Nout = Nout
         # Only the light harmonic transforms + null projectors -- NOT the dense
         # convolution tables (the O(nh^4) Bin3 would be ~70 GB at M=128 and is
@@ -660,11 +899,56 @@ class EEScattering(TreeNode):
     def _mf_psi_eval(self, x: torch.Tensor) -> torch.Tensor:
         """Radial basis ``psi_l(x)`` (power-basis Horner), shape ``x.shape+(Nr,)``."""
         pc = self._mf_psi_coeff
-        res = torch.zeros(x.shape + (pc.shape[1],), dtype=torch.float64,
+        res = torch.zeros(x.shape + (pc.shape[1],), dtype=pc.dtype,
                           device=x.device)
         for p in range(pc.shape[0] - 1, -1, -1):
             res = res * x[..., None] + pc[p]
         return res
+
+    def _benchmark_recon(self) -> str:
+        """Time both leg-reconstruction backends on a small representative slice
+        and return the faster ('gemm' or 'fft').  Self-calibrating: adapts to M,
+        dtype and CPU/GPU with no hardcoded crossover.  The backend ranking is
+        independent of the spatial batch and q-block size (the reconstruction is
+        linear in both), so a small slice predicts the full apply.  Falls back to
+        'gemm' (the safe, GPU-friendly choice) on any error."""
+        import time
+
+        try:
+            M = self.fermi_surface.M_theta
+            Nout, Nf, nq = self._mf_Nout, self._mf_nf, self._mf_nq
+            cos_syn, sin_syn = self._mf_cos, self._mf_sin
+            rdt, dev = cos_syn.dtype, cos_syn.device
+            cdt = torch.complex64 if rdt == torch.float32 else torch.complex128
+            Nfreq = Nout // 2 + 1
+            qb = min(nq, 1024)  # small q-slice; ranking is q-linear
+            ReB = torch.randn(1, Nf, qb, M + 1, dtype=rdt, device=dev)
+            ImB = torch.randn(1, Nf, qb, M + 1, dtype=rdt, device=dev)
+
+            def gemm():  # two real (M+1, Nout) synthesis GEMMs
+                return (torch.einsum("...fqm,mn->...nfq", ReB, cos_syn)
+                        - torch.einsum("...fqm,mn->...nfq", ImB, sin_syn))
+
+            def fft():  # half-spectrum irfft on the m >= 0 harmonics
+                spec = torch.zeros(1, Nf, qb, Nfreq, dtype=cdt, device=dev)
+                spec[..., : M + 1] = torch.complex(ReB, ImB)
+                return torch.movedim(
+                    torch.fft.irfft(spec, n=Nout, dim=-1) * Nout, -1, -3)
+
+            def clock(fn, reps=5):
+                fn()  # warm up (allocations, FFT plan, caches)
+                if dev.type == "cuda":
+                    torch.cuda.synchronize()
+                t0 = time.perf_counter()
+                for _ in range(reps):
+                    fn()
+                if dev.type == "cuda":
+                    torch.cuda.synchronize()
+                return (time.perf_counter() - t0) / reps
+
+            return "gemm" if clock(gemm) <= clock(fft) else "fft"
+        except Exception:
+            return "gemm"
 
     def _apply_matrix_free(self, a4: torch.Tensor) -> torch.Tensor:
         """Batch-chunked matrix-free apply.  The per-cell apply allocates
@@ -692,56 +976,107 @@ class EEScattering(TreeNode):
         over the stored kinematic generator -- no mode tensor formed.
 
         ``a4``: modal field ``[..., Nr, dim_theta]``.  Reconstructs ``delta_f``
-        at the four legs from the complex harmonics, evaluates the cubic
+        at the four legs from the modal harmonics, evaluates the cubic
         ``C3 = d1 d2 (d3+d4) - d3 d4 (d1+d2)`` and the particle-hole-odd
         quadratic ``Q2`` of ``(B-F)`` at an output-angle grid, integrates the
         quadrature, projects to output radial modes (``GPc``) and to output
         angular harmonics (DFT in ``phi_1``), then applies the SAME null
         projection + real fold as the dense path.  Returns ``[..., Nr, dim]``.
+
+        Two exact optimizations vs. a naive evaluation:
+
+        * REAL (Hermitian) reconstruction -- the field is real so each leg's
+          harmonics ``B_m`` are Hermitian and the reconstructed ``Phi`` is real;
+          it is synthesized from the ``m >= 0`` half with the real
+          ``cos``/``sin`` matrices (see ``_build_matrix_free_generator``),
+          halving the leg contraction and the synthesis;
+        * LEG-1 HOISTING -- the output-energy leg sits at ``dphi_1 = 0`` with a
+          ``q``-independent radial factor, so ``d1`` is independent of the
+          quadrature point; it is reconstructed ONCE and broadcast, instead of
+          being rebuilt for every quadrature point.
+
+        NOT exploited: the reflection ``phi -> -phi`` (which maps the quadrature
+        point ``(beta, root)`` to ``(2 pi - beta, other root)``).  It is an exact
+        symmetry of the OPERATOR, but it relates the operator on ``delta_f`` to
+        the operator on the reflected field ``delta_f(-phi)``; for a general
+        (non-reflection-symmetric) input the two halves of the ``beta`` grid give
+        genuinely different contributions (the leg harmonics transform as
+        ``C_m e^{-i m dphi}``, not the conjugate/reverse of the originals), so it
+        does NOT halve the quadrature without approximating.  Like the
+        energy-parity selection in the dense path, it is therefore left out.
         """
         fs = self.fermi_surface
         M, Nr = fs.M_theta, fs.Nr
         cdt = self._U.dtype
-        ps = torch.arange(-M, M + 1, device=a4.device)
-        # complex harmonics of the modal field: ahat[..., l, m]:
+        # complex harmonics of the modal field; only the m >= 0 half enters the
+        # Hermitian (real) reconstruction:
         ahat = torch.einsum("mc,...lc->...lm", self._U, a4.to(cdt))  # (..,Nr,nh)
+        aRe = ahat[..., M:].real  # (.., Nr, M+1)  m = 0..M
+        aIm = ahat[..., M:].imag
 
         Nf, nq, Nout = self._mf_nf, self._mf_nq, self._mf_Nout
         batch = ahat.shape[:-2]
         nbatch = int(np.prod(batch)) if batch else 1
-        legs = ("x1", "x2", "x3", "x4")
-        # Full (Nf, nq) views of the field-independent leg tables (broadcast axes
-        # expanded as views, no copy; x1 const per node, x2/x3/dphi3 const):
-        psi_f = {leg: self._mf_psi[leg].to(cdt).expand(Nf, nq, -1) for leg in legs}
-        weq_f = {leg: self._mf_weq[leg].expand(Nf, nq) for leg in legs}
-        f0_f = {leg: self._mf_f0[leg].expand(Nf, nq) for leg in legs}
-        zero = self._mf_dphi3.new_zeros(1, nq)  # dphi1 = 0 (broadcast)
-        dphi_f = {"x1": zero.expand(Nf, nq), "x2": self._mf_dphi2,
-                  "x3": self._mf_dphi3.expand(Nf, nq), "x4": self._mf_dphi4}
+        legs = ("x2", "x3", "x4")  # leg x1 is hoisted out (q-independent)
+        psi_r = {leg: self._mf_psi[leg].expand(Nf, nq, -1) for leg in legs}
+        weq_q = {leg: self._mf_weq[leg].expand(Nf, nq) for leg in legs}
+        f0_q = {leg: self._mf_f0[leg].expand(Nf, nq)
+                for leg in ("x1", "x2", "x3", "x4")}
+        dphi_q = {"x2": self._mf_dphi2, "x3": self._mf_dphi3.expand(Nf, nq),
+                  "x4": self._mf_dphi4}
+        cos_syn, sin_syn = self._mf_cos, self._mf_sin  # (M+1, Nout) real
+        ps_pos = self._mf_ps_pos  # (M+1,) = 0..M
+        use_fft = self.recon == "fft"
+        Nfreq = Nout // 2 + 1  # rfft half-spectrum length
 
-        # nq-axis chunking: the quadrature is a sum over q, so accumulate it in
+        def synth(ReB, ImB, spec, axes, mv):
+            """Real reconstruction of Phi from the m>=0 harmonics (ReB, ImB).
+            ``axes`` is the einsum spec for the gemm path; ``spec`` is a
+            preallocated complex half-spectrum buffer and ``mv`` the movedim
+            destination (placing the angle axis) for the fft path."""
+            if use_fft:
+                spec[..., : M + 1] = torch.complex(ReB, ImB)
+                Phi = torch.fft.irfft(spec, n=Nout, dim=-1) * Nout
+                return torch.movedim(Phi, -1, mv)
+            return (torch.einsum(axes, ReB, cos_syn)
+                    - torch.einsum(axes, ImB, sin_syn))
+
+        # ---- leg 1 (output-energy leg): q-independent, dphi1 = 0, build once --
+        psi1 = self._mf_psi["x1"][:, 0, :]  # (Nf, Nr) real
+        cR1 = torch.einsum("...lm,fl->...fm", aRe, psi1)  # (.., Nf, M+1)
+        cI1 = torch.einsum("...lm,fl->...fm", aIm, psi1)
+        spec1 = (ahat.new_zeros(*batch, Nf, Nfreq) if use_fft else None)
+        Phi1 = synth(cR1, cI1, spec1, "...fm,mn->...nf", -2)  # (.., Nout, Nf)
+        d1 = (self._mf_weq["x1"][:, 0] * Phi1).unsqueeze(-1)  # (.., Nout, Nf, 1)
+        f1_all = f0_q["x1"]  # (Nf, nq)
+
+        # nq-axis chunking: the quadrature is a sum over q, accumulated in
         # q-blocks sized to a memory budget; the (Nout, Nf, nq) leg
         # reconstructions then never exceed it regardless of M / n_phi.  The
         # block is the full nq when it fits (single pass -> bit-identical and no
         # loop overhead); only larger problems split (then summation reorders at
-        # the ~1e-15 level).  Reusing one zero-padded FFT buffer across the four
-        # legs avoids re-zeroing it each leg.
+        # the ~1e-15 level).
         per_q = Nout * Nf * 128 * nbatch  # ~peak bytes per quadrature point
         qchunk = max(1, min(nq, int((4 * 1024**3) // max(per_q, 1))))
         fdot = 0
         for q0 in range(0, nq, qchunk):
             q1 = min(q0 + qchunk, nq)
-            pad = ahat.new_zeros(*batch, Nf, q1 - q0, Nout)  # reused over legs
+            qb = q1 - q0
+            spec = (ahat.new_zeros(*batch, Nf, qb, Nfreq) if use_fft else None)
             d = []
             for leg in legs:
-                B = torch.einsum("...lm,fql->...fqm", ahat, psi_f[leg][:, q0:q1])
-                B = B * torch.exp(1j * dphi_f[leg][:, q0:q1, None] * ps)
-                pad[..., : M + 1] = B[..., M:]      # m = 0..M  -> bins 0..M
-                pad[..., Nout - M:] = B[..., :M]     # m = -M..-1; middle stays 0
-                Phi = torch.fft.ifft(pad, dim=-1) * Nout  # (..,Nf,nb,Nout)
-                d.append((weq_f[leg][:, q0:q1] * torch.movedim(Phi, -1, -3)).real)
-            d1, d2, d3, d4 = d
-            f1, f2, f3, f4 = (f0_f[leg][:, q0:q1] for leg in legs)
+                psi_leg = psi_r[leg][:, q0:q1]  # (Nf, qb, Nr)
+                cR = torch.einsum("...lm,fql->...fqm", aRe, psi_leg)
+                cI = torch.einsum("...lm,fql->...fqm", aIm, psi_leg)
+                mdphi = dphi_q[leg][:, q0:q1, None] * ps_pos  # (Nf, qb, M+1)
+                cmd, smd = torch.cos(mdphi), torch.sin(mdphi)
+                ReB = cR * cmd - cI * smd  # leg phase e^{i m dphi}, real part
+                ImB = cR * smd + cI * cmd  # ... imaginary part
+                Phi = synth(ReB, ImB, spec, "...fqm,mn->...nfq", -3)  # (..,Nout,Nf,q)
+                d.append(weq_q[leg][:, q0:q1] * Phi)
+            d2, d3, d4 = d
+            f1 = f1_all[:, q0:q1]
+            f2, f3, f4 = (f0_q[leg][:, q0:q1] for leg in legs)
             # cubic (f0-independent) + particle-hole-odd quadratic of (B-F):
             C3 = d1 * d2 * (d3 + d4) - d3 * d4 * (d1 + d2)
             Q2 = (d1 * d2 * (f3 + f4 - 1.0) + d1 * d3 * (f2 - f4)

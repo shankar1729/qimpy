@@ -699,8 +699,18 @@ def _cubic_complex(
     n_xi: int = 24,
     xi_cut: float = 10.0,
     n_phi: int = 512,
+    work_dtype: torch.dtype = torch.complex128,
+    work_device=None,
 ):
     """Cubic e-e vertex accumulated as compact complex harmonic tensors.
+
+    ``work_dtype`` / ``work_device`` set the precision and device of the
+    accumulator and the GEMM (the build bottleneck): pass ``complex64`` for a
+    ~2x faster, half-memory fp32 build (the q-sum error ~sqrt(nq) eps32 stays
+    well under the quadrature tol), and an accelerator device to run the GEMM on
+    the GPU.  The kinematics are always evaluated in fp64 for accuracy; only the
+    leg products / accumulation use ``work_dtype``.  Defaults reproduce the
+    fp64-CPU build bit-for-bit (used by the reference-oracle vertices).
 
     Returns ``(Tc_full, Tc_leg1, conv)`` for the cubic part
     ``C3 = d1 d2 (d3+d4) - d3 d4 (d1+d2)`` of ``(B-F)``, BEFORE any radial
@@ -757,8 +767,10 @@ def _cubic_complex(
     ng = n_xi * n_phi
     # (2,3,4)- triple at full rank-3 angular; leg-1 triples with leg-1 harmonic
     # elided (constant phase at phi1 = 0):
-    Tc_full = torch.zeros(Nx1, nrh, nrh, nrh, dtype=torch.complex128)
-    Tc_leg1 = torch.zeros(Nx1, Nr, nrh, nrh, dtype=torch.complex128)
+    Tc_full = torch.zeros(Nx1, nrh, nrh, nrh, dtype=work_dtype,
+                          device=work_device)
+    Tc_leg1 = torch.zeros(Nx1, Nr, nrh, nrh, dtype=work_dtype,
+                          device=work_device)
     x1t = x_nodes.to(torch.float64)
 
     for ix1 in range(Nx1):  # phi1 = 0 canonical (isotropy); stream over x1
@@ -785,28 +797,40 @@ def _cubic_complex(
                 ph2 = phase(phi2)  # (n_xi, n_phi, nharm)
                 ph4 = phase(phi4)
                 # Combined (radial, harmonic) factors on the grid for legs 2-4:
-                p2 = (lf2[:, None, :, None] * ph2[..., None, :]).reshape(ng, nrh)
+                # leg products in fp64, then cast to the work precision/device
+                # for the GEMM (the bottleneck) -- fp32/GPU speed without losing
+                # kinematic accuracy:
+                _w = dict(dtype=work_dtype, device=work_device)
+                p2 = (lf2[:, None, :, None]
+                      * ph2[..., None, :]).reshape(ng, nrh).to(**_w)
                 p3 = (
                     lf3[None, None, :, None]
                     * ph3.expand(n_xi, n_phi, nharm)[..., None, :]
-                ).reshape(ng, nrh)
-                p4 = (lf4[:, None, :, None] * ph4[..., None, :]).reshape(ng, nrh)
-                Wkf = Wk.reshape(ng)
-                # (2,3,4)- triple, full rank-3 angular:
+                ).reshape(ng, nrh).to(**_w)
+                p4 = (lf4[:, None, :, None]
+                      * ph4[..., None, :]).reshape(ng, nrh).to(**_w)
+                Wkf = Wk.reshape(ng).to(**_w)
+                # (2,3,4)- triple, full rank-3 angular.  Contract the quadrature
+                # axis g as a GEMM via a g*nrh^2 intermediate (never the g*nrh^3
+                # tensor torch.einsum("ga,gb,gc->abc") would materialize):
                 wa = p2 * (-Wkf)[:, None]
-                Tc_full[ix1] += torch.einsum("ga,gb,gc->abc", wa, p3, p4)
+                gab = torch.einsum("ga,gb->gab", wa, p3)  # (ng, nrh, nrh)
+                Tc_full[ix1] += torch.matmul(
+                    gab.reshape(ng, -1).mT, p4).reshape(nrh, nrh, nrh)
                 # leg-1 triples (1,2,3)+,(1,2,4)+,(1,3,4)-: leg 1 contributes
                 # only its radial factor lf1[la] (phase == 1), accumulated over
                 # the radial index; the two partner legs keep full (radial,
                 # harmonic) structure:
-                lf1g = lf1[None, :].expand(ng, Nr)  # (ng, Nr)
+                lf1g = lf1.to(**_w)[None, :].expand(ng, Nr)  # (ng, Nr)
                 for s3, pp, pq in (
                     (+1.0, p2, p3),
                     (+1.0, p2, p4),
                     (-1.0, p3, p4),
                 ):
                     wla = lf1g * (Wkf * s3)[:, None]  # (ng, Nr)
-                    Tc_leg1[ix1] += torch.einsum("gl,gp,gq->lpq", wla, pp, pq)
+                    glp = torch.einsum("gl,gp->glp", wla, pp)  # (ng, Nr, nrh)
+                    Tc_leg1[ix1] += torch.matmul(
+                        glp.reshape(ng, -1).mT, pq).reshape(Nr, nrh, nrh)
 
     Tc_full = Tc_full.reshape(Nx1, Nr, nharm, Nr, nharm, Nr, nharm)
     Tc_leg1 = Tc_leg1.reshape(Nx1, Nr, Nr, nharm, Nr, nharm)
@@ -818,6 +842,36 @@ def _cubic_complex(
     # legs are physical so the T must be kept.)
     conv = 4 * T * torch.cosh(x1t / 2) ** 2
     return Tc_full, Tc_leg1, conv
+
+
+def cubic_kernel_complex(**kwargs):
+    """Compact COMPLEX cubic kernel for the convolution apply (no dim^4 fold).
+
+    Returns ``(Tc, conv)`` with ``Tc[f, la, A, lb, B, lc, C]`` (complex, shape
+    ``(Nx1, Nr, 2M+1, Nr, 2M+1, Nr, 2M+1)``) -- the cubic vertex in complex
+    harmonics on the three input legs, BEFORE the dim^4 real fold and the
+    output-harmonic binning (the output harmonic ``mo = A + B + C`` is resolved
+    by convolution at apply time, exploiting the additive angular selection
+    rule).  ``conv[f] = 4 T cosh^2(x_f/2) = 1/w_eq`` (the caller folds ``-conv``
+    into the radial node->mode projection, as in ``cubic_vertex``).  Same
+    arguments as ``cubic_vertex``."""
+    Tc_full, Tc_leg1, conv = _cubic_complex(**kwargs)
+    Tc = Tc_full + Tc_leg1[:, :, None, :, :, :, :]  # leg-1 phase const over A
+    return Tc, conv
+
+
+def quadratic_kernel_complex(**kwargs):
+    """Compact COMPLEX quadratic kernel for the convolution apply.
+
+    Returns ``(Qc, conv)`` with ``Qc[f, la, A, lb, B]`` (complex, shape
+    ``(Nx1, Nr, 2M+1, Nr, 2M+1)``) -- the particle-hole-odd quadratic vertex in
+    complex harmonics on the two input legs, before the real fold / binning
+    (output ``mo = A + B`` resolved by convolution).  Same arguments as
+    ``quadratic_vertex``."""
+    Qc_full, Qc_leg1, conv = _quadratic_complex(**kwargs)
+    # Qc_full[f, la, A, lb, B]; add leg-1 (ma broadcast over A):
+    Qc = Qc_full + Qc_leg1[:, :, None, :, :]
+    return Qc, conv
 
 
 def cubic_vertex(
@@ -935,6 +989,8 @@ def _quadratic_complex(
     n_xi: int = 24,
     xi_cut: float = 10.0,
     n_phi: int = 512,
+    work_dtype: torch.dtype = torch.complex128,
+    work_device=None,
 ):
     """Quadratic (thermoelectric) e-e vertex as compact complex harmonic tensors.
 
@@ -1053,15 +1109,21 @@ def _quadratic_complex(
                     LB = AB.reshape(ng, Nr)
                     PA = phA.reshape(ng, nharm)
                     PB = phB.reshape(ng, nharm)
-                    Qc_full[ix1] += torch.einsum(
-                        "gx,ga,gy,gb->xayb", LA, PA, LB, PB
-                    )
+                    # contract g as a GEMM over the combined (radial,harmonic)
+                    # leg index (no g*nrh^2 einsum intermediate):
+                    gxa = (LA[:, :, None] * PA[:, None, :]).reshape(ng, -1)
+                    gyb = (LB[:, :, None] * PB[:, None, :]).reshape(ng, -1)
+                    Qc_full[ix1] += torch.matmul(
+                        gxa.mT, gyb).reshape(Nr, nharm, Nr, nharm)
 
     # Physical-weight legs (w_eq psi) -> raw integral is f_dot; convert to the
     # solver field rate Phi_code_dot = f_dot / w_eq = 4 T cosh^2(x1/2) * f_dot
     # (see _cubic_complex; the T is kept because the legs are physical).
     conv = 4 * T * torch.cosh(x1t / 2) ** 2
-    return Qc_full, Qc_leg1, conv
+    # quadratic is the subdominant (P^2) vertex: build in fp64 then cast the
+    # output to the work precision/device (cubic does the heavy lifting):
+    return (Qc_full.to(dtype=work_dtype, device=work_device),
+            Qc_leg1.to(dtype=work_dtype, device=work_device), conv)
 
 
 def quadratic_vertex(

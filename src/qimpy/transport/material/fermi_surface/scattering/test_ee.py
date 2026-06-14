@@ -749,8 +749,9 @@ def test_matrix_free_vs_kernel_reference():
 
     for (M, Nr) in ((3, 1), (3, 2), (4, 2)):
         dim = 2 * M + 1
-        fs = make_fs(M_theta=M, Nr=Nr, ee=dict(
-            epsilon_bg=EPS_B, nonlinear=True, n_xi=12, n_phi=128, n_xi_proj=8))
+        fs = make_fs(M_theta=M, Nr=Nr, ee=dict(  # force the matrix-free path
+            epsilon_bg=EPS_B, nonlinear=True, n_xi=12, n_phi=128, n_xi_proj=8,
+            backend="matrix_free"))
         ee = fs.ee_scattering
         torch.manual_seed(7)
         a = 1e-2 * torch.randn(4, Nr * dim, dtype=fs.v.dtype, device=rc.device)
@@ -762,6 +763,32 @@ def test_matrix_free_vs_kernel_reference():
         assert rel < 1e-9, f"matrix-free vs kernel (M={M}, Nr={Nr}): rel={rel:.2e}"
 
 
+def test_dense_backend_vs_matrix_free():
+    """The dense (precontracted-vertex) and matrix-free backends are the same
+    operator: a_dot agrees to roundoff.  Also checks that 'auto' picks dense when
+    the vertex fits the storage cap and matrix_free when it would not."""
+    common = dict(epsilon_bg=EPS_B, nonlinear=True, n_xi=12, n_phi=128,
+                  n_xi_proj=8)
+    for (M, Nr) in ((3, 1), (4, 2)):
+        dim = 2 * M + 1
+        fd = make_fs(M_theta=M, Nr=Nr, ee=dict(backend="dense", **common))
+        fm = make_fs(M_theta=M, Nr=Nr, ee=dict(backend="matrix_free", **common))
+        assert fd.ee_scattering.backend == "dense"
+        assert fm.ee_scattering.backend == "matrix_free"
+        torch.manual_seed(7)
+        a = 1e-2 * torch.randn(4, Nr * dim, dtype=fd.v.dtype, device=rc.device)
+        od, om = fd.ee_scattering.a_dot(a), fm.ee_scattering.a_dot(a)
+        rel = (od - om).abs().max().item() / om.abs().max().item()
+        assert rel < 1e-9, f"dense vs matrix_free (M={M}, Nr={Nr}): rel={rel:.2e}"
+    # 'auto' picks dense when the compact kernel fits, matrix_free when not
+    # (the selection-compact kernel is Nr^4 dim^3, so the crossover is at large
+    # Nr / large M):
+    auto_small = make_fs(M_theta=4, Nr=1, ee=dict(backend="auto", **common))
+    auto_big = make_fs(M_theta=32, Nr=8, ee=dict(backend="auto", **common))
+    assert auto_small.ee_scattering.backend == "dense"
+    assert auto_big.ee_scattering.backend == "matrix_free"
+
+
 def test_matrix_free_conservation():
     """Criterion 3: the matrix-free nonlinear output annihilates number,
     momentum and energy nulls (post the SAME null projection as the dense path)
@@ -771,7 +798,7 @@ def test_matrix_free_conservation():
         fs = make_fs(
             M_theta=M, Nr=Nr,
             ee=dict(epsilon_bg=EPS_B,
-                    nonlinear=True,
+                    nonlinear=True, backend="matrix_free",
                     n_xi=16, n_phi=256, n_xi_proj=8),
         )
         dim = fs.angular.dim
@@ -810,7 +837,7 @@ def test_matrix_free_storage_flat_in_Nr():
     for Nr in (2, 4):
         fs = make_fs(
             M_theta=4, Nr=Nr,
-            ee=dict(epsilon_bg=EPS_B, nonlinear=True,
+            ee=dict(epsilon_bg=EPS_B, nonlinear=True, backend="matrix_free",
                     n_xi=8, n_phi=64, n_xi_proj=6),
         )
         ee = fs.ee_scattering
@@ -833,7 +860,7 @@ def test_matrix_free_rho_dot_integration():
     norm decays (the PSD linear operator dominates)."""
     fs = make_fs(
         M_theta=6, tau_p=np.inf,
-        ee=dict(epsilon_bg=EPS_B, nonlinear=True,
+        ee=dict(epsilon_bg=EPS_B, nonlinear=True, backend="matrix_free",
                 n_xi=16, n_phi=256, n_xi_proj=8),
     )
     Nk = fs.angular.N_theta
