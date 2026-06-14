@@ -117,14 +117,23 @@ class RadialBasis:
         w_x = xi_max * w_std                                 # Jacobian
         w_eq = (1.0 / (4.0 * T_temp)) / np.cosh(0.5 * xi) ** 2
         w_q  = w_x * w_eq                                    # discrete measure
-        # Vandermonde V[q, p] = xi_q^p
-        V = np.vander(xi, Nr, increasing=True)
-        # Mass matrix G[p, p'] = sum_q w_q xi_q^(p+p')
-        G = (V.T * w_q) @ V
-        # Cholesky G = L L^T, so V @ L^{-T} is orthonormal under the discrete <,>.
-        L = np.linalg.cholesky(G)
-        Linv_T = np.linalg.solve(L.T, np.eye(Nr))
-        Tfm = V @ Linv_T                                     # nodes <- modes
+        # Orthonormalize the polynomial powers under the discrete weight <,>_w
+        # by QR of the WEIGHTED Vandermonde, in the RESCALED variable
+        # u = xi/xi_max (so the monomials u^p stay O(1)).  This is far better
+        # conditioned than Cholesky of the mass matrix G = Vw^T Vw: QR works on
+        # Vw directly, whose condition number is the square ROOT of G's, so the
+        # construction stays accurate to much higher Nr (Cholesky(G) already
+        # fails its orthonormality check at Nr >= 14).  The result is the SAME
+        # orthonormal polynomial basis (unique up to sign); the sign is fixed to
+        # a positive R-diagonal, matching the previous Cholesky convention, so
+        # the basis (and everything built on it) is unchanged where both work.
+        V  = np.vander(xi / xi_max, Nr, increasing=True)     # monomials in u
+        Vw = V * np.sqrt(w_q)[:, None]                       # Vw^T Vw = G
+        _Q, R = np.linalg.qr(Vw)
+        sgn = np.sign(np.diag(R))
+        sgn[sgn == 0] = 1.0
+        R = sgn[:, None] * R                                 # positive diagonal
+        Tfm = V @ np.linalg.solve(R, np.eye(Nr))             # nodes <- modes
         Ttm = Tfm.T * w_q                                    # modes <- nodes
         # Sanity: Ttm @ Tfm should be identity (orthonormality under <,>_w).
         eye_check = Ttm @ Tfm
