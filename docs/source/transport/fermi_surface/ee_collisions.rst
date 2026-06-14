@@ -363,9 +363,20 @@ rank-3 tensor over the flat leg index :math:`p = l\cdot \dim + (m{+}M)`
    only one entry per *unordered* triple :math:`(p_a\le p_b\le p_c)` is
    stored, with the leg-ordering multiplicity (6/3/1 for all-distinct/
    two-equal/all-equal) folded into the value.
-#. **Reflection** :math:`\phi\to-\phi`.  Isotropy plus reality make the
-   complex-harmonic kernel **real**, halving storage again (stored real,
-   applied against the complex field).
+#. **Reflection** :math:`\phi\to-\phi` makes the *kernel real*.  The discrete
+   kinematic measure is reflection-invariant -- the :math:`\beta` grid is
+   symmetric about :math:`\pi` and the reflection swaps the two
+   :math:`\phi_2` roots, so contributions pair exactly.  Writing the kernel as
+   :math:`\text{Tc}[m_a,m_b,m_c]=\int d\mu\,W\,
+   e^{i(m_a\phi_2+m_b\phi_3+m_c\phi_4)}` with real radial factors, the
+   substitution :math:`\phi\to-\phi` (invariant :math:`d\mu\,W`) returns the
+   complex conjugate of the *same* integral, so :math:`\text{Tc}` is **real**
+   (verified to :math:`\sim10^{-14}`; the code stores ``.real``).  This halves
+   storage and gives a real-kernel :math:`\times` complex-field apply.  This is
+   a *field-independent* property of the precontracted kernel and is exact for
+   any input; it is **not** the same as halving the matrix-free quadrature loop,
+   which is *not* exploitable (see the matrix-free note,
+   :ref:`reflection halving <ee-reflection-mf>`).
 
 The result is the packed kernel :math:`\texttt{\_sp\_S}[l_o, t]` over kept
 unordered triples :math:`t`, with storage and per-cell apply both
@@ -458,16 +469,23 @@ feasible option at large :math:`(M,N_r)`.
   both at construction and keeps the faster (adapts to :math:`M`, dtype,
   CPU/GPU).
 
+.. _ee-reflection-mf:
+
 **Not used: reflection halving.**  Under :math:`\phi\to-\phi` a quadrature
 point :math:`(\beta,\text{root})` maps to :math:`(2\pi-\beta,\text{other
-root})`.  This is an exact symmetry of the *operator*, but it relates the
-operator on :math:`\delta f` to the operator on the *reflected* field
-:math:`\delta f(-\phi)`; for a general (non-reflection-symmetric) input the two
-halves of the :math:`\beta` grid give genuinely different contributions (the
-leg harmonics transform as :math:`C_m e^{-im\Delta\phi}`, not the
-conjugate/reverse of the originals), so it does **not** halve the quadrature
-without approximating.  Like the energy-parity selection it is therefore left
-out.
+root})`.  The *same* reflection invariance that makes the dense kernel real
+holds here too -- so the *full* matrix-free quadrature sum is real (the code
+takes ``.real``).  What is **not** exploitable is using it to evaluate only
+*half* the :math:`\beta` grid and reconstruct the other half: that would relate
+the operator on :math:`\delta f` to the operator on the *reflected* field
+:math:`\delta f(-\phi)`, and for a general (non-reflection-symmetric) input the
+two halves give genuinely different contributions (the leg harmonics transform
+as :math:`C_m e^{-im\Delta\phi}`, not the conjugate/reverse of the originals).
+The crucial difference from the dense path is that there the symmetry acts on
+the *precomputed, field-independent* kernel (making it real once, for all
+inputs), whereas here it would have to relate per-quadrature-point
+contributions of the *specific* field -- which it does not.  So, like the
+energy-parity selection, reflection halving of the quadrature is left out.
 
 Per-cell apply cost is :math:`\sim n_{\xi,\rm proj}\, n_q\, M\, N_{\rm out}`
 mul-adds; storage is :math:`\sim n_{\xi,\rm proj}\, n_q` (flat in :math:`N_r`).
