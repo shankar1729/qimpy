@@ -860,6 +860,160 @@ def cubic_kernel_complex(**kwargs):
     return Tc, conv
 
 
+def cubic_packed_node(
+    *,
+    x_node: torch.Tensor,
+    psi_coeff: torch.Tensor,
+    ti: torch.Tensor,
+    tj: torch.Tensor,
+    tk: torch.Tensor,
+    M: int,
+    kF: float,
+    m_star: float,
+    T: float,
+    epsilon_bg: float,
+    kappa: float,
+    well_width: float = 0.0,
+    n_xi: int = 24,
+    xi_cut: float = 10.0,
+    n_phi: int = 512,
+    slab: int = 0,
+    work_dtype: torch.dtype = torch.complex128,
+    work_device=None,
+) -> torch.Tensor:
+    """Packed symmetric cubic kernel ``s0[t]`` at ONE output node, built WITHOUT
+    materializing the full ``(Nr*nh)^3`` per-node vertex.
+
+    ``ti, tj, tk`` are the flat ``(l, m)`` indices (each ``(N_tri,)``) of the kept
+    UNORDERED input triples ``p = l*nh + (m+M)``.  Returns the complex
+    ``s0[t] = (1/6) sum over the 6 leg orderings of Tc[perm(ti,tj,tk)]`` -- bit-
+    for-bit (to summation roundoff) what gathering from the full
+    ``cubic_kernel_complex`` vertex gives, but with bounded memory:
+
+    * the ``(2,3,4)`` (no-leg-1) part ``Tc_full[a,b,c]`` is built SLAB by SLAB
+      over the first leg index ``a`` (a BLAS matmul per slab, never the full
+      ``(Nr*nh)^3`` tensor nor the ``g*(Nr*nh)^2`` intermediate); for each slab,
+      the three permutation groups whose first index lies in the slab are
+      gathered and accumulated (gather is linear, so accumulating per
+      ``(x3, root)`` and per slab reproduces the full quadrature/symmetric sum);
+    * the leg-1 part is the small ``(Nr, Nr*nh, Nr*nh)`` tensor (leg 1 carries
+      only its radial factor, harmonic elided), formed in full and gathered.
+
+    Peak build memory is therefore ``~ N_tri + Nr*(Nr*nh)^2 + g*slab*(Nr*nh)``
+    instead of ``(Nr*nh)^3`` -- the binding term is the packed output itself.
+    The caller folds the ``-conv`` solver-field scaling via ``GPc`` and applies
+    the leg-ordering multiplicity, exactly as for the full-tensor build.
+    """
+    E_F = 0.5 * kF**2 / m_star
+    t = T / E_F
+    dd = dict(dtype=torch.float64)
+    nharm = 2 * M + 1
+    Nr = psi_coeff.shape[1]
+    nrh = Nr * nharm
+    ps = torch.arange(-M, M + 1)
+    x2, w2, beta, wbeta, cosB, sinB = _shell_quadrature(
+        T, E_F, n_xi, xi_cut, n_phi
+    )
+
+    def weq(x: torch.Tensor) -> torch.Tensor:
+        return 0.25 / torch.cosh(x / 2) ** 2 / T
+
+    def psi_eval(x: torch.Tensor) -> torch.Tensor:
+        res = torch.zeros(x.shape + (Nr,), **dd)
+        for p in range(psi_coeff.shape[0] - 1, -1, -1):
+            res = res * x[..., None] + psi_coeff[p]
+        return res
+
+    def leg_factor(x: torch.Tensor) -> torch.Tensor:
+        return weq(x)[..., None] * psi_eval(x)
+
+    def phase(dphi: torch.Tensor) -> torch.Tensor:
+        return torch.exp(1j * dphi[..., None] * ps)
+
+    ng = n_xi * n_phi
+    _w = dict(dtype=work_dtype, device=work_device)
+    x1v = x_node.to(torch.float64).reshape(())
+    k1 = k_fermi(x1v, kF, t)
+    lf1 = leg_factor(x1v.reshape(1))[0]  # (Nr,)
+    X2 = x2[:, None]
+    k2 = k_fermi(X2, kF, t)
+    ph3 = phase(beta)[None, :, :]  # (1, n_phi, nharm)
+
+    # slab over the first leg index a so the gab intermediate g*slab*nrh fits a
+    # fixed budget (full nrh when it does -- bit-identical to the dense build):
+    itemsize = 16 if work_dtype == torch.complex128 else 8
+    if slab <= 0:
+        budget = 1 * 1024**3
+        slab = max(1, min(nrh, int(budget // max(ng * nrh * itemsize, 1))))
+
+    N_tri = ti.shape[0]
+    s0_full = torch.zeros(N_tri, **_w)
+    T_leg1 = torch.zeros(Nr, nrh, nrh, **_w)
+    # permutation groups keyed by the leg sitting in the (slabbed) first slot:
+    groups = ((ti, tj, tk), (tj, ti, tk), (tk, ti, tj))
+
+    for i3 in range(n_xi):
+        x3v = x2[i3]
+        w3v = w2[i3]
+        weight_phase, X4 = _shell_geometry(
+            x1v=x1v, X2=X2, k1=k1, k2=k2, x3v=x3v, w2=w2, w3v=w3v,
+            beta=beta, wbeta=wbeta, cosB=cosB, sinB=sinB, T=T, t=t, kF=kF,
+            m_star=m_star, epsilon_bg=epsilon_bg, kappa=kappa,
+            well_width=well_width, n_xi=n_xi, n_phi=n_phi,
+        )
+        lf2 = leg_factor(X2.reshape(n_xi))  # (n_xi, Nr)
+        lf3 = leg_factor(x3v.reshape(1))[0]  # (Nr,)
+        lf4 = leg_factor(X4.reshape(n_xi))  # (n_xi, Nr)
+        for sgn in (+1.0, -1.0):
+            Wk, phi2, phi4 = weight_phase(sgn)
+            ph2 = phase(phi2)
+            ph4 = phase(phi4)
+            p2 = (lf2[:, None, :, None]
+                  * ph2[..., None, :]).reshape(ng, nrh).to(**_w)
+            p3 = (lf3[None, None, :, None]
+                  * ph3.expand(n_xi, n_phi, nharm)[..., None, :]
+                  ).reshape(ng, nrh).to(**_w)
+            p4 = (lf4[:, None, :, None]
+                  * ph4[..., None, :]).reshape(ng, nrh).to(**_w)
+            Wkf = Wk.reshape(ng).to(**_w)
+            wa = p2 * (-Wkf)[:, None]  # (ng, nrh)
+            # (2,3,4) triple, slab by slab over the first leg index a:
+            for a0 in range(0, nrh, slab):
+                a1 = min(a0 + slab, nrh)
+                gab = torch.einsum("ga,gb->gab", wa[:, a0:a1], p3)
+                tsl = torch.matmul(
+                    gab.reshape(ng, -1).mT, p4
+                ).reshape(a1 - a0, nrh, nrh)  # Tc_full[a0:a1, :, :]
+                for first, o1, o2 in groups:
+                    m = (first >= a0) & (first < a1)
+                    if bool(m.any()):
+                        fa = first[m] - a0
+                        b1, b2 = o1[m], o2[m]
+                        # the two orderings of the partner legs (b,c):
+                        s0_full[m] += tsl[fa, b1, b2] + tsl[fa, b2, b1]
+                del gab, tsl
+            # leg-1 part (radial-only first leg), accumulated in full:
+            lf1g = lf1.to(**_w)[None, :].expand(ng, Nr)
+            for s3, pp, pq in (
+                (+1.0, p2, p3),
+                (+1.0, p2, p4),
+                (-1.0, p3, p4),
+            ):
+                wla = lf1g * (Wkf * s3)[:, None]
+                glp = torch.einsum("gl,gp->glp", wla, pp)
+                T_leg1 += torch.matmul(
+                    glp.reshape(ng, -1).mT, pq).reshape(Nr, nrh, nrh)
+
+    # leg-1 gather: leg 1 (radial index a // nharm) sits in each of the 3 slots:
+    la_i, la_j, la_k = ti // nharm, tj // nharm, tk // nharm
+    s0_leg1 = (
+        T_leg1[la_i, tj, tk] + T_leg1[la_i, tk, tj]
+        + T_leg1[la_j, ti, tk] + T_leg1[la_j, tk, ti]
+        + T_leg1[la_k, ti, tj] + T_leg1[la_k, tj, ti]
+    )
+    return (s0_full + s0_leg1) / 6.0
+
+
 def quadratic_kernel_complex(**kwargs):
     """Compact COMPLEX quadratic kernel for the convolution apply.
 

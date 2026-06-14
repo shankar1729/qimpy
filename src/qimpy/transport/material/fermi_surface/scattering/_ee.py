@@ -127,16 +127,22 @@ class EEScattering(TreeNode):
             width ~T/E_F.
         backend
             :yaml:`Nonlinear apply backend: 'auto' (default), 'dense' or
-            'matrix_free'.`  'dense' precontracts the cubic/quadratic vertices
-            into modal tensors and applies them as a few einsums -- per-cell cost
-            ~ (Nr*dim)^4 (a fast dense contraction) instead of the matrix-free
-            quadrature over ~1e5 points, i.e. orders of magnitude faster for
-            small/moderate (M, Nr), but its storage grows as (Nr*dim)^4.
+            'matrix_free'.`  Both backends are the SAME operator (agree to
+            roundoff); they only trade speed vs memory.  'dense' precontracts the
+            vertices into a SPARSE-SYMMETRIC packed kernel and applies it as a
+            gather + scatter; storage and per-cell apply both scale as
+            ~ Nr (Nr dim)^3 / 16 -- the four exact symmetries (additive harmonic
+            selection + output truncation, input-leg permutation, output reality,
+            phi -> -phi reflection) cut ~16 dim off the naive (Nr dim)^4 dense
+            contraction.  The apply is orders of magnitude cheaper per cell than
+            matrix-free, but storage grows as (Nr dim)^3.  The kernel is BUILT
+            directly in packed form (slab-blocked over the first leg index), so
+            build memory is ~ the packed kernel, not the (Nr dim)^3 vertex.
             'matrix_free' evaluates the reduced operator by quadrature over the
-            stored kinematic generator -- storage flat in Nr, the only option at
-            large (M, Nr).  'auto' uses 'dense' when the vertex fits a fixed
-            storage cap (~0.5 GiB) and 'matrix_free' otherwise.  Both are the
-            same operator (agree to roundoff); this only trades speed vs memory.
+            stored kinematic generator -- per-cell apply ~ n_xi_proj * nq * M *
+            Nout, but storage flat in Nr; the only feasible option at large
+            (M, Nr).  'auto' uses 'dense' when its packed kernel fits a fixed cap
+            (~0.5 GiB) AND the one-time build is quick, else 'matrix_free'.
         recon
             :yaml:`Angular leg-reconstruction backend: 'auto' (default), 'gemm'
             or 'fft'.`  Only used by the matrix-free backend.  The nonlinear
@@ -292,27 +298,31 @@ class EEScattering(TreeNode):
         # in Nr).  'auto' uses dense when the kernel fits a fixed cap, else
         # matrix-free.
         if nonlinear:
-            # Sparse-symmetric dense kernel: persistent storage is tiny
-            # (~Nr (Nr dim)^3 / 36).  The kernel is assembled one output node at a
-            # time, so the binding build memory is a SINGLE node's complex vertex
-            # ~ (Nr dim)^3 (not n_xi_proj x that).  Gate 'auto' on that:
+            # Sparse-symmetric dense kernel built DIRECTLY in packed form
+            # (cubic_packed_node slab-blocks the (2,3,4) triple and gathers only
+            # the kept unordered triples -- no (Nr dim)^3 vertex, no g*(Nr dim)^2
+            # intermediate).  Peak build memory is therefore ~ the packed kernel
+            # itself: N_tri ~ (Nr dim)^3 / 16 cubic triples (additive selection +
+            # permutation + reality), each carried over Nr output modes.  Gate
+            # 'auto' on BOTH (a) that packed kernel fitting a fixed cap, and (b)
+            # the one-time build (slab matmuls ~ n_xi_proj * (Nr dim)^3 * nq)
+            # being quick -- so 'auto' precomputes dense only when it is both
+            # memory-feasible and fast (the dense apply is then orders of
+            # magnitude cheaper per cell).  Larger sizes remain available on
+            # demand via backend='dense' (feasible now, just a slower build).
             Pf = Nr * dim
-            g = self.n_xi * self.n_phi
-            P3 = Pf**3
-            # per-node build peak: the g*Pf^2 GEMM intermediate + one node's
-            # complex (Nr dim)^3 vertex.  This tracks build time too (~Pf^3), so
-            # gating 'auto' on it keeps auto-dense builds fast (~<= a minute);
-            # the construction is feasible well beyond this (no g*Pf^3 blow-up),
-            # so larger sizes can still be forced with backend='dense'.
-            build_bytes = (g * Pf * Pf + P3) * 16 * 2
-            # gate conservatively: this also tracks build time (~Pf^3), so 'auto'
-            # picks dense only where the one-time build is fast (~<= a minute);
-            # the construction no longer blows up (no g*Pf^3), so much larger
-            # sizes remain buildable on demand via backend='dense' (slower).
-            mem_cap = 512 * 1024**2  # ~0.5 GiB per-node build transient
+            N_tri = max(1, Pf**3 // 16)
+            citem = 8 if dtype == torch.float32 else 16  # complex build itemsize
+            kernel_bytes = Nr * N_tri * citem            # build accumulator peak
+            nq = 2 * self.n_xi**2 * self.n_phi
+            build_flops = self.n_xi_proj * Pf**3 * nq    # slab-matmul work
+            mem_cap = 512 * 1024**2   # ~0.5 GiB packed-kernel build cap
+            flop_cap = 1.0e13         # ~ build that finishes in <~ a minute
             if self.backend == "auto":
                 self.backend = (
-                    "dense" if build_bytes <= mem_cap else "matrix_free"
+                    "dense"
+                    if (kernel_bytes <= mem_cap and build_flops <= flop_cap)
+                    else "matrix_free"
                 )
             if self.backend == "dense":
                 self._build_dense_vertices(T)
@@ -582,8 +592,9 @@ class EEScattering(TreeNode):
           with reality makes the complex-harmonic kernel REAL -> stored real
           (another 2x, and the apply is real-kernel x complex-field).
 
-        Storage and apply both scale as ``~ Nr (Nr dim)^3 / 36`` (vs the dense
-        ``Nr^4 dim^4``).  The energy-parity ('even sigma') radial selection is
+        Storage and apply both scale as ``~ Nr (Nr dim)^3 / 16`` (measured
+        compression ~16 dim, -> 18 dim asymptotically; vs the naive dense
+        ``(Nr dim)^4``).  The energy-parity ('even sigma') radial selection is
         NOT exploited: it is only leading order in ``T/E_F`` (broken by band
         curvature), so using it would be an approximation, not an exact symmetry.
         Built in fp64, stored in the working precision; the per-output-harmonic
@@ -636,21 +647,22 @@ class EEScattering(TreeNode):
         Nx1 = x_fine.shape[0]
         Sc = torch.zeros(Nr, p1.shape[0], dtype=wdt, device=device)
         Sq = torch.zeros(Nr, q1.shape[0], dtype=wdt, device=device)
-        # CONSTRUCTION: assemble the reduced kernel directly, building the complex
-        # vertex ONE output node at a time and packing it -- peak build memory is
-        # a single node's (Nr dim)^3, never the full n_xi_proj (Nr dim)^3 tensor.
-        # The symmetric value at each unordered triple is the mean over the 6 leg
-        # orderings (gathered directly, no full symmetric tensor formed).  Per-node
-        # contributions are independent, so summing GPc[:, f] * packed(Tc_f) over
-        # nodes reproduces the full-tensor build exactly.
+        # CONSTRUCTION: assemble the packed kernel DIRECTLY -- the cubic part is
+        # built one output node at a time by `cubic_packed_node`, which never
+        # materializes the (Nr dim)^3 per-node vertex nor the g*(Nr dim)^2 GEMM
+        # intermediate: it slab-blocks the (2,3,4) triple over the first leg index
+        # and gathers only the kept unordered triples (plus the small leg-1
+        # tensor).  Peak build memory is therefore ~ the packed kernel itself, not
+        # (Nr dim)^3.  The quadratic kernel is only (Nr dim)^2 (tiny), so it is
+        # formed in full and gathered.  Per-node contributions are independent, so
+        # summing GPc[:, f] * packed(node f) reproduces the full-tensor build
+        # exactly (verified to roundoff against the cubic_kernel_complex gather).
         for f in range(Nx1):
-            Tc1, _c = _kernels.cubic_kernel_complex(
-                x_nodes=x_fine[f:f + 1], psi_coeff=psi_coeff, **kin)
-            Tc1 = Tc1.reshape(Pflat, Pflat, Pflat)
-            s0 = (Tc1[p1, p2, p3] + Tc1[p1, p3, p2] + Tc1[p2, p1, p3]
-                  + Tc1[p2, p3, p1] + Tc1[p3, p1, p2] + Tc1[p3, p2, p1]) / 6.0
+            s0 = _kernels.cubic_packed_node(
+                x_node=x_fine[f], psi_coeff=psi_coeff,
+                ti=p1, tj=p2, tk=p3, **kin)
             Sc += GPc[:, f:f + 1].to(s0.dtype) * s0[None, :]
-            del Tc1, s0
+            del s0
             Qc1, _c = _kernels.quadratic_kernel_complex(
                 x_nodes=x_fine[f:f + 1], psi_coeff=psi_coeff, **kin)
             Qc1 = Qc1.reshape(Pflat, Pflat)
