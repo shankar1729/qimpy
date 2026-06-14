@@ -9,4 +9,5 @@ using *ab initio* electronic structure and scattering kernels.
     :maxdepth: 1
 
     inputfile
+    ee_collisions
 

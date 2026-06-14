@@ -143,6 +143,11 @@ class EEScattering(TreeNode):
             Nout, but storage flat in Nr; the only feasible option at large
             (M, Nr).  'auto' uses 'dense' when its packed kernel fits a fixed cap
             (~0.5 GiB) AND the one-time build is quick, else 'matrix_free'.
+            For large-M matrix-free runs prefer ``precision='float32'`` (the
+            transport-level knob) on a GPU: the apply is ~2x faster and uses half
+            the memory, with ~1e-6 relative accuracy (well within the ~1e-3
+            quadrature tolerance) and conservation still exact (the null
+            projection is applied regardless of dtype).
         recon
             :yaml:`Angular leg-reconstruction backend: 'auto' (default), 'gemm'
             or 'fft'.`  Only used by the matrix-free backend.  The nonlinear
