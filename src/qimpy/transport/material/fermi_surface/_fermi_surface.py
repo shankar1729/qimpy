@@ -337,7 +337,12 @@ class FermiSurface(Material):
         """
         N_theta = self.angular.N_theta
         theta = self.angular.theta
-        w_r = self.radial.quad_w                              # (Nr,)
+        # Normalize the radial weights by sqrt(sum quad_w) so the observable is
+        # the n=0 radial-mode amplitude a_0 for ANY Nr (Nr-consistent).  Without
+        # this, an n=0-driven state reports sum(quad_w * psi_0) = sqrt(sum quad_w)
+        # times a_0 -- which is 1 for Nr=1 but ~1/sqrt(T) for Nr>1, the spurious
+        # ~248x mismatch between Nr=1 and Nr=4.  No-op at Nr=1 (sum quad_w = 1).
+        w_r = self.radial.quad_w / torch.sqrt(self.radial.quad_w.sum())  # (Nr,)
         cos_q = torch.cos(theta) / N_theta                    # (N_theta,)
         sin_q = torch.sin(theta) / N_theta
         one_q = torch.full_like(cos_q, 1.0 / N_theta)
