@@ -77,6 +77,14 @@ def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> Non
         xs = np.linspace(verts[:, 0].min(), verts[:, 0].max(), 220)
         ys = np.linspace(verts[:, 1].min(), verts[:, 1].max(), 220)
         Xs, Ys = np.meshgrid(xs, ys)
+        # The streamline grid spans the mesh bounding box, but griddata only
+        # interpolates over the convex hull of the cell centroids. For a
+        # non-convex domain (cross / Hall bar) the concave regions between arms
+        # lie inside that hull, so streamlines would otherwise be drawn through
+        # empty space outside the device. Mask any grid point that lands on no
+        # triangle (TriFinder returns -1) so streamplot stops at the true mesh
+        # boundary. Computed once: the grid and mesh are fixed across frames.
+        stream_off_mesh = triang.get_trifinder()(Xs, Ys) < 0
     orig_level = log.getEffectiveLevel(); log.setLevel(logging.INFO)
     for checkpoint_file in file_list:
         with Checkpoint(checkpoint_file) as cp:
@@ -98,6 +106,8 @@ def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> Non
             if streamlines is not None and obs.shape[-1] >= 3:
                 U = np.nan_to_num(griddata(cen, obs[fr, :, 1], (Xs, Ys), method="linear"))
                 V = np.nan_to_num(griddata(cen, obs[fr, :, 2], (Xs, Ys), method="linear"))
+                U[stream_off_mesh] = np.nan      # clip streamlines to the mesh domain
+                V[stream_off_mesh] = np.nan
                 ax.streamplot(xs, ys, U, V,
                               density=streamlines.get("density", 1.5),
                               linewidth=streamlines.get("linewidth", 0.6),
