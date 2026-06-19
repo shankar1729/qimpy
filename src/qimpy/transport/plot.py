@@ -33,6 +33,7 @@ def run(
     density: Optional[dict] = None,
     streamlines: Optional[dict] = None,
     boundary: Optional[dict] = None,
+    contacts: Optional[dict] = None,
     dpi: int = 200,
     **ignored,
 ) -> None:
@@ -54,11 +55,12 @@ def run(
             "qimpy.transport.plot renders the finite-volume 'spatial_transport'"
             f" geometry; checkpoint has variant_name={geom_type!r}."
         )
-    run_finite_volume(file_list, mine, output, density, streamlines, boundary, dpi)
+    run_finite_volume(file_list, mine, output, density, streamlines, boundary,
+                      contacts, dpi)
 
 
 def run_finite_volume(file_list, mine, output, density, streamlines, boundary,
-                      dpi) -> None:
+                      contacts, dpi) -> None:
     """Frame-parallel, mesh-native rendering of FiniteVolume (finite-volume) output.
 
     The finite-volume state is one average per triangle, so the density is drawn
@@ -72,12 +74,16 @@ def run_finite_volume(file_list, mine, output, density, streamlines, boundary,
     exactly one triangle. Each rank renders its strided subset of frames."""
     import matplotlib.tri as mtri
     from matplotlib.collections import LineCollection
+    from matplotlib.lines import Line2D
     cmap = density.get("cmap", "bwr")
     bdraw = {} if boundary is None else boundary
+    cdraw = {} if contacts is None else contacts
     with Checkpoint(file_list[0]) as cp:
         g = cp["/geometry"]
         verts = np.array(g["mesh_vertices"])         # (Nv, 2)
         tris = np.array(g["mesh_triangles"])         # (K, 3)
+        mesh_path = g.attrs.get("mesh_file", "")
+    mesh_path = mesh_path.decode() if isinstance(mesh_path, bytes) else str(mesh_path)
     triang = mtri.Triangulation(verts[:, 0], verts[:, 1], tris)
     nv = len(verts)
     # Device boundary = mesh edges that border exactly one triangle, i.e. have no
@@ -85,6 +91,25 @@ def run_finite_volume(file_list, mine, output, density, streamlines, boundary,
     # the triangle across the edge (tris[k, j] -> tris[k, (j+1)%3]).
     bk, bj = np.where(triang.neighbors < 0)
     bseg = np.stack([verts[tris[bk, bj]], verts[tris[bk, (bj + 1) % 3]]], axis=1)
+    # Contacts: the boundary markers live in the source mesh file (its path is
+    # recorded in the checkpoint). Highlight the parametrized contacts (any marker
+    # other than the unparametrized "wall") over the plain device boundary.
+    contact_segs = {}
+    if cdraw.get("draw", True) and mesh_path:
+        try:
+            md = np.load(mesh_path, allow_pickle=True)
+            be = np.asarray(md["boundary_edges"])
+            bm = np.asarray([str(x) for x in md["boundary_markers"]])
+            for marker in sorted(set(bm)):
+                if marker.lower() == "wall":
+                    continue
+                sel = bm == marker
+                contact_segs[marker] = np.stack(
+                    [verts[be[sel, 0]], verts[be[sel, 1]]], axis=1)
+        except Exception:
+            contact_segs = {}
+    contact_palette = {"source": "#2ca02c", "drain": "#d62728"}
+    _cyc = ["#1f77b4", "#ff7f0e", "#9467bd", "#8c564b", "#e377c2", "#17becf"]
     if streamlines is not None:
         xs = np.linspace(verts[:, 0].min(), verts[:, 0].max(), 220)
         ys = np.linspace(verts[:, 1].min(), verts[:, 1].max(), 220)
@@ -126,7 +151,19 @@ def run_finite_volume(file_list, mine, output, density, streamlines, boundary,
             if bdraw.get("draw", True) and len(bseg):
                 ax.add_collection(LineCollection(
                     bseg, colors=bdraw.get("color", "0.2"),
-                    linewidths=bdraw.get("linewidth", 0.8), zorder=3))
+                    linewidths=bdraw.get("linewidth", 1.3), zorder=3))
+            if contact_segs:
+                clw = cdraw.get("linewidth", 3.0)
+                ccolors = cdraw.get("colors", {})
+                handles = []
+                for i_m, (marker, segs) in enumerate(contact_segs.items()):
+                    col = ccolors.get(marker, contact_palette.get(
+                        marker, _cyc[i_m % len(_cyc)]))
+                    ax.add_collection(LineCollection(
+                        segs, colors=col, linewidths=clw, zorder=4))
+                    handles.append(Line2D([0], [0], color=col, lw=2.5, label=marker))
+                ax.legend(handles=handles, loc="upper right", fontsize=8,
+                          framealpha=0.85)
             plot_file = output.format(i_step)
             fig.savefig(plot_file, bbox_inches="tight", dpi=dpi)
             plt.close(fig)
