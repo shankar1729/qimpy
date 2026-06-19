@@ -106,6 +106,23 @@ def run_finite_volume(file_list, mine, output, density, streamlines, boundary,
         np.array([MplPath.MOVETO, MplPath.LINETO, MplPath.LINETO,
                   MplPath.CLOSEPOLY], np.uint8), len(tris))
     device_path = MplPath(clip_pts, clip_codes) if len(tris) else None
+    # White cover for everything OUTSIDE the device: a clip removes overshooting
+    # streamLINES, but arrow heads and ~1px of edge antialiasing can still poke
+    # past the boundary. Painting the complement white (under the boundary line)
+    # guarantees a clean edge. Complement = outer rectangle (CCW) + the triangles
+    # with reversed winding (CW), so the nonzero rule fills rect-minus-device.
+    if len(tris):
+        lo = verts.min(0); hi = verts.max(0); pad = 0.05 * (hi - lo)
+        x0, y0 = lo - pad; x1, y1 = hi + pad
+        rect_v = np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]])
+        rect_c = np.array([MplPath.MOVETO, MplPath.LINETO, MplPath.LINETO,
+                           MplPath.LINETO, MplPath.CLOSEPOLY], np.uint8)
+        trev = tv[:, [0, 2, 1]]                                   # reversed -> CW
+        tr_pts = np.concatenate([trev, trev[:, :1]], axis=1).reshape(-1, 2)
+        comp_path = MplPath(np.vstack([rect_v, tr_pts]),
+                            np.concatenate([rect_c, clip_codes]))
+    else:
+        comp_path = None
     # Contacts: the boundary markers live in the source mesh file (its path is
     # recorded in the checkpoint). Highlight the parametrized contacts (any marker
     # other than the unparametrized "wall") over the plain device boundary.
@@ -176,12 +193,18 @@ def run_finite_volume(file_list, mine, output, density, streamlines, boundary,
                         for art in ax.patches:
                             if art is not clip:
                                 art.set_clip_path(clip)
+                    # Cover any residual outside-device ink (arrow heads, ~1px of
+                    # edge antialiasing the line clip can't remove) with white,
+                    # under the boundary line, for a crisp device edge.
+                    if comp_path is not None:
+                        ax.add_patch(PathPatch(comp_path, fc="white", ec="none",
+                                               zorder=2.6))
             if bdraw.get("draw", True) and len(bseg):
                 ax.add_collection(LineCollection(
                     bseg, colors=bdraw.get("color", "0.2"),
-                    linewidths=bdraw.get("linewidth", 1.3), zorder=3))
+                    linewidths=bdraw.get("linewidth", 3.0), zorder=3))
             if contact_segs:
-                clw = cdraw.get("linewidth", 3.0)
+                clw = cdraw.get("linewidth", 7.0)
                 ccolors = cdraw.get("colors", {})
                 handles = []
                 for i_m, (marker, segs) in enumerate(contact_segs.items()):
@@ -189,7 +212,7 @@ def run_finite_volume(file_list, mine, output, density, streamlines, boundary,
                         marker, _cyc[i_m % len(_cyc)]))
                     ax.add_collection(LineCollection(
                         segs, colors=col, linewidths=clw, zorder=4))
-                    handles.append(Line2D([0], [0], color=col, lw=2.5, label=marker))
+                    handles.append(Line2D([0], [0], color=col, lw=4, label=marker))
                 ax.legend(handles=handles, loc="upper right", fontsize=8,
                           framealpha=0.85)
             plot_file = output.format(i_step)
