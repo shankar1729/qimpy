@@ -140,7 +140,7 @@ def run_finite_volume(file_list, mine, output, density, streamlines, boundary,
                     [verts[be[sel, 0]], verts[be[sel, 1]]], axis=1)
         except Exception:
             contact_segs = {}
-    contact_palette = {"source": "#2ca02c", "drain": "#d62728"}
+    contact_palette = {"source": "#FFD700", "drain": "#DAA520"}   # golden tones
     _cyc = ["#1f77b4", "#ff7f0e", "#9467bd", "#8c564b", "#e377c2", "#17becf"]
     if streamlines is not None:
         xs = np.linspace(verts[:, 0].min(), verts[:, 0].max(), 220)
@@ -202,7 +202,7 @@ def run_finite_volume(file_list, mine, output, density, streamlines, boundary,
             if bdraw.get("draw", True) and len(bseg):
                 ax.add_collection(LineCollection(
                     bseg, colors=bdraw.get("color", "0.2"),
-                    linewidths=bdraw.get("linewidth", 3.0), zorder=3))
+                    linewidths=bdraw.get("linewidth", 2.0), zorder=3))
             if contact_segs:
                 clw = cdraw.get("linewidth", 7.0)
                 ccolors = cdraw.get("colors", {})
