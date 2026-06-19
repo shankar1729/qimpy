@@ -93,27 +93,19 @@ def run_finite_volume(file_list, mine, output, density, streamlines, boundary,
     # the triangle across the edge (tris[k, j] -> tris[k, (j+1)%3]).
     bk, bj = np.where(triang.neighbors < 0)
     bseg = np.stack([verts[tris[bk, bj]], verts[tris[bk, (bj + 1) % 3]]], axis=1)
-    # Assemble the boundary edges into ordered closed loops -> one Path, used to
-    # CLIP the streamlines. The clip is an exact render-time set-intersection of
-    # the drawn lines with this polygon, so no streamline ink lands outside the
-    # device -- a formal guarantee independent of the grid (the velocity mask
-    # alone only bounds streamlines to ~one grid cell). The clip polygon is the
-    # same boundary that is drawn, so the two coincide. Directed boundary edges
-    # (CCW triangles) chain head-to-tail into each loop.
-    nxt = {int(p): int(q) for p, q in zip(tris[bk, bj], tris[bk, (bj + 1) % 3])}
-    seen = set(); pv = []; pc = []
-    for start in nxt:
-        if start in seen:
-            continue
-        v = start; loop = []
-        while v in nxt and v not in seen:
-            seen.add(v); loop.append(v); v = nxt[v]
-        if len(loop) >= 3:
-            pv.append(verts[loop[0]]); pc.append(MplPath.MOVETO)
-            for w in loop[1:]:
-                pv.append(verts[w]); pc.append(MplPath.LINETO)
-            pv.append(verts[loop[0]]); pc.append(MplPath.CLOSEPOLY)
-    bpoly = MplPath(np.array(pv), pc) if pv else None
+    # Clip path for the streamlines = the EXACT device, built as the union of all
+    # mesh triangles (each a closed subpath). The clip is a render-time
+    # set-intersection of the drawn lines with this region, so no streamline ink
+    # lands outside the device -- independent of the integration grid (the
+    # velocity mask alone only bounds streamlines to ~one grid cell). Using the
+    # triangle union (rather than an assembled boundary polygon) is robust for
+    # star-shaped / pinched domains where a single outline can wind wrongly.
+    tv = verts[tris]                                              # (K, 3, 2)
+    clip_pts = np.concatenate([tv, tv[:, :1]], axis=1).reshape(-1, 2)  # v0,v1,v2,v0
+    clip_codes = np.tile(
+        np.array([MplPath.MOVETO, MplPath.LINETO, MplPath.LINETO,
+                  MplPath.CLOSEPOLY], np.uint8), len(tris))
+    device_path = MplPath(clip_pts, clip_codes) if len(tris) else None
     # Contacts: the boundary markers live in the source mesh file (its path is
     # recorded in the checkpoint). Highlight the parametrized contacts (any marker
     # other than the unparametrized "wall") over the plain device boundary.
@@ -172,9 +164,9 @@ def run_finite_volume(file_list, mine, output, density, streamlines, boundary,
                                    linewidth=streamlines.get("linewidth", 0.6),
                                    arrowsize=streamlines.get("arrowsize", 0.6),
                                    color="k")
-                if bpoly is not None and streamlines.get("clip", True):
-                    # exact hard clip to the device boundary (no overshoot ink)
-                    clip = PathPatch(bpoly, transform=ax.transData,
+                if device_path is not None and streamlines.get("clip", True):
+                    # exact hard clip to the device (triangle union; no overshoot)
+                    clip = PathPatch(device_path, transform=ax.transData,
                                      fc="none", ec="none")
                     ax.add_patch(clip)
                     sp.lines.set_clip_path(clip)
