@@ -556,8 +556,10 @@ class FiniteVolume(Geometry):
         # zero tensor and (via the rates check) forces a GPU->CPU sync each step.
         rm = getattr(material, "rates_modal", None)
         ks = getattr(material, "k_speed", 0.0)
+        has_ee = hasattr(material, "ee_scattering")   # microscopic e-e: NOT in rates_modal
         self._skip_collision = bool(
             rm is not None and float(rm.abs().sum()) == 0.0 and float(ks) == 0.0
+            and not has_ee
         )
 
         # Optionally fuse the per-step kernels with torch.compile.  Serial: compile
