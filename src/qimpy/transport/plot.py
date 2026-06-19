@@ -32,6 +32,7 @@ def run(
     output: str,
     density: Optional[dict] = None,
     streamlines: Optional[dict] = None,
+    boundary: Optional[dict] = None,
     dpi: int = 200,
     **ignored,
 ) -> None:
@@ -53,38 +54,41 @@ def run(
             "qimpy.transport.plot renders the finite-volume 'spatial_transport'"
             f" geometry; checkpoint has variant_name={geom_type!r}."
         )
-    run_finite_volume(file_list, mine, output, density, streamlines, dpi)
+    run_finite_volume(file_list, mine, output, density, streamlines, boundary, dpi)
 
 
-def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> None:
+def run_finite_volume(file_list, mine, output, density, streamlines, boundary,
+                      dpi) -> None:
     """Frame-parallel, mesh-native rendering of FiniteVolume (finite-volume) output.
 
     The finite-volume state is one average per triangle, so the density is drawn
     as a flat-shaded ``tripcolor`` (piecewise-constant, the honest FV picture)
-    over the actual mesh, and current streamlines are traced from a linear
-    interpolation of (jx, jy) off the cell centroids. Each rank renders its
-    strided subset of frames, so post-processing scales like the solve."""
+    over the actual mesh. Current streamlines are traced mesh-natively: the
+    per-cell (jx, jy) is scattered to the vertices and sampled with matplotlib's
+    ``LinearTriInterpolator``, which interpolates within the triangulation and
+    returns values masked outside it -- so streamlines stop at the true device
+    boundary with no convex-hull bleed (important for non-convex cross/Hall-bar
+    domains). The device boundary itself is drawn from the mesh edges that border
+    exactly one triangle. Each rank renders its strided subset of frames."""
     import matplotlib.tri as mtri
-    from scipy.interpolate import griddata
+    from matplotlib.collections import LineCollection
     cmap = density.get("cmap", "bwr")
+    bdraw = {} if boundary is None else boundary
     with Checkpoint(file_list[0]) as cp:
         g = cp["/geometry"]
         verts = np.array(g["mesh_vertices"])         # (Nv, 2)
         tris = np.array(g["mesh_triangles"])         # (K, 3)
-        cen = np.array(g["cell_centroid"])           # (K, 2)
     triang = mtri.Triangulation(verts[:, 0], verts[:, 1], tris)
+    nv = len(verts)
+    # Device boundary = mesh edges that border exactly one triangle, i.e. have no
+    # neighbour across them (Triangulation.neighbors == -1). neighbors[k, j] is
+    # the triangle across the edge (tris[k, j] -> tris[k, (j+1)%3]).
+    bk, bj = np.where(triang.neighbors < 0)
+    bseg = np.stack([verts[tris[bk, bj]], verts[tris[bk, (bj + 1) % 3]]], axis=1)
     if streamlines is not None:
         xs = np.linspace(verts[:, 0].min(), verts[:, 0].max(), 220)
         ys = np.linspace(verts[:, 1].min(), verts[:, 1].max(), 220)
         Xs, Ys = np.meshgrid(xs, ys)
-        # The streamline grid spans the mesh bounding box, but griddata only
-        # interpolates over the convex hull of the cell centroids. For a
-        # non-convex domain (cross / Hall bar) the concave regions between arms
-        # lie inside that hull, so streamlines would otherwise be drawn through
-        # empty space outside the device. Mask any grid point that lands on no
-        # triangle (TriFinder returns -1) so streamplot stops at the true mesh
-        # boundary. Computed once: the grid and mesh are fixed across frames.
-        stream_off_mesh = triang.get_trifinder()(Xs, Ys) < 0
     orig_level = log.getEffectiveLevel(); log.setLevel(logging.INFO)
     for checkpoint_file in file_list:
         with Checkpoint(checkpoint_file) as cp:
@@ -104,14 +108,25 @@ def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> Non
             cb = fig.colorbar(tpc, ax=ax, fraction=0.046, pad=0.04)
             cb.set_label(rf"Density ($\times|\rho|_{{\max}}$ = {vmax:.2e})")
             if streamlines is not None and obs.shape[-1] >= 3:
-                U = np.nan_to_num(griddata(cen, obs[fr, :, 1], (Xs, Ys), method="linear"))
-                V = np.nan_to_num(griddata(cen, obs[fr, :, 2], (Xs, Ys), method="linear"))
-                U[stream_off_mesh] = np.nan      # clip streamlines to the mesh domain
-                V[stream_off_mesh] = np.nan
-                ax.streamplot(xs, ys, U, V,
+                # Scatter per-triangle (jx, jy) to vertices (mean of incident
+                # cells), then sample with the mesh-aware interpolator; values
+                # off the triangulation come back masked -> NaN, so streamlines
+                # stay inside the device.
+                jxv = np.zeros(nv); jyv = np.zeros(nv); cnt = np.zeros(nv)
+                np.add.at(jxv, tris.ravel(), np.repeat(obs[fr, :, 1], 3))
+                np.add.at(jyv, tris.ravel(), np.repeat(obs[fr, :, 2], 3))
+                np.add.at(cnt, tris.ravel(), 1.0)
+                nz = cnt > 0; jxv[nz] /= cnt[nz]; jyv[nz] /= cnt[nz]
+                U = mtri.LinearTriInterpolator(triang, jxv)(Xs, Ys)
+                V = mtri.LinearTriInterpolator(triang, jyv)(Xs, Ys)
+                ax.streamplot(xs, ys, U.filled(np.nan), V.filled(np.nan),
                               density=streamlines.get("density", 1.5),
                               linewidth=streamlines.get("linewidth", 0.6),
                               arrowsize=streamlines.get("arrowsize", 0.6), color="k")
+            if bdraw.get("draw", True) and len(bseg):
+                ax.add_collection(LineCollection(
+                    bseg, colors=bdraw.get("color", "0.2"),
+                    linewidths=bdraw.get("linewidth", 0.8), zorder=3))
             plot_file = output.format(i_step)
             fig.savefig(plot_file, bbox_inches="tight", dpi=dpi)
             plt.close(fig)
