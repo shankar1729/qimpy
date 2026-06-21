@@ -731,6 +731,46 @@ class EEScattering(TreeNode):
             out = out + nl.to(out.dtype)
         return out.reshape(shape_in)
 
+    def a_dot_breakdown(self, a: torch.Tensor):
+        """Split the collision contribution into (linear, quadratic, cubic).
+
+        Returns three tensors with the same shape as ``a`` (``(..., Nr*dim)``):
+
+        * ``lin``  -- the linearized collision operator ``-L_coeff @ a4``;
+        * ``quad`` -- the part of the exact nonlinear operator that is even in
+          ``a`` (quadratic-in-deltaf vertex), isolated as ``½(NL[a]+NL[-a])``;
+        * ``cub``  -- the part odd in ``a`` (cubic-in-deltaf vertex), isolated
+          as ``½(NL[a]-NL[-a])``.
+
+        Using the +/- symmetrization rather than re-deriving the per-degree
+        vertices keeps this consistent with the single ``NL`` path used in
+        :meth:`a_dot` (and matches the warm in-loop apply, avoiding the
+        standalone-apply slow path).  ``lin + quad + cub`` reproduces
+        ``a_dot(a)`` to round-off.
+        """
+        fs = self.fermi_surface
+        Nr, dim = fs.Nr, fs.angular.dim
+        shape_in = a.shape
+        a4 = a.reshape(*shape_in[:-1], Nr, dim)
+        lin = -torch.einsum("cij,...jc->...ic", self.L_coeff, a4)
+        if self.nonlinear:
+            if self.backend == "dense":
+                nlp = self._apply_dense(a4)
+                nlm = self._apply_dense(-a4)
+            else:
+                nlp = self._apply_matrix_free(a4)
+                nlm = self._apply_matrix_free(-a4)
+            nlp = nlp.to(lin.dtype)
+            nlm = nlm.to(lin.dtype)
+            cub = 0.5 * (nlp - nlm)
+            quad = 0.5 * (nlp + nlm)
+        else:
+            cub = torch.zeros_like(lin)
+            quad = torch.zeros_like(lin)
+        return (lin.reshape(shape_in),
+                quad.reshape(shape_in),
+                cub.reshape(shape_in))
+
     def _finalize_nonlinear(self, Fhat: torch.Tensor) -> torch.Tensor:
         """Apply the per-output-harmonic null projection on the binned complex
         output and convert to real coefficients ``[..., o, co]``."""

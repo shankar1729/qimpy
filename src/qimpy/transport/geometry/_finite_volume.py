@@ -430,6 +430,7 @@ class FiniteVolume(Geometry):
         vk_eps2: float = 0.0,
         compile: bool = False,
         save_rho: bool = False,
+        save_terms: bool = False,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
@@ -460,6 +461,7 @@ class FiniteVolume(Geometry):
         self.mesh_file = mesh_file
         self.contacts = contacts
         self.save_rho = save_rho
+        self.save_terms = save_terms
         self._vk_eps2 = float(vk_eps2)
 
         self.mesh = load_mesh(mesh_file)
@@ -595,6 +597,7 @@ class FiniteVolume(Geometry):
         else:
             self._u = torch.zeros(self.K, self.Nk, device=rc.device, dtype=v.dtype)
         self._stash_t, self._stash_i, self._stash_obs = [], [], []
+        self._stash_terms = []   # per-frame (4, K_own, Nr*dim): [a, lin, quad, cub]
 
     def _setup_boundary(self, material: Material) -> None:
         """Group boundary edges by marker into a wall (reflector) set and one
@@ -822,6 +825,21 @@ class FiniteVolume(Geometry):
         self._stash_i.append(i_step)
         self._stash_t.append(t)
         self._stash_obs.append(obs.detach().cpu().numpy())
+        if self.save_terms and hasattr(self.material, "ee_scattering"):
+            # Per-(m,l) collision breakdown, computed WARM in the evolution loop
+            # (the same context as the in-run apply) to dodge the cold
+            # standalone-apply slow path. a is the modal distribution; lin/quad/
+            # cub are the linear, quadratic-in-deltaf and cubic-in-deltaf parts
+            # of the e-e operator. All are modal, flattenable to (Nr, dim).
+            with torch.no_grad():
+                a = self.material.to_modes(u_own)            # (K_own, Nr*dim)
+                lin, quad, cub = self.material.ee_scattering.a_dot_breakdown(a)
+                self._stash_terms.append(np.stack([
+                    a.detach().cpu().numpy(),
+                    lin.detach().cpu().numpy(),
+                    quad.detach().cpu().numpy(),
+                    cub.detach().cpu().numpy(),
+                ], axis=0))                                  # (4, K_own, Nr*dim)
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
@@ -864,5 +882,25 @@ class FiniteVolume(Geometry):
                                        (self._own_start, 0),
                                        torch.from_numpy(u_own))
             saved.append("rho")
+        if self.save_terms and len(self._stash_terms):
+            # Per-(m,l) collision breakdown stacked over saved frames:
+            # (n_stash, 4, K, Nr*dim) with channel order [a, lin, quad, cub].
+            # Reshape the last axis to (Nr, dim) offline for the radial/angular
+            # (l, m) contributions. dim = 2*M_theta+1 (m = -M..M).
+            fs = self.material
+            Nr_m = int(fs.Nr); dim_m = int(fs.angular.dim)
+            n_modal = Nr_m * dim_m
+            cp_path.attrs["terms_Nr"] = Nr_m
+            cp_path.attrs["terms_dim"] = dim_m
+            cp_path.write_str("terms_channels", "a,lin,quad,cub")
+            terms_own = np.stack(self._stash_terms)          # (n_stash,4,K_own,n_modal)
+            CheckpointPath(checkpoint, path).create_dataset(
+                "fv_terms", (n_stash, 4, self.K, n_modal), terms_own.dtype)
+            if checkpoint is not None:
+                checkpoint.write_slice(checkpoint[f"{path}/fv_terms"],
+                                       (0, 0, self._own_start, 0),
+                                       torch.from_numpy(terms_own))
+            saved.append("fv_terms")
         self._stash_t, self._stash_i, self._stash_obs = [], [], []
+        self._stash_terms = []
         return saved
