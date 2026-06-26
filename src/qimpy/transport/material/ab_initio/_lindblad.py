@@ -25,6 +25,7 @@ class Lindblad(TreeNode):
 
     constant_params: dict[str, torch.Tensor]  #: constant values of parameters
     scale_factor: dict[int, torch.Tensor]  #: scale factors per patch
+    detailed_balance: str
 
     @stopwatch
     def __init__(
@@ -33,6 +34,7 @@ class Lindblad(TreeNode):
         ab_initio: material.ab_initio.AbInitio,
         data_file: Checkpoint,
         scale_factor: float = 1.0,
+        detailed_balance: str = "single",
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """
@@ -45,6 +47,25 @@ class Lindblad(TreeNode):
         """
         super().__init__()
         self.ab_initio = ab_initio
+        self.detailed_balance = detailed_balance
+
+        if detailed_balance == "spatial":
+            max_dmu = 1e-3
+            eps = 1e-12
+            dmu_eps = 1e-8
+
+            self.mu0 = torch.ones(1,1).to(rc.device) * ab_initio.mu
+
+            self.max_dbetamu = max_dmu / ab_initio.T
+            self.max_dmu = max_dmu
+            self.eps = float(eps)
+            self.dbetamu_eps = float(dmu_eps) / ab_initio.T
+            self.dmu_eps = float(dmu_eps)
+            self.exp_betaE = torch.exp(ab_initio.E / ab_initio.T)[None, None]
+        elif detailed_balance not in ["single", "none", "emission"]:
+            raise InvalidInputException(f"{detailed_balance} detailed_balance only has spatial, single, and none implemented")
+          
+
         if not bool(data_file.attrs["ePhEnabled"]):
             raise InvalidInputException("No e-ph scattering available in data file")
 
@@ -104,6 +125,8 @@ class Lindblad(TreeNode):
         )
         cp_omega_ph = data_file["omega_ph"]
         cp_G = data_file["G"]
+        if detailed_balance == "emission":
+            cp_E = torch.from_numpy(np.array(data_file["E"])).to(rc.device)
         for block_start, block_stop in zip(block_lims[:-1], block_lims[1:]):
             # Read current slice of data:
             cur = slice(block_start, block_stop)
@@ -114,7 +137,8 @@ class Lindblad(TreeNode):
                 G = torch.einsum("kba, kbc, kcd -> kad", evecs[ik].conj(), G, evecs[jk])
             bose_occ = bose(omega_ph, ab_initio.T)[:, None, None]
             wm = prefactor * bose_occ
-            wp = prefactor * (bose_occ + 1.0)
+            if detailed_balance != "emission":
+                wp = prefactor * (bose_occ + 1.0)
 
             # Contributions to dynamics of ik:
             if (sel := get_mine(ik)) is not None:
@@ -122,14 +146,26 @@ class Lindblad(TreeNode):
                 Gcur = G[sel]
                 Gsq = pack_real("kac, kbd -> kabcd", Gcur, Gcur.conj())
                 P[0].index_add_(0, i_pair, wm[sel] * Gsq)  # P contribution
-                P[1].index_add_(0, i_pair, wp[sel] * Gsq)  # Pbar contribution
+                if detailed_balance != "emission":
+                    P[1].index_add_(0, i_pair, wp[sel] * Gsq)  # Pbar contribution
+                else:
+                    dE = cp_E[ik[sel]][..., None] - cp_E[jk[sel]][..., None, :]
+                    Gcur_ = Gcur * torch.exp(dE / (2 * ab_initio.T))
+                    Gsq_ = pack_real("kac, kbd -> kabcd", Gcur_, Gcur_.conj())
+                    P[1].index_add_(0, i_pair, wm[sel] * Gsq_)  # Pbar contribution
 
             # Contributions to dynamics of jk:
             if (sel := get_mine(jk)) is not None:
                 i_pair = (jk[sel] - ik_start) * nk + ik[sel]
                 Gcur = G[sel]
                 Gsq = pack_real("kca, kdb -> kabcd", Gcur.conj(), Gcur)
-                P[0].index_add_(0, i_pair, wp[sel] * Gsq)  # P contribution
+                if detailed_balance != "emission":
+                    P[0].index_add_(0, i_pair, wp[sel] * Gsq)  # P contribution
+                else:
+                    dE = cp_E[ik[sel]][..., None] - cp_E[jk[sel]][..., None, :]
+                    Gcur_ = Gcur * torch.exp(dE / (2 * ab_initio.T))
+                    Gsq_ = pack_real("kca, kdb -> kabcd", Gcur_.conj(), Gcur_)
+                    P[0].index_add_(0, i_pair, wm[sel] * Gsq_)  # P contribution
                 P[1].index_add_(0, i_pair, wm[sel] * Gsq)  # Pbar contribution
 
         op_shape = (2, nk_mine * n_bands_sq, nk * n_bands_sq)
@@ -144,7 +180,13 @@ class Lindblad(TreeNode):
         fill_percent_P = 100.0 * nnzP / ntotP
         log.info(f"P tensor fill fraction: {fill_percent_P:.1f}%")
 
-        self.rho_dot0 = self._calculate(ph.unpack(ab_initio.rho0))
+        if detailed_balance in ["none", "emission"]:
+            log.info(f"Setting rho_dot0 to zero for {detailed_balance} detailed balance scheme")
+            self.rho_dot0 = 0 
+        else:
+            log.info(f"Computing rho_dot0 for {detailed_balance} detailed balance scheme")
+            self.rho_dot0 = self._calculate(ph.unpack(ab_initio.rho0))
+
         self.constant_params = dict(
             scale_factor=torch.tensor(scale_factor, device=rc.device)
         )
@@ -167,7 +209,56 @@ class Lindblad(TreeNode):
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         """drho/dt due to scattering in Schrodinger picture.
         Input and output rho are in unpacked (complex Hermitian) form."""
+        if self.detailed_balance == "spatial":
+            if self.mu0.shape == (1, 1):
+                self.mu0 = torch.tile(self.mu0, rho.shape[:2])
+            self.rho_dot0 = self._update_rho_dot0(rho)
         return self.scale_factor[patch_id] * (self._calculate(rho) - self.rho_dot0)
+  
+    def _update_rho_dot0(self, rho: torch.Tensor) -> torch.Tensor:
+        """Update rho_dot0 for detailed balance."""
+        ab_initio = self.ab_initio
+        ph = ab_initio.packed_hermitian
+        n_bands = ab_initio.n_bands
+        brange = range(n_bands)
+        f = rho[..., brange, brange].real
+        mu, fk_eq = self.find_mu(f, self.mu0)
+        self.mu0 = mu
+        rho0 = torch.diag_embed(fk_eq)
+        return self._calculate(ph.unpack(rho0))
+
+    def find_mu(self, f: torch.Tensor,mu0: torch.Tensor) -> torch.Tensor:
+        '''find mu based on occupations f, Does not work for k-point parralelization '''
+        ab_initio = self.ab_initio
+        T = ab_initio.T
+        betamu = mu0 / T
+        sum_rule = "xykb -> xy"
+        f_total = torch.einsum(sum_rule, f) 
+        reshape = betamu.shape + (1,1)
+        # Fermi-dirac distribution, shape (Nx, Ny, Nk, Nb)
+        
+        exp_beta_Emu = self.exp_betaE / torch.exp(betamu).reshape(reshape)
+        distribution = 1 / (exp_beta_Emu + 1)
+        F = torch.einsum(sum_rule, distribution) - f_total
+        c = 0
+        while torch.max(torch.abs(F)) > self.eps:
+            dF = torch.einsum(sum_rule, exp_beta_Emu / (exp_beta_Emu + 1) ** 2)
+            dbetamu = F / dF
+            limit_ind = (
+                torch.abs(dbetamu) > self.max_dbetamu
+            )  # indices that need to be limited by self.max_dbetamu
+            dbetamu[limit_ind] = torch.sign(F[limit_ind]) * self.max_dbetamu
+            betamu -= dbetamu
+            exp_beta_Emu = self.exp_betaE / torch.exp(betamu).reshape(reshape)
+            distribution = 1 / (exp_beta_Emu + 1)
+            F = torch.einsum(sum_rule, distribution) - f_total
+            if torch.max(torch.abs(dbetamu)) < self.dbetamu_eps:
+                break
+            if  c > 100:
+                log.info(f'mu not found after 100 iterations. {torch.max(torch.abs(dbetamu))}')
+                break 
+            c += 1
+        return betamu*T, distribution
 
     def _calculate(self, rho: torch.Tensor) -> torch.Tensor:
         """Internal drho/dt calculation without detailed balance / scaling."""

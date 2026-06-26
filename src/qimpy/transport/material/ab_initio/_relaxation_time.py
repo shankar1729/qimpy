@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Union, Sequence
 
 import numpy as np
 import torch
@@ -41,8 +42,8 @@ class RelaxationTime(TreeNode):
         ab_initio: material.ab_initio.AbInitio,
         tau_e: float = np.inf,
         tau_h: float = np.inf,
-        tau_s_e: float = np.inf,
-        tau_s_h: float = np.inf,
+        tau_s_e: Union[float, Sequence[float]] = np.inf,
+        tau_s_h: Union[float, Sequence[float]] = np.inf,
         tau_eh: float = np.inf,
         max_dmu: float = 1e-3,
         tau_recomb: float = np.inf,
@@ -66,9 +67,11 @@ class RelaxationTime(TreeNode):
         tau_s_e
             :yaml:`Electron spin relaxation time.`
             Note that `tau_e` must also be set to use this.
+            Can be a single number, or three components for each spin direction.
         tau_s_h
             :yaml:`Hole spin relaxation time.`
             Note that `tau_h` must also be set to use this.
+            Can be a single number, or three components for each spin direction.
         max_dmu
             :yaml:`Maximum mu change in Newton-Rhapson method.`
         tau_recomb
@@ -85,8 +88,8 @@ class RelaxationTime(TreeNode):
         self.constant_params = dict(
             tau_e=torch.tensor(tau_e, device=rc.device),
             tau_h=torch.tensor(tau_h, device=rc.device),
-            tau_s_e=torch.tensor(tau_s_e, device=rc.device),
-            tau_s_h=torch.tensor(tau_s_h, device=rc.device),
+            tau_s_e=torch.tensor(tau_s_e, device=rc.device).reshape(-1),
+            tau_s_h=torch.tensor(tau_s_h, device=rc.device).reshape(-1),
             tau_eh=torch.tensor(tau_eh, device=rc.device),
             tau_recomb=torch.tensor(tau_recomb, device=rc.device),
         )
@@ -101,28 +104,28 @@ class RelaxationTime(TreeNode):
             log.info("Enable RTA for conduction bands.")
             self.exp_betaEe = {}
             self.betamue0 = {}
-            if np.isfinite(tau_s_e):
+            if np.all(np.isfinite(tau_s_e)):
                 log.info("Enable separate spin relaxation time for conduction bands.")
                 self.proj_S_e = get_projector(
                     ab_initio.S[..., nv:, nv:], ab_initio.comm
                 )
                 if only_diagonal:
                     raise InvalidInputException("Cannot use only_diagonal with tau_s_e")
-        elif np.isfinite(tau_s_e):
+        elif np.all(np.isfinite(tau_s_e)):
             raise InvalidInputException("Require finite tau_e to use tau_s_e")
 
         if np.isfinite(tau_h):
             log.info("Enable RTA for valance bands.")
             self.exp_betaEh = {}
             self.betamuh0 = {}
-            if np.isfinite(tau_s_h):
+            if np.all(np.isfinite(tau_s_h)):
                 log.info("Enable separate spin relaxation time for valence bands.")
                 self.proj_S_h = get_projector(
                     ab_initio.S[..., :nv, :nv], ab_initio.comm
                 )
                 if only_diagonal:
                     raise InvalidInputException("Cannot use only_diagonal with tau_s_h")
-        elif np.isfinite(tau_s_h):
+        elif np.all(np.isfinite(tau_s_h)):
             raise InvalidInputException("Require finite tau_h to use tau_s_h")
 
         if np.isfinite(tau_eh):
@@ -150,8 +153,8 @@ class RelaxationTime(TreeNode):
         attrs = cp_path.attrs
         attrs["tau_e"] = self.constant_params["tau_e"].item()
         attrs["tau_h"] = self.constant_params["tau_h"].item()
-        attrs["tau_s_e"] = self.constant_params["tau_s_e"].item()
-        attrs["tau_s_h"] = self.constant_params["tau_s_h"].item()
+        attrs["tau_s_e"] = self.constant_params["tau_s_e"].tolist()
+        attrs["tau_s_h"] = self.constant_params["tau_s_h"].tolist()
         attrs["tau_eh"] = self.constant_params["tau_eh"].item()
         attrs["tau_recomb"] = self.constant_params["tau_recomb"].item()
         attrs["max_dmu"] = self.max_dmu
@@ -190,9 +193,9 @@ class RelaxationTime(TreeNode):
                 None, None
             ]
             self.betamuh0[patch_id] = -torch.ones([1, 1]).to(rc.device) * betamu0
-        if torch.isfinite(tau_s_e):
+        if torch.all(torch.isfinite(tau_s_e)):
             self.tau_s_e[patch_id] = tau_s_e
-        if torch.isfinite(tau_s_h):
+        if torch.all(torch.isfinite(tau_s_h)):
             self.tau_s_h[patch_id] = tau_s_h
         if torch.isfinite(tau_eh):
             self.tau_eh[patch_id] = tau_eh
@@ -248,8 +251,10 @@ class RelaxationTime(TreeNode):
                 drho = rho[..., bslice, bslice] - torch.diag_embed(fe_eq)
                 if patch_id in self.tau_s_e:
                     drho_S = apply_projector(drho, self.proj_S_e, self.ab_initio.comm)
-                    drho -= drho_S  # leave complement of S projection in drho
-                    result[..., bslice, bslice] -= drho_S / (2 * self.tau_s_e[patch_id])
+                    drho -= drho_S.sum(dim=-1)  # leave non-spin parts in drho
+                    result[..., bslice, bslice] -= (
+                        drho_S / (2 * self.tau_s_e[patch_id][..., None, None, :])
+                    ).sum(dim=-1)
                 result[..., bslice, bslice] -= drho / (2 * self.tau_e[patch_id])
             self.betamue0[patch_id] = betamue
 
@@ -269,8 +274,10 @@ class RelaxationTime(TreeNode):
                 drho = rho[..., bslice, bslice] - torch.diag_embed(fh_eq)
                 if patch_id in self.tau_s_h:
                     drho_S = apply_projector(drho, self.proj_S_h, self.ab_initio.comm)
-                    drho -= drho_S  # leave complement of S projection in drho
-                    result[..., bslice, bslice] -= drho_S / (2 * self.tau_s_h[patch_id])
+                    drho -= drho_S.sum(dim=-1)  # leave non-spin parts in drho
+                    result[..., bslice, bslice] -= (
+                        drho_S / (2 * self.tau_s_h[patch_id][..., None, None, :])
+                    ).sum(dim=-1)
                 result[..., bslice, bslice] -= drho / (2 * self.tau_h[patch_id])
             self.betamuh0[patch_id] = betamuh
 
@@ -345,4 +352,4 @@ def apply_projector(
     """Project `rho` onto space defined by orthonormal projectors `proj`."""
     overlap = torch.einsum("...kab, kiab -> ...i", rho, proj.conj())
     comm.Allreduce(MPI.IN_PLACE, BufferView(overlap))
-    return torch.einsum("kiab, ...i -> ...kab", proj, overlap)
+    return torch.einsum("kiab, ...i -> ...kabi", proj, overlap)

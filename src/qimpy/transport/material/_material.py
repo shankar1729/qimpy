@@ -26,7 +26,10 @@ class Material(TreeNode):
     rho0: torch.Tensor  #: nk_mine x n_bands x n_bands initial density matrix
     dt_max: float  #: maximum stable time-step (set to inf if not available)
 
-    def __init__(
+    def __init__(self, *, checkpoint_in: CheckpointPath = CheckpointPath()) -> None:
+        super().__init__()
+
+    def initialize(
         self,
         *,
         wk: float,
@@ -34,10 +37,8 @@ class Material(TreeNode):
         n_bands: int,
         n_dim: int,
         process_grid: ProcessGrid,
-        checkpoint_in: CheckpointPath = CheckpointPath(),
-    ):
-        """Initialize material parameters, typically used from a derived class."""
-        super().__init__()
+    ) -> None:
+        """Initialize shared material parameters (call from a derived class.)"""
         self.comm = process_grid.get_comm("k")
         self.k_division = TaskDivision(
             n_tot=nk, i_proc=self.comm.rank, n_procs=self.comm.size
@@ -106,6 +107,7 @@ class Material(TreeNode):
         """Return expectation value of observables, (Nx x Ny x No)."""
         result = self.wk * torch.einsum("xya, oa -> xyo", rho, self.get_observables(t))
         if self.comm.size > 1:
+            result = result.contiguous()
             self.comm.Allreduce(MPI.IN_PLACE, BufferView(result))
         return result
 

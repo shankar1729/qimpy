@@ -66,6 +66,11 @@ class TimeEvolution(TreeNode):
             corresponding to the number of collated steps.
         integrator
             :yaml:`Integrator for time-stepping: RK2 or RK4.`
+        steady_state
+            :yaml:`Steady state options.`
+            EXPERIMENTAL: works only with a single process and geometry domain for now.
+            Specify a dictionary of `rho0_path` for initial state, `method` for solver,
+            `nit` for number of iterations and `nit_save` for iterations to save at.
         dt_max_sources
             List of objects with dt_max that determine maximum safe time step.
         """
@@ -118,7 +123,7 @@ class TimeEvolution(TreeNode):
             geometry.rho = rho0 + (dt / 6.0) * (k1 + 2 * (k2 + k3) + k4)
         else:
             raise KeyError(f"Unrecognized integrator = {self.integrator}")
-        #if len(geometry.rho.data):
+        # if len(geometry.rho.data):
         #    np.save("rho.npy", rho0.data[0].cpu().numpy())
         #    exit()
 
