@@ -1,0 +1,28 @@
+# rect-domain driven by source/drain contacts, solved with the finite-volume
+# triangle-mesh transport (finite_volume). The mesh is supplied externally (qimpy does
+# not mesh); generate it first with:
+#     python make_rect_mesh.py --out rect-domain-tri.npz
+fermi_surface:
+  kF: 1.0
+  vF: 1.5
+  M_theta: 12
+  Nr: 1
+  tau_p: .inf
+  tau_ee: .inf
+  r_c: 10.0
+
+finite_volume:
+  mesh_file: rect-domain-tri.npz
+  compile: true   # fuse the per-step kernels (~2.5x on GPU); one-time compile cost
+  contacts:
+    source:
+      dmu: +0.1
+    drain:
+      dmu: -0.1
+
+time_evolution:
+  t_max: 1000.0
+  dt_save: 5.0
+  n_collate: 32
+
+checkpoint_out: animation/advect_{:04d}.h5

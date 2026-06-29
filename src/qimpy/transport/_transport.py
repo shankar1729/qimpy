@@ -5,8 +5,8 @@ from qimpy.rc import MPI
 from qimpy.io import CheckpointPath, Checkpoint, CheckpointContext
 from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
-from .geometry import Geometry, PatchSet, ParameterGrid
-from .material import Material, FermiCircle
+from .geometry import Geometry, FiniteVolume
+from .material import Material, FermiSurface
 from .material.ab_initio import AbInitio
 from .material.single_band import SingleBand
 from . import TimeEvolution
@@ -21,10 +21,9 @@ class Transport(TreeNode):
         self,
         *,
         ab_initio: Optional[Union[AbInitio, dict]] = None,
-        fermi_circle: Optional[Union[FermiCircle, dict]] = None,
+        fermi_surface: Optional[Union[FermiSurface, dict]] = None,
         single_band: Optional[Union[SingleBand, dict]] = None,
-        patch_set: Optional[Union[PatchSet, dict]] = None,
-        parameter_grid: Optional[Union[ParameterGrid, dict]] = None,
+        finite_volume: Optional[Union[FiniteVolume, dict]] = None,
         time_evolution: Optional[Union[TimeEvolution, dict]] = None,
         checkpoint: Optional[str] = None,
         checkpoint_out: Optional[str] = None,
@@ -40,17 +39,16 @@ class Transport(TreeNode):
         ab_initio
             :yaml:`Ab-initio material.`
             Exactly one supported material type must be specified.
-        fermi_circle
-            :yaml:`Fermi-circle material for graphene/2DEG.`
+        fermi_surface
+            :yaml:`Unified Fermi-surface (delta-k storage with modal transforms).`
+            Set Nr=1 to recover the Fermi-circle limit.
             Exactly one supported material type must be specified.
         single_band
             :yaml:`Single-band model material for energy-resolved charge transport.`
             Exactly one supported material type must be specified.
-        patch_set
-            :yaml:`Geometry consisting of bicubic patches.`
-            Exactly one supported geometry type must be specified.
-        parameter_grid
-            :yaml:`Virtual geometry of disconnected points for batched dynamics.`
+        finite_volume
+            :yaml:`Cell-centered finite-volume transport on an external mesh
+            (triangles in 2D, line segments in 1D).`
             Exactly one supported geometry type must be specified.
         time_evolution
             :yaml:`Time integration options.`
@@ -88,9 +86,9 @@ class Transport(TreeNode):
                 "ab-initio", AbInitio, ab_initio, process_grid=self.process_grid
             ),
             TreeNode.ChildOptions(
-                "fermi-circle",
-                FermiCircle,
-                fermi_circle,
+                "fermi-surface",
+                FermiSurface,
+                fermi_surface,
                 process_grid=self.process_grid,
             ),
             TreeNode.ChildOptions(
@@ -102,16 +100,9 @@ class Transport(TreeNode):
             "geometry",
             checkpoint_in,
             TreeNode.ChildOptions(
-                "patch_set",
-                PatchSet,
-                patch_set,
-                material=self.material,
-                process_grid=self.process_grid,
-            ),
-            TreeNode.ChildOptions(
-                "parameter_grid",
-                ParameterGrid,
-                parameter_grid,
+                "finite_volume",
+                FiniteVolume,
+                finite_volume,
                 material=self.material,
                 process_grid=self.process_grid,
             ),

@@ -1,0 +1,11 @@
+# 1D wire [0,1]: source contact at x=0, drain at x=1.
+# Generate the mesh first:  python make_1d_mesh.py --nx 64 --out line.npz
+fermi_surface: {kF: 1.0, vF: 1.0, M_theta: 16, Nr: 1, tau_p: .inf, tau_ee: .inf, r_c: .inf, specularity: 1.0}
+finite_volume:
+  mesh_file: line.npz
+  cfl: 0.8
+  contacts:
+    source: {dmu: +0.1}
+    drain: {dmu: -0.1}
+time_evolution: {t_max: 50.0, dt_save: 25.0, n_collate: 2, integrator: RK2}
+checkpoint_out: line_out/advect_{:04d}.h5
