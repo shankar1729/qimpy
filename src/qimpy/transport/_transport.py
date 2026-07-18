@@ -6,7 +6,7 @@ from qimpy.io import CheckpointPath, Checkpoint, CheckpointContext
 from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
 from .geometry import Geometry, FiniteVolume
-from .material import Material, FermiSurface
+from .material import Material, FermiSurface, FermiCartesian
 from .material.ab_initio import AbInitio
 from .material.single_band import SingleBand
 from . import TimeEvolution
@@ -22,6 +22,7 @@ class Transport(TreeNode):
         *,
         ab_initio: Optional[Union[AbInitio, dict]] = None,
         fermi_surface: Optional[Union[FermiSurface, dict]] = None,
+        fermi_cartesian: Optional[Union[FermiCartesian, dict]] = None,
         single_band: Optional[Union[SingleBand, dict]] = None,
         spatial_transport: Optional[Union[FiniteVolume, dict]] = None,
         time_evolution: Optional[Union[TimeEvolution, dict]] = None,
@@ -89,6 +90,12 @@ class Transport(TreeNode):
                 "fermi-surface",
                 FermiSurface,
                 fermi_surface,
+                process_grid=self.process_grid,
+            ),
+            TreeNode.ChildOptions(
+                "fermi-cartesian",
+                FermiCartesian,
+                fermi_cartesian,
                 process_grid=self.process_grid,
             ),
             TreeNode.ChildOptions(
