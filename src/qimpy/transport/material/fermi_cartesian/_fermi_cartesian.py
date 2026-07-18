@@ -39,7 +39,8 @@ class FermiCartesian(Material):
         self, *, kF: float, vF: float, k_max: float, n_k: int, M_theta: int,
         Nr: int = 4, T: float = 1.0, xi_max: float = 6.0,
         m_star: Optional[float] = None, spin: float = 2.0,
-        newton_iters: int = 8, cell_chunk: int = 256,
+        newton_iters: int = 8, frame_polish: int = 2,
+        cell_chunk: int = 4096, mem_budget_gb: float = 3.0,
         ee_scattering: Optional[Union[EEScattering, dict]] = None,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
@@ -51,6 +52,7 @@ class FermiCartesian(Material):
         self.T_temp, self.xi_max = T, xi_max
         self.mu = 0.5 * kF * kF / m_star                      # E_F (degenerate)
         self.newton_iters, self.cell_chunk = newton_iters, cell_chunk
+        self.frame_polish, self.mem_budget_gb = frame_polish, mem_budget_gb
 
         dk = 2.0 * k_max / n_k                                # cell-centred uniform grid
         kg = torch.arange(n_k, device=rc.device) * dk - k_max + 0.5 * dk
@@ -70,6 +72,17 @@ class FermiCartesian(Material):
         self.eps_k = (k.square().sum(-1) / (2 * m_star)).to(dtype)   # (Nk,)
         self.E = self.eps_k.reshape(Nk, 1)                   # Material.E: (Nk, n_bands)
         self.v = (k / m_star).to(dtype)                      # (Nk, 2) transport velocity
+
+        # density of states: the frame-recovery Newton moments are 1D integrals in
+        # eps (origin-centred FD is translation-invariant on the full grid), so bin
+        # eps once and fit (Te, mu) over nb bins instead of Nk points.
+        nb = min(4096, Nk)
+        edges = torch.linspace(float(self.eps_k.min()), float(self.eps_k.max()),
+                               nb + 1, device=rc.device, dtype=dtype)
+        self._dos_eps = 0.5 * (edges[1:] + edges[:-1])        # (nb,) bin centres
+        idx = torch.bucketize(self.eps_k, edges[1:-1])        # (Nk,) -> [0, nb-1]
+        self._dos_g = torch.zeros(nb, device=rc.device, dtype=dtype).scatter_add_(
+            0, idx, torch.ones_like(self.eps_k))              # (nb,) counts (sum = Nk)
 
         # code's own modal bases (identical construction to FermiSurface)
         self.angular = AngularBasis(M_theta, dtype=dtype)
@@ -101,16 +114,22 @@ class FermiCartesian(Material):
         """psi_n(xi) for all n, shape (..., Nr).  xi any shape."""
         if self.Nr == 1:
             return torch.ones((*xi.shape, 1), dtype=xi.dtype, device=xi.device)
-        u = (xi / self.xi_max).unsqueeze(-1)                 # (..., 1)
-        powers = u ** torch.arange(self.Nr, device=xi.device)  # (..., Nr_pow)
-        return powers @ self._psi_coeff                       # (..., Nr_mode)
+        u = xi / self.xi_max                                  # power ladder (no pow: cheaper, no neg-base)
+        powers = [torch.ones_like(u), u]
+        for _ in range(2, self.Nr):
+            powers.append(powers[-1] * u)
+        return torch.stack(powers, dim=-1) @ self._psi_coeff  # (..., Nr_mode)
 
     def _fourier(self, th: torch.Tensor) -> torch.Tensor:
-        """[1, cos th, sin th, ..., cos M th, sin M th] : (..., 2M+1)."""
-        cols = [torch.ones_like(th)]
-        for m in range(1, self.M_theta + 1):
-            cols += [torch.cos(m * th), torch.sin(m * th)]
-        return torch.stack(cols, dim=-1)
+        """[1, cos th, sin th, ..., cos M th, sin M th] : (..., 2M+1).
+        Independent cos/sin (GPU pipelines them) beat a sequential recurrence."""
+        m = torch.arange(1, self.M_theta + 1, device=th.device, dtype=th.dtype)
+        mth = th.unsqueeze(-1) * m                            # (..., M)
+        cols = torch.empty((*th.shape, self.angular.dim), dtype=th.dtype, device=th.device)
+        cols[..., 0] = 1.0
+        cols[..., 1::2] = torch.cos(mth)
+        cols[..., 2::2] = torch.sin(mth)
+        return cols
 
     @property
     def transport_velocity(self) -> torch.Tensor:
@@ -125,30 +144,38 @@ class FermiCartesian(Material):
         E = torch.einsum("ck,k->c", f, self.eps_k) * w       # (C,)
         kD = p / n[:, None]                                  # <k> exact drift
         E_rest = E - (kD.square().sum(-1) / (2 * self.m_star)) * n  # internal energy
-        # 2x2 Newton on (Te, mu) matching (n, E_rest) via rest-frame FD grid moments
         Te = torch.full_like(n, self.T_temp)
         mu = torch.full_like(n, self.mu)
-        eps = self.eps_k[None, :]                            # (1, Nk)
-        for _ in range(self.newton_iters):
+        # cheap guess over the binned DOS, then polish on the full k-grid so that
+        # equilibrium (delta-f=0) recovers (T, E_F) exactly -> exact fixed point.
+        Te, mu = self._newton_TeMu(Te, mu, n, E_rest,
+                                   self._dos_eps[None, :], self._dos_g[None, :] * w,
+                                   self.newton_iters)
+        Te, mu = self._newton_TeMu(Te, mu, n, E_rest,
+                                   self.eps_k[None, :], w, self.frame_polish)
+        return kD, Te, mu
+
+    def _newton_TeMu(self, Te, mu, n, E_rest, eps, gw, iters):
+        """2x2 Newton for (Te, mu) matching (n, E_rest) over an energy grid `eps`
+        with weights `gw` (binned-DOS tensor, or scalar wk for the full k-grid)."""
+        ge = gw * eps
+        for _ in range(iters):
             xi = (eps - mu[:, None]) / Te[:, None]
             f0 = torch.special.expit(-xi)
             weq = f0 * (1 - f0)
-            nn = f0.sum(-1) * w
-            EE = (f0 * eps).sum(-1) * w
-            g_mu = weq / Te[:, None]                         # df0/dmu
-            g_Te = weq * xi / Te[:, None]                    # df0/dTe
-            J11 = g_mu.sum(-1) * w;              J12 = g_Te.sum(-1) * w
-            J21 = (g_mu * eps).sum(-1) * w;      J22 = (g_Te * eps).sum(-1) * w
-            det = (J11 * J22 - J12 * J21)
+            nn = (gw * f0).sum(-1);  EE = (ge * f0).sum(-1)
+            g_mu = weq / Te[:, None];  g_Te = weq * xi / Te[:, None]
+            J11 = (gw * g_mu).sum(-1);  J12 = (gw * g_Te).sum(-1)
+            J21 = (ge * g_mu).sum(-1);  J22 = (ge * g_Te).sum(-1)
+            det = J11 * J22 - J12 * J21
             det = torch.where(det.abs() < 1e-30, torch.ones_like(det), det)
             r1 = n - nn; r2 = E_rest - EE
-            dmu = (J22 * r1 - J12 * r2) / det
-            dTe = (-J21 * r1 + J11 * r2) / det
-            mu = mu + dmu
-            Te = (Te + dTe).clamp_min(0.05 * self.T_temp)
-        return kD, Te, mu
+            mu = mu + (J22 * r1 - J12 * r2) / det
+            Te = (Te + (-J21 * r1 + J11 * r2) / det).clamp_min(0.05 * self.T_temp)
+        return Te, mu
 
     # ---- the projection-collision (reuses EEScattering unchanged) ----
+    @torch.no_grad()
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         if not hasattr(self, "ee_scattering"):
@@ -158,10 +185,15 @@ class FermiCartesian(Material):
         C = df_lab.shape[0]
         out = torch.empty_like(df_lab)
         dim = self.angular.dim
-        eps = self.eps_k; k = self.k; f0_lab = self._f0_lab
-        Ttm_r = self.radial.T_to_modes                       # (Nr, Nr) modal<-nodal radial
-        for lo in range(0, C, self.cell_chunk):
-            hi = min(lo + self.cell_chunk, C)
+        Nk = df_lab.shape[-1]
+        k = self.k; f0_lab = self._f0_lab
+        # chunk sized from a memory budget (dominant tensors ~ Nk*(2 dim + 3 Nr) doubles);
+        # keeps the bmm intermediates in-core at any grid resolution.
+        bytes_per_row = Nk * (2 * dim + 3 * self.Nr + 12) * 8
+        chunk = max(1, min(self.cell_chunk,
+                           int(self.mem_budget_gb * (2 ** 30) / bytes_per_row)))
+        for lo in range(0, C, chunk):
+            hi = min(lo + chunk, C)
             df = df_lab[lo:hi]                               # (c, Nk)
             f = f0_lab[None, :] + df
             kD, Te, mu = self._recover_frame(f)             # (c,2),(c,),(c,)
@@ -172,20 +204,21 @@ class FermiCartesian(Material):
             f0_loc = torch.special.expit(-xi)
             weq = f0_loc * (1 - f0_loc)
             df_loc = f - f0_loc                              # deviation about local frame
-            # forward: Cartesian -> modal a[c, Nr*dim]  (drift-centred projection)
+            # modal bases built ONCE per chunk, reused forward + backward
+            psi = self._psi(xi)                              # (c, Nk, Nr)  unmasked
+            fou = self._fourier(th)                          # (c, Nk, dim) raw
+            # forward projection: a[c,n,d] = jac * sum_k (df_loc*mask) psi (fou/norm_c).
+            # Fold df into the small (Nr) factor and bmm -> never form (c,Nk,Nr,dim).
             mask = (xi.abs() < self.xi_max)
-            psi = self._psi(xi) * mask.unsqueeze(-1)         # (c, Nk, Nr)
-            fou = self._fourier(th) * self._ang_norm         # (c, Nk, dim)
             jac = self.dk_area / (self.m_star * Te)          # (c,)
-            a = torch.einsum("ck,ckn,ckd->cnd", df_loc, psi, fou) * jac[:, None, None]
-            a = a.reshape(hi - lo, self.Nr * dim)
+            gp = (df_loc * mask).unsqueeze(-1) * psi         # (c, Nk, Nr)
+            a = torch.bmm(gp.transpose(1, 2), fou * self._ang_norm)  # (c, Nr, dim)
+            a = (a * jac[:, None, None]).reshape(hi - lo, self.Nr * dim)
             a_dot = self.ee_scattering.a_dot(a)             # <-- REUSED UNCHANGED
-            # backward: modal -> Cartesian increment  dδf = weq * sum a_dot psi fourier
+            # backward reconstruction: dδf = weq * sum_{n,d} a_dot psi fou  (bmm, no big temp)
             ad = a_dot.reshape(hi - lo, self.Nr, dim)
-            psi_all = self._psi(xi)                          # (c, Nk, Nr) unmasked for recon
-            fou_pl = self._fourier(th)                       # (c, Nk, dim)
-            Phi_dot = torch.einsum("cnd,ckn,ckd->ck", ad, psi_all, fou_pl)
-            ddf = weq * Phi_dot                              # (c, Nk)
+            B = torch.bmm(fou, ad.transpose(1, 2))           # (c, Nk, Nr)
+            ddf = weq * (psi * B).sum(-1)                     # (c, Nk)
             # exact conservation: project (n, J, E) out of the increment
             ddf = self._project_conserved(ddf, kp, eps_p, weq)
             out[lo:hi] = ddf
