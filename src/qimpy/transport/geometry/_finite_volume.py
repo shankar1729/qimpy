@@ -622,8 +622,12 @@ class FiniteVolume(Geometry):
         # O(M_theta)-Python-loop modal transforms into a single per-edge matrix
         # applied as one batched matmul. Build it once by reflecting the Nk basis
         # vectors: refl_mat[e, i, c] = reflector(e_c)[e, i].
+        # Dense (nw, Nk, Nk) reflection matrix collapses the reflector to one matmul
+        # -- worth it for modal materials (small Nk).  For grid materials (large Nk)
+        # it is infeasible (nw*Nk^2), so build it only when it fits ~1 GB; otherwise
+        # apply the sparse reflector per step in _exterior.
         self._refl_mat = None
-        if self._reflector is not None:
+        if self._reflector is not None and self._wall.numel() * self.Nk ** 2 * 8 <= 1.0e9:
             nw = self._wall.numel()
             bn_wall = g.bn[self._wall]
             eye = torch.eye(self.Nk, device=rc.device, dtype=g.area.dtype)
@@ -725,6 +729,8 @@ class FiniteVolume(Geometry):
         if self._refl_mat is not None:
             uP[self._wall] = torch.einsum(
                 "eic,ec->ei", self._refl_mat, uMb[self._wall])
+        elif self._reflector is not None:                         # sparse reflector (large Nk)
+            uP[self._wall] = self._reflector(uMb[self._wall][None])[0]
         for c in self._contacts:
             if c.kind == "fixed":
                 uP[c.idx] = c.ghost.to(uP)
