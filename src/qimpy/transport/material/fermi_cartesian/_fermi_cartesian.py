@@ -35,8 +35,29 @@ class FermiCartesian(Material):
     angular: AngularBasis
     radial: RadialBasis
 
+    @staticmethod
+    def recommended_grid(kF, vF, T, *, xi_max=6.0, dmu_max=0.0, kD_max=0.0,
+                         dk=None, safety_cells=3, m_star=None):
+        """Minimal (k_max, n_k) whose box holds the occupied shell for the given BC.
+
+        f is negligible (< e^{-xi_max}) beyond the thermal shell radius
+        |k| = sqrt(2 m*(E_F + dmu_max + xi_max*T)); a drift shifts the shell centre by
+        |k_D| (= m* v_D at a drift contact, or the interior drift under collisions).
+        Streaming + specular walls preserve |k|, so for the ballistic case this is an
+        exact bound; the drift enters only through kD_max (tiny for weak drive).
+        dk defaults to the thermal width T/vF."""
+        m = float(m_star) if m_star is not None else kF / vF
+        EF = 0.5 * kF * kF / m
+        dk = float(dk) if dk else T / vF
+        k_shell = (2 * m * (EF + abs(dmu_max) + xi_max * T)) ** 0.5
+        k_max = abs(kD_max) + k_shell + safety_cells * dk
+        return float(k_max), int(np.ceil(2 * k_max / dk))
+
     def __init__(
-        self, *, kF: float, vF: float, k_max: float, n_k: int, M_theta: int,
+        self, *, kF: float, vF: float, M_theta: int,
+        k_max: Optional[float] = None, n_k: Optional[int] = None,
+        dk: Optional[float] = None, dmu_max: float = 0.0, kD_max: float = 0.0,
+        grid_safety_cells: int = 3,
         Nr: int = 4, T: float = 1.0, xi_max: float = 6.0,
         m_star: Optional[float] = None, spin: float = 2.0,
         newton_iters: int = 8, frame_polish: int = 2,
@@ -54,6 +75,10 @@ class FermiCartesian(Material):
         self.newton_iters, self.cell_chunk = newton_iters, cell_chunk
         self.frame_polish, self.mem_budget_gb = frame_polish, mem_budget_gb
 
+        if k_max is None or n_k is None:                     # auto-size the box from the BC
+            k_max, n_k = self.recommended_grid(
+                kF, vF, T, xi_max=xi_max, dmu_max=dmu_max, kD_max=kD_max,
+                dk=dk, safety_cells=grid_safety_cells, m_star=m_star)
         dk = 2.0 * k_max / n_k                                # cell-centred uniform grid
         kg = torch.arange(n_k, device=rc.device) * dk - k_max + 0.5 * dk
         KX, KY = torch.meshgrid(kg, kg, indexing="ij")
