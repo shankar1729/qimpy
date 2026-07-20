@@ -237,11 +237,17 @@ class FermiSurface(Material):
 
     # ---- observables / boundaries: delegate to the representation ----
     def get_observable_names(self) -> list[str]:
-        return ["n", "jx", "jy"]
+        return ["n"]                                     # scalars (cell-centred)
 
     @stopwatch
     def get_observables(self, t: float) -> torch.Tensor:
         return self.representation.get_observables()
+
+    def get_flux_names(self) -> list[str]:
+        return self.representation.get_flux_names()      # fluxes (face-centred)
+
+    def get_flux_weights(self) -> torch.Tensor:
+        return self.representation.get_flux_weights()
 
     def get_contactor(self, n: torch.Tensor, **kwargs) -> Callable:
         return self.representation.get_contactor(n, **kwargs)

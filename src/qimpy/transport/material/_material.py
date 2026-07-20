@@ -100,8 +100,22 @@ class Material(TreeNode):
 
     @abstractmethod
     def get_observables(self, t: float) -> torch.Tensor:
-        """Return tensor of complex conjugates of all observables specific to each
+        """Return tensor of SCALAR (cell-centred) observables specific to each
         material. (No x Nkbb_mine) where No is number of observables."""
+
+    def get_flux_names(self) -> list[str]:
+        """Names of FLUX observables (vector fluxes: currents, heat fluxes) that
+        the geometry outputs at face/edge centres as face-normal fluxes rather
+        than cell-centred averages.  Default: none."""
+        return []
+
+    def get_flux_weights(self) -> Optional[torch.Tensor]:
+        """Per-channel scalar weights ``g`` (Nflux x Nkbb_mine) for the flux
+        observables: the face-normal flux of channel-summed ``g`` through an edge
+        with outward unit normal ``n`` is ``sum_k u_face_k (v_k . n) g_k``.  For
+        the particle current ``g`` is the density weight; for a heat flux it is
+        energy x density weight.  Default: None (no flux observables)."""
+        return None
 
     def measure_observables(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         """Return expectation value of observables, (Nx x Ny x No)."""

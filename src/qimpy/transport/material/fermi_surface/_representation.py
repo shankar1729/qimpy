@@ -93,17 +93,25 @@ class DeltaK(KRepresentation):
     def apply_collision(self, rho: torch.Tensor, modal_op: Callable) -> torch.Tensor:
         return self.from_modes(modal_op(self.to_modes(rho)))
 
-    # ---- observables: delta-k weighted sums ----
+    # ---- observables: scalar density per cell; current/heat are FLUXES (faces) ----
+    def _density_weight(self) -> torch.Tensor:
+        fs = self.fs
+        w_r = fs.radial.quad_w / torch.sqrt(fs.radial.quad_w.sum())    # (Nr,)
+        one_q = torch.full((fs.angular.N_theta,), 1.0 / fs.angular.N_theta,
+                           dtype=w_r.dtype, device=w_r.device)
+        return (w_r[:, None] * one_q[None, :]).reshape(-1)             # (Nk,)
+
     def get_observables(self) -> torch.Tensor:
-        fs = self.fs; Ntheta = fs.angular.N_theta; theta = fs.angular.theta
-        w_r = fs.radial.quad_w / torch.sqrt(fs.radial.quad_w.sum())   # (Nr,)
-        cos_q = torch.cos(theta) / Ntheta
-        sin_q = torch.sin(theta) / Ntheta
-        one_q = torch.full_like(cos_q, 1.0 / Ntheta)
-        n_rq = (w_r[:, None] * one_q[None, :]).reshape(-1)
-        jx_rq = (w_r[:, None] * (fs.vF * cos_q)[None, :]).reshape(-1)
-        jy_rq = (w_r[:, None] * (fs.vF * sin_q)[None, :]).reshape(-1)
-        return torch.stack([n_rq, jx_rq, jy_rq], dim=0)
+        return self._density_weight()[None, :]                        # (1, Nk): density
+
+    def get_flux_names(self) -> list[str]:
+        return ["j", "q"]                                             # current, heat flux
+
+    def get_flux_weights(self) -> torch.Tensor:
+        fs = self.fs
+        n_op = self._density_weight()                                 # density weight
+        eps = (fs.mu + fs.radial.xi * fs.T_temp).repeat_interleave(fs.angular.N_theta)
+        return torch.stack([n_op, eps * n_op], dim=0)                 # (2, Nk): g_j, g_q
 
     def get_contactor(self, n: torch.Tensor, **kwargs) -> Callable:
         return _DeltaKContactor(self.fs, n, **kwargs)

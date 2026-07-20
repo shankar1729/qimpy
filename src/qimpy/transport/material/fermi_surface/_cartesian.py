@@ -207,8 +207,14 @@ class Cartesian(KRepresentation):
         return ddf - torch.einsum("ca,cak->ck", lam, g)
 
     def get_observables(self) -> torch.Tensor:
+        return torch.ones_like(self.eps_k)[None, :]       # (1, Nk): density (g=1)
+
+    def get_flux_names(self) -> list[str]:
+        return ["j", "q"]                                 # current, heat flux
+
+    def get_flux_weights(self) -> torch.Tensor:
         one = torch.ones_like(self.eps_k)
-        return torch.stack([one, self.v[:, 0], self.v[:, 1]], dim=0)
+        return torch.stack([one, self.eps_k], dim=0)      # (2, Nk): g_j=1, g_q=eps
 
     def get_contactor(self, n: torch.Tensor, **kwargs) -> Callable:
         return _CartesianContactor(self, n, **kwargs)

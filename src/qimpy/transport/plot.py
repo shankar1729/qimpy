@@ -238,6 +238,27 @@ def _read_contact_names(g):
     return names or None
 
 
+def _cell_vector_from_edge_flux(edge_cells, edge_normal, edge_len, F, K):
+    """Least-squares cell-centre vector from face-normal fluxes.
+
+    Each edge gives ``j_c . n_e = F_e / L_e`` for both incident cells (n_e is the
+    stored edge normal; the sign cancels).  Per cell we solve the 2x2 normal
+    equations over its incident edges.  Because F is the conserved upwind flux
+    (exactly 0 through specular walls), the reconstructed field is tangent to
+    walls and divergence-consistent -- streamlines stay inside the device."""
+    nrm = np.asarray(edge_normal, float)
+    fd = np.asarray(F, float) / np.maximum(np.asarray(edge_len, float), 1e-30)
+    A = np.zeros((K, 2, 2)); b = np.zeros((K, 2))
+    nn = nrm[:, :, None] * nrm[:, None, :]                # (Ne, 2, 2)
+    for side in (0, 1):
+        c = np.asarray(edge_cells)[:, side]
+        m = c >= 0                                        # boundary eR = -1 -> skip
+        np.add.at(A, c[m], nn[m])
+        np.add.at(b, c[m], nrm[m] * fd[m][:, None])
+    A += 1e-12 * np.eye(2)[None]                          # regularize isolated cells
+    return np.linalg.solve(A, b[:, :, None])[:, :, 0]     # (K, 2)
+
+
 def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> None:
     """Frame-parallel, mesh-native rendering of FiniteVolume (finite-volume) output.
 
@@ -297,7 +318,13 @@ def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> Non
             g = cp["/geometry"]
             i_step_list = np.array(g["i_step"])[mine]
             t_list = np.array(g["t"])[mine]
-            obs = np.array(g["fv_observables"][mine])   # (nframe, K, n_obs)
+            obs = np.array(g["fv_observables"][mine])   # (nframe, K, n_scalar)
+            has_flux = "fv_edge_flux" in g
+            if has_flux:
+                edge_cells = np.array(g["edge_cells"])
+                edge_normal = np.array(g["edge_normal"])
+                edge_len = np.array(g["edge_len"])
+                edge_flux = np.array(g["fv_edge_flux"][mine])   # (nframe, n_edge, n_flux)
         for fr, (i_step, t) in enumerate(zip(i_step_list, t_list)):
             n_val = obs[fr, :, 0]                        # (K,) per-cell density
             vmax = float(np.nanmax(np.abs(n_val)))
@@ -326,19 +353,27 @@ def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> Non
                                       ec=gold, alpha=0.85, lw=1.0))
             cb = fig.colorbar(tpc, ax=ax, fraction=0.046, pad=0.04)
             cb.set_label(rf"Density ($\times|\rho|_{{\max}}$ = {vmax:.2e})")
-            if streamlines is not None and obs.shape[-1] >= 3:
-                # Current is stored cell-averaged (centroid) -- see the
-                # staggered-output TODO above. Interpolate it from the cell
-                # centroids and mask to the mesh interior so streamlines stay
-                # inside the device.
-                U = griddata(cell_cent, obs[fr, :, 1], (Xs, Ys), method="linear")
-                V = griddata(cell_cent, obs[fr, :, 2], (Xs, Ys), method="linear")
-                U = np.where(inside, np.nan_to_num(U), np.nan)
-                V = np.where(inside, np.nan_to_num(V), np.nan)
-                ax.streamplot(xs, ys, U, V,
-                              density=streamlines.get("density", 1.5),
-                              linewidth=streamlines.get("linewidth", 0.9),
-                              arrowsize=streamlines.get("arrowsize", 0.9), color="k")
+            if streamlines is not None:
+                # Current from the FACE-normal fluxes (conserved, wall-tangent):
+                # reconstruct the cell-centre vector, then interpolate to the grid
+                # and mask to the mesh interior so streamlines stay inside.
+                if has_flux:
+                    j = _cell_vector_from_edge_flux(edge_cells, edge_normal, edge_len,
+                                                    edge_flux[fr, :, 0], obs.shape[1])
+                    jx, jy = j[:, 0], j[:, 1]
+                elif obs.shape[-1] >= 3:                  # legacy cell-centred current
+                    jx, jy = obs[fr, :, 1], obs[fr, :, 2]
+                else:
+                    jx = None
+                if jx is not None:
+                    U = griddata(cell_cent, jx, (Xs, Ys), method="linear")
+                    V = griddata(cell_cent, jy, (Xs, Ys), method="linear")
+                    U = np.where(inside, np.nan_to_num(U), np.nan)
+                    V = np.where(inside, np.nan_to_num(V), np.nan)
+                    ax.streamplot(xs, ys, U, V,
+                                  density=streamlines.get("density", 1.5),
+                                  linewidth=streamlines.get("linewidth", 0.9),
+                                  arrowsize=streamlines.get("arrowsize", 0.9), color="k")
             plot_file = output.format(i_step)
             fig.savefig(plot_file, bbox_inches="tight", dpi=dpi)
             plt.close(fig)

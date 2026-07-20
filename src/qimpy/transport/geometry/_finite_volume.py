@@ -508,6 +508,25 @@ class FiniteVolume(Geometry):
         # Per-channel density weight; outward number-flux operator per boundary edge.
         self._ncoef = material.get_observables(0.0)[0]        # (Nk,)
         self._cur_b = (g.blen[:, None] * self._ncoef[None, :]) * self._a_bnd  # (Nb,Nk)
+
+        # Face-flux output: fluxes (currents, heat) are emitted on edges as the
+        # face-normal flux F = elen * sum_k u_face_k (v_k.n) g_k -- the SAME upwind
+        # trace the scheme streams with, so F is the conserved flux (exactly 0
+        # through specular walls).  Scalars stay cell-centred.  (Serial only.)
+        self._flux_names = list(material.get_flux_names())
+        self._flux_g = material.get_flux_weights()           # (Nflux, Nk) or None
+        self._do_flux = (self._flux_g is not None) and (self._decomp is None)
+        if self._do_flux:
+            self._a_int = a_int                              # (Ne, Nk) interior v.n
+            eLc = g.eL.detach().cpu().numpy(); eRc = g.eR.detach().cpu().numpy()
+            bc = g.bcell.detach().cpu().numpy()
+            self._edge_cells = np.concatenate([               # (n_edge, 2), eR=-1 on bnd
+                np.stack([eLc, eRc], 1), np.stack([bc, -np.ones_like(bc)], 1)]).astype(np.int64)
+            self._edge_normal = np.concatenate([              # (n_edge, 2) out of first cell
+                g.en.detach().cpu().numpy(), g.bn.detach().cpu().numpy()])
+            self._edge_len = np.concatenate([                 # (n_edge,)
+                g.elen.detach().cpu().numpy(), g.blen.detach().cpu().numpy()])
+            self._stash_flux = []
         # Restrict per-step work to cells/edges this rank owns (all of them serially).
         lo, hi = self._own_start, self._own_stop
         if self._mpi:
@@ -831,6 +850,17 @@ class FiniteVolume(Geometry):
         self._stash_i.append(i_step)
         self._stash_t.append(t)
         self._stash_obs.append(obs.detach().cpu().numpy())
+        if self._do_flux:
+            # Face-normal fluxes on every edge, from the upwind face trace.
+            uf = self._faces(self._u).reshape(-1, self.Nk)
+            g = self.geom
+            uup_i = torch.where(self._maskL, uf[g.eLF], uf[g.eRF])      # (Ne, Nk)
+            uMb = uf[g.bF]
+            uup_b = torch.where(self._maskB, uMb, self._exterior(uMb, t))   # (Nb, Nk)
+            Fi = g.elen[None, :] * (self._flux_g @ (uup_i * self._a_int).t())  # (Nflux, Ne)
+            Fb = g.blen[None, :] * (self._flux_g @ (uup_b * self._a_bnd).t())  # (Nflux, Nb)
+            F = torch.cat([Fi, Fb], dim=1).t()                         # (n_edge, Nflux)
+            self._stash_flux.append(F.detach().cpu().numpy())
         if self.save_terms and hasattr(self.material, "ee_scattering"):
             # Per-(m,l) collision breakdown, computed WARM in the evolution loop
             # (the same context as the in-run apply) to dodge the cold
@@ -877,6 +907,21 @@ class FiniteVolume(Geometry):
             checkpoint.write_slice(checkpoint[f"{path}/fv_observables"],
                                    (0, self._own_start, 0),
                                    torch.from_numpy(np.stack(self._stash_obs)))
+        if self._do_flux and n_stash:
+            # Flux observables live on edges: geometry + face-normal flux per frame.
+            saved += [
+                cp_path.write("edge_cells", torch.from_numpy(self._edge_cells)),
+                cp_path.write("edge_normal", torch.from_numpy(self._edge_normal)),
+                cp_path.write("edge_len", torch.from_numpy(self._edge_len)),
+                "fv_edge_flux",
+            ]
+            cp_path.write_str("flux_names", ",".join(self._flux_names))
+            n_edge = self._edge_len.shape[0]
+            CheckpointPath(checkpoint, path).create_dataset(
+                "fv_edge_flux", (n_stash, n_edge, len(self._flux_names)), np.float64)
+            if checkpoint is not None:
+                checkpoint.write_slice(checkpoint[f"{path}/fv_edge_flux"],
+                                       (0, 0, 0), torch.from_numpy(np.stack(self._stash_flux)))
         if self.save_rho:
             # Raw per-cell state (n_cells, n_channels), for exact restart /
             # steady-state warm start. Each rank writes its owned cell block.
@@ -909,4 +954,6 @@ class FiniteVolume(Geometry):
             saved.append("fv_terms")
         self._stash_t, self._stash_i, self._stash_obs = [], [], []
         self._stash_terms = []
+        if self._do_flux:
+            self._stash_flux = []
         return saved
