@@ -28,11 +28,7 @@ from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext, InvalidInputException
 from .scattering import EEScattering
 from .._material import Material
-from ._representation import (
-    DeltaK,
-    _DeltaKContactor as _FermiSurfaceContactor,   # backward-compat aliases (moved)
-    _DeltaKReflector as _FermiSurfaceReflector,
-)
+from ._representation import DeltaK
 from ._cartesian import Cartesian
 
 
@@ -237,11 +233,18 @@ class FermiSurface(Material):
 
     # ---- observables / boundaries: delegate to the representation ----
     def get_observable_names(self) -> list[str]:
-        return ["n"]                                     # scalars (cell-centred)
+        return ["density"]                               # row-0 weight (contact current)
 
     @stopwatch
     def get_observables(self, t: float) -> torch.Tensor:
-        return self.representation.get_observables()
+        return self.representation.get_density_weight()[None, :]   # (1, Nk)
+
+    def get_cell_scalar_names(self) -> list[str]:
+        return self.representation.get_cell_scalar_names()
+
+    @stopwatch
+    def get_cell_scalars(self, rho: torch.Tensor, t: float) -> torch.Tensor:
+        return self.representation.get_cell_scalars(rho)  # full local moments (K, n)
 
     def get_flux_names(self) -> list[str]:
         return self.representation.get_flux_names()      # fluxes (face-centred)

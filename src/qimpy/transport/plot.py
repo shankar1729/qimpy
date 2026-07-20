@@ -238,6 +238,15 @@ def _read_contact_names(g):
     return names or None
 
 
+def _read_str_list(g, key):
+    """Comma-separated name list written by FiniteVolume, or [] if absent."""
+    if key not in g:
+        return []
+    v = g[key][()]
+    s = v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
+    return s.split(",") if s else []
+
+
 def _cell_vector_from_edge_flux(edge_cells, edge_normal, edge_len, F, K):
     """Least-squares cell-centre vector from face-normal fluxes.
 
@@ -262,14 +271,14 @@ def _cell_vector_from_edge_flux(edge_cells, edge_normal, edge_len, F, K):
 def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> None:
     """Frame-parallel, mesh-native rendering of FiniteVolume (finite-volume) output.
 
-    The finite-volume state is one average per triangle. Density is a
-    cell-centred quantity, drawn as a flat-shaded ``tripcolor`` (piecewise
-    constant, the honest FV picture) over the actual mesh. The current is also
-    stored cell-averaged, so streamlines are traced from the cell-centred field
-    interpolated over the mesh and masked to the interior so none stray outside
-    the device (see the staggered-output TODO: a flux really belongs on the
-    faces). Each rank renders its strided subset of frames, so post-processing
-    scales like the solve."""
+    Scalars (density, ...) are cell-centred, drawn as a flat-shaded
+    ``tripcolor`` (piecewise constant, the honest FV picture) over the mesh; the
+    density panel shows the variation about the frame mean so the driven response
+    is visible even when the field is a small ripple on a large uniform value.
+    The current is a FACE quantity: streamlines are traced from the divergence-
+    conforming, wall-tangent cell vector reconstructed from the face-normal
+    ``particle_current`` fluxes, so they stay inside the device. Each rank renders
+    its strided subset of frames, so post-processing scales like the solve."""
     import os
     import matplotlib.tri as mtri
     from matplotlib.collections import LineCollection
@@ -319,19 +328,23 @@ def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> Non
             i_step_list = np.array(g["i_step"])[mine]
             t_list = np.array(g["t"])[mine]
             obs = np.array(g["fv_observables"][mine])   # (nframe, K, n_scalar)
-            has_flux = "fv_edge_flux" in g
-            if has_flux:
-                edge_cells = np.array(g["edge_cells"])
-                edge_normal = np.array(g["edge_normal"])
-                edge_len = np.array(g["edge_len"])
-                edge_flux = np.array(g["fv_edge_flux"][mine])   # (nframe, n_edge, n_flux)
+            scalar_names = _read_str_list(g, "observable_names")
+            flux_names = _read_str_list(g, "flux_names")
+            edge_cells = np.array(g["edge_cells"])
+            edge_normal = np.array(g["edge_normal"])
+            edge_len = np.array(g["edge_len"])
+            edge_flux = np.array(g["fv_edge_flux"][mine])   # (nframe, n_edge, n_flux)
+        i_dens = scalar_names.index("density") if "density" in scalar_names else 0
+        i_cur = (flux_names.index("particle_current")
+                 if "particle_current" in flux_names else 0)
         for fr, (i_step, t) in enumerate(zip(i_step_list, t_list)):
-            n_val = obs[fr, :, 0]                        # (K,) per-cell density
-            vmax = float(np.nanmax(np.abs(n_val)))
+            n_val = obs[fr, :, i_dens]                   # (K,) per-cell density field
+            n_dev = n_val - float(np.nanmean(n_val))     # variation about frame mean
+            vmax = float(np.nanmax(np.abs(n_dev)))
             if not np.isfinite(vmax) or vmax == 0.0:
                 vmax = 1.0
             fig, ax = plt.subplots(figsize=(6, 6))
-            tpc = ax.tripcolor(triang, facecolors=n_val / vmax, cmap=cmap,
+            tpc = ax.tripcolor(triang, facecolors=n_dev / vmax, cmap=cmap,
                                vmin=-1, vmax=1)         # flat shading = FV cell average
             ax.set_aspect("equal")
             ax.set_title(f"$t$ = {t * _PS_PER_AU_TIME:.4g} ps")
@@ -352,28 +365,22 @@ def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> Non
                             bbox=dict(boxstyle="round,pad=0.2", fc="white",
                                       ec=gold, alpha=0.85, lw=1.0))
             cb = fig.colorbar(tpc, ax=ax, fraction=0.046, pad=0.04)
-            cb.set_label(rf"Density ($\times|\rho|_{{\max}}$ = {vmax:.2e})")
+            cb.set_label(rf"$n-\langle n\rangle$ ($\times${vmax:.2e})")
             if streamlines is not None:
-                # Current from the FACE-normal fluxes (conserved, wall-tangent):
-                # reconstruct the cell-centre vector, then interpolate to the grid
-                # and mask to the mesh interior so streamlines stay inside.
-                if has_flux:
-                    j = _cell_vector_from_edge_flux(edge_cells, edge_normal, edge_len,
-                                                    edge_flux[fr, :, 0], obs.shape[1])
-                    jx, jy = j[:, 0], j[:, 1]
-                elif obs.shape[-1] >= 3:                  # legacy cell-centred current
-                    jx, jy = obs[fr, :, 1], obs[fr, :, 2]
-                else:
-                    jx = None
-                if jx is not None:
-                    U = griddata(cell_cent, jx, (Xs, Ys), method="linear")
-                    V = griddata(cell_cent, jy, (Xs, Ys), method="linear")
-                    U = np.where(inside, np.nan_to_num(U), np.nan)
-                    V = np.where(inside, np.nan_to_num(V), np.nan)
-                    ax.streamplot(xs, ys, U, V,
-                                  density=streamlines.get("density", 1.5),
-                                  linewidth=streamlines.get("linewidth", 0.9),
-                                  arrowsize=streamlines.get("arrowsize", 0.9), color="k")
+                # Current from the FACE-normal particle-current fluxes (conserved,
+                # wall-tangent): reconstruct the divergence-conforming cell vector,
+                # interpolate to the grid, mask to the interior -> streamlines stay
+                # inside the device.
+                j = _cell_vector_from_edge_flux(edge_cells, edge_normal, edge_len,
+                                                edge_flux[fr, :, i_cur], obs.shape[1])
+                U = griddata(cell_cent, j[:, 0], (Xs, Ys), method="linear")
+                V = griddata(cell_cent, j[:, 1], (Xs, Ys), method="linear")
+                U = np.where(inside, np.nan_to_num(U), np.nan)
+                V = np.where(inside, np.nan_to_num(V), np.nan)
+                ax.streamplot(xs, ys, U, V,
+                              density=streamlines.get("density", 1.5),
+                              linewidth=streamlines.get("linewidth", 0.9),
+                              arrowsize=streamlines.get("arrowsize", 0.9), color="k")
             plot_file = output.format(i_step)
             fig.savefig(plot_file, bbox_inches="tight", dpi=dpi)
             plt.close(fig)

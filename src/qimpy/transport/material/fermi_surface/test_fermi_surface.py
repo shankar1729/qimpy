@@ -7,8 +7,8 @@ Covers:
 - rho_dot in modes: collision is diagonal in (l, n), cyclotron is omega_c * G
   where G is the block-skew Fourier generator; compare against a hand-built
   reference (no dependency on legacy materials).
-- _FermiSurfaceContactor: voltage + drift modal structure round-trips.
-- _FermiSurfaceReflector: specular at axis-aligned wall; mass conservation at
+- _DeltaKContactor: voltage + drift modal structure round-trips.
+- _DeltaKReflector: specular at axis-aligned wall; mass conservation at
   arbitrary normals and specularities (the discrete-quadrature leak is folded
   into D so the net mass flux at the wall is zero to roundoff).
 - realizability_floor: defaults to None (no-op limiter for delta-f).
@@ -21,9 +21,8 @@ import pytest
 from qimpy import rc
 from qimpy.mpi import ProcessGrid
 from qimpy.transport.material import FermiSurface
-from ._fermi_surface import (
-    AngularBasis, RadialBasis, _FermiSurfaceReflector,
-)
+from ._fermi_surface import AngularBasis, RadialBasis
+from ._representation import _DeltaKReflector
 
 
 def _pg() -> ProcessGrid:
@@ -161,7 +160,7 @@ def test_reflector_specular_axis_aligned() -> None:
     torch.set_default_dtype(torch.float64)
     fs = _make(M_theta=8, Nr=1)
     n = torch.tensor([[0.0, 1.0]], dtype=torch.float64)
-    refl = _FermiSurfaceReflector(fs, n, specularity=1.0)
+    refl = _DeltaKReflector(fs, n, specularity=1.0)
     a_in = torch.randn(1, fs.angular.dim, dtype=torch.float64)
     u_in = fs.from_modes(a_in)
     a_out = fs.to_modes(refl(u_in))
@@ -181,7 +180,7 @@ def test_reflector_mass_conservation(phi_deg: float, s: float) -> None:
     fs = _make(M_theta=8, Nr=1, specularity=s)
     phi = np.deg2rad(phi_deg)
     n = torch.tensor([[np.cos(phi), np.sin(phi)]], dtype=torch.float64)
-    refl = _FermiSurfaceReflector(fs, n, specularity=s)
+    refl = _DeltaKReflector(fs, n, specularity=s)
     rng = torch.Generator(device=rc.device).manual_seed(0)
     u_in = torch.randn(1, 1, fs.angular.N_theta, dtype=torch.float64,
                        generator=rng)
@@ -209,7 +208,7 @@ def test_reflector_tang_momentum_conservation(phi_deg: float, s: float) -> None:
     fs = _make(M_theta=8, Nr=1, specularity=s)
     phi = np.deg2rad(phi_deg)
     n = torch.tensor([[np.cos(phi), np.sin(phi)]], dtype=torch.float64)
-    refl = _FermiSurfaceReflector(fs, n, specularity=s)
+    refl = _DeltaKReflector(fs, n, specularity=s)
     rng = torch.Generator(device=rc.device).manual_seed(0)
     u_in = torch.randn(1, 1, fs.angular.N_theta, dtype=torch.float64,
                        generator=rng)
@@ -237,7 +236,7 @@ def test_reflector_energy_conservation(phi_deg: float, s: float) -> None:
     fs = _make(M_theta=8, Nr=1, specularity=s)
     phi = np.deg2rad(phi_deg)
     n = torch.tensor([[np.cos(phi), np.sin(phi)]], dtype=torch.float64)
-    refl = _FermiSurfaceReflector(fs, n, specularity=s)
+    refl = _DeltaKReflector(fs, n, specularity=s)
     rng = torch.Generator(device=rc.device).manual_seed(0)
     u_in = torch.randn(1, 1, fs.angular.N_theta, dtype=torch.float64,
                        generator=rng)

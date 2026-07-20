@@ -100,8 +100,23 @@ class Material(TreeNode):
 
     @abstractmethod
     def get_observables(self, t: float) -> torch.Tensor:
-        """Return tensor of SCALAR (cell-centred) observables specific to each
-        material. (No x Nkbb_mine) where No is number of observables."""
+        """Return tensor of SCALAR (cell-centred) observable weights specific to
+        each material. (No x Nkbb_mine) where No is number of observables.  Row 0
+        is the density weight (used for the boundary contact-current operator)."""
+
+    def get_cell_scalar_names(self) -> list[str]:
+        """Names of the CELL-CENTRED scalar fields written per saved frame.
+        Default: the linear observable names.  A material may override to emit
+        richer local fields (density, energy, temperature, ...) computed
+        nonlinearly from the distribution."""
+        return self.get_observable_names()
+
+    def get_cell_scalars(self, rho: torch.Tensor, t: float) -> torch.Tensor:
+        """Cell-centred scalar fields for the owned cells, (K x n_scalar).
+        Default: the linear moments ``sum_k rho_ck g_ok`` of the scalar
+        observables.  ``rho`` is the (K x Nkbb_mine) per-cell distribution.
+        Overridden by materials whose fields are nonlinear in the distribution."""
+        return torch.einsum("ok,ck->co", self.get_observables(t), rho)
 
     def get_flux_names(self) -> list[str]:
         """Names of FLUX observables (vector fluxes: currents, heat fluxes) that

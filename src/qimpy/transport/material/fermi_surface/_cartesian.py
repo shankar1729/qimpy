@@ -18,7 +18,7 @@ import torch
 from qimpy import rc
 from qimpy.mpi import ProcessGrid
 from qimpy.io import CheckpointPath, CheckpointContext, InvalidInputException
-from ._representation import KRepresentation
+from ._representation import KRepresentation, CELL_SCALAR_NAMES, FLUX_NAMES
 
 
 class Cartesian(KRepresentation):
@@ -206,15 +206,44 @@ class Cartesian(KRepresentation):
         lam = torch.linalg.solve(M + eye, U.unsqueeze(-1))[..., 0]
         return ddf - torch.einsum("ca,cak->ck", lam, g)
 
-    def get_observables(self) -> torch.Tensor:
-        return torch.ones_like(self.eps_k)[None, :]       # (1, Nk): density (g=1)
+    def get_density_weight(self) -> torch.Tensor:
+        return torch.ones_like(self.eps_k)                # (Nk,) unit weight (contact op)
+
+    def get_cell_scalar_names(self) -> list[str]:
+        return CELL_SCALAR_NAMES
+
+    @torch.no_grad()
+    def get_cell_scalars(self, rho: torch.Tensor) -> torch.Tensor:
+        """Full local fields from the drifted-heated frame recovery of f = f0 + df:
+        [density, energy_density, temperature, chemical_potential, velocity_x,
+        velocity_y], (K, 6), physical (phase-space weight wk included)."""
+        df_lab = rho.reshape(-1, self.Nk)
+        C = df_lab.shape[0]
+        w = self.wk
+        out = torch.empty((C, 6), device=df_lab.device, dtype=df_lab.dtype)
+        per_row = self.Nk * 8 * 8                          # ~8 (C,Nk) temporaries
+        chunk = max(1, min(self.cell_chunk,
+                           int(self.mem_budget_gb * (2 ** 30) / per_row)))
+        for lo in range(0, C, chunk):
+            hi = min(lo + chunk, C)
+            f = self._f0_lab[None, :] + df_lab[lo:hi]
+            kD, Te, mu = self._recover_frame(f)
+            n = f.sum(-1) * w
+            E = torch.einsum("ck,k->c", f, self.eps_k) * w
+            u = kD / self.m_star                           # drift velocity <v>
+            out[lo:hi] = torch.stack([n, E, Te, mu, u[:, 0], u[:, 1]], dim=1)
+        return out
 
     def get_flux_names(self) -> list[str]:
-        return ["j", "q"]                                 # current, heat flux
+        return FLUX_NAMES
 
     def get_flux_weights(self) -> torch.Tensor:
+        # Physical face fluxes (phase-space weight wk): particle j=int f v,
+        # momentum flux Pi_i = int f (m* v_i) v = int f k_i v, heat q = int f eps v.
+        w = self.wk
         one = torch.ones_like(self.eps_k)
-        return torch.stack([one, self.eps_k], dim=0)      # (2, Nk): g_j=1, g_q=eps
+        kx, ky = self.k[:, 0], self.k[:, 1]                # m* v = k (momentum)
+        return w * torch.stack([one, kx, ky, self.eps_k], dim=0)  # (4, Nk)
 
     def get_contactor(self, n: torch.Tensor, **kwargs) -> Callable:
         return _CartesianContactor(self, n, **kwargs)

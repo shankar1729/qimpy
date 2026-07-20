@@ -844,9 +844,9 @@ class FiniteVolume(Geometry):
         return {c.name: c.level for c in self._contacts if c.kind != "fixed"}
 
     def update_stash(self, i_step: int, t: float) -> None:
-        # Stash observables for this rank's owned cells (its checkpoint slice).
+        # Stash cell-centred scalar fields for this rank's owned cells.
         u_own = self._u[self._own_start:self._own_stop]
-        obs = torch.einsum("oc,kc->ko", self.material.get_observables(t), u_own)
+        obs = self.material.get_cell_scalars(u_own, t)
         self._stash_i.append(i_step)
         self._stash_t.append(t)
         self._stash_obs.append(obs.detach().cpu().numpy())
@@ -881,7 +881,7 @@ class FiniteVolume(Geometry):
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
         g = self.geom
-        names = self.material.get_observable_names()
+        names = self.material.get_cell_scalar_names()
         cp_path.attrs["order"] = 0                            # piecewise-constant FV
         cp_path.attrs["mesh_file"] = self.mesh_file
         saved = [
