@@ -612,7 +612,11 @@ class FiniteVolume(Geometry):
         self.dt_max = self.comm.allreduce(dt_local, op=MPI.MIN)
 
         rho0 = getattr(material, "rho0", None)
-        if rho0 is not None:
+        if (self._decomp is None) and checkpoint_in and checkpoint_in.member("rho"):
+            cp, path = checkpoint_in                          # warm start (serial)
+            self._u = torch.as_tensor(np.array(cp[f"{path}/rho"]),
+                                      device=rc.device, dtype=v.dtype)
+        elif rho0 is not None:
             self._u = rho0.flatten().to(rc.device, v.dtype)[None, :].repeat(self.K, 1)
         else:
             self._u = torch.zeros(self.K, self.Nk, device=rc.device, dtype=v.dtype)
