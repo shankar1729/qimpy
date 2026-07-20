@@ -76,7 +76,10 @@ class Cartesian(KRepresentation):
         Nk = n_k * n_k
         self.dk_area = dk * dk
         self.Nk = Nk
-        self.wk = float(spin) * self.dk_area
+        # Physical BZ phase-space weight: n = spin * int d^2k/(2pi)^2 f  ->  per-k
+        # weight spin*dk^2/(2pi)^2.  (Gives n = kF^2/2pi at equilibrium, and makes
+        # contact currents physical so I_set is in a.u. current, 20uA=3.02e-3.)
+        self.wk = float(spin) * self.dk_area / (2.0 * np.pi) ** 2
         self.k = k
         self.eps_k = (k.square().sum(-1) / (2 * m_star)).to(dtype)
         self.v = (k / m_star).to(dtype)                      # (Nk, 2) transport velocity
@@ -207,7 +210,7 @@ class Cartesian(KRepresentation):
         return ddf - torch.einsum("ca,cak->ck", lam, g)
 
     def get_density_weight(self) -> torch.Tensor:
-        return torch.ones_like(self.eps_k)                # (Nk,) unit weight (contact op)
+        return torch.full_like(self.eps_k, self.wk)       # (Nk,) BZ weight -> physical current
 
     def get_cell_scalar_names(self) -> list[str]:
         return CELL_SCALAR_NAMES

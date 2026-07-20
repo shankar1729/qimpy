@@ -683,9 +683,15 @@ class FiniteVolume(Geometry):
             i_set = params.pop("I_set", None)
             vD = float(params.get("vD", 0.0))
             if floating or (i_set is not None):
-                # Contactor ghost is affine in dmu: g(dmu) = dmu*unit + drift.
+                # Feedback ghost is affine in dmu: g(dmu) = dmu*unit + drift, so the
+                # unit is d(ghost)/d(dmu).  Take it as the LINEAR slope from a small
+                # dmu: exact for the (linear-in-dmu) delta-k contactor, and the correct
+                # df0/dmu for the Cartesian full-f Fermi-Dirac -- where dmu=1 would
+                # saturate the FD and inject current into the inert empty high-energy
+                # tail instead of the Fermi surface (no drive at all).
                 bn_ci = g.bn[ci]
-                unit = material.get_contactor(bn_ci, dmu=1.0)(0.0)
+                eps = 0.1 * float(getattr(material, "T_temp", 1.0))
+                unit = material.get_contactor(bn_ci, dmu=eps)(0.0) / eps
                 drift = (material.get_contactor(bn_ci, vD=vD)(0.0)
                          if vD else torch.zeros_like(unit))
                 cur_in = torch.where(self._a_bnd[ci] < 0, cur, torch.zeros_like(cur))
