@@ -415,6 +415,11 @@ class _Contact:
     base: float = 0.0                          # feedback: drift inflow current
     target: float = 0.0                        # feedback: desired net current
     level: float = 0.0                         # feedback: last solved level
+    cur_in: Optional[torch.Tensor] = None      # feedback(nonlinear): inflow-only flux op
+    bn: Optional[torch.Tensor] = None          # feedback(nonlinear): boundary normals
+    vD: float = 0.0                            # feedback: contact drift velocity
+    nonlinear: bool = False                    # feedback: full-FD Newton (vs affine)
+    hmu: float = 1e-3                          # feedback(nonlinear): Newton FD step in dmu
 
 
 class FiniteVolume(Geometry):
@@ -681,6 +686,7 @@ class FiniteVolume(Geometry):
             params = dict(params)
             floating = bool(params.pop("floating", False))
             i_set = params.pop("I_set", None)
+            nonlinear = bool(params.pop("nonlinear", False))
             vD = float(params.get("vD", 0.0))
             if floating or (i_set is not None):
                 # Feedback ghost is affine in dmu: g(dmu) = dmu*unit + drift, so the
@@ -702,7 +708,9 @@ class FiniteVolume(Geometry):
                     name=nm, idx=ci, cur=cur, kind="current",
                     unit=unit, drift=drift, cur_out=cur_out,
                     den=(den if abs(den) > 1e-300 else 1e-300), base=base,
-                    target=(0.0 if floating else float(i_set))))
+                    target=(0.0 if floating else float(i_set)),
+                    cur_in=cur_in, bn=bn_ci, vD=vD, nonlinear=nonlinear,
+                    hmu=0.01 * float(getattr(material, "T_temp", 1.0))))
             else:
                 ghost = material.get_contactor(g.bn[ci], **params)(0.0)
                 self._contacts.append(_Contact(
@@ -776,13 +784,37 @@ class FiniteVolume(Geometry):
             if c.kind == "fixed":
                 uP[c.idx] = c.ghost.to(uP)
             else:
-                # I_net(level) = num_out + base - level*den; solve = target. The
-                # outflow term is summed across ranks so the level is global.
+                # Feedback: solve the contact level so the net current hits target.
+                # I_net = num_out + inflow(ghost); num_out is the interior outflow.
                 num = float((c.cur_out * uMb[c.idx]).sum())
                 if self._mpi:
                     num = self.comm.allreduce(num)
-                c.level = (num + c.base - c.target) / c.den
-                uP[c.idx] = (c.level * c.unit + c.drift).to(uP)
+                if c.nonlinear:
+                    # Full physical contact: ghost is the exact Pauli-bounded Fermi-
+                    # Dirac deviation FD(mu0+dmu)-f0, NONLINEAR in dmu.  Newton-solve
+                    # dmu (warm-started from last step) so I_net(dmu)=target -- captures
+                    # the contact nonlinearity the affine linear-response feedback drops.
+                    dmu = c.level
+                    for _ in range(8):
+                        inflow = self.material.get_contactor(c.bn, dmu=dmu, vD=c.vD)(0.0)
+                        i0 = float((c.cur_in * inflow).sum())
+                        gh = self.material.get_contactor(c.bn, dmu=dmu + c.hmu, vD=c.vD)(0.0)
+                        ih = float((c.cur_in * gh).sum())
+                        if self._mpi:
+                            i0 = self.comm.allreduce(i0); ih = self.comm.allreduce(ih)
+                        dIdmu = (ih - i0) / c.hmu
+                        if abs(dIdmu) < 1e-300:
+                            break
+                        d = (num + i0 - c.target) / dIdmu
+                        dmu = dmu - d
+                        if abs(d) <= 1e-6 * (abs(dmu) + c.hmu):
+                            break
+                    c.level = dmu
+                    uP[c.idx] = self.material.get_contactor(
+                        c.bn, dmu=dmu, vD=c.vD)(0.0).to(uP)
+                else:
+                    c.level = (num + c.base - c.target) / c.den
+                    uP[c.idx] = (c.level * c.unit + c.drift).to(uP)
         return uP
 
     def _spatial_rhs(self, u: torch.Tensor, t: float) -> torch.Tensor:
