@@ -480,6 +480,7 @@ class FiniteVolume(Geometry):
         self.Nk = v.shape[0]
         self.K = int(g.area.shape[0])
         self._nf = int(g.recon.shape[1])                      # faces/cell: 3 (tri) or 2 (1D)
+        self._face_budget_gb = float(os.environ.get("QIMPY_FACE_BUDGET_GB", "3.0"))
 
         # Spatial decomposition: owned cell block, reconstruction rows (owned +
         # 1-ring), owned-incident edges and the halo exchange (see SpatialDecomp).
@@ -730,13 +731,24 @@ class FiniteVolume(Geometry):
     def _faces(self, u: torch.Tensor) -> torch.Tensor:
         """Reconstructed face values, (K, n_face, Nk). Serial reconstructs every
         cell; under decomposition only the rows this rank needs (owned + 1-ring)
-        are filled, the rest left zero (their faces are never read)."""
+        are filled, the rest left zero (their faces are never read).
+
+        The (rows, Nmax, Nk) neighbour gather is chunked over cells so its peak
+        stays within ``_face_budget_gb``: this is what lets a fine k-grid (large
+        Nk) run -- otherwise the whole K*Nmax*Nk gather (tens of GB) is built at
+        once.  Small-Nk runs take the original single-shot path (chunk >= K)."""
         g = self.geom
-        if self._R is None:
-            return self._limited_faces(u, u[g.nbr], g.recon)
-        R = self._R
+        rows = self._R                                       # None (serial) or owned+1ring
+        n_rows = self.K if rows is None else int(rows.shape[0])
+        per_row = g.nbr.shape[1] * self.Nk * 8               # neighbour-gather bytes/cell
+        chunk = max(1, int(self._face_budget_gb * (2 ** 30) / max(per_row, 1)))
+        if rows is None and chunk >= self.K:
+            return self._limited_faces(u, u[g.nbr], g.recon)          # single-shot
+        idx = torch.arange(self.K, device=u.device) if rows is None else rows
         uf = u.new_zeros(self.K, self._nf, self.Nk)
-        uf[R] = self._limited_faces(u[R], u[g.nbr[R]], g.recon[R])
+        for lo in range(0, n_rows, chunk):
+            ci = idx[lo:lo + chunk]
+            uf[ci] = self._limited_faces(u[ci], u[g.nbr[ci]], g.recon[ci])
         return uf
 
     def _exterior(self, uMb: torch.Tensor, t: float) -> torch.Tensor:
