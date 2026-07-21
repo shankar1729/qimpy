@@ -936,7 +936,9 @@ class FiniteVolume(Geometry):
     ) -> list[str]:
         g = self.geom
         names = self.material.get_cell_scalar_names()
-        cp_path.attrs["order"] = 0                            # piecewise-constant FV
+        # NOTE: checkpoint attrs are fed back as constructor kwargs on restart
+        # (qimpy convention: attrs == constructor params), so only real
+        # constructor arguments may be written here.
         cp_path.attrs["mesh_file"] = self.mesh_file
         saved = [
             cp_path.write("mesh_vertices", torch.from_numpy(g.vertices_np)),
@@ -995,8 +997,10 @@ class FiniteVolume(Geometry):
             fs = self.material
             Nr_m = int(fs.Nr); dim_m = int(fs.angular.dim)
             n_modal = Nr_m * dim_m
-            cp_path.attrs["terms_Nr"] = Nr_m
-            cp_path.attrs["terms_dim"] = dim_m
+            # (Nr, dim) as a dataset, NOT attrs -- attrs round-trip into
+            # constructor kwargs on restart and these are not constructor args.
+            cp_path.write("terms_shape",
+                          torch.tensor([Nr_m, dim_m], dtype=torch.int64))
             cp_path.write_str("terms_channels", "a,lin,quad,cub")
             terms_own = np.stack(self._stash_terms)          # (n_stash,4,K_own,n_modal)
             CheckpointPath(checkpoint, path).create_dataset(
