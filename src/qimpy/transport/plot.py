@@ -247,25 +247,81 @@ def _read_str_list(g, key):
     return s.split(",") if s else []
 
 
-def _cell_vector_from_edge_flux(edge_cells, edge_normal, edge_len, F, K):
-    """Least-squares cell-centre vector from face-normal fluxes.
+def _rt0_assembly(verts, tris, edge_cells, edge_normal):
+    """Per-triangle assembly of the exact face-flux (RT0) vector field.
 
-    Each edge gives ``j_c . n_e = F_e / L_e`` for both incident cells (n_e is the
-    stored edge normal; the sign cancels).  Per cell we solve the 2x2 normal
-    equations over its incident edges.  Because F is the conserved upwind flux
-    (exactly 0 through specular walls), the reconstructed field is tangent to
-    walls and divergence-consistent -- streamlines stay inside the device."""
-    nrm = np.asarray(edge_normal, float)
-    fd = np.asarray(F, float) / np.maximum(np.asarray(edge_len, float), 1e-30)
-    A = np.zeros((K, 2, 2)); b = np.zeros((K, 2))
-    nn = nrm[:, :, None] * nrm[:, None, :]                # (Ne, 2, 2)
-    for side in (0, 1):
-        c = np.asarray(edge_cells)[:, side]
-        m = c >= 0                                        # boundary eR = -1 -> skip
-        np.add.at(A, c[m], nn[m])
-        np.add.at(b, c[m], nrm[m] * fd[m][:, None])
-    A += 1e-12 * np.eye(2)[None]                          # regularize isolated cells
-    return np.linalg.solve(A, b[:, :, None])[:, :, 0]     # (K, 2)
+    The face-normal fluxes ARE the plotted quantity: inside each triangle the
+    unique divergence-conforming (lowest-order Raviart-Thomas) field with the
+    checkpoint's per-edge fluxes is
+
+        v(x)|_k = sum_e  Fout_{k,e} (x - p_{k,e}) / (2 A_k),
+
+    where ``Fout`` is the OUTWARD flux through local edge ``e`` and ``p`` the
+    opposite vertex.  Its normal component is constant along each edge and
+    equals F_e / len_e -- exactly the stored flux, continuous across edges and
+    identically zero along specular walls.  No cell averaging or least-squares
+    smoothing is involved.
+
+    Returns ``(edge_idx (K,3), sign (K,3), p_opp (K,3,2), area (K,))`` mapping
+    each triangle's local edges to checkpoint edge indices and outward signs."""
+    from collections import defaultdict
+    tris = np.asarray(tris); verts = np.asarray(verts, float)
+    ec = np.asarray(edge_cells); nrm = np.asarray(edge_normal, float)
+    K = len(tris)
+    locals_ = ((0, 1, 2), (1, 2, 0), (2, 0, 1))           # (edge a, b, opposite)
+    # interior checkpoint edges keyed by unordered cell pair; boundary per cell
+    pair2edge = {}
+    bnd_by_cell = defaultdict(list)
+    for i, (cL, cR) in enumerate(ec):
+        if cR >= 0:
+            pair2edge[(min(cL, cR), max(cL, cR))] = i
+        else:
+            bnd_by_cell[int(cL)].append(i)
+    # neighbor triangle across each local edge, from shared vertex pairs
+    vpair2tris = defaultdict(list)
+    for k, t in enumerate(tris):
+        for a, b, _ in locals_:
+            vpair2tris[tuple(sorted((int(t[a]), int(t[b]))))].append(k)
+    edge_idx = np.zeros((K, 3), int)
+    sign = np.zeros((K, 3))
+    p_opp = np.zeros((K, 3, 2))
+    area = 0.5 * np.abs(np.cross(verts[tris[:, 1]] - verts[tris[:, 0]],
+                                 verts[tris[:, 2]] - verts[tris[:, 0]]))
+    for k, t in enumerate(tris):
+        for j, (a, b, o) in enumerate(locals_):
+            p_opp[k, j] = verts[t[o]]
+            owners = vpair2tris[tuple(sorted((int(t[a]), int(t[b]))))]
+            nb = [c for c in owners if c != k]
+            va, vb = verts[t[a]], verts[t[b]]
+            mid = 0.5 * (va + vb)
+            n_out = np.array([vb[1] - va[1], va[0] - vb[0]])  # rotate edge by -90
+            if np.dot(n_out, mid - verts[t].mean(0)) < 0:
+                n_out = -n_out                             # ensure outward of k
+            n_out /= max(np.hypot(*n_out), 1e-300)
+            if nb:                                         # interior edge
+                i = pair2edge[(min(k, nb[0]), max(k, nb[0]))]
+            else:                                          # wall/contact: match normal
+                cand = bnd_by_cell[k]
+                i = max(cand, key=lambda c: float(np.dot(nrm[c], n_out)))
+            edge_idx[k, j] = i
+            # stored normal is out of edge_cells[i,0]; sign flips for the other cell
+            sign[k, j] = 1.0 if float(np.dot(nrm[i], n_out)) > 0 else -1.0
+    return edge_idx, sign, p_opp, area
+
+
+def _rt0_sample(rt0, F, tid, inside, Xs, Ys):
+    """Evaluate the exact face-flux (RT0) field at grid points; NaN outside."""
+    edge_idx, sign, p_opp, area = rt0
+    k = np.where(inside, tid, 0)
+    Fout = sign * F[edge_idx]                              # (K, 3) outward fluxes
+    U = np.zeros_like(Xs); V = np.zeros_like(Ys)
+    for e in range(3):
+        w = Fout[k, e] / (2.0 * area[k])
+        U += w * (Xs - p_opp[k, e, 0])
+        V += w * (Ys - p_opp[k, e, 1])
+    U = np.where(inside, U, np.nan)
+    V = np.where(inside, V, np.nan)
+    return U, V
 
 
 def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> None:
@@ -275,14 +331,14 @@ def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> Non
     ``tripcolor`` (piecewise constant, the honest FV picture) over the mesh; the
     density panel shows the variation about the frame mean so the driven response
     is visible even when the field is a small ripple on a large uniform value.
-    The current is a FACE quantity: streamlines are traced from the divergence-
-    conforming, wall-tangent cell vector reconstructed from the face-normal
-    ``particle_current`` fluxes, so they stay inside the device. Each rank renders
-    its strided subset of frames, so post-processing scales like the solve."""
+    The current is a FACE quantity and is plotted EXACTLY as stored: streamlines
+    trace the RT0 (divergence-conforming) field whose normal component along each
+    edge equals the stored face flux ``F_e/len_e`` (see ``_rt0_assembly``) -- no
+    cell averaging or reconstruction.  Each rank renders its strided subset of
+    frames, so post-processing scales like the solve."""
     import os
     import matplotlib.tri as mtri
     from matplotlib.collections import LineCollection
-    from scipy.interpolate import griddata
     cmap = density.get("cmap", "bwr")
     with Checkpoint(file_list[0]) as cp:
         g = cp["/geometry"]
@@ -320,7 +376,9 @@ def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> Non
         xs = np.linspace(verts[:, 0].min(), verts[:, 0].max(), 220)
         ys = np.linspace(verts[:, 1].min(), verts[:, 1].max(), 220)
         Xs, Ys = np.meshgrid(xs, ys)
-        inside = triang.get_trifinder()(Xs, Ys) >= 0  # grid points within mesh
+        tid = triang.get_trifinder()(Xs, Ys)          # containing triangle (-1 outside)
+        inside = tid >= 0
+        rt0 = None                                    # built once from edge data
     orig_level = log.getEffectiveLevel(); log.setLevel(logging.INFO)
     for checkpoint_file in file_list:
         with Checkpoint(checkpoint_file) as cp:
@@ -367,16 +425,14 @@ def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> Non
             cb = fig.colorbar(tpc, ax=ax, fraction=0.046, pad=0.04)
             cb.set_label(rf"$n-\langle n\rangle$ ($\times${vmax:.2e})")
             if streamlines is not None:
-                # Current from the FACE-normal particle-current fluxes (conserved,
-                # wall-tangent): reconstruct the divergence-conforming cell vector,
-                # interpolate to the grid, mask to the interior -> streamlines stay
-                # inside the device.
-                j = _cell_vector_from_edge_flux(edge_cells, edge_normal, edge_len,
-                                                edge_flux[fr, :, i_cur], obs.shape[1])
-                U = griddata(cell_cent, j[:, 0], (Xs, Ys), method="linear")
-                V = griddata(cell_cent, j[:, 1], (Xs, Ys), method="linear")
-                U = np.where(inside, np.nan_to_num(U), np.nan)
-                V = np.where(inside, np.nan_to_num(V), np.nan)
+                # Streamlines of the EXACT face-centred fluxes: evaluate the
+                # divergence-conforming (RT0) field whose normal component along
+                # every edge IS the stored flux F_e/len_e -- no cell averaging,
+                # no least-squares reconstruction.  Wall edges carry exactly
+                # zero flux, so the field is exactly tangent to walls.
+                if rt0 is None:
+                    rt0 = _rt0_assembly(verts, tris, edge_cells, edge_normal)
+                U, V = _rt0_sample(rt0, edge_flux[fr, :, i_cur], tid, inside, Xs, Ys)
                 ax.streamplot(xs, ys, U, V,
                               density=streamlines.get("density", 1.5),
                               linewidth=streamlines.get("linewidth", 0.9),
