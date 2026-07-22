@@ -652,11 +652,15 @@ class FiniteVolume(Geometry):
         # applied as one batched matmul. Build it once by reflecting the Nk basis
         # vectors: refl_mat[e, i, c] = reflector(e_c)[e, i].
         # Dense (nw, Nk, Nk) reflection matrix collapses the reflector to one matmul
-        # -- worth it for modal materials (small Nk).  For grid materials (large Nk)
-        # it is infeasible (nw*Nk^2), so build it only when it fits ~1 GB; otherwise
-        # apply the sparse reflector per step in _exterior.
+        # -- worth it for modal materials (moderate Nk): the per-step reflector call
+        # is launch-bound (its modal transforms), so the dense matmul is the fast
+        # path whenever it fits.  For grid materials (large Nk) it is infeasible
+        # (nw*Nk^2 ~ PB), so fall back to the per-step reflector.  Budget
+        # configurable via QIMPY_REFL_BUDGET_GB (default 4 GB: delta-k at
+        # M_theta=1024 needs 3.2 GB and is ~10x faster dense than per-step).
         self._refl_mat = None
-        if self._reflector is not None and self._wall.numel() * self.Nk ** 2 * 8 <= 1.0e9:
+        refl_budget = float(os.environ.get("QIMPY_REFL_BUDGET_GB", "4.0")) * 2 ** 30
+        if self._reflector is not None and self._wall.numel() * self.Nk ** 2 * 8 <= refl_budget:
             nw = self._wall.numel()
             bn_wall = g.bn[self._wall]
             eye = torch.eye(self.Nk, device=rc.device, dtype=g.area.dtype)

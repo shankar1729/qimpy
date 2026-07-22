@@ -197,15 +197,21 @@ class _DeltaKReflector:
         self.psi_0 = fs.radial.T_from_modes[:, 0]
 
     def _specular_modal(self, a_modal: torch.Tensor) -> torch.Tensor:
+        # Per-harmonic block rotation, vectorized over all m at once (a Python
+        # loop over m is launch-bound and dominates the per-step cost at large
+        # M_theta): out_c + i*out_s = e^{i m angle} (a_c - i a_s) for m = 1..M.
         s = a_modal.shape
         a4 = a_modal.reshape(*s[:-1], self.Nr, self.dim_theta)
         out = a4.clone()
-        angle = self.angle
-        for m in range(1, self.M_theta + 1):
-            c = torch.cos(m * angle); sn = torch.sin(m * angle)
-            a_c = a4[..., 2 * m - 1]; a_s = -a4[..., 2 * m]
-            out[..., 2 * m - 1] = c[..., None] * a_c - sn[..., None] * a_s
-            out[..., 2 * m] = sn[..., None] * a_c + c[..., None] * a_s
+        m = torch.arange(1, self.M_theta + 1, device=a_modal.device,
+                         dtype=a_modal.dtype)
+        ang = self.angle[:, None] * m                    # (Nsel, M)
+        c = torch.cos(ang).unsqueeze(-2)                 # (Nsel, 1, M) -> bcast Nr
+        sn = torch.sin(ang).unsqueeze(-2)
+        a_c = a4[..., 1::2]                              # (..., Nsel, Nr, M) cos coeffs
+        a_s = -a4[..., 2::2]                             # (..., Nsel, Nr, M) -sin coeffs
+        out[..., 1::2] = c * a_c - sn * a_s
+        out[..., 2::2] = sn * a_c + c * a_s
         return out.reshape(s)
 
     def __call__(self, uM_dk: torch.Tensor) -> torch.Tensor:
