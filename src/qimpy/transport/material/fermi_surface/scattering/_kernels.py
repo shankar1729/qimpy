@@ -857,7 +857,7 @@ def cubic_kernel_complex(**kwargs):
     harmonics on the three input legs, BEFORE the dim^4 real fold and the
     output-harmonic binning (the output harmonic ``mo = A + B + C`` is resolved
     by convolution at apply time, exploiting the additive angular selection
-    rule).  ``conv[f] = 4 T cosh^2(x_f/2) = 1/w_eq`` (the caller folds ``-conv``
+    rule).  ``conv[f] = 4 T cosh^2(x_f/2) = 1/w_eq`` (the production caller folds ``+conv``
     into the radial node->mode projection, as in ``cubic_vertex``).  Same
     arguments as ``cubic_vertex``."""
     Tc_full, Tc_leg1, conv = _cubic_complex(**kwargs)

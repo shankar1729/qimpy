@@ -645,14 +645,16 @@ class EEScattering(TreeNode):
         q1, q2 = pr[:, 0], pr[:, 1]
         multq = torch.where(q1 == q2, 1, 2)
 
-        # radial node -> output-mode projection with the (-conv) decay/solver-
+        # radial node -> output-mode projection with the +conv solver-
         # field scaling folded in (conv = 1 / w_eq = 4 T cosh^2(x1/2)):
         conv = 4.0 * T * torch.cosh(x_fine.to(torch.float64) / 2) ** 2
-        # SIGN: the raw packed pieces accumulate the "-Phi_dot" (decay) kernel
-        # convention; folding +conv here makes nl = +Phi_dot_NL so that
+        # SIGN: the raw packed pieces accumulate +f_dot (occupation rate);
+        # folding +conv (= 1/w_eq) makes nl = +Phi_dot_NL so that
         # a_dot = Phi_dot_lin + Phi_dot_NL is convention-consistent (the linear
-        # path un-negates L_coeff explicitly).  Verified signed against the
-        # governing-equation reference (test_a_dot_nonlinear_signed).
+        # path un-negates the decay-form L_coeff explicitly).  Verified signed
+        # against the governing equation (test_a_dot_nonlinear_signed).  NOTE:
+        # the standalone cubic_vertex/quadratic_vertex wrappers keep their own
+        # documented -Phi_dot convention -- do not conflate the two.
         GPc = ((Ginv @ P) * conv[None, :]).to(device)  # (Nr, n_fine), real
         Nx1 = x_fine.shape[0]
         Sc = torch.zeros(Nr, p1.shape[0], dtype=wdt, device=device)
@@ -803,7 +805,7 @@ class EEScattering(TreeNode):
         on ``L = Nr`` -- only the tiny radial-basis table ``psi_coeff`` does.
 
         Also stores the radial Galerkin node->mode projector ``GPc`` (with the
-        ``-conv`` solver-field scaling folded in, exactly as the dense path) and
+        ``+conv`` solver-field scaling folded in, exactly as the dense path) and
         builds the harmonic transforms + null projectors (shared with the dense
         apply) so ``_finalize_nonlinear`` can be reused.
         """
@@ -812,10 +814,10 @@ class EEScattering(TreeNode):
         dtype = fs.v.dtype
         psi_coeff, x_fine, P, Ginv, _ = self._radial_galerkin(T)
         t = T / self.E_F
-        # Galerkin node->mode projector with -conv (decay sign) folded in -- the
+        # Galerkin node->mode projector with +conv folded in (nl = +Phi_dot) -- the
         # output node quantity is the raw kinematic integral (occupation rate
         # f_dot, since the legs carry the physical weight w_eq); GPc maps it to
-        # modal coefficients exactly as in _nonlinear_vertices.  The solver field
+        # modal coefficients exactly as in the dense vertex build.  The solver field
         # obeys delta_f = w_eq Phi_code, so Phi_code_dot = f_dot / w_eq =
         # 4 T cosh^2(x1/2) * f_dot:
         conv = 4 * T * torch.cosh(x_fine / 2) ** 2  # 1 / w_eq(x1)
@@ -1147,7 +1149,7 @@ class EEScattering(TreeNode):
             fdot = fdot + torch.einsum(
                 "...nfq,fq->...nf", C3 + Q2, self._mf_Wk[:, q0:q1])
         # Galerkin-project the output-energy node axis onto radial modes (GPc
-        # folds the -conv solver-field scaling); then DFT in phi1 to harmonics:
+        # folds the +conv solver-field scaling); then DFT in phi1 to harmonics:
         out_rad = torch.einsum(
             "of,...nf->...no", self._mf_GPc, fdot.to(self._mf_GPc.dtype))
         Fhat = torch.einsum("mn,...no->...om", self._mf_expmn, out_rad)
