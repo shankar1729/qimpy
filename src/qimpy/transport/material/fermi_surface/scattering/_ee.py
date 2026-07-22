@@ -648,7 +648,12 @@ class EEScattering(TreeNode):
         # radial node -> output-mode projection with the (-conv) decay/solver-
         # field scaling folded in (conv = 1 / w_eq = 4 T cosh^2(x1/2)):
         conv = 4.0 * T * torch.cosh(x_fine.to(torch.float64) / 2) ** 2
-        GPc = ((Ginv @ P) * (-conv)[None, :]).to(device)  # (Nr, n_fine), real
+        # SIGN: the raw packed pieces accumulate the "-Phi_dot" (decay) kernel
+        # convention; folding +conv here makes nl = +Phi_dot_NL so that
+        # a_dot = Phi_dot_lin + Phi_dot_NL is convention-consistent (the linear
+        # path un-negates L_coeff explicitly).  Verified signed against the
+        # governing-equation reference (test_a_dot_nonlinear_signed).
+        GPc = ((Ginv @ P) * conv[None, :]).to(device)  # (Nr, n_fine), real
         Nx1 = x_fine.shape[0]
         Sc = torch.zeros(Nr, p1.shape[0], dtype=wdt, device=device)
         Sq = torch.zeros(Nr, q1.shape[0], dtype=wdt, device=device)
@@ -814,7 +819,7 @@ class EEScattering(TreeNode):
         # obeys delta_f = w_eq Phi_code, so Phi_code_dot = f_dot / w_eq =
         # 4 T cosh^2(x1/2) * f_dot:
         conv = 4 * T * torch.cosh(x_fine / 2) ** 2  # 1 / w_eq(x1)
-        GPc = (Ginv @ P) * (-conv)[None, :]  # (Nr, n_fine)
+        GPc = (Ginv @ P) * conv[None, :]  # (Nr, n_fine); +conv: nl = +Phi_dot_NL
 
         log.info(
             f"Building matrix-free e-e generator (M = {fs.M_theta},"

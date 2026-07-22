@@ -21,6 +21,24 @@ E_F = 0.5 * KF**2 / M_STAR
 KAPPA = 2 * M_STAR / EPS_B
 
 
+@pytest.fixture(autouse=True)
+def _no_default_device_mode():
+    """qimpy's conftest installs torch.set_default_device(rc.device), whose
+    TorchFunctionMode wrapper (a) breaks the kernels' numpy interop on GPU
+    nodes and (b) injects a device= kwarg into torch.vander, which does not
+    accept one -- silently failing this ENTIRE module on GPU nodes (the
+    long-standing 'torch.vander env bug').  Disable the mode for this module;
+    code that explicitly asks for rc.device is unaffected."""
+    try:
+        prev = torch.get_default_device()
+    except (AttributeError, RuntimeError):
+        prev = None
+    torch.set_default_device(None)                # remove the wrapper entirely
+    yield
+    if prev is not None:
+        torch.set_default_device(prev)
+
+
 def make_fs(M_theta=8, Nr=1, ee=None, **kwargs):
     from qimpy.transport.material import FermiSurface
 
@@ -213,8 +231,8 @@ def test_cubic_vertex_energy_structured_vs_reference():
 
     M, Nr = 6, 2
     rb = RadialBasis(Nr, T_temp=T0, xi_max=6.0)
-    xi_c = rb.xi.to(torch.float64)
-    Tfm = rb.T_from_modes.to(torch.float64)
+    xi_c = rb.xi.to(torch.float64).cpu()
+    Tfm = rb.T_from_modes.to(torch.float64).cpu()
     psi_coeff = torch.linalg.solve(
         torch.vander(xi_c, Nr, increasing=True), Tfm
     )
@@ -306,8 +324,8 @@ def test_quadratic_vertex_vs_reference():
 
     M, Nr = 4, 2
     rb = RadialBasis(Nr, T_temp=T0, xi_max=6.0)
-    xi_c = rb.xi.to(torch.float64)
-    Tfm = rb.T_from_modes.to(torch.float64)
+    xi_c = rb.xi.to(torch.float64).cpu()
+    Tfm = rb.T_from_modes.to(torch.float64).cpu()
     psi_coeff = torch.linalg.solve(
         torch.vander(xi_c, Nr, increasing=True), Tfm
     )
@@ -417,14 +435,14 @@ def test_nonlinear_conservation():
         nl = (fs.ee_scattering.a_dot(a) - a_lin).reshape(4, Nr, dim)
         scale = nl.abs().max().item()
         # number (m=0) and energy (m=0, l-weighted) at output mode co=0:
-        num = torch.einsum("bl,l->b", nl[..., 0], ones_c.to(nl.dtype))
+        num = torch.einsum("bl,l->b", nl[..., 0], ones_c.to(nl.device, nl.dtype))
         assert num.abs().max().item() < 1e-10 * scale, "number"
         if Nr > 1:
             x_c = Ttm @ fs.radial.xi.to(torch.float64).cpu()
-            ene = torch.einsum("bl,l->b", nl[..., 0], x_c.to(nl.dtype))
+            ene = torch.einsum("bl,l->b", nl[..., 0], x_c.to(nl.device, nl.dtype))
             assert ene.abs().max().item() < 1e-10 * scale, "energy"
         # momentum (m=1) at output cos/sin modes co=1,2:
-        mc = k_c.to(nl.dtype)
+        mc = k_c.to(nl.device, nl.dtype)
         momx = torch.einsum("bl,l->b", nl[..., 1], mc)
         momy = torch.einsum("bl,l->b", nl[..., 2], mc)
         assert momx.abs().max().item() < 1e-10 * scale, "momentum x"
@@ -524,7 +542,7 @@ def test_exact_rates_radial_tower():
         ee=dict(epsilon_bg=EPS_B, nonlinear=False,
                 n_xi=24, n_phi=512, n_xi_proj=12),
     )
-    L = fs.ee_scattering.L_coeff.to(torch.float64)
+    L = fs.ee_scattering.L_coeff.to(torch.float64).cpu()
     # symmetry + PSD:
     for c in range(L.shape[0]):
         assert torch.allclose(L[c], L[c].T, atol=1e-18)
@@ -732,6 +750,8 @@ def test_matrix_free_vs_kernel_reference():
         fs = ee.fermi_surface
         M = fs.M_theta
         psi_coeff, x_fine, P, Ginv, _ = ee._radial_galerkin(T0)
+        psi_coeff, x_fine = psi_coeff.cpu(), x_fine.cpu()
+        P, Ginv = P.cpu(), Ginv.cpu()
         kin = dict(M=M, well_width=ee.well_width, n_xi=ee.n_xi,
                    xi_cut=ee.xi_cut, n_phi=ee.n_phi, **common)
         Vc = _kernels.cubic_vertex(x_nodes=x_fine, psi_coeff=psi_coeff, **kin)
@@ -739,13 +759,16 @@ def test_matrix_free_vs_kernel_reference():
         GP = Ginv @ P
         V_cubic = torch.einsum("lf,fcxaybzd->lcxaybzd", GP, Vc)
         V_quad = torch.einsum("lf,fcxayb->lcxayb", GP, Vq)
-        Proj = ee._radial_null_projectors(T0)
+        Proj = ee._radial_null_projectors(T0).cpu()
         V_cubic = torch.einsum("cLl,lcxaybzd->Lcxaybzd", Proj, V_cubic)
         V_quad = torch.einsum("cLl,lcxayb->Lcxayb", Proj, V_quad)
+        a4 = a4.cpu()
         cub = torch.einsum(
             "lcxaybzd,...xa,...yb,...zd->...lc", V_cubic, a4, a4, a4)
         qd = torch.einsum("lcxayb,...xa,...yb->...lc", V_quad, a4, a4)
-        return (cub + qd).reshape(*a4.shape[:-2], fs.Nr * fs.angular.dim)
+        # kernels output the "-Phi_dot" convention; production folds +conv so
+        # nl = +Phi_dot_NL -- negate here to mirror it:
+        return -(cub + qd).reshape(*a4.shape[:-2], fs.Nr * fs.angular.dim)
 
     for (M, Nr) in ((3, 1), (3, 2), (4, 2)):
         dim = 2 * M + 1
@@ -759,7 +782,7 @@ def test_matrix_free_vs_kernel_reference():
         nl_mf = ee.a_dot(a) + torch.einsum(
             "cij,...jc->...ic", ee.L_coeff, a4).reshape(4, Nr * dim)
         nl_ref = dense_nonlinear(ee, a4)
-        rel = (nl_mf - nl_ref).abs().max().item() / nl_ref.abs().max().item()
+        rel = (nl_mf.cpu() - nl_ref).abs().max().item() / nl_ref.abs().max().item()
         assert rel < 1e-9, f"matrix-free vs kernel (M={M}, Nr={Nr}): rel={rel:.2e}"
 
 
@@ -815,13 +838,13 @@ def test_matrix_free_conservation():
         ).reshape(4, Nr * dim)
         nl = (fs.ee_scattering.a_dot(a) - a_lin).reshape(4, Nr, dim)
         scale = nl.abs().max().item()
-        num = torch.einsum("bl,l->b", nl[..., 0], ones_c.to(nl.dtype))
+        num = torch.einsum("bl,l->b", nl[..., 0], ones_c.to(nl.device, nl.dtype))
         assert num.abs().max().item() < 1e-10 * scale, "number"
         if Nr > 1:
             x_c = Ttm @ fs.radial.xi.to(torch.float64).cpu()
-            ene = torch.einsum("bl,l->b", nl[..., 0], x_c.to(nl.dtype))
+            ene = torch.einsum("bl,l->b", nl[..., 0], x_c.to(nl.device, nl.dtype))
             assert ene.abs().max().item() < 1e-10 * scale, "energy"
-        mc = k_c.to(nl.dtype)
+        mc = k_c.to(nl.device, nl.dtype)
         momx = torch.einsum("bl,l->b", nl[..., 1], mc)
         momy = torch.einsum("bl,l->b", nl[..., 2], mc)
         assert momx.abs().max().item() < 1e-10 * scale, "momentum x"
@@ -874,3 +897,56 @@ def test_matrix_free_rho_dot_integration():
     a_s = fs.to_modes(rho_small)
     a_dot_s = fs.to_modes(fs.rho_dot(rho_small, 0.0, 0))
     assert (a_s * a_dot_s).sum() < 0
+
+
+def test_a_dot_nonlinear_signed():
+    """END-TO-END SIGNED: the assembled a_dot's cubic channel vs the governing
+    equation, sign and magnitude.  The 2026-07 audit found a sign flip at the
+    assembly seam that every layer-wise test missed (kernels validated in their
+    own -Phi_dot convention, backends against each other, invariants sign-blind);
+    this is the only test that crosses that seam.  Pointwise-in-x comparisons are
+    NOT valid here: the cubic's cos(2 phi) overlap changes sign across the shell,
+    so the reference must be Galerkin-projected exactly like the operator."""
+    torch.set_default_dtype(torch.float64)
+    fs = make_fs(M_theta=4, Nr=1, ee=dict(epsilon_bg=EPS_B, nonlinear=True,
+                                          check_convergence=False))
+    ee = fs.ee_scattering
+    dim = fs.angular.dim
+    amp = 2.0 * T0
+    a = torch.zeros(dim, dtype=torch.float64, device=rc.device)
+    a[3] = amp                                    # m=2 cosine channel
+    a4 = a.reshape(1, dim)
+    lin = (-torch.einsum("cij,jc->ic", ee.L_coeff, a4)).reshape(-1)
+    cub = 0.5 * (ee.a_dot(a) - ee.a_dot(-a)) - lin
+    # scaling sanity: the odd channel is pure cubic (series terminates)
+    cub_h = 0.5 * (ee.a_dot(0.5 * a) - ee.a_dot(-0.5 * a)) \
+        - (-torch.einsum("cij,jc->ic", ee.L_coeff, 0.5 * a4)).reshape(-1)
+    assert abs(float(cub[3] / cub_h[3]) - 8.0) < 1e-6
+    # governing-equation reference: eps^3 Richardson, Galerkin-projected
+    # (w_eq_RB * conv = 1 -> unit x-weight; Ginv = T0/Gband at Nr=1).
+    # Whole reference on CPU inside a device context: the suite's global
+    # default-device wrapper otherwise breaks the reference's numpy interop.
+    with torch.device("cpu"):
+        xg = torch.tensor(np.linspace(-8.0, 8.0, 25), dtype=torch.float64)
+        phi1 = torch.tensor(np.linspace(0, 2 * np.pi, 16, endpoint=False),
+                            dtype=torch.float64)
+
+        def df(x, phi):
+            return (0.25 / torch.cosh(x / 2) ** 2) * (amp * torch.cos(2 * phi)) / T0
+
+        common2 = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
+        refkw = dict(n_xi=20, xi_cut=10.0, n_phi=128, chunk=2, **common2)
+        X, P = torch.meshgrid(xg, phi1, indexing="ij")
+        Xf, Pf = X.reshape(-1), P.reshape(-1)
+        fd = {s: _kernels.exact_collision_reference(
+                (lambda s_: (lambda x, phi: df(x, phi) * s_))(s),
+                Xf, Pf, linearize=False, **refkw).reshape(len(xg), len(phi1))
+              for s in (1.0, 2.0, -1.0, -2.0)}
+        C3 = (0.5 * (fd[2.0] - fd[-2.0]) - (fd[1.0] - fd[-1.0])) / 6.0
+        ov = 2.0 * (C3 * torch.cos(2 * phi1)[None, :]).mean(1)
+        dx = float(xg[1] - xg[0])
+        Gband = float((0.25 / torch.cosh(xg / 2) ** 2).sum() * dx)
+        cub2_ref = float(ov.sum() * dx / Gband * T0)
+    ratio = float(cub[3].cpu()) / cub2_ref
+    assert ratio > 0, f"nonlinear sign FLIPPED vs governing equation: {ratio:.3f}"
+    assert 0.5 < ratio < 1.6, f"cubic magnitude off vs reference: {ratio:.3f}"
