@@ -162,16 +162,44 @@ class DeltaK(KRepresentation):
 
 
 class _DeltaKContactor:
-    """Contact distribution built in modes (dmu -> (n=0,m=0); vD -> (n=0,m=1)),
-    transformed to delta-k once."""
-    def __init__(self, fs, n: torch.Tensor, *, dmu: float = 0.0, vD: float = 0.0) -> None:
-        n = n.to(rc.device); Nsel = n.shape[0]; dim_t = fs.angular.dim
-        cm = torch.zeros((Nsel, fs.Nr, dim_t), device=rc.device, dtype=n.dtype)
+    """Reservoir ghost for the delta-k representation.
+
+    The reservoir is a drifted Fermi-Dirac at (mu + dmu, T) with PHYSICAL inward
+    drift velocity ``vD`` (along -n, into the device), i.e. a shell shift
+    s(theta) = (dmu - kF vD cos(theta-phi) - m* vD^2/2) / T.
+
+    nonlinear=False (default): the EXACT LINEARIZATION -- nodal storage
+        Phi = dmu - kF vD cos(theta-phi), built in modes (m=0 and m=1 only).
+    nonlinear=True: the exact Pauli-bounded deviation of the shifted FD,
+        Phi(xi, theta) = 2T (1 + cosh xi) [expit(s - xi) - expit(-xi)]
+        (at Nr=1 this is the saturating 2T tanh(s/2) contact), band-limited once
+        through the representation's modal transform.  Its small-s limit is
+        exactly the linear ghost, so the flag changes fidelity, not convention.
+    """
+    def __init__(self, fs, n: torch.Tensor, *, dmu: float = 0.0, vD: float = 0.0,
+                 nonlinear: bool = False) -> None:
+        n = n.to(rc.device); Nsel = n.shape[0]
         phi = torch.atan2(n[:, 1], n[:, 0])
-        cm[:, 0, 0] = dmu
-        cm[:, 0, 1] = -(vD / fs.vF) * torch.cos(phi)
-        cm[:, 0, 2] = -(vD / fs.vF) * torch.sin(phi)
-        self.rho_contact = fs.representation.from_modes(cm.reshape(Nsel, fs.Nr * dim_t))
+        rep = fs.representation
+        if not nonlinear:
+            dim_t = fs.angular.dim
+            cm = torch.zeros((Nsel, fs.Nr, dim_t), device=rc.device, dtype=n.dtype)
+            cm[:, 0, 0] = dmu
+            cm[:, 0, 1] = -(fs.kF * vD) * torch.cos(phi)
+            cm[:, 0, 2] = -(fs.kF * vD) * torch.sin(phi)
+            self.rho_contact = rep.from_modes(cm.reshape(Nsel, fs.Nr * dim_t))
+        else:
+            theta = fs.angular.theta                          # (N_theta,)
+            xi = fs.radial.xi                                 # (Nr,)
+            m_star = fs.kF / fs.vF
+            s = (dmu - fs.kF * vD * torch.cos(theta[None, :] - phi[:, None])
+                 - 0.5 * m_star * vD * vD) / fs.T_temp        # (Nsel, N_theta)
+            xi_b = xi[None, :, None]                          # (1, Nr, 1)
+            s_b = s[:, None, :]                               # (Nsel, 1, N_theta)
+            dfe = torch.special.expit(s_b - xi_b) - torch.special.expit(-xi_b)
+            Phi = 2.0 * fs.T_temp * (1.0 + torch.cosh(xi_b)) * dfe
+            Phi = Phi.reshape(Nsel, fs.Nr * fs.angular.N_theta)
+            self.rho_contact = rep.from_modes(rep.to_modes(Phi))   # band-limit once
 
     def __call__(self, t: float) -> torch.Tensor:
         return self.rho_contact

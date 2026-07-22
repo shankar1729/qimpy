@@ -705,7 +705,12 @@ class FiniteVolume(Geometry):
             params = dict(params)
             floating = bool(params.pop("floating", False))
             i_set = params.pop("I_set", None)
-            nonlinear = bool(params.pop("nonlinear", False))
+            # nonlinear: for feedback (I_set/floating) contacts it selects the
+            # Newton-on-exact-FD level solve; for fixed contacts it passes
+            # through to the representation's contactor (exact reservoir vs its
+            # linearization).  None = each contactor's own default.
+            nl_key = params.pop("nonlinear", None)
+            nonlinear = bool(nl_key)
             vD = float(params.get("vD", 0.0))
             if floating or (i_set is not None):
                 # Feedback ghost is affine in dmu: g(dmu) = dmu*unit + drift, so the
@@ -731,6 +736,8 @@ class FiniteVolume(Geometry):
                     cur_in=cur_in, bn=bn_ci, vD=vD, nonlinear=nonlinear,
                     hmu=0.01 * float(getattr(material, "T_temp", 1.0))))
             else:
+                if nl_key is not None:
+                    params["nonlinear"] = bool(nl_key)
                 ghost = material.get_contactor(g.bn[ci], **params)(0.0)
                 self._contacts.append(_Contact(
                     name=nm, idx=ci, cur=cur, kind="fixed", ghost=ghost))

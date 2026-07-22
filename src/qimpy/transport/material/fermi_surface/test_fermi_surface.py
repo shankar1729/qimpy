@@ -136,9 +136,10 @@ def test_rho_dot_matches_hand_built_modal(
 # Contactor: voltage + drift in modal -> delta-k
 # ----------------------------------------------------------------------------
 def test_contactor_voltage_drift_at_Nr1() -> None:
-    """The Nr=1 contactor produces the same modal coefficients as ModalContactor."""
+    """Linear contactor: dmu -> m=0; PHYSICAL inward drift vD -> m=1 with
+    coefficient -kF*vD (shell momentum shift), per unit Phi convention."""
     torch.set_default_dtype(torch.float64)
-    M = 8; vF = 1.5
+    M = 8; kF = 1.0
     fs = _make(M, Nr=1)
     # Wall normals at three angles
     phi = torch.tensor([0.3, 1.1, -2.4], dtype=torch.float64)
@@ -146,10 +147,39 @@ def test_contactor_voltage_drift_at_Nr1() -> None:
     contactor = fs.get_contactor(n, dmu=0.07, vD=0.13)
     rho_dk = contactor(0.0)                               # (3, N_theta)
     a = fs.to_modes(rho_dk)
-    # Expected: a_0 = dmu; a_1 = -(vD/vF) cos phi; b_1 = -(vD/vF) sin phi
+    # Expected: a_0 = dmu; a_1 = -kF vD cos phi; b_1 = -kF vD sin phi
     assert torch.allclose(a[:, 0], torch.full_like(a[:, 0], 0.07), atol=1e-12)
-    assert torch.allclose(a[:, 1], -(0.13 / vF) * torch.cos(phi), atol=1e-12)
-    assert torch.allclose(a[:, 2], -(0.13 / vF) * torch.sin(phi), atol=1e-12)
+    assert torch.allclose(a[:, 1], -(kF * 0.13) * torch.cos(phi), atol=1e-12)
+    assert torch.allclose(a[:, 2], -(kF * 0.13) * torch.sin(phi), atol=1e-12)
+
+
+def test_contactor_nonlinear_linear_limit() -> None:
+    """The nonlinear (exact shifted-FD) ghost linearizes to the linear ghost:
+    same convention, different fidelity."""
+    torch.set_default_dtype(torch.float64)
+    fs = _make(8, Nr=1)
+    phi = torch.tensor([0.4, -1.9], dtype=torch.float64)
+    n = torch.stack([torch.cos(phi), torch.sin(phi)], dim=-1)
+    eps = 1e-6 * fs.T_temp
+    lin = fs.get_contactor(n, dmu=eps, vD=eps)(0.0)
+    nl = fs.get_contactor(n, dmu=eps, vD=eps, nonlinear=True)(0.0)
+    scale = lin.abs().max()
+    assert (nl - lin).abs().max() < 1e-6 * scale
+
+
+def test_contactor_nonlinear_saturates() -> None:
+    """Nr=1 nonlinear ghost = 2T tanh(s/2): saturating (Pauli-bounded), below
+    the linear ghost at strong bias."""
+    torch.set_default_dtype(torch.float64)
+    T = 0.02
+    fs = _make(8, Nr=1, T_temp=T)
+    n = torch.tensor([[0.0, 1.0]], dtype=torch.float64)
+    dmu = 5.0 * T
+    nl = fs.get_contactor(n, dmu=dmu, nonlinear=True)(0.0)
+    expect = 2.0 * T * np.tanh(2.5)                       # s = dmu/T = 5
+    assert torch.allclose(nl, torch.full_like(nl, expect), rtol=1e-10)
+    lin = fs.get_contactor(n, dmu=dmu)(0.0)
+    assert nl.abs().max() < lin.abs().max()               # saturation
 
 
 # ----------------------------------------------------------------------------

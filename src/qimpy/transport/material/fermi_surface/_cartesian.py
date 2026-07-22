@@ -277,15 +277,26 @@ class Cartesian(KRepresentation):
 
 
 class _CartesianContactor:
-    """Contact ghost = a drifted-heated FD reservoir, as delta-f about f0_lab."""
-    def __init__(self, rep: "Cartesian", n: torch.Tensor, *, dmu: float = 0.0, vD: float = 0.0):
+    """Reservoir ghost = drifted FD at (mu + dmu, T) with PHYSICAL inward drift
+    velocity ``vD`` (along -n, into the device; kD = -m* vD n), as delta-f about
+    f0_lab.  nonlinear=True (default): the exact Pauli-bounded deviation.
+    nonlinear=False: its exact linearization,
+        delta-f = (dmu - vD (k.n)) f0(1-f0)/T,
+    matching the delta-k linear contactor's convention on the shell."""
+    def __init__(self, rep: "Cartesian", n: torch.Tensor, *, dmu: float = 0.0,
+                 vD: float = 0.0, nonlinear: bool = True):
         n = n.to(rc.device)
-        phi = torch.atan2(n[:, 1], n[:, 0])
-        kD = (rep.m_star * vD) * torch.stack([torch.cos(phi), torch.sin(phi)], -1)
-        kp = rep.k[None] - kD[:, None]
-        eps_p = kp.square().sum(-1) / (2 * rep.m_star)
-        f_res = torch.special.expit(-(eps_p - (rep.mu + dmu)) / rep.T_temp)
-        self.df_contact = f_res - rep._f0_lab[None, :]
+        f0 = rep._f0_lab
+        if nonlinear:
+            kD = -(rep.m_star * vD) * n                      # inward drift
+            kp = rep.k[None] - kD[:, None]
+            eps_p = kp.square().sum(-1) / (2 * rep.m_star)
+            f_res = torch.special.expit(-(eps_p - (rep.mu + dmu)) / rep.T_temp)
+            self.df_contact = f_res - f0[None, :]
+        else:
+            k_dot_n = rep.k @ n.t()                          # (Nk, Nsel)
+            self.df_contact = ((dmu - vD * k_dot_n.t())
+                               * (f0 * (1.0 - f0))[None, :] / rep.T_temp)
 
     def __call__(self, t: float) -> torch.Tensor:
         return self.df_contact
