@@ -326,7 +326,7 @@ def test_cartesian_projection_contract(Nr: int, mode: int) -> None:
     rho = _cart_state(fs, mode, amp)[None]        # one spatial cell
     seen = {}
 
-    def capture(a, te2=None):
+    def capture(a, te=None):
         seen["a"] = a.detach().clone()
         return torch.zeros_like(a)
 
@@ -346,7 +346,7 @@ def test_cartesian_projection_roundtrip(Nr: int, mode: int) -> None:
     torch.set_default_dtype(torch.float64)
     fs = _make_cart(Nr)
     rho = _cart_state(fs, mode, 1e-8)[None]
-    out = fs.representation.apply_collision(rho, lambda a, te2=None: a)
+    out = fs.representation.apply_collision(rho, lambda a, te=None: a)
     rel = float((out - rho).abs().max() / rho.abs().max())
     assert rel < 2e-2, f"P.R != identity: rel={rel:.1e}"
 

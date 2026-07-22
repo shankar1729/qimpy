@@ -72,6 +72,7 @@ class EEScattering(TreeNode):
         well_width: float = 0.0,
         nonlinear: bool = True,
         on_shell: bool = False,
+        T_build: float = 0.0,
         tol: float = 1e-3,
         n_alpha: int = 0,
         n_xi: int = 0,
@@ -187,7 +188,12 @@ class EEScattering(TreeNode):
             )
         self.recon = recon
 
-        T = fs.T_temp
+        # T_build: optional build-temperature override (local-T_e ensembles
+        # tabulate the operator at Chebyshev nodes T_i around the material T;
+        # 0 = use the material temperature).  All internal quadratures,
+        # vertices and null structures below are built at this temperature.
+        T = float(T_build) if T_build else fs.T_temp
+        self.T_build = T
         t_ratio = T / self.E_F
         log.info("\n--- Initializing e-e collisions (2D Fermi liquid) ---")
         log.info(
@@ -573,7 +579,7 @@ class EEScattering(TreeNode):
         self._U = U.to(dtype=cdtype, device=device)
         self._R = R.to(dtype=cdtype, device=device)
         # Per-harmonic null radial projectors (mo in {0, +-1}); identity else.
-        proj = self._null_projectors_by_harm(self.fermi_surface.T_temp)
+        proj = self._null_projectors_by_harm(self.T_build)
         self._null_proj = {
             mo: Pm.to(dtype=cdtype, device=device) for mo, Pm in proj.items()
         }

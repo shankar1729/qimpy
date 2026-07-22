@@ -983,3 +983,43 @@ def test_cartesian_local_te_rates():
         outs[tag] = fs.rho_dot(rho, 0.0, 0)
     ratio = float(outs["on"].abs().max() / outs["off"].abs().max())
     assert 3.5 < ratio < 4.5, f"(T_e/T)^2 rescale broken: ratio={ratio:.2f}"
+
+
+def test_local_te_ensemble_exact():
+    """EXACT local-T_e (the factorization C^(d) = T_e^2 T^(1-d) M_d(t_e)): the
+    ensemble-evaluated linear rate at te = 2T matches an operator FRESHLY BUILT
+    at 2T (for d=1 the rate is convention-free, directly comparable at Nr=1),
+    reproduces the material operator at te = T, and beats the scalar
+    (T_e/T)^2 fallback, which misses the O(t) shape drift of M_1."""
+    from qimpy.transport.material import FermiSurface
+    torch.set_default_dtype(torch.float64)
+    pg = ProcessGrid(rc.comm, "rk", (-1, 1))
+    T = 0.02
+    ee_base = dict(epsilon_bg=12.9, nonlinear=False, on_shell=False,
+                   check_convergence=False, n_xi=16, n_phi=128, n_xi_proj=8)
+
+    def mk(Tm, local=None):
+        eed = dict(ee_base)
+        if local:
+            eed["local_te"] = local
+        return FermiSurface(kF=1.0, vF=1.5, M_theta=4, Nr=1, T=Tm, xi_max=6.0,
+                            ee_scattering=eed, process_grid=pg)
+
+    fs = mk(T, local=dict(n_nodes=6, te_fac_min=0.5, te_fac_max=3.0))
+    fs2 = mk(2 * T)
+    dim = fs.angular.dim
+    a = torch.zeros(1, dim, dtype=torch.float64, device=rc.device)
+    a[0, 3] = 1.0                                       # m=2 channel
+    te = torch.full((1,), 2 * T, dtype=torch.float64, device=rc.device)
+    gam_ens = -float(fs._modal_collision(a, te=te)[0, 3])
+    gam_fresh = float(fs2.ee_scattering.L_coeff[3, 0, 0])
+    rel = abs(gam_ens - gam_fresh) / gam_fresh
+    assert rel < 5e-3, f"ensemble(2T) vs fresh build: rel={rel:.1e}"
+    # the scalar fallback misses the shape drift -- it must be WORSE:
+    gam_scalar = 4.0 * float(fs.ee_scattering.L_coeff[3, 0, 0])
+    assert abs(gam_scalar - gam_fresh) / gam_fresh > rel
+    # and at te = T the ensemble reproduces the material operator:
+    teT = torch.full((1,), T, dtype=torch.float64, device=rc.device)
+    gam_T = -float(fs._modal_collision(a, te=teT)[0, 3])
+    gam_0 = float(fs.ee_scattering.L_coeff[3, 0, 0])
+    assert abs(gam_T - gam_0) / gam_0 < 5e-3

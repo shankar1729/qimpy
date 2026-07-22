@@ -187,6 +187,10 @@ class FermiSurface(Material):
             rates.reshape(-1), dtype=self.v.dtype, device=rc.device)
 
         # microscopic e-e collisions (replaces the tau_ee placeholder)
+        local_te = None
+        if isinstance(ee_scattering, dict):
+            ee_scattering = dict(ee_scattering)
+            local_te = ee_scattering.pop("local_te", None)
         if (ee_scattering is not None) or checkpoint_in.member("ee_scattering"):
             if np.isfinite(tau_ee):
                 raise InvalidInputException(
@@ -194,6 +198,34 @@ class FermiSurface(Material):
                     " ee_scattering, not both")
             self.add_child("ee_scattering", EEScattering, ee_scattering,
                            checkpoint_in, fermi_surface=self)
+        # Exact local-T_e operator ensemble (see the factorization derivation):
+        # each degree-d block is EXACTLY C^(d) = T_e^2 T^(1-d) M_d(t_e) with
+        # M_d a smooth matrix function of t = T_e/E_F alone -- so tabulate
+        # complete operators at Chebyshev nodes T_i = fac_i * T and evaluate
+        # per cell by barycentric interpolation with the analytic prefactors.
+        # Without the table, a supplied T_e falls back to the leading-order
+        # uniform (T_e/T)^2 rescale.
+        self._ee_ensemble = None
+        if local_te is not None:
+            if not isinstance(ee_scattering, dict):
+                raise InvalidInputException(
+                    "local_te requires ee_scattering given as parameters")
+            n_nodes = int(local_te.get("n_nodes", 6))
+            fmin = float(local_te.get("te_fac_min", 0.5))
+            fmax = float(local_te.get("te_fac_max", 3.0))
+            j = np.arange(n_nodes)
+            xj = np.cos(np.pi * (2 * j + 1) / (2 * n_nodes))     # Chebyshev
+            fac = 0.5 * (fmin + fmax) + 0.5 * (fmax - fmin) * xj
+            wj = (-1.0) ** j * np.sin(np.pi * (2 * j + 1) / (2 * n_nodes))
+            self._ee_fac = torch.as_tensor(fac, dtype=torch.float64,
+                                           device=rc.device)
+            self._ee_bary_w = torch.as_tensor(wj, dtype=torch.float64,
+                                              device=rc.device)
+            self._ee_fac_lim = (fmin, fmax)
+            self._ee_ensemble = [
+                EEScattering(fermi_surface=self, T_build=self.T_temp * f,
+                             **ee_scattering)
+                for f in fac]
 
     def __getattr__(self, name):
         # Expose the modal transforms ONLY when the representation has them, so
@@ -213,20 +245,67 @@ class FermiSurface(Material):
         return self.v
 
     # ---- the representation-agnostic modal collision (the physics) ----
+    def _ee_local_te(self, a: torch.Tensor, te: torch.Tensor) -> torch.Tensor:
+        """EXACT local-T_e e-e term via the operator ensemble.
+
+        Factorization (derived + agent-verified): each degree-d block is
+        C^(d)(T_e) = T_e^2 T^(1-d) M_d(t_e), M_d smooth in t_e = T_e/E_F only.
+        A node operator built at T_i carries T_i^2 T_i^(1-d) M_d(t_i) in its own
+        convention, so its contribution needs the per-degree factor
+        q_d = (T_e/T_i)^2 (T_i/T)^(d-1).  All three degrees are obtained from
+        ONE a_dot call per node via homogeneity: with lam_i = T_i/T,
+        NL_i(lam a) = lam^2 Q_i + lam^3 C_i, so
+        mu_i NL_i(lam_i a) with mu_i = (T_e/T_i)^2 (T/T_i) gives exactly
+        q_2 Q_i + q_3 C_i; the linear part is scaled by (T_e/T_i)^2 directly.
+        Barycentric-Chebyshev weights in t interpolate M_d spectrally.
+        (Per-node null projectors use their own sqrt(1+t_i xi) momentum
+        covector; the O(t) covector mismatch of the mixture is absorbed by the
+        representation's exact conservation projection downstream.)"""
+        T = self.T_temp
+        x = (te.to(torch.float64) / T).clamp(*self._ee_fac_lim)   # (cells,)
+        d = x[:, None] - self._ee_fac[None, :]                    # (cells, N)
+        exact = d.abs() < 1e-12
+        d = torch.where(exact, torch.ones_like(d), d)
+        w = self._ee_bary_w[None, :] / d
+        w = torch.where(exact.any(-1, keepdim=True),
+                        exact.to(w.dtype), w)
+        w = w / w.sum(-1, keepdim=True)                           # (cells, N)
+        Nr, dim = self.Nr, self.angular.dim
+        a4 = a.reshape(*a.shape[:-1], Nr, dim)
+        out = torch.zeros_like(a)
+        for i, ee in enumerate(self._ee_ensemble):
+            Ti = float(self._ee_fac[i]) * T
+            lin_i = -torch.einsum("cij,...jc->...ic", ee.L_coeff,
+                                  a4).reshape(a.shape)
+            s2 = ((te.to(a.dtype) / Ti) ** 2).unsqueeze(-1)       # (cells, 1)
+            term = s2 * lin_i
+            if ee.nonlinear:
+                lam = Ti / T
+                nl_i = ee.a_dot(lam * a) - lam * lin_i            # lam^2 Q + lam^3 C
+                mu = s2 * (T / Ti)
+                term = term + mu * nl_i
+            out = out + w[:, i:i + 1].to(a.dtype) * term
+        return out
+
     def _modal_collision(self, a: torch.Tensor,
-                         te2: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """Modal collision.  ``te2`` (optional, per-cell broadcastable) scales
-        the microscopic e-e operator by (T_e/T)^2 -- the leading local-
-        temperature law for ALL its blocks (L, allowed-Q, C alike; the
-        particle-hole-forbidden Q sector's (T_e/T)^3 is O(T/E_F)-small).  The
-        phenomenological tau_p/tau_ee rates are user-set constants and are NOT
-        rescaled; cyclotron is magnetic, not collisional."""
+                         te: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Modal collision.  ``te`` (optional, per-cell) = local electron
+        temperature: with a local_te ensemble the microscopic e-e term is
+        evaluated EXACTLY at T_e (analytic prefactors x Chebyshev-tabulated
+        shape); without one it falls back to the leading-order uniform
+        (T_e/T)^2 rescale (all blocks alike; the PH-forbidden Q sector's
+        (T_e/T)^3 is O(T/E_F)-small).  Phenomenological tau_p/tau_ee are
+        user-set constants and are NOT rescaled; cyclotron is magnetic."""
         a_dot = -self.rates_modal * a
         if hasattr(self, "ee_scattering"):
-            ee_term = self.ee_scattering.a_dot(a)
-            if te2 is not None:
-                ee_term = ee_term * te2.to(ee_term.dtype)
-            a_dot = a_dot + ee_term
+            if te is not None and self._ee_ensemble is not None:
+                a_dot = a_dot + self._ee_local_te(a, te)
+            else:
+                ee_term = self.ee_scattering.a_dot(a)
+                if te is not None:
+                    s2 = (te.to(ee_term.dtype) / self.T_temp).unsqueeze(-1) ** 2
+                    ee_term = ee_term * s2
+                a_dot = a_dot + ee_term
         if self.k_speed:
             Nr, dim_t = self.Nr, self.angular.dim
             a4 = a.reshape(*a.shape[:-1], Nr, dim_t)

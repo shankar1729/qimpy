@@ -232,12 +232,12 @@ class Cartesian(KRepresentation):
             # Operator contract: coefficients c of Phi = delta_f/(f0(1-f0)/T):
             a = self.T_temp * torch.einsum("nm,cmd->cnd", self._Ginv_band, a)
             a = a.reshape(hi - lo, Nr * dim)
-            # Local-T_e rates: every collision block (L, allowed-Q, C) scales as
-            # (T_e/T)^2 at leading order (audit); PH-forbidden Q is (T_e/T)^3
-            # but O(T/E_F)-small.  Passed per cell into the modal operator.
-            te2 = ((Te / self.T_temp) ** 2).unsqueeze(-1) \
-                if self.local_te_rates else None
-            a_dot = modal_op(a, te2=te2)                     # <-- model's modal collision
+            # Local-T_e rates: hand the per-cell recovered T_e to the modal
+            # operator -- evaluated EXACTLY there when the model has a local_te
+            # ensemble (analytic T_e^2 T^(1-d) prefactors x tabulated shape),
+            # else by the leading-order uniform (T_e/T)^2 rescale.
+            te = Te if self.local_te_rates else None
+            a_dot = modal_op(a, te=te)                       # <-- model's modal collision
             ad = a_dot.reshape(hi - lo, Nr, dim)
             B = torch.bmm(fou, ad.transpose(1, 2))
             # w_eq_RB = f0(1-f0)/T -- the /T completes the contract (audit bug 2):
