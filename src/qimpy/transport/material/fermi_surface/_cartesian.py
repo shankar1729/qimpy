@@ -44,7 +44,7 @@ class Cartesian(KRepresentation):
         self, *, fermi_surface,
         k_max: Optional[float] = None, n_k: Optional[int] = None,
         dk: Optional[float] = None, dmu_max: float = 0.0, kD_max: float = 0.0,
-        grid_safety_cells: int = 3, spin: float = 2.0,
+        grid_safety_cells: int = 3, spin: float = 2.0, circular: bool = True,
         newton_iters: int = 8, frame_polish: int = 2,
         cell_chunk: int = 4096, mem_budget_gb: float = 3.0,
         process_grid: ProcessGrid,
@@ -74,6 +74,27 @@ class Cartesian(KRepresentation):
         KX, KY = torch.meshgrid(kg, kg, indexing="ij")
         k = torch.stack([KX.reshape(-1), KY.reshape(-1)], dim=-1).to(dtype)
         Nk = n_k * n_k
+        # Square-grid bookkeeping (the wall reflector's bilinear stencil indexes
+        # the underlying uniform grid even when the active set is masked):
+        self.n_k_grid = n_k
+        self._k_min = float(kg[0])
+        self._dk_grid = dk
+        # Circular active set: |k| conservation (streaming + specular walls) and
+        # the bounded contact shell mean k-points beyond |k| ~ k_max are NEVER
+        # occupied -- but their box-corner speed sqrt(2)*k_max/m* sets the CFL dt.
+        # Dropping them is exact physics: dt grows x sqrt(2) and Nk falls ~21%.
+        # Keep a 1.5*dk guard ring so reflection stencils of active points find
+        # their neighbors (occupancy there < e^-7: dropped stencil corners beyond
+        # it are negligible).
+        if circular:
+            r_act = k_max + 1.5 * dk
+            act = k.square().sum(-1) <= r_act * r_act
+            self._full2act = torch.full((Nk,), -1, dtype=torch.long, device=rc.device)
+            self._full2act[act] = torch.arange(int(act.sum().item()), device=rc.device)
+            k = k[act]
+            Nk = k.shape[0]
+        else:
+            self._full2act = None
         self.dk_area = dk * dk
         self.Nk = Nk
         # Physical BZ phase-space weight: n = spin * int d^2k/(2pi)^2 f  ->  per-k
@@ -272,20 +293,31 @@ class _CartesianContactor:
 
 class _CartesianReflector:
     """Specular wall: delta-f(k) <- delta-f(k - 2(k.n)n) via bilinear interp on the
-    uniform grid (exact for axis-aligned walls)."""
+    underlying uniform grid (exact for axis-aligned walls).  With a circular
+    active set, stencil indices are translated full-grid -> active; the rare
+    stencil corner beyond the guard ring (occupancy < e^-7) is dropped (weight
+    zeroed) -- reflection preserves |k|, so every reflected ACTIVE point itself
+    lies inside the active radius."""
     def __init__(self, rep: "Cartesian", n: torch.Tensor):
         n = n.to(rc.device); self.rep = rep; self.Ns = n.shape[0]
-        k = rep.k
+        k = rep.k                                       # active points
         kdotn = (k[None] * n[:, None]).sum(-1)
         k_ref = k[None] - 2.0 * kdotn.unsqueeze(-1) * n[:, None]
-        n_k = int(round(np.sqrt(k.shape[0])))
-        kmin = k[:, 0].min(); self._nk = n_k
-        self._dk = (k[:, 0].max() - kmin) / (n_k - 1)
-        g = ((k_ref - kmin) / self._dk).clamp(0, n_k - 1.0001)
+        n_k = rep.n_k_grid
+        g = ((k_ref - rep._k_min) / rep._dk_grid).clamp(0, n_k - 1.0001)
         i0 = g.floor().long(); fr = g - i0
         ix, iy = i0[..., 0], i0[..., 1]; fx, fy = fr[..., 0], fr[..., 1]
-        self._idx = (ix * n_k + iy, (ix + 1) * n_k + iy, ix * n_k + iy + 1, (ix + 1) * n_k + iy + 1)
-        self._wt = ((1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy)
+        idx_full = (ix * n_k + iy, (ix + 1) * n_k + iy,
+                    ix * n_k + iy + 1, (ix + 1) * n_k + iy + 1)
+        wts = ((1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy)
+        self._idx = []; self._wt = []
+        for idx, wt in zip(idx_full, wts):
+            if rep._full2act is not None:
+                a = rep._full2act[idx]
+                wt = wt * (a >= 0)                      # outside active set: drop
+                idx = a.clamp(min=0)
+            self._idx.append(idx)
+            self._wt.append(wt)
 
     def __call__(self, u: torch.Tensor) -> torch.Tensor:
         out = torch.zeros_like(u)
