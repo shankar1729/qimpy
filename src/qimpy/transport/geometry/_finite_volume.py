@@ -27,7 +27,7 @@ from typing import Optional
 import numpy as np
 import torch
 
-from qimpy import rc, TreeNode
+from qimpy import rc, log, TreeNode
 from qimpy.rc import MPI
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import ProcessGrid
@@ -660,21 +660,34 @@ class FiniteVolume(Geometry):
         # M_theta=1024 needs 3.2 GB and is ~10x faster dense than per-step).
         self._refl_mat = None
         refl_budget = float(os.environ.get("QIMPY_REFL_BUDGET_GB", "4.0")) * 2 ** 30
-        if self._reflector is not None and self._wall.numel() * self.Nk ** 2 * 8 <= refl_budget:
-            nw = self._wall.numel()
-            bn_wall = g.bn[self._wall]
-            eye = torch.eye(self.Nk, device=rc.device, dtype=g.area.dtype)
-            # Build the per-edge matrix in chunks over wall edges into a preallocated
-            # buffer: fully materializing the (Nk, nw, Nk) basis at once OOMs at
-            # large Nk (the matrix itself is nw*Nk^2).  Cap the transient at ~200 MB.
-            chunk = max(1, int(2.0e8 // (self.Nk * self.Nk * 8)))
-            self._refl_mat = torch.empty(nw, self.Nk, self.Nk,
-                                         device=rc.device, dtype=g.area.dtype)
-            for s in range(0, nw, chunk):
-                cs = min(chunk, nw - s)
-                refl_c = material.get_reflector(bn_wall[s:s + cs])
-                basis_c = eye[:, None, :].expand(self.Nk, cs, self.Nk)
-                self._refl_mat[s:s + cs] = refl_c(basis_c).permute(1, 2, 0)
+        if self._reflector is not None:
+            dense_gb = self._wall.numel() * self.Nk ** 2 * 8 / 2 ** 30
+            if dense_gb * 2 ** 30 <= refl_budget:
+                nw = self._wall.numel()
+                bn_wall = g.bn[self._wall]
+                eye = torch.eye(self.Nk, device=rc.device, dtype=g.area.dtype)
+                # Build the per-edge matrix in chunks over wall edges into a
+                # preallocated buffer: fully materializing the (Nk, nw, Nk) basis at
+                # once OOMs at large Nk (the matrix itself is nw*Nk^2).  Cap the
+                # transient at ~200 MB.
+                chunk = max(1, int(2.0e8 // (self.Nk * self.Nk * 8)))
+                self._refl_mat = torch.empty(nw, self.Nk, self.Nk,
+                                             device=rc.device, dtype=g.area.dtype)
+                for s in range(0, nw, chunk):
+                    cs = min(chunk, nw - s)
+                    refl_c = material.get_reflector(bn_wall[s:s + cs])
+                    basis_c = eye[:, None, :].expand(self.Nk, cs, self.Nk)
+                    self._refl_mat[s:s + cs] = refl_c(basis_c).permute(1, 2, 0)
+                log.info(
+                    f"Wall reflector: dense matrix ({dense_gb:.2f} GB, "
+                    f"{nw} edges x {self.Nk}^2) -> one batched matmul per step")
+            else:
+                log.info(
+                    f"Wall reflector: PER-STEP apply -- dense matrix would need "
+                    f"{dense_gb:.1f} GB > QIMPY_REFL_BUDGET_GB "
+                    f"({refl_budget / 2 ** 30:.1f} GB). This path is launch-bound "
+                    f"for modal materials at large M_theta; raise the budget if "
+                    f"the dense matrix fits GPU memory.")
 
         def allreduce(x: float) -> float:
             return self.comm.allreduce(x) if self._mpi else x
