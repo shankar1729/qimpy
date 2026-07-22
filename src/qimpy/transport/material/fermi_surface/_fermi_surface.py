@@ -213,10 +213,20 @@ class FermiSurface(Material):
         return self.v
 
     # ---- the representation-agnostic modal collision (the physics) ----
-    def _modal_collision(self, a: torch.Tensor) -> torch.Tensor:
+    def _modal_collision(self, a: torch.Tensor,
+                         te2: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Modal collision.  ``te2`` (optional, per-cell broadcastable) scales
+        the microscopic e-e operator by (T_e/T)^2 -- the leading local-
+        temperature law for ALL its blocks (L, allowed-Q, C alike; the
+        particle-hole-forbidden Q sector's (T_e/T)^3 is O(T/E_F)-small).  The
+        phenomenological tau_p/tau_ee rates are user-set constants and are NOT
+        rescaled; cyclotron is magnetic, not collisional."""
         a_dot = -self.rates_modal * a
         if hasattr(self, "ee_scattering"):
-            a_dot = a_dot + self.ee_scattering.a_dot(a)
+            ee_term = self.ee_scattering.a_dot(a)
+            if te2 is not None:
+                ee_term = ee_term * te2.to(ee_term.dtype)
+            a_dot = a_dot + ee_term
         if self.k_speed:
             Nr, dim_t = self.Nr, self.angular.dim
             a4 = a.reshape(*a.shape[:-1], Nr, dim_t)

@@ -950,3 +950,36 @@ def test_a_dot_nonlinear_signed():
     ratio = float(cub[3].cpu()) / cub2_ref
     assert ratio > 0, f"nonlinear sign FLIPPED vs governing equation: {ratio:.3f}"
     assert 0.5 < ratio < 1.6, f"cubic magnitude off vs reference: {ratio:.3f}"
+
+
+def test_cartesian_local_te_rates():
+    """A heated cell (recovered T_e = 2T) relaxes its ripple (T_e/T)^2 = 4x
+    faster with local_te_rates=True than False (identical state; the ratio
+    isolates the per-cell rescale exactly).  Lives here for the module's
+    no-default-device fixture (builds an EEScattering)."""
+    from qimpy.transport.material import FermiSurface
+    torch.set_default_dtype(torch.float64)
+    T = 0.02
+    ee = dict(epsilon_bg=12.9, nonlinear=False, on_shell=False,
+              check_convergence=False, n_xi=8, n_phi=64, n_xi_proj=6)
+    pg = ProcessGrid(rc.comm, "rk", (-1, 1))
+
+    def mk(local):
+        return FermiSurface(
+            kF=1.0, vF=1.5, M_theta=6, Nr=1, T=T, xi_max=6.0,
+            cartesian=dict(dk=T / (3.0 * 1.5), local_te_rates=local),
+            ee_scattering=dict(ee), process_grid=pg)
+
+    outs = {}
+    for tag, local in (("on", True), ("off", False)):
+        fs = mk(local)
+        rep = fs.representation
+        eps = rep.eps_k
+        f0 = rep._f0_lab
+        f_hot = torch.special.expit(-(eps - fs.mu) / (2 * T))
+        th = torch.atan2(rep.k[:, 1], rep.k[:, 0])
+        ripple = 1e-6 * f_hot * (1 - f_hot) / (2 * T) * torch.cos(2 * th)
+        rho = (f_hot - f0 + ripple)[None]
+        outs[tag] = fs.rho_dot(rho, 0.0, 0)
+    ratio = float(outs["on"].abs().max() / outs["off"].abs().max())
+    assert 3.5 < ratio < 4.5, f"(T_e/T)^2 rescale broken: ratio={ratio:.2f}"

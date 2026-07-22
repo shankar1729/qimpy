@@ -45,6 +45,7 @@ class Cartesian(KRepresentation):
         k_max: Optional[float] = None, n_k: Optional[int] = None,
         dk: Optional[float] = None, dmu_max: float = 0.0, kD_max: float = 0.0,
         grid_safety_cells: int = 3, spin: float = 2.0, circular: bool = True,
+        local_te_rates: bool = True,
         newton_iters: int = 8, frame_polish: int = 2,
         cell_chunk: int = 4096, mem_budget_gb: float = 3.0,
         process_grid: ProcessGrid,
@@ -61,6 +62,7 @@ class Cartesian(KRepresentation):
             )
         self.kF, self.vF, self.m_star = fs.kF, fs.vF, fs.m_star
         self.mu, self.T_temp, self.xi_max = fs.mu, fs.T_temp, fs.xi_max
+        self.local_te_rates = bool(local_te_rates)
         self.newton_iters, self.frame_polish = newton_iters, frame_polish
         self.cell_chunk, self.mem_budget_gb = cell_chunk, mem_budget_gb
         m_star = fs.m_star; dtype = torch.get_default_dtype()
@@ -119,6 +121,21 @@ class Cartesian(KRepresentation):
             [1.0 / (2 * np.pi)] + [1.0 / np.pi] * (2 * fs.M_theta),
             dtype=dtype, device=rc.device)
         self._f0_lab = torch.special.expit(-(self.eps_k - self.mu) / self.T_temp)
+        # Radial Gram of the CONTINUUM measure the k-sum realizes.  The psi
+        # basis is orthonormal only under the DISCRETE Nr-point quadrature, so
+        # the raw projection returns (G_band @ c) / T rather than the operator
+        # contract's coefficients c of Phi = delta_f / (f0(1-f0)/T).  Invert
+        # G_band (fine quadrature of the dimensionless 0.25 sech^2 measure over
+        # the projection mask |xi| < xi_max); apply_collision left-applies
+        # T * Ginv_band and the reconstruction divides its weight by T, making
+        # projection -> reconstruction the exact identity (audit bugs 2+3).
+        xi_f = torch.linspace(-fs.xi_max, fs.xi_max, 4001,
+                              device=rc.device, dtype=dtype)
+        w_f = 0.25 / torch.cosh(0.5 * xi_f) ** 2
+        psi_f = self._psi(xi_f)                              # (nfine, Nr)
+        G_band = torch.einsum("xn,xm,x->nm", psi_f, psi_f, w_f) \
+            * float(xi_f[1] - xi_f[0])
+        self._Ginv_band = torch.linalg.inv(G_band)
 
     # ---- radial polynomial evaluation at arbitrary xi (reuse the model's psi_n) ----
     def _radial_poly_coeffs(self, dtype) -> torch.Tensor:
@@ -211,11 +228,20 @@ class Cartesian(KRepresentation):
             jac = self.dk_area / (self.m_star * Te)
             gp = (df_loc * mask).unsqueeze(-1) * psi
             a = torch.bmm(gp.transpose(1, 2), fou * self._ang_norm)
-            a = (a * jac[:, None, None]).reshape(hi - lo, Nr * dim)
-            a_dot = modal_op(a)                              # <-- model's modal collision
+            a = a * jac[:, None, None]                       # raw (G_band @ c)/T
+            # Operator contract: coefficients c of Phi = delta_f/(f0(1-f0)/T):
+            a = self.T_temp * torch.einsum("nm,cmd->cnd", self._Ginv_band, a)
+            a = a.reshape(hi - lo, Nr * dim)
+            # Local-T_e rates: every collision block (L, allowed-Q, C) scales as
+            # (T_e/T)^2 at leading order (audit); PH-forbidden Q is (T_e/T)^3
+            # but O(T/E_F)-small.  Passed per cell into the modal operator.
+            te2 = ((Te / self.T_temp) ** 2).unsqueeze(-1) \
+                if self.local_te_rates else None
+            a_dot = modal_op(a, te2=te2)                     # <-- model's modal collision
             ad = a_dot.reshape(hi - lo, Nr, dim)
             B = torch.bmm(fou, ad.transpose(1, 2))
-            ddf = weq * (psi * B).sum(-1)
+            # w_eq_RB = f0(1-f0)/T -- the /T completes the contract (audit bug 2):
+            ddf = (weq / self.T_temp) * (psi * B).sum(-1)
             out[lo:hi] = self._project_conserved(ddf, kp, eps_p, weq)
         return out.reshape(shape_in)
 

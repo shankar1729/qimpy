@@ -288,3 +288,65 @@ def test_reflector_energy_conservation(phi_deg: float, s: float) -> None:
 def test_realizability_floor_default_is_none() -> None:
     fs = _make(M_theta=4, Nr=1)
     assert fs.realizability_floor() is None
+
+
+# ----------------------------------------------------------------------------
+# Cartesian representation: projection contract, round-trip, local-T_e rates
+# (the 2026-07 audit found the projection returned G_band@c/T instead of the
+# operator contract's c, and the reconstruction was a factor T too large --
+# invisible at Nr=1 linear where the two nearly cancel, catastrophic elsewhere)
+# ----------------------------------------------------------------------------
+def _make_cart(Nr: int, T: float = 0.05, *, local_te_rates: bool = True,
+               ee=None) -> FermiSurface:
+    return FermiSurface(
+        kF=1.0, vF=1.5, M_theta=6, Nr=Nr, T=T, xi_max=6.0,
+        cartesian=dict(dk=T / (3.0 * 1.5), local_te_rates=local_te_rates),
+        ee_scattering=ee, process_grid=_pg())
+
+
+def _cart_state(fs, radial_mode: int, amp: float):
+    """delta-f = w_eq_RB(xi_lab) * amp * psi_n(xi) * cos(2 theta): a pure
+    (n, m=2 cos) mode of Phi about the lab frame (no N/J/E content)."""
+    rep = fs.representation
+    xi = (rep.eps_k - fs.mu) / fs.T_temp
+    th = torch.atan2(rep.k[:, 1], rep.k[:, 0])
+    f0 = torch.special.expit(-xi)
+    psi = rep._psi(xi)[:, radial_mode]
+    return (f0 * (1 - f0) / fs.T_temp) * amp * psi * torch.cos(2 * th)
+
+
+@pytest.mark.parametrize("Nr,mode", [(1, 0), (2, 0), (2, 1)])
+def test_cartesian_projection_contract(Nr: int, mode: int) -> None:
+    """The coefficients handed to the modal operator ARE the Phi coefficients
+    (Gram-corrected, T-normalized): a pure (n, m=2) input of amplitude amp
+    projects to amp on that channel and ~0 elsewhere."""
+    torch.set_default_dtype(torch.float64)
+    fs = _make_cart(Nr)
+    amp = 1e-8
+    rho = _cart_state(fs, mode, amp)[None]        # one spatial cell
+    seen = {}
+
+    def capture(a, te2=None):
+        seen["a"] = a.detach().clone()
+        return torch.zeros_like(a)
+
+    fs.representation.apply_collision(rho, capture)
+    a = seen["a"].reshape(Nr, fs.angular.dim)
+    idx = (mode, 3)                               # (n, m=2 cos)
+    err_chan = abs(float(a[idx]) - amp) / amp
+    others = a.clone(); others[idx] = 0.0
+    assert err_chan < 2e-2, f"channel amplitude off by {err_chan:.1e}"
+    assert float(others.abs().max()) < 2e-2 * amp, "cross-channel leakage"
+
+
+@pytest.mark.parametrize("Nr,mode", [(1, 0), (2, 1)])
+def test_cartesian_projection_roundtrip(Nr: int, mode: int) -> None:
+    """apply_collision with the identity modal operator returns the input
+    (P then R is the identity on non-conserved modes)."""
+    torch.set_default_dtype(torch.float64)
+    fs = _make_cart(Nr)
+    rho = _cart_state(fs, mode, 1e-8)[None]
+    out = fs.representation.apply_collision(rho, lambda a, te2=None: a)
+    rel = float((out - rho).abs().max() / rho.abs().max())
+    assert rel < 2e-2, f"P.R != identity: rel={rel:.1e}"
+
