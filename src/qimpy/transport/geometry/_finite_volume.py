@@ -651,13 +651,15 @@ class FiniteVolume(Geometry):
         # O(M_theta)-Python-loop modal transforms into a single per-edge matrix
         # applied as one batched matmul. Build it once by reflecting the Nk basis
         # vectors: refl_mat[e, i, c] = reflector(e_c)[e, i].
-        # Dense (nw, Nk, Nk) reflection matrix collapses the reflector to one matmul
-        # -- worth it for modal materials (moderate Nk): the per-step reflector call
-        # is launch-bound (its modal transforms), so the dense matmul is the fast
-        # path whenever it fits.  For grid materials (large Nk) it is infeasible
-        # (nw*Nk^2 ~ PB), so fall back to the per-step reflector.  Budget
-        # configurable via QIMPY_REFL_BUDGET_GB (default 4 GB: delta-k at
-        # M_theta=1024 needs 3.2 GB and is ~10x faster dense than per-step).
+        # Dense (nw, Nk, Nk) reflection matrix collapses the reflector to one matmul.
+        # Measured tradeoff (mixer, A100X-20C): at small Nk the dense matrix is tiny
+        # and either path is fast; at large Nk the dense matmul is BANDWIDTH-bound
+        # (it re-reads nw*Nk^2 every step: 5.4 GB at M_theta=1024 -> 0.019 s/step)
+        # and the vectorized per-step reflector, which touches only the (nw, Nk)
+        # wall trace, is faster (0.015 s/step).  For grid materials dense is
+        # infeasible outright (nw*Nk^2 ~ PB).  Budget via QIMPY_REFL_BUDGET_GB
+        # (default 4 GB) -- large-M modal materials land on the per-step path,
+        # which is the right choice there since its harmonic loop was vectorized.
         self._refl_mat = None
         refl_budget = float(os.environ.get("QIMPY_REFL_BUDGET_GB", "4.0")) * 2 ** 30
         if self._reflector is not None:
