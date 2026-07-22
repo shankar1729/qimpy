@@ -402,8 +402,19 @@ def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> Non
             if not np.isfinite(vmax) or vmax == 0.0:
                 vmax = 1.0
             fig, ax = plt.subplots(figsize=(6, 6))
-            tpc = ax.tripcolor(triang, facecolors=n_dev / vmax, cmap=cmap,
-                               vmin=-1, vmax=1)         # flat shading = FV cell average
+            # linthresh (fraction of the color max, default 1 = linear): below it
+            # the scale is linear, above it logarithmic (SymLogNorm) -- makes
+            # weak-response regions (e.g. probe stubs ~100x below the driven
+            # arms) visible on the same panel without saturating the strong ones.
+            lt = float(density.get("linthresh", 1.0))
+            if lt < 1.0:
+                from matplotlib.colors import SymLogNorm
+                tpc = ax.tripcolor(triang, facecolors=n_dev / vmax, cmap=cmap,
+                                   norm=SymLogNorm(linthresh=lt, vmin=-1.0,
+                                                   vmax=1.0, base=10))
+            else:
+                tpc = ax.tripcolor(triang, facecolors=n_dev / vmax, cmap=cmap,
+                                   vmin=-1, vmax=1)     # flat shading = FV cell average
             ax.set_aspect("equal")
             ax.set_title(f"$t$ = {t * _PS_PER_AU_TIME:.4g} ps")
             ax.axis("off")
