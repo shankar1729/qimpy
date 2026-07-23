@@ -221,7 +221,8 @@ class EEScattering(TreeNode):
         # of angular width ~T/E_F, so it is the only physics-tied knob.
         s = max(1.0, 1.0 + float(np.log10(1e-3 / max(tol, 1e-12))))
         self.n_xi = n_xi if n_xi else int(np.ceil(max(16, 4 * Nr) * s))
-        self.n_xi_proj = n_xi_proj if n_xi_proj else max(Nr + 6, 8)
+        # >= 96 so ALL hybrid Gram entries are machine-converged (memo):
+        self.n_xi_proj = max(n_xi_proj, 96, Nr + 6)
         nphi_auto = max(6 * M + 2, int(np.ceil(8.0 * s / max(t_ratio, 1e-3))))
         self.n_phi = n_phi if n_phi else nphi_auto + (nphi_auto % 2)
         self.xi_cut = xi_cut if xi_cut else 10.0
@@ -363,9 +364,10 @@ class EEScattering(TreeNode):
         """Shared radial Galerkin machinery for the exact-kinematics path.
 
         Returns ``(psi_coeff, x_fine, P, Ginv, psi0_norm)`` where
-        ``psi_coeff[p, l]`` are the power-basis coefficients of the radial
-        basis ``psi_l(x) = sum_p psi_coeff[p, l] v^p`` in the tanh-mapped
-        variable ``v = tanh(x/2)`` (``x = xi/T``),
+        ``psi_coeff[p, l]`` are hybrid-FEATURE coefficients of the radial
+        basis ``psi_l(x) = sum_p psi_coeff[p, l] phi_p(x)`` with features
+        ``phi = [1, x, v^2, v, v^4, v^3, ...]``, ``v = tanh(x/2)``
+        (``x = xi/T``; the {1, x} block keeps mass/energy shapes exact),
         ``x_fine`` the fine Galerkin nodes, ``P[l, f]`` the projection
         covector ``<psi_l | . >_w`` in the fine measure, ``Ginv`` the inverse
         Gram (``~ identity``), and ``psi0_norm`` the constant value of the
@@ -376,9 +378,20 @@ class EEScattering(TreeNode):
         t_ratio = T / self.E_F
         xi_c = fs.radial.xi.to(torch.float64).cpu()  # collocation nodes
         Tfm = fs.radial.T_from_modes.to(torch.float64).cpu()  # psi_l(xi_c)
-        V = torch.vander(torch.tanh(0.5 * xi_c), Nr, increasing=True)  # (Nr, Nr)
+
+        def _feats(x):
+            # hybrid features [1, x, v^2, v, v^4, v^3, ...], v = tanh(x/2)
+            v = torch.tanh(0.5 * x)
+            cols = [torch.ones_like(x), x]
+            pe, po = 2, 1
+            while len(cols) < Nr:
+                cols.append(v ** pe); pe += 2
+                if len(cols) < Nr:
+                    cols.append(v ** po); po += 2
+            return torch.stack(cols[:Nr], dim=-1)
+
         psi_coeff = (
-            torch.linalg.solve(V, Tfm)
+            torch.linalg.solve(_feats(xi_c), Tfm)
             if Nr > 1
             else torch.ones(1, 1, dtype=torch.float64)
         )
@@ -395,19 +408,17 @@ class EEScattering(TreeNode):
                 f" reaches the band bottom (E_F/T = {1/t_ratio:g});"
                 " reduce xi_max or T"
             )
-        # Fine rule in u = tanh(x/2)/u_span: w_eq(x) dx = (u_span/2T) du is a
-        # CONSTANT measure, so the Gram of the tanh-polynomial basis is
-        # Gauss-exact (a bare-x rule badly under-resolves psi at Nr >= 4).
-        u_span = np.tanh(0.5 * x_span)
-        x_fine = torch.tensor(2.0 * np.arctanh(u_span * xg), dtype=torch.float64)
-        w_meas = torch.tensor((u_span / (2.0 * T)) * xw, dtype=torch.float64)
+        # Bare-x Gauss rule with n >= 96: x-block entries of the hybrid Gram
+        # are exact (polynomials in x), tanh-power entries converge at the
+        # sech^2 pole rate rho ~ 1.3-1.7 => <= 1e-13 at n = 96.  (A u-mapped
+        # rule is DISQUALIFIED for the hybrid: atanh's log endpoint stalls the
+        # x-entries at rho ~ 1.01-1.10.)
+        x_fine = torch.tensor(x_span * xg, dtype=torch.float64)
+        w_meas = torch.tensor(x_span * xw, dtype=torch.float64) * (
+            0.25 / torch.cosh(x_fine / 2) ** 2 / T)
 
         def psi_eval(x):
-            v = torch.tanh(0.5 * x)
-            res = torch.zeros(x.shape + (Nr,), dtype=torch.float64)
-            for p in range(psi_coeff.shape[0] - 1, -1, -1):
-                res = res * v[..., None] + psi_coeff[p]
-            return res
+            return _feats(x) @ psi_coeff
 
         Psi = psi_eval(x_fine)  # (n_fine, Nr)
         P = Psi.T * w_meas  # (Nr, n_fine): <psi_l| . >_w
@@ -977,15 +988,19 @@ class EEScattering(TreeNode):
         self._build_harmonic_tables()
 
     def _mf_psi_eval(self, x: torch.Tensor) -> torch.Tensor:
-        """Radial basis ``psi_l(x)``: Horner in ``v = tanh(x/2)``,
+        """Radial basis ``psi_l(x)`` via hybrid features
+        ``[1, x, v^2, v, v^4, v^3, ...]``, ``v = tanh(x/2)``;
         shape ``x.shape+(Nr,)``."""
         pc = self._mf_psi_coeff
+        n = pc.shape[0]
         v = torch.tanh(0.5 * x)
-        res = torch.zeros(x.shape + (pc.shape[1],), dtype=pc.dtype,
-                          device=x.device)
-        for p in range(pc.shape[0] - 1, -1, -1):
-            res = res * v[..., None] + pc[p]
-        return res
+        cols = [torch.ones_like(x), x]
+        pe, po = 2, 1
+        while len(cols) < n:
+            cols.append(v ** pe); pe += 2
+            if len(cols) < n:
+                cols.append(v ** po); po += 2
+        return torch.stack(cols[:n], dim=-1).to(pc.dtype) @ pc
 
     def _benchmark_recon(self) -> str:
         """Time both leg-reconstruction backends on a small representative slice

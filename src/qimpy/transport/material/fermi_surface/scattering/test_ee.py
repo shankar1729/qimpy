@@ -233,9 +233,13 @@ def test_cubic_vertex_energy_structured_vs_reference():
     rb = RadialBasis(Nr, T_temp=T0, xi_max=6.0)
     xi_c = rb.xi.to(torch.float64).cpu()
     Tfm = rb.T_from_modes.to(torch.float64).cpu()
-    psi_coeff = torch.linalg.solve(
-        torch.vander(torch.tanh(0.5 * xi_c), Nr, increasing=True), Tfm
-    )
+    _fc = [torch.ones_like(xi_c), xi_c]
+    _pe, _po = 2, 1
+    while len(_fc) < Nr:
+        _fc.append(torch.tanh(0.5 * xi_c) ** _pe); _pe += 2
+        if len(_fc) < Nr:
+            _fc.append(torch.tanh(0.5 * xi_c) ** _po); _po += 2
+    psi_coeff = torch.linalg.solve(torch.stack(_fc[:Nr], dim=-1), Tfm)
     nh = 2 * M + 1
     common = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
 
@@ -250,11 +254,13 @@ def test_cubic_vertex_energy_structured_vs_reference():
 
     def psi_eval(x):
         v = np.tanh(0.5 * x)
-        res = np.zeros(x.shape + (Nr,))
-        pc = psi_coeff.numpy()
-        for p in range(pc.shape[0] - 1, -1, -1):
-            res = res * v[..., None] + pc[p]
-        return res
+        cols = [np.ones_like(x), x]
+        pe, po = 2, 1
+        while len(cols) < Nr:
+            cols.append(v ** pe); pe += 2
+            if len(cols) < Nr:
+                cols.append(v ** po); po += 2
+        return np.stack(cols[:Nr], axis=-1) @ psi_coeff.numpy()
 
     def ec_real(phi):
         cols = [np.ones_like(phi)]
@@ -327,9 +333,13 @@ def test_quadratic_vertex_vs_reference():
     rb = RadialBasis(Nr, T_temp=T0, xi_max=6.0)
     xi_c = rb.xi.to(torch.float64).cpu()
     Tfm = rb.T_from_modes.to(torch.float64).cpu()
-    psi_coeff = torch.linalg.solve(
-        torch.vander(torch.tanh(0.5 * xi_c), Nr, increasing=True), Tfm
-    )
+    _fc = [torch.ones_like(xi_c), xi_c]
+    _pe, _po = 2, 1
+    while len(_fc) < Nr:
+        _fc.append(torch.tanh(0.5 * xi_c) ** _pe); _pe += 2
+        if len(_fc) < Nr:
+            _fc.append(torch.tanh(0.5 * xi_c) ** _po); _po += 2
+    psi_coeff = torch.linalg.solve(torch.stack(_fc[:Nr], dim=-1), Tfm)
     nh = 2 * M + 1
     common = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
 
@@ -342,11 +352,13 @@ def test_quadratic_vertex_vs_reference():
 
     def psi_eval(x):
         v = np.tanh(0.5 * x)
-        res = np.zeros(x.shape + (Nr,))
-        pc = psi_coeff.numpy()
-        for p in range(pc.shape[0] - 1, -1, -1):
-            res = res * v[..., None] + pc[p]
-        return res
+        cols = [np.ones_like(x), x]
+        pe, po = 2, 1
+        while len(cols) < Nr:
+            cols.append(v ** pe); pe += 2
+            if len(cols) < Nr:
+                cols.append(v ** po); po += 2
+        return np.stack(cols[:Nr], axis=-1) @ psi_coeff.numpy()
 
     def ec_real(phi):
         cols = [np.ones_like(phi)]
@@ -407,9 +419,10 @@ def test_quadratic_vertex_vs_reference():
     ).abs().max()
     ratio = (q_out / c_out).item()
     # Finite-T particle-hole residual ~ T/E_F.  The numeric value scales with
-    # 1/psi_0, i.e. with the basis band-mass normalization (tanh-mapped basis:
-    # exact band mass, x1.68 vs legacy at Nr=2 -> ratio x1.30).
-    assert ratio < 3e-3, f"Q2 surface/cubic = {ratio:.2e} (expected ~1e-3)"
+    # 1/psi_0, i.e. with the basis band-mass normalization (hybrid basis:
+    # exact band mass -> psi_0 smaller x1.68 vs legacy at Nr=2 -> ratio x1.68,
+    # 1.355e-3 -> 2.274e-3).
+    assert ratio < 4e-3, f"Q2 surface/cubic = {ratio:.2e} (expected ~1e-3)"
 
 
 def test_nonlinear_conservation():

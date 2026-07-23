@@ -142,20 +142,30 @@ class Cartesian(KRepresentation):
         Nr = self.fs.Nr
         if Nr == 1:
             return torch.ones((1, 1), dtype=dtype, device=rc.device)
-        v = np.tanh(0.5 * self.fs.radial.xi.cpu().numpy())
-        V = np.vander(v, Nr, increasing=True)
+        xi_c = self.fs.radial.xi.cpu().numpy()
+        v = np.tanh(0.5 * xi_c)
+        cols = [np.ones_like(xi_c), xi_c]
+        pe, po = 2, 1
+        while len(cols) < Nr:
+            cols.append(v ** pe); pe += 2
+            if len(cols) < Nr:
+                cols.append(v ** po); po += 2
+        F = np.stack(cols[:Nr], axis=-1)     # hybrid features [1, x, v^2, v, ...]
         Tfm = self.fs.radial.T_from_modes.cpu().numpy()
-        return torch.as_tensor(np.linalg.solve(V, Tfm), dtype=dtype, device=rc.device)
+        return torch.as_tensor(np.linalg.solve(F, Tfm), dtype=dtype, device=rc.device)
 
     def _psi(self, xi: torch.Tensor) -> torch.Tensor:
         Nr = self.fs.Nr
         if Nr == 1:
             return torch.ones((*xi.shape, 1), dtype=xi.dtype, device=xi.device)
         v = torch.tanh(0.5 * xi)
-        powers = [torch.ones_like(v), v]
-        for _ in range(2, Nr):
-            powers.append(powers[-1] * v)
-        return torch.stack(powers, dim=-1) @ self._psi_coeff
+        cols = [torch.ones_like(xi), xi]
+        pe, po = 2, 1
+        while len(cols) < Nr:
+            cols.append(v ** pe); pe += 2
+            if len(cols) < Nr:
+                cols.append(v ** po); po += 2
+        return torch.stack(cols[:Nr], dim=-1) @ self._psi_coeff
 
     def _fourier(self, th: torch.Tensor) -> torch.Tensor:
         M = self.fs.M_theta

@@ -78,9 +78,13 @@ class AngularBasis:
 # Radial basis: polynomials in xi orthonormal under  w(xi) = (1/4T) sech^2(xi/2)
 # ----------------------------------------------------------------------------
 class RadialBasis:
-    """Radial basis orthonormal under ``w(xi) = (1/4T) sech^2(xi/2)``:
-    polynomials in ``v = tanh(xi/2)`` (Legendre in the mapped variable), with
-    Gauss-Legendre collocation in ``u = v/tanh(xi_max/2)``.
+    """Hybrid radial basis orthonormal under ``w(xi) = (1/4T) sech^2(xi/2)``:
+    span {1, xi} (mass and energy shapes EXACT) completed by tanh-powers
+    ``v^p``, ``v = tanh(xi/2)``, in parity-interleaved order
+    ``[1, xi, v^2, v, v^4, v^3, ...]`` so ``psi_n(-xi) = (-1)^n psi_n(xi)``.
+    Orthonormalized against a fine bare-xi Gauss rule (continuum == discrete
+    orthonormality; ``T_to_modes = inv(T_from_modes)``), collocated at
+    Gauss-Legendre nodes in ``u = v/tanh(xi_max/2)``.
     ``Nr == 1`` collapses to the identity at ``xi = 0`` (pure Fermi circle)."""
 
     def __init__(self, Nr: int, T_temp: float = 1.0, xi_max: float = 6.0,
@@ -94,25 +98,40 @@ class RadialBasis:
             self.T_from_modes = torch.ones((1, 1), dtype=dtype, device=dev)
             self.T_to_modes   = torch.ones((1, 1), dtype=dtype, device=dev)
             return
-        # tanh-mapped construction: u = tanh(xi/2)/u_lim makes the equilibrium
-        # measure EXACTLY constant, w_eq(xi) dxi = (u_lim/2T) du, so Gauss-
-        # Legendre nodes in u give discrete == continuum orthonormality (Gauss
-        # exact to degree 2Nr-1) and the basis is (scaled) Legendre P_n(u):
-        # exponentially adapted to Fermi-shell (tanh) structure, unlike plain
-        # polynomials in xi.
+        # Collocation: Gauss-Legendre in u = tanh(xi/2)/u_lim (tanh-clustered
+        # nodes; measure w_eq dxi = (u_lim/2T) du is exactly constant in u).
         x_std, w_std = np.polynomial.legendre.leggauss(Nr)
         u_lim = np.tanh(0.5 * xi_max)
         xi  = 2.0 * np.arctanh(u_lim * x_std)
         w_q = (u_lim / (2.0 * T_temp)) * w_std
-        V  = np.vander(x_std, Nr, increasing=True)
-        Vw = V * np.sqrt(w_q)[:, None]
-        _Q, R = np.linalg.qr(Vw)
+
+        def feats(x):
+            # normalized hybrid features [1, x/xi_max, u^2, u, u^4, u^3, ...]
+            u = np.tanh(0.5 * x) / u_lim
+            cols = [np.ones_like(x), x / xi_max]
+            pe, po = 2, 1
+            while len(cols) < Nr:
+                cols.append(u ** pe); pe += 2
+                if len(cols) < Nr:
+                    cols.append(u ** po); po += 2
+            return np.stack(cols[:Nr], axis=-1)
+
+        # Orthonormalize against a FINE bare-xi Gauss rule (node-QR does not
+        # transfer to continuum orthonormality for the hybrid span).
+        xf, wf = np.polynomial.legendre.leggauss(128)
+        xf = xi_max * xf
+        wf = (xi_max * wf) * ((1.0 / (4.0 * T_temp)) / np.cosh(0.5 * xf) ** 2)
+        A = feats(xf) * np.sqrt(wf)[:, None]
+        _Q, R = np.linalg.qr(A)
         sgn = np.sign(np.diag(R)); sgn[sgn == 0] = 1.0
         R = sgn[:, None] * R
-        Tfm = V @ np.linalg.solve(R, np.eye(Nr))
-        Ttm = Tfm.T * w_q
-        err = float(np.max(np.abs(Ttm @ Tfm - np.eye(Nr))))
-        if err > 1e-10:
+        C = np.linalg.solve(R, np.eye(Nr))          # psi = feats(.) @ C
+        Tfm = feats(xi) @ C                         # psi at the nodes
+        Ttm = np.linalg.inv(Tfm)                    # exact round trip
+        G_cont = (A @ C).T @ (A @ C)                # continuum Gram (fine rule)
+        err = max(float(np.max(np.abs(Ttm @ Tfm - np.eye(Nr)))),
+                  float(np.max(np.abs(G_cont - np.eye(Nr)))))
+        if err > 1e-8:
             raise RuntimeError(f"RadialBasis orthonormality failed (err={err:.2e})")
         self.xi           = torch.as_tensor(xi,  dtype=dtype, device=dev)
         self.quad_w       = torch.as_tensor(w_q, dtype=dtype, device=dev)
