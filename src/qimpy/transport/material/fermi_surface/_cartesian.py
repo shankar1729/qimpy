@@ -142,8 +142,8 @@ class Cartesian(KRepresentation):
         Nr = self.fs.Nr
         if Nr == 1:
             return torch.ones((1, 1), dtype=dtype, device=rc.device)
-        u = (self.fs.radial.xi / self.xi_max).cpu().numpy()
-        V = np.vander(u, Nr, increasing=True)
+        v = np.tanh(0.5 * self.fs.radial.xi.cpu().numpy())
+        V = np.vander(v, Nr, increasing=True)
         Tfm = self.fs.radial.T_from_modes.cpu().numpy()
         return torch.as_tensor(np.linalg.solve(V, Tfm), dtype=dtype, device=rc.device)
 
@@ -151,10 +151,10 @@ class Cartesian(KRepresentation):
         Nr = self.fs.Nr
         if Nr == 1:
             return torch.ones((*xi.shape, 1), dtype=xi.dtype, device=xi.device)
-        u = xi / self.xi_max
-        powers = [torch.ones_like(u), u]
+        v = torch.tanh(0.5 * xi)
+        powers = [torch.ones_like(v), v]
         for _ in range(2, Nr):
-            powers.append(powers[-1] * u)
+            powers.append(powers[-1] * v)
         return torch.stack(powers, dim=-1) @ self._psi_coeff
 
     def _fourier(self, th: torch.Tensor) -> torch.Tensor:

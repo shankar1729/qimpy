@@ -78,7 +78,9 @@ class AngularBasis:
 # Radial basis: polynomials in xi orthonormal under  w(xi) = (1/4T) sech^2(xi/2)
 # ----------------------------------------------------------------------------
 class RadialBasis:
-    """Polynomial transforms orthonormal under ``w(xi) = (1/4T) sech^2(xi/2)``.
+    """Radial basis orthonormal under ``w(xi) = (1/4T) sech^2(xi/2)``:
+    polynomials in ``v = tanh(xi/2)`` (Legendre in the mapped variable), with
+    Gauss-Legendre collocation in ``u = v/tanh(xi_max/2)``.
     ``Nr == 1`` collapses to the identity at ``xi = 0`` (pure Fermi circle)."""
 
     def __init__(self, Nr: int, T_temp: float = 1.0, xi_max: float = 6.0,
@@ -92,12 +94,17 @@ class RadialBasis:
             self.T_from_modes = torch.ones((1, 1), dtype=dtype, device=dev)
             self.T_to_modes   = torch.ones((1, 1), dtype=dtype, device=dev)
             return
+        # tanh-mapped construction: u = tanh(xi/2)/u_lim makes the equilibrium
+        # measure EXACTLY constant, w_eq(xi) dxi = (u_lim/2T) du, so Gauss-
+        # Legendre nodes in u give discrete == continuum orthonormality (Gauss
+        # exact to degree 2Nr-1) and the basis is (scaled) Legendre P_n(u):
+        # exponentially adapted to Fermi-shell (tanh) structure, unlike plain
+        # polynomials in xi.
         x_std, w_std = np.polynomial.legendre.leggauss(Nr)
-        xi  = xi_max * x_std
-        w_x = xi_max * w_std
-        w_eq = (1.0 / (4.0 * T_temp)) / np.cosh(0.5 * xi) ** 2
-        w_q  = w_x * w_eq
-        V  = np.vander(xi / xi_max, Nr, increasing=True)
+        u_lim = np.tanh(0.5 * xi_max)
+        xi  = 2.0 * np.arctanh(u_lim * x_std)
+        w_q = (u_lim / (2.0 * T_temp)) * w_std
+        V  = np.vander(x_std, Nr, increasing=True)
         Vw = V * np.sqrt(w_q)[:, None]
         _Q, R = np.linalg.qr(Vw)
         sgn = np.sign(np.diag(R)); sgn[sgn == 0] = 1.0

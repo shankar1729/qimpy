@@ -441,8 +441,9 @@ def L_blocks(
     ``a_dot_ml = -L^(m)_{l l'} a_ml'`` with
     ``L^(m) = T_to_radial_modes @ R^(m)``.
 
-    ``psi_coeff[p, l]`` are power-basis coefficients: ``psi_l(x) =
-    sum_p psi_coeff[p, l] x^p`` in ``x = xi/T``.  Solver-field
+    ``psi_coeff[p, l]`` are power-basis coefficients in the tanh-mapped
+    variable: ``psi_l(x) = sum_p psi_coeff[p, l] v^p``, ``v = tanh(x/2)``,
+    ``x = xi/T``.  Solver-field
     convention: ``delta_f = w_eq Phi``, ``w_eq = sech^2(x/2)/(4 T)``.
 
     Returns tensor of shape ``(len(m_list), len(x_nodes), n_basis)``.
@@ -468,10 +469,11 @@ def L_blocks(
     def k_of(x):
         return kF * torch.sqrt(torch.clamp(1.0 + t * x, min=0.0))
 
-    def psi_eval(x):  # (...,) -> (..., n_basis) via Horner
+    def psi_eval(x):  # (...,) -> (..., n_basis): Horner in v = tanh(x/2)
+        v = torch.tanh(0.5 * x)
         res = torch.zeros(x.shape + (n_basis,), **dd)
         for p in range(psi_coeff.shape[0] - 1, -1, -1):
-            res = res * x[..., None] + psi_coeff[p]
+            res = res * v[..., None] + psi_coeff[p]
         return res
 
     pref = m_star**3 / (2 * np.pi) ** 3
@@ -757,9 +759,10 @@ def _cubic_complex(
         return 0.25 / torch.cosh(x / 2) ** 2 / T
 
     def psi_eval(x: torch.Tensor) -> torch.Tensor:
+        v = torch.tanh(0.5 * x)
         res = torch.zeros(x.shape + (Nr,), **dd)
         for p in range(psi_coeff.shape[0] - 1, -1, -1):
-            res = res * x[..., None] + psi_coeff[p]
+            res = res * v[..., None] + psi_coeff[p]
         return res
 
     def leg_factor(x: torch.Tensor) -> torch.Tensor:  # w_eq psi_l: (..., Nr)
@@ -924,9 +927,10 @@ def cubic_packed_node(
         return 0.25 / torch.cosh(x / 2) ** 2 / T
 
     def psi_eval(x: torch.Tensor) -> torch.Tensor:
+        v = torch.tanh(0.5 * x)
         res = torch.zeros(x.shape + (Nr,), **dd)
         for p in range(psi_coeff.shape[0] - 1, -1, -1):
-            res = res * x[..., None] + psi_coeff[p]
+            res = res * v[..., None] + psi_coeff[p]
         return res
 
     def leg_factor(x: torch.Tensor) -> torch.Tensor:
@@ -1069,7 +1073,7 @@ def cubic_vertex(
             sum_l psi_l(x_leg) [ sum_m a_{l,m} e_m(phi_leg) ]``
 
     with ``w_eq = sech^2(x/2)/(4T)`` and ``psi_coeff[p, l]`` the power-basis
-    coefficients ``psi_l(x) = sum_p psi_coeff[p, l] x^p`` (as in ``L_blocks``
+    coefficients ``psi_l(x) = sum_p psi_coeff[p, l] v^p, v = tanh(x/2)`` (as in ``L_blocks``
     and ``quadratic_vertex``); each leg therefore carries its own radial factor
     ``psi_l`` evaluated at that leg's energy (``x2``, ``x3`` or ``x4`` for the
     integration legs, ``x1`` for the output-energy leg, with
@@ -1189,9 +1193,10 @@ def _quadratic_complex(
         return torch.sigmoid(-x)
 
     def psi_eval(x: torch.Tensor) -> torch.Tensor:  # (...,) -> (..., Nr)
+        v = torch.tanh(0.5 * x)
         res = torch.zeros(x.shape + (Nr,), **dd)
         for p in range(psi_coeff.shape[0] - 1, -1, -1):
-            res = res * x[..., None] + psi_coeff[p]
+            res = res * v[..., None] + psi_coeff[p]
         return res
 
     def phase(dphi: torch.Tensor) -> torch.Tensor:
@@ -1315,7 +1320,7 @@ def quadratic_vertex(
     ``delta_f`` at each leg is ``w_eq(x_leg) sum_{l,c} a_{l,c} psi_l(x_leg)
     e_c(phi_leg)`` with the full modal field (radial ``l``, angular ``c``);
     ``psi_coeff[p, l]`` are the power-basis coefficients ``psi_l(x) = sum_p
-    psi_coeff[p, l] x^p`` (as in ``L_blocks``).
+    psi_coeff[p, l] v^p``, ``v = tanh(x/2)`` (as in ``L_blocks``).
 
     Returns the real rank-5 tensor ``V[i, co, (la, a), (lb, b)]`` reshaped as
     ``(len(x_nodes), 2M+1, Nr, 2M+1, Nr, 2M+1)`` -- minus the rate of change of

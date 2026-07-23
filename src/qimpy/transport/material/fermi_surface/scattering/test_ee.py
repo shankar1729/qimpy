@@ -234,7 +234,7 @@ def test_cubic_vertex_energy_structured_vs_reference():
     xi_c = rb.xi.to(torch.float64).cpu()
     Tfm = rb.T_from_modes.to(torch.float64).cpu()
     psi_coeff = torch.linalg.solve(
-        torch.vander(xi_c, Nr, increasing=True), Tfm
+        torch.vander(torch.tanh(0.5 * xi_c), Nr, increasing=True), Tfm
     )
     nh = 2 * M + 1
     common = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
@@ -249,10 +249,11 @@ def test_cubic_vertex_energy_structured_vs_reference():
     amod[0, 4] = -0.3   # l=0, sin(2 phi)
 
     def psi_eval(x):
+        v = np.tanh(0.5 * x)
         res = np.zeros(x.shape + (Nr,))
         pc = psi_coeff.numpy()
         for p in range(pc.shape[0] - 1, -1, -1):
-            res = res * x[..., None] + pc[p]
+            res = res * v[..., None] + pc[p]
         return res
 
     def ec_real(phi):
@@ -327,7 +328,7 @@ def test_quadratic_vertex_vs_reference():
     xi_c = rb.xi.to(torch.float64).cpu()
     Tfm = rb.T_from_modes.to(torch.float64).cpu()
     psi_coeff = torch.linalg.solve(
-        torch.vander(xi_c, Nr, increasing=True), Tfm
+        torch.vander(torch.tanh(0.5 * xi_c), Nr, increasing=True), Tfm
     )
     nh = 2 * M + 1
     common = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
@@ -340,10 +341,11 @@ def test_quadratic_vertex_vs_reference():
     amod[0, 2] = 0.4   # l=0, sin(1 phi)
 
     def psi_eval(x):
+        v = np.tanh(0.5 * x)
         res = np.zeros(x.shape + (Nr,))
         pc = psi_coeff.numpy()
         for p in range(pc.shape[0] - 1, -1, -1):
-            res = res * x[..., None] + pc[p]
+            res = res * v[..., None] + pc[p]
         return res
 
     def ec_real(phi):
@@ -404,7 +406,10 @@ def test_quadratic_vertex_vs_reference():
         "oxaybzd,xa,yb,zd->o", Vc[0], a_surf, a_surf, a_surf
     ).abs().max()
     ratio = (q_out / c_out).item()
-    assert ratio < 2e-3, f"Q2 surface/cubic = {ratio:.2e} (expected ~1e-3)"
+    # Finite-T particle-hole residual ~ T/E_F.  The numeric value scales with
+    # 1/psi_0, i.e. with the basis band-mass normalization (tanh-mapped basis:
+    # exact band mass, x1.68 vs legacy at Nr=2 -> ratio x1.30).
+    assert ratio < 3e-3, f"Q2 surface/cubic = {ratio:.2e} (expected ~1e-3)"
 
 
 def test_nonlinear_conservation():

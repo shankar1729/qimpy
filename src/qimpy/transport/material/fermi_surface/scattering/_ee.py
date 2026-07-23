@@ -364,7 +364,8 @@ class EEScattering(TreeNode):
 
         Returns ``(psi_coeff, x_fine, P, Ginv, psi0_norm)`` where
         ``psi_coeff[p, l]`` are the power-basis coefficients of the radial
-        basis ``psi_l(x) = sum_p psi_coeff[p, l] x^p`` (``x = xi/T``),
+        basis ``psi_l(x) = sum_p psi_coeff[p, l] v^p`` in the tanh-mapped
+        variable ``v = tanh(x/2)`` (``x = xi/T``),
         ``x_fine`` the fine Galerkin nodes, ``P[l, f]`` the projection
         covector ``<psi_l | . >_w`` in the fine measure, ``Ginv`` the inverse
         Gram (``~ identity``), and ``psi0_norm`` the constant value of the
@@ -375,7 +376,7 @@ class EEScattering(TreeNode):
         t_ratio = T / self.E_F
         xi_c = fs.radial.xi.to(torch.float64).cpu()  # collocation nodes
         Tfm = fs.radial.T_from_modes.to(torch.float64).cpu()  # psi_l(xi_c)
-        V = torch.vander(xi_c, Nr, increasing=True)  # (Nr, Nr)
+        V = torch.vander(torch.tanh(0.5 * xi_c), Nr, increasing=True)  # (Nr, Nr)
         psi_coeff = (
             torch.linalg.solve(V, Tfm)
             if Nr > 1
@@ -394,19 +395,28 @@ class EEScattering(TreeNode):
                 f" reaches the band bottom (E_F/T = {1/t_ratio:g});"
                 " reduce xi_max or T"
             )
-        x_fine = torch.tensor(x_span * xg, dtype=torch.float64)
-        w_fine = torch.tensor(x_span * xw, dtype=torch.float64)
-        w_eq = 0.25 / torch.cosh(x_fine / 2) ** 2 / T  # (1/4T) sech^2(x/2)
+        # Fine rule in u = tanh(x/2)/u_span: w_eq(x) dx = (u_span/2T) du is a
+        # CONSTANT measure, so the Gram of the tanh-polynomial basis is
+        # Gauss-exact (a bare-x rule badly under-resolves psi at Nr >= 4).
+        u_span = np.tanh(0.5 * x_span)
+        x_fine = torch.tensor(2.0 * np.arctanh(u_span * xg), dtype=torch.float64)
+        w_meas = torch.tensor((u_span / (2.0 * T)) * xw, dtype=torch.float64)
 
         def psi_eval(x):
+            v = torch.tanh(0.5 * x)
             res = torch.zeros(x.shape + (Nr,), dtype=torch.float64)
             for p in range(psi_coeff.shape[0] - 1, -1, -1):
-                res = res * x[..., None] + psi_coeff[p]
+                res = res * v[..., None] + psi_coeff[p]
             return res
 
         Psi = psi_eval(x_fine)  # (n_fine, Nr)
-        P = Psi.T * (w_fine * w_eq)  # (Nr, n_fine): <psi_l| . >_w
+        P = Psi.T * w_meas  # (Nr, n_fine): <psi_l| . >_w
         G = P @ Psi  # Gram in the fine measure (~ identity)
+        if Nr > 1 and float(torch.linalg.cond(G)) > 1e3:
+            raise RuntimeError(
+                f"radial Galerkin Gram ill-conditioned (cond={float(torch.linalg.cond(G)):.1e});"
+                " increase n_xi_proj"
+            )
         return psi_coeff, x_fine, P, torch.linalg.inv(G), psi0_norm
 
     def _null_covectors(self, T: float) -> "dict[int, list[torch.Tensor]]":
@@ -967,12 +977,14 @@ class EEScattering(TreeNode):
         self._build_harmonic_tables()
 
     def _mf_psi_eval(self, x: torch.Tensor) -> torch.Tensor:
-        """Radial basis ``psi_l(x)`` (power-basis Horner), shape ``x.shape+(Nr,)``."""
+        """Radial basis ``psi_l(x)``: Horner in ``v = tanh(x/2)``,
+        shape ``x.shape+(Nr,)``."""
         pc = self._mf_psi_coeff
+        v = torch.tanh(0.5 * x)
         res = torch.zeros(x.shape + (pc.shape[1],), dtype=pc.dtype,
                           device=x.device)
         for p in range(pc.shape[0] - 1, -1, -1):
-            res = res * x[..., None] + pc[p]
+            res = res * v[..., None] + pc[p]
         return res
 
     def _benchmark_recon(self) -> str:
