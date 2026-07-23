@@ -29,7 +29,7 @@ import torch
 
 from qimpy import rc, log, TreeNode
 from qimpy.rc import MPI
-from qimpy.io import CheckpointPath, CheckpointContext
+from qimpy.io import CheckpointPath, InvalidInputException, CheckpointContext
 from qimpy.mpi import ProcessGrid
 from ..material import Material
 from . import TensorList, Geometry
@@ -553,6 +553,10 @@ class FiniteVolume(Geometry):
             if int((slot < 0).sum()):
                 raise RuntimeError("deterministic flux slots incomplete")
             self._slot = slot.view(self.K, self._nf).to(rc.device)
+            # Persistent contribution buffer (fully overwritten every eval;
+            # per-call torch.empty of this GB-scale block fragments small GPUs):
+            self._contrib = torch.empty(2 * Ne + Nb, self.Nk, device=rc.device,
+                                        dtype=material.transport_velocity.dtype)
 
         # Restrict per-step work to cells/edges this rank owns (all of them serially).
         lo, hi = self._own_start, self._own_stop
@@ -654,6 +658,11 @@ class FiniteVolume(Geometry):
             cp, path = checkpoint_in                          # warm start (serial)
             self._u = torch.as_tensor(np.array(cp[f"{path}/rho"]),
                                       device=rc.device, dtype=v.dtype)
+            if tuple(self._u.shape) != (self.K, self.Nk):
+                raise InvalidInputException(
+                    f"checkpoint rho shape {tuple(self._u.shape)} != (K, Nk) ="
+                    f" ({self.K}, {self.Nk}): k-representation config (n_k /"
+                    f" circular / annulus_xi) must match the checkpoint")
         elif rho0 is not None:
             self._u = rho0.flatten().to(rc.device, v.dtype)[None, :].repeat(self.K, 1)
         else:
@@ -825,8 +834,13 @@ class FiniteVolume(Geometry):
         # Serial chunked path fills every row -> skip the (K, nf, Nk) zero-fill
         # (3.6 GB/eval at device-scale Cartesian); MPI leaves unused rows unread
         # but must keep them defined, so retain zeros there.
-        uf = (torch.empty(self.K, self._nf, self.Nk, device=u.device, dtype=u.dtype)
-              if rows is None else u.new_zeros(self.K, self._nf, self.Nk))
+        if rows is None:
+            if not hasattr(self, "_uf_buf"):
+                self._uf_buf = torch.empty(self.K, self._nf, self.Nk,
+                                           device=u.device, dtype=u.dtype)
+            uf = self._uf_buf
+        else:
+            uf = u.new_zeros(self.K, self._nf, self.Nk)
         for lo in range(0, n_rows, chunk):
             ci = idx[lo:lo + chunk]
             uf[ci] = self._limited_faces(u[ci], u[g.nbr[ci]], g.recon[ci])
@@ -901,8 +915,7 @@ class FiniteVolume(Geometry):
             # (full uup + cat copies OOM device-scale Cartesian on 20 GB).
             Ne = int(eLF.shape[0])
             Nb = int(g.bcell.numel())
-            contrib = torch.empty(2 * Ne + Nb, self.Nk,
-                                  device=u.device, dtype=u.dtype)
+            contrib = self._contrib
             ecs = max(1, int(self._face_budget_gb * (2 ** 30)
                              / max(6 * self.Nk * 8, 1)))
             for s0 in range(0, Ne, ecs):

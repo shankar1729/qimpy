@@ -15,7 +15,7 @@ from typing import Callable, Optional
 import numpy as np
 import torch
 
-from qimpy import rc
+from qimpy import log, rc
 from qimpy.mpi import ProcessGrid
 from qimpy.io import CheckpointPath, CheckpointContext, InvalidInputException
 from ._representation import KRepresentation, CELL_SCALAR_NAMES, FLUX_NAMES
@@ -45,6 +45,7 @@ class Cartesian(KRepresentation):
         k_max: Optional[float] = None, n_k: Optional[int] = None,
         dk: Optional[float] = None, dmu_max: float = 0.0, kD_max: float = 0.0,
         grid_safety_cells: int = 3, spin: float = 2.0, circular: bool = True,
+        annulus_xi: float = 0.0,
         local_te_rates: bool = True,
         newton_iters: int = 8, frame_polish: int = 2,
         cell_chunk: int = 4096, mem_budget_gb: float = 3.0,
@@ -88,9 +89,51 @@ class Cartesian(KRepresentation):
         # Keep a 1.5*dk guard ring so reflection stencils of active points find
         # their neighbors (occupancy there < e^-7: dropped stencil corners beyond
         # it are negligible).
+        self.annulus_xi = float(annulus_xi)
+        if annulus_xi > 0.0 and not circular:
+            raise InvalidInputException("annulus_xi requires circular=True")
+        self._n_frozen = self._E_frozen = 0.0
+        self._p_frozen = torch.zeros(2, device=rc.device, dtype=dtype)
+        self._eps_dos_full = None
+        self._annulus_on = False
         if circular:
             r_act = k_max + 1.5 * dk
             act = k.square().sum(-1) <= r_act * r_act
+            if annulus_xi > 0.0:
+                # Annulus active set: the deep Fermi sea is FROZEN at exactly
+                # f0_lab (deviations there are bounded by e^-annulus_xi of the
+                # shell scale: streaming preserves a k-uniform state and both
+                # contacts and collisions only touch the shell).  Its moments
+                # enter frame recovery and observables as precomputed
+                # constants; its (isotropic) flux sums vanish to roundoff.
+                # NOT bit-identical to the full grid -- roundoff-equivalent
+                # (interior dynamics are ~1e-15); opt-in knob, default off.
+                r_in = float(np.sqrt(max(
+                    2 * m_star * (self.mu - abs(dmu_max)
+                                  - annulus_xi * self.T_temp), 0.0)))
+                r_in = max(r_in - abs(kD_max) - 1.5 * dk, 0.0)
+                # Heated cells reach the frozen zone as e^{-annulus_xi*T/Te}:
+                # for Te_max/T ~ 2 the deviation clipped there is e^{-axi/2}
+                # (1.2e-3 at axi=12).  Size axi >= xi_max*(Te_max/T) + ~4.
+                if annulus_xi < 2.0 * self.xi_max + 4.0:
+                    log.warning(
+                        f"annulus_xi = {annulus_xi:g} < 2*xi_max+4 ="
+                        f" {2*self.xi_max+4:g}: heated cells (Te ~ 2T) leak"
+                        f" ~e^(-annulus_xi/2) into the frozen sea")
+                frozen = act & (k.square().sum(-1) < r_in * r_in)
+                act = act & ~frozen
+                wk0 = float(spin) * dk * dk / (2.0 * np.pi) ** 2
+                eps_full = k.square().sum(-1) / (2 * m_star)
+                f0_full = torch.special.expit(-(eps_full - self.mu) / self.T_temp)
+                self._n_frozen = float(wk0 * f0_full[frozen].sum())
+                self._p_frozen = wk0 * (f0_full[frozen, None]
+                                        * k[frozen]).sum(0).to(dtype)
+                self._E_frozen = float(wk0 * (f0_full[frozen]
+                                              * eps_full[frozen]).sum())
+                # frame-recovery Newton needs the FULL-band density of states
+                # (the FD model's moments must be comparable to the totals):
+                self._eps_dos_full = eps_full[act | frozen].to(dtype)
+                self._annulus_on = bool(int(frozen.sum()))
             self._full2act = torch.full((Nk,), -1, dtype=torch.long, device=rc.device)
             self._full2act[act] = torch.arange(int(act.sum().item()), device=rc.device)
             k = k[act]
@@ -107,14 +150,25 @@ class Cartesian(KRepresentation):
         self.eps_k = (k.square().sum(-1) / (2 * m_star)).to(dtype)
         self.v = (k / m_star).to(dtype)                      # (Nk, 2) transport velocity
 
-        # density of states for O(nb) frame recovery (Newton moments are 1D in eps)
-        nb = min(4096, Nk)
-        edges = torch.linspace(float(self.eps_k.min()), float(self.eps_k.max()),
+        # density of states for O(nb) frame recovery (Newton moments are 1D in
+        # eps).  Under the annulus the FD-model moments must span the FULL band
+        # (targets include the frozen constants), so bin the full-grid energies
+        # and use a finer histogram for the polish stage as well.
+        eps_dos = self.eps_k if self._eps_dos_full is None else self._eps_dos_full
+        nb = min(4096 if self._eps_dos_full is None else 16384,
+                 int(eps_dos.shape[0]))
+        edges = torch.linspace(float(eps_dos.min()), float(eps_dos.max()),
                                nb + 1, device=rc.device, dtype=dtype)
         self._dos_eps = 0.5 * (edges[1:] + edges[:-1])
-        idx = torch.bucketize(self.eps_k, edges[1:-1])
+        idx = torch.bucketize(eps_dos, edges[1:-1])
         self._dos_g = torch.zeros(nb, device=rc.device, dtype=dtype).scatter_add_(
-            0, idx, torch.ones_like(self.eps_k))
+            0, idx, torch.ones_like(eps_dos))
+        # Under the annulus keep the full-band energies for the EXACT polish
+        # stage (the 16k histogram alone leaves a ~2e-4 systematic in Te --
+        # amplified (mu/T)^2-fold from total-E binning noise; the full-eps
+        # polish restores machine recovery, validated to 9e-14 T):
+        self._eps_polish = eps_dos if self._annulus_on else None
+        self._eps_dos_full = None
 
         self._psi_coeff = self._radial_poly_coeffs(dtype)
         self._ang_norm = torch.tensor(
@@ -180,17 +234,18 @@ class Cartesian(KRepresentation):
     # ---- local drifted-heated frame recovery from moments ----
     def _recover_frame(self, f: torch.Tensor):
         w = self.wk
-        n = (f.sum(-1) * w).clamp_min(1e-30)
-        p = torch.einsum("ck,kd->cd", f, self.k) * w
-        E = torch.einsum("ck,k->c", f, self.eps_k) * w
+        n = (f.sum(-1) * w + self._n_frozen).clamp_min(1e-30)
+        p = torch.einsum("ck,kd->cd", f, self.k) * w + self._p_frozen
+        E = torch.einsum("ck,k->c", f, self.eps_k) * w + self._E_frozen
         kD = p / n[:, None]
         E_rest = E - (kD.square().sum(-1) / (2 * self.m_star)) * n
         Te = torch.full_like(n, self.T_temp); mu = torch.full_like(n, self.mu)
         Te, mu = self._newton_TeMu(Te, mu, n, E_rest,
                                    self._dos_eps[None, :], self._dos_g[None, :] * w,
                                    self.newton_iters)
+        eps_pol = self.eps_k if self._eps_polish is None else self._eps_polish
         Te, mu = self._newton_TeMu(Te, mu, n, E_rest,
-                                   self.eps_k[None, :], w, self.frame_polish)
+                                   eps_pol[None, :], w, self.frame_polish)
         return kD, Te, mu
 
     def _newton_TeMu(self, Te, mu, n, E_rest, eps, gw, iters):
@@ -288,8 +343,8 @@ class Cartesian(KRepresentation):
             hi = min(lo + chunk, C)
             f = self._f0_lab[None, :] + df_lab[lo:hi]
             kD, Te, mu = self._recover_frame(f)
-            n = f.sum(-1) * w
-            E = torch.einsum("ck,k->c", f, self.eps_k) * w
+            n = f.sum(-1) * w + self._n_frozen
+            E = torch.einsum("ck,k->c", f, self.eps_k) * w + self._E_frozen
             u = kD / self.m_star                           # drift velocity <v>
             out[lo:hi] = torch.stack([n, E, Te, mu, u[:, 0], u[:, 1]], dim=1)
         return out
