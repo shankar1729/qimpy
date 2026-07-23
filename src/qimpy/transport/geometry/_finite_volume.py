@@ -533,6 +533,27 @@ class FiniteVolume(Geometry):
             self._edge_len = np.concatenate([                 # (n_edge,)
                 g.elen.detach().cpu().numpy(), g.blen.detach().cpu().numpy()])
             self._stash_flux = []
+        # Deterministic flux assembly (serial): every face of every cell is
+        # exactly one (interior-edge, side) or boundary-edge contribution, so
+        # divergence = fixed-order sum over the cell's _nf face slots of a
+        # concatenated contribution array [wL*uup; wR*uup; wB*uup_b].  This
+        # replaces the atomic index_add_ scatter, whose accumulation order is
+        # nondeterministic on CUDA (repeated evals differed at ~1 ulp).
+        self._slot = None
+        if not self._mpi:
+            Ne = int(g.eL.shape[0])
+            Nb = int(g.bcell.shape[0])
+            slot = torch.full((self.K * self._nf,), -1, dtype=torch.long)
+            eL = g.eL.cpu(); eR = g.eR.cpu()
+            eLF = g.eLF.cpu(); eRF = g.eRF.cpu()
+            slot[eLF] = torch.arange(Ne)                  # side L -> row e
+            slot[eRF] = torch.arange(Ne) + Ne             # side R -> row Ne+e
+            if Nb:
+                slot[g.bF.cpu()] = torch.arange(Nb) + 2 * Ne
+            if int((slot < 0).sum()):
+                raise RuntimeError("deterministic flux slots incomplete")
+            self._slot = slot.view(self.K, self._nf).to(rc.device)
+
         # Restrict per-step work to cells/edges this rank owns (all of them serially).
         lo, hi = self._own_start, self._own_stop
         if self._mpi:
@@ -604,11 +625,23 @@ class FiniteVolume(Geometry):
             # cudagraph input copies offset the launch-overhead savings. Override
             # with QIMPY_COMPILE_MODE if a workload benefits from a different mode.
             mode = os.environ.get("QIMPY_COMPILE_MODE", "max-autotune")
+            # Whole-RHS compilation is fastest when the working set fits; at
+            # device-scale Cartesian (K*nf*Nk state ~ GB) Inductor's extra
+            # buffers OOM small cards, so compile only the limiter hotspot
+            # (85% of the step) there.  Threshold via QIMPY_COMPILE_WHOLE_GB.
+            whole_gb = float(os.environ.get("QIMPY_COMPILE_WHOLE_GB", "1.0"))
+            state_gb = self.K * self._nf * self.Nk * 8 / 2 ** 30
             try:
                 if self._mpi:
                     self._faces_fn = torch.compile(self._faces, mode=mode)
-                else:
+                elif state_gb <= whole_gb:
                     self._srhs_fn = torch.compile(self._spatial_rhs, mode=mode)
+                else:
+                    self._limited_faces = torch.compile(self._limited_faces,
+                                                        mode=mode)
+                    log.info(
+                        f"compile: limiter-only (face state {state_gb:.1f} GB >"
+                        f" {whole_gb:.1f} GB whole-RHS threshold)")
             except Exception:               # older torch / no backend -> eager
                 self._faces_fn, self._srhs_fn = self._faces, self._spatial_rhs
 
@@ -789,7 +822,11 @@ class FiniteVolume(Geometry):
         if rows is None and chunk >= self.K:
             return self._limited_faces(u, u[g.nbr], g.recon)          # single-shot
         idx = torch.arange(self.K, device=u.device) if rows is None else rows
-        uf = u.new_zeros(self.K, self._nf, self.Nk)
+        # Serial chunked path fills every row -> skip the (K, nf, Nk) zero-fill
+        # (3.6 GB/eval at device-scale Cartesian); MPI leaves unused rows unread
+        # but must keep them defined, so retain zeros there.
+        uf = (torch.empty(self.K, self._nf, self.Nk, device=u.device, dtype=u.dtype)
+              if rows is None else u.new_zeros(self.K, self._nf, self.Nk))
         for lo in range(0, n_rows, chunk):
             ci = idx[lo:lo + chunk]
             uf[ci] = self._limited_faces(u[ci], u[g.nbr[ci]], g.recon[ci])
@@ -847,7 +884,7 @@ class FiniteVolume(Geometry):
         g = self.geom
         u = self._dealias(u)                                  # de-alias (fused into graph)
         uf = self._faces_fn(u).reshape(-1, self.Nk)           # (K*3, Nk)
-        dudt = torch.zeros_like(u)
+        dudt = None if self._slot is not None else torch.zeros_like(u)
         e = self._eloc                                        # owned-incident edges
         eL = g.eL if e is None else g.eL[e]
         eR = g.eR if e is None else g.eR[e]
@@ -856,6 +893,35 @@ class FiniteVolume(Geometry):
         maskL = self._maskL if e is None else self._maskL[e]
         wL = self._wL if e is None else self._wL[e]
         wR = self._wR if e is None else self._wR[e]
+        if self._slot is not None:
+            # Deterministic fixed-order assembly: gather each cell's _nf face
+            # contributions and sum in face order (no atomics).  Contributions
+            # are written in place, chunked over edges: elementwise ops are
+            # chunk-invariant (bit-exact) and the peak transient stays small
+            # (full uup + cat copies OOM device-scale Cartesian on 20 GB).
+            Ne = int(eLF.shape[0])
+            Nb = int(g.bcell.numel())
+            contrib = torch.empty(2 * Ne + Nb, self.Nk,
+                                  device=u.device, dtype=u.dtype)
+            ecs = max(1, int(self._face_budget_gb * (2 ** 30)
+                             / max(6 * self.Nk * 8, 1)))
+            for s0 in range(0, Ne, ecs):
+                sl = slice(s0, min(s0 + ecs, Ne))
+                uupc = torch.where(maskL[sl], uf[eLF[sl]], uf[eRF[sl]])
+                torch.mul(wL[sl], uupc, out=contrib[s0:s0 + uupc.shape[0]])
+                torch.mul(wR[sl], uupc,
+                          out=contrib[Ne + s0:Ne + s0 + uupc.shape[0]])
+                del uupc
+            if Nb:
+                uMb = uf[g.bF]
+                uup_b = torch.where(self._maskB, uMb, self._exterior(uMb, t))
+                torch.mul(self._wB, uup_b, out=contrib[2 * Ne:])
+                del uup_b
+            del uf
+            acc = contrib[self._slot[:, 0]]
+            for f in range(1, self._nf):
+                acc = acc + contrib[self._slot[:, f]]
+            return acc
         uup = torch.where(maskL, uf[eLF], uf[eRF])            # interior upwind trace
         dudt.index_add_(0, eL, wL * uup)
         dudt.index_add_(0, eR, wR * uup)
