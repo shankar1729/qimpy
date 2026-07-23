@@ -1003,6 +1003,10 @@ class FiniteVolume(Geometry):
         return {c.name: c.level for c in self._contacts if c.kind != "fixed"}
 
     def update_stash(self, i_step: int, t: float) -> None:
+        ce = getattr(getattr(self.material, "representation", None),
+                     "check_envelope", None)
+        if ce is not None:
+            ce(self._u[self._own_start:self._own_stop])
         # Stash cell-centred scalar fields for this rank's owned cells.
         u_own = self._u[self._own_start:self._own_stop]
         obs = self.material.get_cell_scalars(u_own, t)

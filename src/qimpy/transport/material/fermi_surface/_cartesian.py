@@ -26,17 +26,22 @@ class Cartesian(KRepresentation):
 
     @staticmethod
     def recommended_grid(kF, vF, T, *, xi_max=6.0, dmu_max=0.0, kD_max=0.0,
+                         te_fac_max=1.0, annulus_xi=0.0,
                          dk=None, safety_cells=3, m_star=None):
         """Minimal (k_max, n_k) whose box holds the occupied shell for the given BC.
 
-        f is negligible (< e^{-xi_max}) beyond |k| = sqrt(2 m*(E_F+dmu_max+xi_max*T));
-        a drift shifts the shell centre by |k_D|.  Streaming + specular walls
-        preserve |k|, so for ballistic this is exact; the drift enters only through
-        kD_max.  dk defaults to the thermal width T/vF."""
+        The OUTER margin is sized to xi_out = max(xi_max*te_fac_max, annulus_xi):
+        heated cells (T_e up to te_fac_max*T) occupy out to xi_loc ~ xi_max,
+        i.e. xi ~ xi_max*te_fac_max in material units, and when an annulus
+        freezes the interior at depth annulus_xi the outer truncation should
+        meet the same e^{-annulus_xi} standard (symmetric margins).  A drift
+        shifts the shell centre by |k_D|; dmu shifts mu.  Streaming + specular
+        walls preserve |k|.  dk defaults to the thermal width T/vF."""
         m = float(m_star) if m_star is not None else kF / vF
         EF = 0.5 * kF * kF / m
         dk = float(dk) if dk else T / vF
-        k_shell = (2 * m * (EF + abs(dmu_max) + xi_max * T)) ** 0.5
+        xi_out = max(xi_max * max(te_fac_max, 1.0), annulus_xi)
+        k_shell = (2 * m * (EF + abs(dmu_max) + xi_out * T)) ** 0.5
         k_max = abs(kD_max) + k_shell + safety_cells * dk
         return float(k_max), int(np.ceil(2 * k_max / dk))
 
@@ -45,7 +50,7 @@ class Cartesian(KRepresentation):
         k_max: Optional[float] = None, n_k: Optional[int] = None,
         dk: Optional[float] = None, dmu_max: float = 0.0, kD_max: float = 0.0,
         grid_safety_cells: int = 3, spin: float = 2.0, circular: bool = True,
-        annulus_xi: float = 0.0,
+        annulus_xi: float = 0.0, te_fac_max: float = 1.0,
         local_te_rates: bool = True,
         newton_iters: int = 8, frame_polish: int = 2,
         cell_chunk: int = 4096, mem_budget_gb: float = 3.0,
@@ -71,7 +76,8 @@ class Cartesian(KRepresentation):
         if k_max is None or n_k is None:                     # auto-size from BC
             k_max, n_k = self.recommended_grid(
                 fs.kF, fs.vF, fs.T_temp, xi_max=fs.xi_max, dmu_max=dmu_max,
-                kD_max=kD_max, dk=dk, safety_cells=grid_safety_cells, m_star=m_star)
+                kD_max=kD_max, te_fac_max=te_fac_max, annulus_xi=annulus_xi,
+                dk=dk, safety_cells=grid_safety_cells, m_star=m_star)
         dk = 2.0 * k_max / n_k
         kg = torch.arange(n_k, device=rc.device) * dk - k_max + 0.5 * dk
         KX, KY = torch.meshgrid(kg, kg, indexing="ij")
@@ -142,6 +148,19 @@ class Cartesian(KRepresentation):
             self._full2act = None
         self.dk_area = dk * dk
         self.Nk = Nk
+        # Envelope-guard rings: innermost/outermost active bands (2.5 dk wide).
+        # A healthy run never carries significant deviation there; reaching the
+        # edge means the declared envelope (annulus_xi / kD_max / box) is
+        # exceeded and the state is being silently clipped.
+        kr2 = k.square().sum(-1)
+        r_hi = float(kr2.max().sqrt())
+        self._ring_out = torch.where(kr2 > (r_hi - 2.5 * dk) ** 2)[0]
+        if circular and annulus_xi > 0.0 and self._annulus_on:
+            r_lo = float(kr2.min().sqrt())
+            self._ring_in = torch.where(kr2 < (r_lo + 2.5 * dk) ** 2)[0]
+        else:
+            self._ring_in = None
+        self._env_warn_count = 0
         # Physical BZ phase-space weight: n = spin * int d^2k/(2pi)^2 f  ->  per-k
         # weight spin*dk^2/(2pi)^2.  (Gives n = kF^2/2pi at equilibrium, and makes
         # contact currents physical so I_set is in a.u. current, 20uA=3.02e-3.)
@@ -320,6 +339,28 @@ class Cartesian(KRepresentation):
         eye = 1e-30 * torch.eye(4, device=ddf.device, dtype=ddf.dtype)
         lam = torch.linalg.solve(M + eye, U.unsqueeze(-1))[..., 0]
         return ddf - torch.einsum("ca,cak->ck", lam, g)
+
+    @torch.no_grad()
+    def check_envelope(self, rho: torch.Tensor) -> None:
+        """Warn (throttled) when the state carries significant deviation at the
+        k-grid edges -- the declared envelope is being exceeded and clipped."""
+        df = rho.reshape(-1, self.Nk)
+        m = float(df.abs().max())
+        if m <= 0.0:
+            return
+        for ring, nm, fix in ((self._ring_in, "inner (annulus)",
+                               "increase annulus_xi and/or kD_max"),
+                              (self._ring_out, "outer (box)",
+                               "increase te_fac_max/dmu_max/kD_max box margins")):
+            if ring is None:
+                continue
+            r = float(df[:, ring].abs().max()) / m
+            if r > 1e-2:
+                if self._env_warn_count % 100 == 0:
+                    log.warning(
+                        f"k-grid {nm} edge carries {r:.1%} of the peak"
+                        f" deviation -- state is being clipped; {fix}")
+                self._env_warn_count += 1
 
     def get_density_weight(self) -> torch.Tensor:
         return torch.full_like(self.eps_k, self.wk)       # (Nk,) BZ weight -> physical current
