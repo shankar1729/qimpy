@@ -176,9 +176,18 @@ def _mass_rate(geom):
     return float((geom.geom.area[:, None] * geom._ncoef[None, :] * dudt).sum())
 
 
+def _obs_weights(material, t=0.0):
+    """(3, Nk) weights [n, jx, jy]: the staggered-output refactor reduced
+    get_observables to the density row; rebuild the current weights from it and
+    the transport velocity (j = int f v)."""
+    nw = material.get_observables(t)[0]                       # (Nk,)
+    v = material.transport_velocity                           # (Nk, 2)
+    return torch.stack([nw, nw * v[:, 0], nw * v[:, 1]])
+
+
 def _integral(geom, material, obs_idx, t=0.0):
     """Domain integral of observable `obs_idx` (0=n, 1=jx, 2=jy): sum_k area_k o_k."""
-    obs = torch.einsum("oc,kc->ko", material.get_observables(t), geom._u)  # (K,3)
+    obs = torch.einsum("oc,kc->ko", _obs_weights(material, t), geom._u)  # (K,3)
     return float((geom.geom.area * obs[:, obs_idx]).sum())
 
 
@@ -458,7 +467,7 @@ def test_1d_line_mesh_ballistic_is_antisymmetric() -> None:
     assert geom._nf == 2                                   # interval cells -> 2 faces
     _step(geom, _steps_for(geom, 20.0))
     x = geom.geom.centroid_np[:, 0]
-    obs = torch.einsum("oc,kc->ko", mat.get_observables(0.0), geom._u)
+    obs = torch.einsum("oc,kc->ko", _obs_weights(mat), geom._u)
     n = obs[:, 0].cpu().numpy()
     jx = obs[:, 1].cpu().numpy()
     assert np.isfinite(n).all(), "1D solution diverged"
