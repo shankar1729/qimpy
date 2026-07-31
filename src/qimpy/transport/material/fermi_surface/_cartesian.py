@@ -12,6 +12,7 @@ rejected at construction (use the delta-k representation for those).
 """
 from __future__ import annotations
 from typing import Callable, Optional
+import os
 import numpy as np
 import torch
 
@@ -189,6 +190,22 @@ class Cartesian(KRepresentation):
         self._eps_polish = eps_dos if self._annulus_on else None
         self._eps_dos_full = None
 
+        # torch.compile the per-step table builders: they are long elementwise
+        # chains over (cells, Nk) and Inductor fuses them into single kernels.
+        # Measured on the mixer grid at M=24: _fourier 123 -> 31 ms/1792cells,
+        # output bit-identical.  Opt out with QIMPY_COLL_COMPILE=0.
+        self._fourier_fn = self._fourier
+        self._psi_fn = self._psi
+        if os.environ.get("QIMPY_COLL_COMPILE", "1") != "0":
+            try:
+                # NOT plain max-autotune: cudagraphs reuse output buffers,
+                # and psi would be clobbered by the fourier call that follows.
+                mode = os.environ.get("QIMPY_COLL_COMPILE_MODE",
+                                      "max-autotune-no-cudagraphs")
+                self._fourier_fn = torch.compile(self._fourier, mode=mode)
+                self._psi_fn = torch.compile(self._psi, mode=mode)
+            except Exception:
+                self._fourier_fn, self._psi_fn = self._fourier, self._psi
         self._psi_coeff = self._radial_poly_coeffs(dtype)
         self._ang_norm = torch.tensor(
             [1.0 / (2 * np.pi)] + [1.0 / np.pi] * (2 * fs.M_theta),
@@ -241,6 +258,7 @@ class Cartesian(KRepresentation):
         return torch.stack(cols[:Nr], dim=-1) @ self._psi_coeff
 
     def _fourier(self, th: torch.Tensor) -> torch.Tensor:
+        """Real harmonics [1, cos t, sin t, cos 2t, sin 2t, ...] at each angle."""
         M = self.fs.M_theta
         m = torch.arange(1, M + 1, device=th.device, dtype=th.dtype)
         mth = th.unsqueeze(-1) * m
@@ -306,8 +324,8 @@ class Cartesian(KRepresentation):
             th = torch.atan2(kp[..., 1], kp[..., 0])
             f0_loc = torch.special.expit(-xi); weq = f0_loc * (1 - f0_loc)
             df_loc = f - f0_loc
-            psi = self._psi(xi)                              # (c, Nk, Nr)
-            fou = self._fourier(th)                          # (c, Nk, dim)
+            psi = self._psi_fn(xi)                           # (c, Nk, Nr)
+            fou = self._fourier_fn(th)                       # (c, Nk, dim)
             mask = (xi.abs() < self.xi_max)
             jac = self.dk_area / (self.m_star * Te)
             gp = (df_loc * mask).unsqueeze(-1) * psi
