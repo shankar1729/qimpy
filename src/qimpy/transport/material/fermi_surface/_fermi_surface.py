@@ -22,7 +22,7 @@ from typing import Callable, Optional, Union
 import numpy as np
 import torch
 
-from qimpy import rc, TreeNode
+from qimpy import log, rc, TreeNode
 from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext, InvalidInputException
@@ -161,6 +161,7 @@ class FermiSurface(Material):
         delta_k: Optional[Union[dict, DeltaK]] = None,
         cartesian: Optional[Union[dict, Cartesian]] = None,
         ee_scattering: Optional[Union[EEScattering, dict]] = None,
+        residual_damping: bool = False,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
@@ -252,6 +253,125 @@ class FermiSurface(Material):
                 EEScattering(fermi_surface=self, T_build=self.T_temp * f,
                              **ee_scattering)
                 for f in fac]
+
+        # ---- residual (unresolved-mode) closure rate ------------------------
+        self._gamma_res_ee = self._gamma_res_phen = 0.0
+        if residual_damping:
+            self._set_residual_rate()
+
+    def _set_residual_rate(self) -> None:
+        """Closure rate for the modes the projection does not retain.
+
+        The Cartesian k-grid carries angular content up to its own Nyquist
+        ``M_Nyq ~ pi kF/dk`` (~199 at production resolution), but the collision
+        is evaluated in a basis truncated at ``M_theta``.  The increment the
+        operator returns lies entirely in that retained span, so it can neither
+        damp nor remove the rest: without a closure the unresolved harmonics
+        relax at rate ZERO instead of ``gamma_m``, and since their true
+        collisional lifetime (~0.13 transits) is far shorter than the ballistic
+        escape (~1 transit) the device looks spuriously ballistic in exactly
+        its sharpest angular structure.
+
+        The rate used is the one at the TOP RETAINED HARMONIC -- a zeroth-order
+        hold on the rate spectrum, exact through ``M_theta`` then flat.  Chosen
+        over any amplitude-weighted average of the discarded band because:
+
+        * ``gamma_m`` is monotone increasing over the EVEN harmonics (verified
+          in closed form out to m=420, well past any grid Nyquist), so this is
+          a strict LOWER bound on every discarded even rate and cannot
+          over-damp the even angular band.  ODD harmonics are excluded from the
+          closure entirely -- they are gated to zero at leading order and are
+          the long-lived tomographic modes -- see the parity split in
+          :meth:`Cartesian.apply_collision`;
+        * it is refinement-consistent: raising ``M_theta`` both raises the rate
+          toward truth and shrinks the residual band, so M is a clean monotone
+          convergence knob with no free constant left over;
+        * it introduces no tunable parameter.
+
+        The even spectrum is logarithmic (gamma_198/gamma_48 = 1.36), which is
+        what makes a zeroth-order hold adequate; it would be a poor closure for
+        a rate growing like m^2.
+
+        CAVEAT (angular only).  The residual also contains RADIAL content
+        beyond ``Nr`` at retained even harmonics, which this same rate damps.
+        Its true rate at m = 2 is ~gamma_2, so that slice is over-damped by
+        roughly gamma_{m_top}/gamma_2 (~4x at M = 48).  The slice is small --
+        the hybrid basis reaches 1.7e-3 completeness by Nr = 8 -- but the
+        "cannot over-damp" statement above is about the angular band only.
+
+        Split into the microscopic e-e part (rescaled per cell by T_e, like
+        every other e-e rate) and the phenomenological part (constant, matching
+        how tau_p/tau_ee are handled in :meth:`_modal_collision`).
+        """
+        M = self.M_theta
+        # The rate must be read at an EVEN harmonic.  Odd harmonics are gated to
+        # zero at leading order (K_m = 0 for odd m, _kernels.K_table) and are
+        # only weakly relaxed by the exact operator, so an odd M_theta would
+        # read gamma ~ 0 and silently disable the closure.
+        m_top = M - (M % 2)
+        if m_top < 2:
+            raise InvalidInputException(
+                "residual_damping requires M_theta >= 2 (the closure rate is "
+                "read at the top EVEN harmonic; odd harmonics do not relax at "
+                "leading order)")
+        if self.Nr < 2:
+            raise InvalidInputException(
+                "residual_damping requires Nr >= 2: at Nr = 1 the radial span "
+                "is {1}, so the ENERGY shape xi itself falls in the residual "
+                "and would be damped at the m = M rate, then re-injected by "
+                "the conservation projector -- a systematic distortion, not a "
+                "small one.  (on_shell=True forces Nr = 1.)")
+        if not isinstance(self.representation, Cartesian):
+            raise InvalidInputException(
+                "residual_damping is implemented only for the Cartesian "
+                "representation; the delta-k representation stores the state "
+                "modally, where truncation genuinely removes the modes.")
+        c_top = 2 * m_top - 1                                # cos block of m_top
+        # Phenomenological: diagonal, take the slowest radial channel at m_top.
+        rates = self.rates_modal.reshape(self.Nr, self.angular.dim)
+        self._gamma_res_phen = float(rates[:, c_top].min())
+        # Microscopic: L_coeff is block-diagonal in the harmonic and a dense
+        # (Nr, Nr) matrix over radial modes, in decay form (a_dot = -L @ a).
+        # The slowest-decaying radial channel is the smallest eigenvalue of its
+        # symmetric part -- the correct dissipativity bound, and it keeps the
+        # "never over-damps" guarantee without assuming L is exactly symmetric.
+        if hasattr(self, "ee_scattering"):
+            L = self.ee_scattering.L_coeff[c_top].to(torch.float64).cpu()
+            ev = torch.linalg.eigvalsh(0.5 * (L + L.transpose(-1, -2)))
+            self._gamma_res_ee = max(float(ev.min()), 0.0)
+            g_surf = float(L[0, 0])                          # surface-mode rate
+            if g_surf > 0.0 and self._gamma_res_ee < 0.1 * g_surf:
+                log.warning(
+                    f"Residual closure rate {self._gamma_res_ee:.3g} is far "
+                    f"below the surface-mode rate {g_surf:.3g} at m={m_top}: a "
+                    "radial channel is nearly null there, so the closure will "
+                    "be very weak.  Check M_theta / Nr.")
+        log.info(
+            f"Residual closure at m > {M}: gamma_res = "
+            f"{self._gamma_res_ee + self._gamma_res_phen:.4g} "
+            f"(e-e {self._gamma_res_ee:.4g} + phenomenological "
+            f"{self._gamma_res_phen:.4g}), read at m={m_top}")
+
+    def gamma_residual(self, te: Optional[torch.Tensor] = None):
+        """Per-cell residual closure rate, or None when the closure is off.
+
+        The e-e part carries the same leading ``(T_e/T)^2`` scaling as the
+        modal rates it extrapolates; the phenomenological part is a user-set
+        constant and is not rescaled.
+
+        With a ``local_te`` ensemble the exact rate is below this leading form
+        (the NLO correction is linear in T_e/E_F with negative coefficients,
+        ~-7% at T_e ~ 2T), so in hot cells the rescale can overshoot the m=M
+        rate by a few percent.  That does not break the closure's lower-bound
+        property against the band it stands in for: 1.07 x gamma_M = 4.25 is
+        still well under gamma at the grid Nyquist (5.40, in units of gamma_2).
+        """
+        if self._gamma_res_ee == 0.0 and self._gamma_res_phen == 0.0:
+            return None
+        if te is None:
+            return self._gamma_res_ee + self._gamma_res_phen
+        s2 = (te / self.T_temp) ** 2
+        return self._gamma_res_ee * s2 + self._gamma_res_phen
 
     def __getattr__(self, name):
         # Expose the modal transforms ONLY when the representation has them, so
@@ -384,4 +504,5 @@ class FermiSurface(Material):
         a["tau_p"] = (1.0 / self.tau_inv_p) if self.tau_inv_p else np.inf
         a["tau_ee"] = (1.0 / self.tau_inv_ee) if self.tau_inv_ee else np.inf
         a["r_c"], a["specularity"] = self.r_c, self.specularity
+        a["residual_damping"] = bool(self._gamma_res_ee or self._gamma_res_phen)
         return list(a.keys())

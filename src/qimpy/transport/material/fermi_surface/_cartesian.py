@@ -227,6 +227,16 @@ class Cartesian(KRepresentation):
             * float(xi_f[1] - xi_f[0])
         self._Ginv_band = torch.linalg.inv(G_band)
 
+        # Even-m selector over the flattened (radial, angular) modal ordering.
+        # Angular layout: index 0 is m = 0, then (cos, sin) pairs at 2m-1, 2m,
+        # so the harmonic of angular index c is m = (c + 1) // 2.  Used by the
+        # residual closure, which may only touch even harmonics.
+        dim_t = self.fs.angular.dim
+        m_of_c = (np.arange(dim_t) + 1) // 2
+        self._even_m_flat = torch.as_tensor(
+            np.tile((m_of_c % 2 == 0).astype(float), self.fs.Nr),
+            dtype=dtype, device=rc.device)
+
     # ---- radial polynomial evaluation at arbitrary xi (reuse the model's psi_n) ----
     def _radial_poly_coeffs(self, dtype) -> torch.Tensor:
         Nr = self.fs.Nr
@@ -310,7 +320,10 @@ class Cartesian(KRepresentation):
         out = torch.empty_like(df_lab)
         dim = self.fs.angular.dim; Nr = self.fs.Nr; Nk = df_lab.shape[-1]
         k = self.k; f0_lab = self._f0_lab
-        bytes_per_row = Nk * (2 * dim + 3 * Nr + 12) * 8
+        # +10 rows when the residual closure is on: the parity reflection builds
+        # (c,Nk,2) grid coordinates plus per-corner index/weight temporaries.
+        closure_rows = 14 if self.fs.gamma_residual() is not None else 0
+        bytes_per_row = Nk * (2 * dim + 3 * Nr + 12 + closure_rows) * 8
         chunk = max(1, min(self.cell_chunk,
                            int(self.mem_budget_gb * (2 ** 30) / bytes_per_row)))
         for lo in range(0, C, chunk):
@@ -340,12 +353,110 @@ class Cartesian(KRepresentation):
             # else by the leading-order uniform (T_e/T)^2 rescale.
             te = Te if self.local_te_rates else None
             a_dot = modal_op(a, te=te)                       # <-- model's modal collision
+            # Residual closure: the modes above M_theta / N_r are NOT filtered
+            # -- the increment is built from the retained basis, so it has zero
+            # component there and simply leaves them undamped.  Relax the EVEN
+            # part of that residual at the top retained even rate:
+            #     ddf -= g * (even.df - Pi_even df).
+            # Since the reconstruction R is linear,
+            #     R(a_dot) - g*(even.df - R(a_even))
+            #       = R(a_dot + g*a_even) - g*even.df,
+            # so the mode-space half costs one axpy on the (tiny) coefficients
+            # and needs NO second reconstruction.  Neither side is masked: R is
+            # evaluated at every k, so masking only the df side would leave a
+            # bare +g*Pi.df outside the band -- a one-signed secular source
+            # rather than a damping.
+            # _project_conserved runs on the total, so conservation is exact by
+            # construction regardless of this term's size or sign.
+            # NOTE: dissipativity requires ||Pi|| <= 1, i.e. Pi idempotent in the
+            # w_eq inner product.  _Ginv_band is a 1-D fine rule, NOT the actual
+            # discrete masked Gram of this k-grid, so Pi is only approximately a
+            # projector (the repo's own P.R contract tests hold it to 2e-2 at 3x
+            # finer dk than production).  MEASURE lambda_max(Pi) on the
+            # production grid before treating this term as strictly dissipative.
+            g_res = self.fs.gamma_residual(Te if self.local_te_rates else None)
+            if g_res is not None:
+                g_col = (g_res.unsqueeze(-1) if torch.is_tensor(g_res)
+                         else g_res)
+                # PARITY: only the EVEN-m residual may be damped.  Odd angular
+                # harmonics are gated to zero at leading order (K_m = 0 for odd
+                # m) and are only weakly relaxed by the exact operator -- these
+                # are the long-lived tomographic modes, and a single rate would
+                # destroy exactly the physics worth resolving.  So the closure
+                # acts on  even(df_loc) - Pi_even df_loc.
+                # The mode-space half is free: zero the odd-m coefficients.
+                # The k-space half needs one reflection about k_D, since
+                # even(df_loc)(k') = 1/2 [df_loc(k') + df_loc(-k')].
+                # f0_loc depends only on |k'|, so it is even and drops out of
+                # the reflection.
+                # What is gathered is df_loc, NOT the lab-frame df: df_loc is
+                # identically zero at the local drifted-heated equilibrium, so
+                # ANY linear interpolation of it is exactly zero there and the
+                # closure vanishes on the null state C[f_le] = 0 by
+                # construction.  Gathering the lab df instead would put the
+                # interpolation error on the O(1) shifted-shell structure --
+                # an ABSOLUTE source ~1e-2 independent of the residual, and
+                # invisible at kD = 0 where the reflection is an exact grid
+                # permutation.
+                # Stencil weight that falls outside the active set is simply
+                # dropped (df_loc treated as 0 there), which is right on both
+                # edges: in the frozen sea BOTH f and f0_loc are saturated, so
+                # df_loc ~ e^-annulus_xi (1e-7 at the recommended axi >= 16),
+                # and beyond the outer guard ring occupancy is < e^-7.  An
+                # earlier version completed the dropped weight with
+                # f0_lab(k_r) - f0_loc; that is the deviation about the LAB
+                # sea, not the local one, and it injected a source 15x the
+                # true residual at the drifted-heated equilibrium.
+                r = torch.zeros_like(df_loc)
+                for idx, wt in self._reflect_about(kD):
+                    r = r + wt * torch.gather(df_loc, -1, idx)
+                dfl_even = 0.5 * (df_loc + r)
+                a_dot = a_dot + g_col * (a * self._even_m_flat)
             ad = a_dot.reshape(hi - lo, Nr, dim)
             B = torch.bmm(fou, ad.transpose(1, 2))
             # w_eq_RB = f0(1-f0)/T -- the /T completes the contract (audit bug 2):
             ddf = (weq / self.T_temp) * (psi * B).sum(-1)
+            if g_res is not None:
+                ddf = ddf - g_col * dfl_even
             out[lo:hi] = self._project_conserved(ddf, kp, eps_p, weq)
         return out.reshape(shape_in)
+
+    def _reflect_about(self, kD: torch.Tensor):
+        """Bilinear stencil for the drift-centred parity map k' -> -k'.
+
+        In lab coordinates the reflected point is ``k_r = 2 k_D - k``.  Same
+        construction as the specular wall reflector, but k_D is per-cell so the
+        stencil is built per chunk rather than once.  Yields (index, weight)
+        pairs over the ACTIVE set; stencil corners outside it (guard ring, or
+        the frozen sea when the annulus is on) get zero weight, which is exact
+        for the quantity gathered here -- see :meth:`apply_collision`, where
+        what is gathered is delta-f about f0_lab and delta-f is identically
+        zero in the frozen sea.
+        """
+        n_k = self.n_k_grid
+        g = ((2.0 * kD[:, None, :] - self.k[None] - self._k_min)
+             / self._dk_grid)                                # (c, Nk, 2)
+        # Mask BEFORE clamping.  The specular reflector may clamp because
+        # mirror reflection preserves |k|, so its images stay in the box; the
+        # DRIFT reflection preserves |k - kD| and moves |k| by up to 2|kD|, so
+        # images do leave the box and clamping would silently gather an edge
+        # value at full weight instead of dropping it.
+        ok = ((g >= 0.0) & (g <= n_k - 1.0)).all(-1)         # (c, Nk)
+        g = g.clamp(0, n_k - 1.0001)
+        i0 = g.floor()
+        fx, fy = (g[..., 0] - i0[..., 0]), (g[..., 1] - i0[..., 1])
+        i0 = i0.long(); ix, iy = i0[..., 0].clone(), i0[..., 1].clone()
+        del g, i0                                            # free (c,Nk,2) temps
+        for idx, wt in ((ix * n_k + iy, (1 - fx) * (1 - fy)),
+                        ((ix + 1) * n_k + iy, fx * (1 - fy)),
+                        (ix * n_k + iy + 1, (1 - fx) * fy),
+                        ((ix + 1) * n_k + iy + 1, fx * fy)):
+            wt = wt * ok
+            if self._full2act is not None:
+                a = self._full2act[idx]
+                wt = wt * (a >= 0)
+                idx = a.clamp(min=0)
+            yield idx, wt
 
     def _project_conserved(self, ddf, kp, eps_p, weq):
         w = self.wk

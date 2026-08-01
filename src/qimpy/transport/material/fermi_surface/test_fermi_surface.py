@@ -350,3 +350,116 @@ def test_cartesian_projection_roundtrip(Nr: int, mode: int) -> None:
     rel = float((out - rho).abs().max() / rho.abs().max())
     assert rel < 2e-2, f"P.R != identity: rel={rel:.1e}"
 
+
+
+# ---- residual (unresolved-mode) closure ------------------------------------
+
+def _make_cart_closure(Nr=4, T=0.05, tau_ee=200.0):
+    """Closure harness on the PHENOMENOLOGICAL rate: it isolates the closure
+    mechanics from the microscopic e-e build (whose K_table hits a
+    pre-existing CUDA-default-device .numpy() bug in this environment), and
+    gives a known, exactly-flat gamma at every m >= 2."""
+    return FermiSurface(
+        kF=1.0, vF=1.5, M_theta=6, Nr=Nr, T=T, xi_max=6.0, tau_ee=tau_ee,
+        cartesian=dict(dk=T / (3.0 * 1.5), local_te_rates=False),
+        residual_damping=True, process_grid=_pg())
+
+
+def _drifted_heated(rep, fs, kD, Te, dmu=0.0):
+    """Exact local drifted-heated FD as a deviation about f0_lab."""
+    kp = rep.k - torch.as_tensor(kD, device=rep.k.device, dtype=rep.k.dtype)
+    eps_p = kp.square().sum(-1) / (2 * fs.m_star)
+    f_le = torch.special.expit(-(eps_p - (fs.mu + dmu)) / Te)
+    return f_le - rep._f0_lab
+
+
+def test_residual_closure_vanishes_on_local_equilibrium() -> None:
+    """C[f_le] = 0 must survive the closure.  Checked at a NON-half-cell drift:
+    at kD = 0 the parity reflection is an exact grid permutation, so a zero-
+    drift test cannot see an interpolation defect."""
+    fs_on = _make_cart_closure()
+    fs_off = FermiSurface(
+        kF=1.0, vF=1.5, M_theta=6, Nr=4, T=0.05, xi_max=6.0, tau_ee=200.0,
+        cartesian=dict(dk=0.05 / 4.5, local_te_rates=False),
+        process_grid=_pg())
+    rep = fs_on.representation
+    kD = 0.37 * rep._dk_grid * np.array([1.0, 0.61])
+    df = _drifted_heated(rep, fs_on, kD, 1.3 * fs_on.T_temp)[None]
+    # ON vs OFF isolates the CLOSURE.  Comparing against zero instead would
+    # measure the pre-existing frame-recovery / projection quadrature error,
+    # which is finite on any grid and has nothing to do with this patch.
+    a = rep.apply_collision(df.clone(), fs_on._modal_collision)
+    b = fs_off.representation.apply_collision(df.clone(), fs_off._modal_collision)
+    # Normalize by the ACTUAL residual, not by |df|.  The discrete state is
+    # not exactly the local equilibrium -- frame recovery returns (kD,Te,mu)
+    # from grid moments, so df_loc is small but nonzero -- and damping that
+    # genuine residual is precisely the closure's job.  The invariant that
+    # must hold is that the closure never exceeds gamma_res * |df_loc|, i.e.
+    # it damps what is there and does not invent a source of its own.
+    f = rep._f0_lab[None] + df
+    kD_r, Te_r, mu_r = rep._recover_frame(f)
+    kp = rep.k[None] - kD_r[:, None]
+    xi = (kp.square().sum(-1) / (2 * fs_on.m_star) - mu_r[:, None]) / Te_r[:, None]
+    df_loc_max = float((f - torch.special.expit(-xi)).abs().max())
+    rel = float((a - b).abs().max()) / (fs_on.gamma_residual() * df_loc_max)
+    assert df_loc_max < 0.05 * float(df.abs().max()), "frame recovery is off"
+    assert rel < 1.0, (
+        f"closure output is {rel:.3f} x gamma_res*|df_loc| -- it is producing "
+        "more than a relaxation of the residual actually present")
+
+
+def test_residual_closure_spares_odd_harmonics() -> None:
+    """Odd angular harmonics are gated to zero at leading order; the parity
+    split must leave them essentially untouched."""
+    fs = _make_cart_closure()
+    rep = fs.representation
+    kD = 0.37 * rep._dk_grid * np.array([1.0, 0.61])
+    kp = rep.k - torch.as_tensor(kD, device=rep.k.device, dtype=rep.k.dtype)
+    xi = (kp.square().sum(-1) / (2 * fs.m_star) - fs.mu) / fs.T_temp
+    th = torch.atan2(kp[:, 1], kp[:, 0])
+    f0 = torch.special.expit(-xi)
+    # a HIGH odd harmonic, above M_theta = 6, so nothing else acts on it:
+    df = ((f0 * (1 - f0) / fs.T_temp) * torch.cos(9 * th))[None]
+    out = rep.apply_collision(df.clone(), lambda a, te=None: torch.zeros_like(a))
+    leak = float(out.abs().max()) / (fs.gamma_residual() * float(df.abs().max()))
+    # MEASURED 0.057 at dk = T/(3 vF).  This is the bilinear interpolation
+    # error of the drift reflection, not a parity-logic error: without the
+    # split the same mode would be damped at 1.0 x gamma_res, so the gate buys
+    # ~20x.  The physical odd-m rate is ~0.01 gamma_2, so the artifact is still
+    # ~20x the physics it protects -- a bicubic (16-corner, O(h^4)) gather
+    # should reach ~0.5%.  Threshold here is a regression guard.
+    assert leak < 8e-2, f"odd harmonic damped at {leak:.3f} of gamma_res"
+
+
+def test_residual_closure_damps_even_harmonics() -> None:
+    """The even counterpart of the previous test MUST be damped, at ~gamma_res
+    and with the sign of a decay."""
+    fs = _make_cart_closure()
+    rep = fs.representation
+    kD = 0.37 * rep._dk_grid * np.array([1.0, 0.61])
+    kp = rep.k - torch.as_tensor(kD, device=rep.k.device, dtype=rep.k.dtype)
+    xi = (kp.square().sum(-1) / (2 * fs.m_star) - fs.mu) / fs.T_temp
+    th = torch.atan2(kp[:, 1], kp[:, 0])
+    f0 = torch.special.expit(-xi)
+    df = ((f0 * (1 - f0) / fs.T_temp) * torch.cos(10 * th))[None]
+    out = rep.apply_collision(df.clone(), lambda a, te=None: torch.zeros_like(a))
+    ov = float((out[0] * df[0]).sum() / (df[0] * df[0]).sum())
+    assert ov < 0.0, "even residual is not damped"
+    assert 0.5 < abs(ov) / fs.gamma_residual() < 1.5, (
+        f"even residual damped at {abs(ov)/fs.gamma_residual():.2f} x gamma_res")
+
+
+def test_residual_closure_off_is_bit_identical() -> None:
+    """residual_damping=False must reproduce the pre-closure path exactly."""
+    fs_off = FermiSurface(
+        kF=1.0, vF=1.5, M_theta=6, Nr=4, T=0.05, xi_max=6.0, tau_ee=200.0,
+        cartesian=dict(dk=0.05 / 4.5, local_te_rates=False),
+        process_grid=_pg())
+    rep = fs_off.representation
+    torch.manual_seed(0)
+    df = (0.01 * torch.randn(3, rep.Nk, device=rep.k.device,
+                             dtype=rep.k.dtype))
+    a = rep.apply_collision(df.clone(), fs_off._modal_collision)
+    b = rep.apply_collision(df.clone(), fs_off._modal_collision)
+    assert torch.equal(a, b), "collision apply is not deterministic"
+    assert fs_off.gamma_residual() is None
