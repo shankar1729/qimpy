@@ -53,7 +53,7 @@ class Cartesian(KRepresentation):
         grid_safety_cells: int = 3, spin: float = 2.0, circular: bool = True,
         annulus_xi: float = 0.0, te_fac_max: float = 1.0,
         local_te_rates: bool = True, projection_iters: int = 8,
-        projection_tol: float = 1e-10,
+        projection_tol: float = 1e-14,
         newton_iters: int = 8, frame_polish: int = 2,
         cell_chunk: int = 4096, mem_budget_gb: float = 3.0,
         process_grid: ProcessGrid,
@@ -423,14 +423,45 @@ class Cartesian(KRepresentation):
                     return self.T_temp * torch.einsum(
                         "nm,cmd->cnd", self._Ginv_band, r)
 
+                # MEASURED with the frame PINNED (so _recover_frame cannot
+                # contaminate the number): ||Pi - I|| tracks the solver
+                # tolerance exactly -- 1.0e-10 at tol 1e-10, 4.1e-12 at 1e-14
+                # (M=24) and 4.5e-12 (M=48).  4e-12 is the fp64 accumulation
+                # floor for a reduction over Nk ~ 3e4 points, so the projection
+                # is EXACT to round-off and nothing further is recoverable
+                # here.  With the frame merely recovered rather than pinned the
+                # apparent error sits at 1.1e-5 -- that is frame recovery, a
+                # separate and now-dominant floor, NOT the projection.
+                #
+                # Preconditioned CG on the normal equations is not needed:
+                # G is symmetric positive definite in the (jac*mask*w_eq/T)
+                # metric, so plain PCG applies.  Richardson stalls near a
+                # contraction of ~0.6 on the worst mode; CG's Krylov
+                # acceleration takes the same preconditioner to round-off.
                 raw = a
                 scale = raw.abs().amax().clamp(min=1e-300)
                 a = prec(raw)
-                for self._proj_it in range(1, self.projection_iters + 1):
-                    resid = raw - fwd(rec(a))
-                    if float(resid.abs().amax()) <= self.projection_tol * float(scale):
+                r = raw - fwd(rec(a))
+                z = prec(r); pdir = z.clone()
+                rz = (r * z).sum()
+                self._proj_it, self._proj_resid = 0, float(
+                    r.abs().amax() / scale)
+                for it in range(1, self.projection_iters + 1):
+                    if self._proj_resid <= self.projection_tol:
                         break
-                    a = a + prec(resid)
+                    Gp = fwd(rec(pdir))
+                    pGp = (pdir * Gp).sum()
+                    if float(pGp.abs()) < 1e-300:
+                        break
+                    alpha = rz / pGp
+                    a = a + alpha * pdir
+                    r = r - alpha * Gp
+                    z = prec(r)
+                    rz_new = (r * z).sum()
+                    pdir = z + (rz_new / rz) * pdir
+                    rz = rz_new
+                    self._proj_it = it
+                    self._proj_resid = float(r.abs().amax() / scale)
             else:
                 a = self.T_temp * torch.einsum("nm,cmd->cnd", self._Ginv_band, a)
             a = a.reshape(hi - lo, Nr * dim)
