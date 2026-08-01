@@ -52,7 +52,8 @@ class Cartesian(KRepresentation):
         dk: Optional[float] = None, dmu_max: float = 0.0, kD_max: float = 0.0,
         grid_safety_cells: int = 3, spin: float = 2.0, circular: bool = True,
         annulus_xi: float = 0.0, te_fac_max: float = 1.0,
-        local_te_rates: bool = True, discrete_gram: bool = False,
+        local_te_rates: bool = True, projection_iters: int = 8,
+        projection_tol: float = 1e-10,
         newton_iters: int = 8, frame_polish: int = 2,
         cell_chunk: int = 4096, mem_budget_gb: float = 3.0,
         process_grid: ProcessGrid,
@@ -70,7 +71,8 @@ class Cartesian(KRepresentation):
         self.kF, self.vF, self.m_star = fs.kF, fs.vF, fs.m_star
         self.mu, self.T_temp, self.xi_max = fs.mu, fs.T_temp, fs.xi_max
         self.local_te_rates = bool(local_te_rates)
-        self.discrete_gram = bool(discrete_gram)
+        self.projection_iters = int(projection_iters)
+        self.projection_tol = float(projection_tol)
         self.newton_iters, self.frame_polish = newton_iters, frame_polish
         self.cell_chunk, self.mem_budget_gb = cell_chunk, mem_budget_gb
         m_star = fs.m_star; dtype = torch.get_default_dtype()
@@ -382,22 +384,53 @@ class Cartesian(KRepresentation):
             # radial Gram serves all angular channels and only the angular
             # quadrature error survives).  This makes R.P the identity by
             # construction instead of to a few percent.
-            if self.discrete_gram:
-                wg = (jac / (2.0 * np.pi))[:, None] * (mask * weq)
-                G_c = torch.bmm((psi * wg.unsqueeze(-1)).transpose(1, 2), psi)
-                # PSD by construction (Gram of real vectors, positive weights)
-                # and well-conditioned whenever the masked point count >> Nr,
-                # which it is by ~3 orders of magnitude; jitter is pure safety.
-                G_c = G_c + (1e-13 * torch.diagonal(
-                    G_c, dim1=-2, dim2=-1).mean(-1))[:, None, None] * torch.eye(
-                        Nr, device=G_c.device, dtype=G_c.dtype)
-                try:
-                    a = self.T_temp * torch.linalg.solve(G_c, a)
-                except torch.linalg.LinAlgError:      # degenerate masked set
-                    log.warning("discrete_gram: singular per-cell Gram; "
-                                "falling back to the fine-rule normalization")
-                    a = self.T_temp * torch.einsum(
-                        "nm,cmd->cnd", self._Ginv_band, a)
+            if self.projection_iters:
+                # EXACT projection by iterative refinement.
+                #
+                # R.P is the identity only if the normalization is the Gram
+                # that the k-sum ACTUALLY realizes, G = B^T W B over the JOINT
+                # (radial, angular) index -- not a 1-D rule in xi, and not the
+                # radial block alone: the dominant error is ANGULAR (a square
+                # lattice samples a ring at uneven angles, worse the more
+                # wiggles the harmonic has, which is why ||Pi - I|| GREW with
+                # M: lam(sym Pi) spread [0.990,1.008] at M=6 -> [0.910,1.080]
+                # at M=48).  Building G costs Nk*D^2 and is far too slow.
+                #
+                # But APPLYING G is free: G a = fwd(rec(a)), i.e. reconstruct
+                # then re-project, both already here and both reusing the psi
+                # and fourier tables built once above.  So solve G a = raw by
+                # Richardson iteration preconditioned with the old fine-rule
+                # normalization -- which the measurement shows is already
+                # within 4-8%, so the iteration contracts by ~0.04-0.08 and
+                # reaches round-off in a handful of passes.
+                #
+                # This makes Pi^2 = Pi to solver tolerance, hence (1 - Pi) a
+                # true projector and the residual closure's -g(1 - Pi)
+                # EXACTLY dissipative (eigenvalues 0 and -g) rather than
+                # merely small.  It also removes the upper bound on M.
+                fou_n = fou * self._ang_norm
+                jac3 = jac[:, None, None]
+
+                def fwd(u):                                  # (c,Nk) -> (c,Nr,dim)
+                    return torch.bmm(((u * mask).unsqueeze(-1) * psi
+                                      ).transpose(1, 2), fou_n) * jac3
+
+                def rec(am):                                 # (c,Nr,dim) -> (c,Nk)
+                    return (weq / self.T_temp) * (
+                        psi * torch.bmm(fou, am.transpose(1, 2))).sum(-1)
+
+                def prec(r):
+                    return self.T_temp * torch.einsum(
+                        "nm,cmd->cnd", self._Ginv_band, r)
+
+                raw = a
+                scale = raw.abs().amax().clamp(min=1e-300)
+                a = prec(raw)
+                for self._proj_it in range(1, self.projection_iters + 1):
+                    resid = raw - fwd(rec(a))
+                    if float(resid.abs().amax()) <= self.projection_tol * float(scale):
+                        break
+                    a = a + prec(resid)
             else:
                 a = self.T_temp * torch.einsum("nm,cmd->cnd", self._Ginv_band, a)
             a = a.reshape(hi - lo, Nr * dim)

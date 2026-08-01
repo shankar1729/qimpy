@@ -335,7 +335,9 @@ def test_cartesian_projection_contract(Nr: int, mode: int) -> None:
     idx = (mode, 3)                               # (n, m=2 cos)
     err_chan = abs(float(a[idx]) - amp) / amp
     others = a.clone(); others[idx] = 0.0
-    assert err_chan < 2e-2, f"channel amplitude off by {err_chan:.1e}"
+    # was 2e-2 with the fine-rule normalization; the iterative solve
+    # against the Gram the k-sum actually realizes makes this exact.
+    assert err_chan < 1e-4, f"channel amplitude off by {err_chan:.1e}"
     assert float(others.abs().max()) < 2e-2 * amp, "cross-channel leakage"
 
 
@@ -348,7 +350,7 @@ def test_cartesian_projection_roundtrip(Nr: int, mode: int) -> None:
     rho = _cart_state(fs, mode, 1e-8)[None]
     out = fs.representation.apply_collision(rho, lambda a, te=None: a)
     rel = float((out - rho).abs().max() / rho.abs().max())
-    assert rel < 2e-2, f"P.R != identity: rel={rel:.1e}"
+    assert rel < 1e-4, f"P.R != identity: rel={rel:.1e}"
 
 
 
