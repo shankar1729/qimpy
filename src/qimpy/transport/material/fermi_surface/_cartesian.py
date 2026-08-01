@@ -52,7 +52,7 @@ class Cartesian(KRepresentation):
         dk: Optional[float] = None, dmu_max: float = 0.0, kD_max: float = 0.0,
         grid_safety_cells: int = 3, spin: float = 2.0, circular: bool = True,
         annulus_xi: float = 0.0, te_fac_max: float = 1.0,
-        local_te_rates: bool = True,
+        local_te_rates: bool = True, discrete_gram: bool = False,
         newton_iters: int = 8, frame_polish: int = 2,
         cell_chunk: int = 4096, mem_budget_gb: float = 3.0,
         process_grid: ProcessGrid,
@@ -70,6 +70,7 @@ class Cartesian(KRepresentation):
         self.kF, self.vF, self.m_star = fs.kF, fs.vF, fs.m_star
         self.mu, self.T_temp, self.xi_max = fs.mu, fs.T_temp, fs.xi_max
         self.local_te_rates = bool(local_te_rates)
+        self.discrete_gram = bool(discrete_gram)
         self.newton_iters, self.frame_polish = newton_iters, frame_polish
         self.cell_chunk, self.mem_budget_gb = cell_chunk, mem_budget_gb
         m_star = fs.m_star; dtype = torch.get_default_dtype()
@@ -211,14 +212,42 @@ class Cartesian(KRepresentation):
             [1.0 / (2 * np.pi)] + [1.0 / np.pi] * (2 * fs.M_theta),
             dtype=dtype, device=rc.device)
         self._f0_lab = torch.special.expit(-(self.eps_k - self.mu) / self.T_temp)
-        # Radial Gram of the CONTINUUM measure the k-sum realizes.  The psi
-        # basis is orthonormal only under the DISCRETE Nr-point quadrature, so
-        # the raw projection returns (G_band @ c) / T rather than the operator
-        # contract's coefficients c of Phi = delta_f / (f0(1-f0)/T).  Invert
-        # G_band (fine quadrature of the dimensionless 0.25 sech^2 measure over
-        # the projection mask |xi| < xi_max); apply_collision left-applies
-        # T * Ginv_band and the reconstruction divides its weight by T, making
-        # projection -> reconstruction the exact identity (audit bugs 2+3).
+        # Radial Gram.  The raw projection returns (G @ c) / T rather than the
+        # operator contract's coefficients c of Phi = delta_f/(f0(1-f0)/T), so
+        # apply_collision left-applies T * G^-1 and the reconstruction divides
+        # its weight by T.
+        #
+        # WHICH G matters.  The forward projection is a discrete sum over THIS
+        # k-grid; for the round trip to be the identity, G must be the Gram of
+        # that same sum.  G_band below is instead a 4001-point 1-D rule in xi
+        # -- the CONTINUUM Gram.  The two disagree because the Cartesian grid
+        # is coarse in xi (dxi ~ 1 at the shell for the default dk = T/vF, so
+        # ~12 points across |xi| < xi_max) and because the mask cuts along a
+        # staircase of lattice points that the smooth 1-D rule knows nothing
+        # about.  Result: Pi = R P = G_band^-1 G_disc = I +- eps, a few percent
+        # -- which is why test_cartesian_projection_contract only asserts 2e-2,
+        # and it does so at 3x finer dk than production.
+        #
+        # `discrete_gram` uses the per-cell G_disc actually realized by the
+        # k-sum instead, which fixes the RADIAL half by construction.
+        #
+        # MEASURED (production dk = T/vF, kD = 0.37 cell, Nr = 4, m >= 2 probes;
+        # /tmp/gram_probe.py, gram_vsM.py in session):
+        #
+        #     M     ||Pi - I||inf    lam(sym Pi)        fine-rule -> discrete
+        #      6      1.9e-3      [0.9896, 1.0076]
+        #     12      3.7e-3      [0.9751, 1.0194]      3.69e-3 -> 3.69e-3
+        #     24      4.2e-3      [0.9487, 1.0395]      0.0395  -> 0.0393
+        #     48      4.4e-3      [0.9099, 1.0804]      0.0804  -> 0.0803
+        #
+        # Two conclusions.  (1) discrete_gram is a MEASURED NO-OP at production
+        # dk: the residual is entirely ANGULAR quadrature, which a radial Gram
+        # cannot touch.  Default OFF so prior results stay bit-identical; kept
+        # because it is the correct normalization and does help at finer dk
+        # (1.4e-3 -> 9.7e-4 at dk/3, kD = 0).  (2) The eigenvalue spread GROWS
+        # WITH M -- so raising M does not monotonically improve C[f] on this
+        # grid, and the residual closure's -g(1 - Pi) can inject at up to
+        # (lam_max - 1) * gamma_res: 3% of gamma_res at M = 6 but 8% at M = 48.
         xi_f = torch.linspace(-fs.xi_max, fs.xi_max, 4001,
                               device=rc.device, dtype=dtype)
         w_f = 0.25 / torch.cosh(0.5 * xi_f) ** 2
@@ -343,9 +372,34 @@ class Cartesian(KRepresentation):
             jac = self.dk_area / (self.m_star * Te)
             gp = (df_loc * mask).unsqueeze(-1) * psi
             a = torch.bmm(gp.transpose(1, 2), fou * self._ang_norm)
-            a = a * jac[:, None, None]                       # raw (G_band @ c)/T
-            # Operator contract: coefficients c of Phi = delta_f/(f0(1-f0)/T):
-            a = self.T_temp * torch.einsum("nm,cmd->cnd", self._Ginv_band, a)
+            a = a * jac[:, None, None]                       # raw (G @ c)/T
+            # Operator contract: coefficients c of Phi = delta_f/(f0(1-f0)/T).
+            # Normalize by the Gram the k-sum ACTUALLY realizes, per cell, on
+            # the same masked point set:
+            #   G_disc[n,m] = (jac/2pi) sum_k mask w_eq psi_n psi_m,
+            # whose continuum limit is exactly G_band (the angular factor
+            # F_d^2 N_d has mean 1/2pi for EVERY d, m = 0 included, so one
+            # radial Gram serves all angular channels and only the angular
+            # quadrature error survives).  This makes R.P the identity by
+            # construction instead of to a few percent.
+            if self.discrete_gram:
+                wg = (jac / (2.0 * np.pi))[:, None] * (mask * weq)
+                G_c = torch.bmm((psi * wg.unsqueeze(-1)).transpose(1, 2), psi)
+                # PSD by construction (Gram of real vectors, positive weights)
+                # and well-conditioned whenever the masked point count >> Nr,
+                # which it is by ~3 orders of magnitude; jitter is pure safety.
+                G_c = G_c + (1e-13 * torch.diagonal(
+                    G_c, dim1=-2, dim2=-1).mean(-1))[:, None, None] * torch.eye(
+                        Nr, device=G_c.device, dtype=G_c.dtype)
+                try:
+                    a = self.T_temp * torch.linalg.solve(G_c, a)
+                except torch.linalg.LinAlgError:      # degenerate masked set
+                    log.warning("discrete_gram: singular per-cell Gram; "
+                                "falling back to the fine-rule normalization")
+                    a = self.T_temp * torch.einsum(
+                        "nm,cmd->cnd", self._Ginv_band, a)
+            else:
+                a = self.T_temp * torch.einsum("nm,cmd->cnd", self._Ginv_band, a)
             a = a.reshape(hi - lo, Nr * dim)
             # Local-T_e rates: hand the per-cell recovered T_e to the modal
             # operator -- evaluated EXACTLY there when the model has a local_te
