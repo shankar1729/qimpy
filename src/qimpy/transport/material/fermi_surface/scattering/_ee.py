@@ -68,6 +68,7 @@ class EEScattering(TreeNode):
         fermi_surface: FermiSurface,
         epsilon_bg: float,
         kappa: float = 0.0,
+        g_s: float = 2.0,
         m_star: float = 0.0,
         well_width: float = 0.0,
         nonlinear: bool = True,
@@ -169,8 +170,20 @@ class EEScattering(TreeNode):
         fs = fermi_surface
         self.fermi_surface = fs
         self.epsilon_bg = epsilon_bg
+        # Spin degeneracy of the PARTNER electron in the golden-rule sum.
+        # It multiplies the whole collision integral:
+        #   C = (2 pi/hbar) g_s Int d2k2 d2k3 d2k4/(2 pi)^6 |M|^2 dd (B - F)
+        # and after the two deltas are resolved it survives as the overall
+        # factor on (m*)^3/(2 pi)^3.  It was previously absent (g_s = 1)
+        # while the screening constant kappa = g_s m*/eps_bg was built with
+        # the spin-DEGENERATE 2D density of states -- the two were
+        # inconsistent.  g_s = 2 for an unpolarized 2DEG (GaAs/AlGaAs) with
+        # the direct (Hartree) matrix element; use g_s = 1 only if the
+        # same-spin exchange channel is being excluded deliberately.
+        self.g_s = float(g_s)
         self.m_star = m_star if m_star else fs.kF / fs.vF
-        self.kappa = kappa if kappa else 2 * self.m_star / epsilon_bg
+        # kappa = 2 pi e^2 nu_2D/eps_bg with nu_2D = g_s m*/(2 pi):
+        self.kappa = kappa if kappa else self.g_s * self.m_star / epsilon_bg
         self.E_F = 0.5 * fs.kF**2 / self.m_star
         self.well_width = well_width
         self.nonlinear = nonlinear
@@ -243,7 +256,8 @@ class EEScattering(TreeNode):
             n_alpha=self.n_alpha,
         )
         gamma_cf = _kernels.gamma_linear(
-            self.K, m_star=self.m_star, T=T, E_F=self.E_F
+            self.K, m_star=self.m_star, T=T, E_F=self.E_F,
+            g_s=self.g_s,
         )
         log.info(
             f"K_2 = {self.K[2]:.4g}, gamma_2 (closed form) = {gamma_cf[2]:.4g}"
@@ -463,7 +477,7 @@ class EEScattering(TreeNode):
                 x_nodes=x_fine, psi_coeff=psi_coeff, m_list=m_chk,
                 kF=fs.kF, m_star=self.m_star, T=T, epsilon_bg=self.epsilon_bg,
                 kappa=self.kappa, well_width=self.well_width,
-                n_xi=self.n_xi, xi_cut=self.xi_cut, n_phi=n_phi,
+                n_xi=self.n_xi, xi_cut=self.xi_cut, n_phi=n_phi, g_s=self.g_s,
             )  # (len(m_chk), n_fine, Nr)
             L = torch.einsum("ij,jf,mfl->mil", Ginv, P, R)  # (len, Nr, Nr)
             return torch.stack([torch.linalg.norm(L[i]) for i in range(len(m_chk))])
@@ -507,7 +521,7 @@ class EEScattering(TreeNode):
             well_width=self.well_width,
             n_xi=self.n_xi,
             xi_cut=self.xi_cut,
-            n_phi=self.n_phi,
+            n_phi=self.n_phi, g_s=self.g_s,
         )  # (M+1, n_fine, Nr): minus Phi_dot at fine nodes
 
         L_m = torch.einsum("ij,jf,mfl->mil", Ginv, P, R)  # (M+1, Nr, Nr)
@@ -699,11 +713,11 @@ class EEScattering(TreeNode):
         for f in range(Nx1):
             s0 = _kernels.cubic_packed_node(
                 x_node=x_fine[f], psi_coeff=psi_coeff,
-                ti=p1, tj=p2, tk=p3, **kin)
+                ti=p1, tj=p2, tk=p3, **kin, g_s=self.g_s)
             Sc += GPc[:, f:f + 1].to(s0.dtype) * s0[None, :]
             del s0
             Qc1, _c = _kernels.quadratic_kernel_complex(
-                x_nodes=x_fine[f:f + 1], psi_coeff=psi_coeff, **kin)
+                x_nodes=x_fine[f:f + 1], psi_coeff=psi_coeff, **kin, g_s=self.g_s)
             Qc1 = Qc1.reshape(Pflat, Pflat)
             q0 = 0.5 * (Qc1[q1, q2] + Qc1[q2, q1])
             Sq += GPc[:, f:f + 1].to(q0.dtype) * q0[None, :]

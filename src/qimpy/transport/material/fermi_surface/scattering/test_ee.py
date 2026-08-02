@@ -3,7 +3,7 @@
 Reference values: GaAs 2DEG of the derivation notes (atomic units):
 m* = 0.067, kF = 7.5e-3 (E_F = 4.198e-4), T = 1.33e-5 (4.2 K),
 eps_b = 12.9, kappa = 2 m*/eps_b.  Doc targets: K2 = 5.108e3,
-K4 = 7.930e3, K6 = 9.811e3, gamma_2/T^2 = 1086.8 (closed form).
+K4 = 7.930e3, K6 = 9.811e3, gamma_2/T^2 = 2173.6 (closed form, spin degeneracy g_s = 2).
 The exact thermal-shell (Galerkin) rates at T/E_F = 0.032 are larger:
 gamma_2 = 1.299x, gamma_4 = 1.156x closed form (verified independently
 against the unreduced collision integral by Monte-Carlo quadratic form).
@@ -64,7 +64,10 @@ def test_K_table():
 def test_closed_form_rate():
     K = _kernels.K_table(2, kF=KF, epsilon_bg=EPS_B, kappa=KAPPA)
     gam = _kernels.gamma_linear(K, m_star=M_STAR, T=T0, E_F=E_F)
-    assert abs(gam[2] / T0**2 - 1086.8) < 1.0
+    # g_s = 2 (unpolarized 2DEG): the doc's 1086.8 is the g_s = 1 value.
+    # gamma scales LINEARLY in g_s -- every RATIO in this file is
+    # invariant, so this is the only expectation that moves.
+    assert abs(gam[2] / T0**2 - 2 * 1086.8) < 2.0
 
 
 def test_on_shell_rates():
@@ -1041,3 +1044,21 @@ def test_local_te_ensemble_exact():
     gam_T = -float(fs._modal_collision(a, te=teT)[0, 3])
     gam_0 = float(fs.ee_scattering.L_coeff[3, 0, 0])
     assert abs(gam_T - gam_0) / gam_0 < 5e-3
+
+
+def test_spin_degeneracy_scales_the_rate() -> None:
+    """g_s enters the golden rule as an overall factor on the collision
+    integral, so every rate must be exactly linear in it -- and the SCREENING
+    constant must use the same degeneracy (kappa = g_s m*/eps_bg), since kappa
+    is 2 pi e^2 nu_2D/eps_bg with the spin-degenerate 2D DOS.  Before this was
+    a parameter the two were inconsistent: kappa was built with g_s = 2 while
+    the collision prefactor carried g_s = 1."""
+    ee1 = dict(epsilon_bg=EPS_B, kappa=KAPPA, nonlinear=False, g_s=1.0)
+    ee2 = dict(epsilon_bg=EPS_B, kappa=KAPPA, nonlinear=False, g_s=2.0)
+    L1 = make_fs(M_theta=2, Nr=1, ee=ee1).ee_scattering.L_coeff[3, 0, 0].item()
+    L2 = make_fs(M_theta=2, Nr=1, ee=ee2).ee_scattering.L_coeff[3, 0, 0].item()
+    assert abs(L2 / L1 - 2.0) < 1e-12, f"rate not linear in g_s: {L2/L1}"
+    # default is the unpolarized 2DEG, and kappa follows the same degeneracy
+    fs = make_fs(M_theta=2, Nr=1, ee=dict(epsilon_bg=EPS_B, nonlinear=False))
+    assert fs.ee_scattering.g_s == 2.0
+    assert abs(fs.ee_scattering.kappa - 2 * M_STAR / EPS_B) < 1e-15

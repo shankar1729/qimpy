@@ -111,14 +111,14 @@ def K_table(
 
 
 def gamma_linear(
-    K: torch.Tensor, *, m_star: float, T: float, E_F: float
+    K: torch.Tensor, *, m_star: float, T: float, E_F: float, g_s: float = 2.0
 ) -> torch.Tensor:
     """Closed-form leading-order rates ``gamma_m`` from the ``K_m`` table.
 
     ``gamma_m = m*^2 T^2 K_m / (16 pi E_F)`` for even ``m`` (zero for
     ``m = 0`` since ``K_0 = 0``, and for odd ``m`` by the parity gate).
     """
-    return (m_star**2 * T**2 / (16 * np.pi * E_F)) * K
+    return g_s * (m_star**2 * T**2 / (16 * np.pi * E_F)) * K
 
 
 # ----------------------------------------------------------------------------
@@ -140,6 +140,7 @@ def exact_collision_reference(
     n_phi: int = 1024,
     linearize: bool = False,
     chunk: int = 16,
+    g_s: float = 2.0,
 ) -> torch.Tensor:
     """Brute-force evaluation of the exact reduced collision operator.
 
@@ -181,7 +182,7 @@ def exact_collision_reference(
     def k_of(x):
         return kF * torch.sqrt(torch.clamp(1.0 + t * x, min=0.0))
 
-    pref = m_star**3 / (2 * np.pi) ** 3
+    pref = g_s * m_star**3 / (2 * np.pi) ** 3
     out = torch.empty(len(x1), **dd)
 
     for i0 in range(0, len(x1), chunk):
@@ -279,6 +280,7 @@ def unreduced_collision_reference(
     xi_cut: float = 9.0,
     linearize: bool = False,
     x2chunk: int = 8,
+    g_s: float = 2.0,
 ) -> torch.Tensor:
     """Assumption-free check of the kinematic reduction (no Jacobian, no roots).
 
@@ -338,7 +340,7 @@ def unreduced_collision_reference(
     def x_of_k(k):  # inverse of k_of: xi/T from |k|
         return ((k / kF) ** 2 - 1.0) / t
 
-    pref = m_star**2 * T / (2 * np.pi) ** 3  # one m* and one delta consumed
+    pref = g_s * m_star**2 * T / (2 * np.pi) ** 3  # one m* and one delta consumed
     out = torch.empty(len(x1), **dd)
     # leg-3 grids are independent of x1; broadcast dims (x2c, x3, phi3, phi2):
     P3 = phi3[None, None, :, None]
@@ -428,6 +430,7 @@ def L_blocks(
     n_xi: int = 32,
     xi_cut: float = 10.0,
     n_phi: int = 1024,
+    g_s: float = 2.0,
 ) -> torch.Tensor:
     """Linearized collision matrix in a radial polynomial basis.
 
@@ -479,7 +482,7 @@ def L_blocks(
                 cols.append(v ** po); po += 2
         return torch.stack(cols[:n_basis], dim=-1) @ psi_coeff
 
-    pref = m_star**3 / (2 * np.pi) ** 3
+    pref = g_s * m_star**3 / (2 * np.pi) ** 3
     m_arr = list(m_list)
     out = torch.zeros(len(m_arr), Nr, n_basis, **dd)
 
@@ -645,6 +648,7 @@ def _shell_quadrature(T: float, E_F: float, n_xi: int, xi_cut: float, n_phi: int
 def _shell_geometry(
     *, x1v, X2, k1, k2, x3v, w2, w3v, beta, wbeta, cosB, sinB, T, t, kF,
     m_star, epsilon_bg, kappa, well_width, n_xi, n_phi,
+    g_s: float = 2.0,
 ):
     """Resolve the thermal-shell kinematics at one ``(x1, x3, sgn-pair)``.
 
@@ -674,7 +678,7 @@ def _shell_geometry(
     ).expand(n_xi, n_phi)
     # Full quadrature weight x kinematic prefactor (per (n_xi, n_phi) grid cell):
     wt = (w2[:, None] * wbeta[None, :]) * (T**2)
-    wt_pref = wt * (m_star**3 / (2 * np.pi) ** 3) * w3v
+    wt_pref = wt * (g_s * m_star**3 / (2 * np.pi) ** 3) * w3v
 
     def weight_phase(sgn: float):
         phi2 = phiP + sgn * dlt
@@ -711,6 +715,7 @@ def _cubic_complex(
     n_phi: int = 512,
     work_dtype: torch.dtype = torch.complex128,
     work_device=None,
+    g_s: float = 2.0,
 ):
     """Cubic e-e vertex accumulated as compact complex harmonic tensors.
 
@@ -801,8 +806,7 @@ def _cubic_complex(
                 x1v=x1v, X2=X2, k1=k1, k2=k2, x3v=x3v, w2=w2, w3v=w3v,
                 beta=beta, wbeta=wbeta, cosB=cosB, sinB=sinB, T=T, t=t, kF=kF,
                 m_star=m_star, epsilon_bg=epsilon_bg, kappa=kappa,
-                well_width=well_width, n_xi=n_xi, n_phi=n_phi,
-            )
+                well_width=well_width, n_xi=n_xi, n_phi=n_phi, g_s=g_s)
             lf2 = leg_factor(X2.reshape(n_xi))  # (n_xi, Nr)
             lf3 = leg_factor(x3v.reshape(1))[0]  # (Nr,)
             lf4 = leg_factor(X4.reshape(n_xi))  # (n_xi, Nr)
@@ -894,6 +898,7 @@ def cubic_packed_node(
     slab: int = 0,
     work_dtype: torch.dtype = torch.complex128,
     work_device=None,
+    g_s: float = 2.0,
 ) -> torch.Tensor:
     """Packed symmetric cubic kernel ``s0[t]`` at ONE output node, built WITHOUT
     materializing the full ``(Nr*nh)^3`` per-node vertex.
@@ -977,8 +982,7 @@ def cubic_packed_node(
             x1v=x1v, X2=X2, k1=k1, k2=k2, x3v=x3v, w2=w2, w3v=w3v,
             beta=beta, wbeta=wbeta, cosB=cosB, sinB=sinB, T=T, t=t, kF=kF,
             m_star=m_star, epsilon_bg=epsilon_bg, kappa=kappa,
-            well_width=well_width, n_xi=n_xi, n_phi=n_phi,
-        )
+            well_width=well_width, n_xi=n_xi, n_phi=n_phi, g_s=g_s)
         lf2 = leg_factor(X2.reshape(n_xi))  # (n_xi, Nr)
         lf3 = leg_factor(x3v.reshape(1))[0]  # (Nr,)
         lf4 = leg_factor(X4.reshape(n_xi))  # (n_xi, Nr)
@@ -1061,6 +1065,7 @@ def cubic_vertex(
     xi_cut: float = 10.0,
     n_phi: int = 512,
     gate_odd: bool = False,
+    g_s: float = 2.0,
 ) -> torch.Tensor:
     """Finite-T cubic e-e vertex on the radial-output collocation nodes.
 
@@ -1163,6 +1168,7 @@ def _quadratic_complex(
     n_phi: int = 512,
     work_dtype: torch.dtype = torch.complex128,
     work_device=None,
+    g_s: float = 2.0,
 ):
     """Quadratic (thermoelectric) e-e vertex as compact complex harmonic tensors.
 
@@ -1237,8 +1243,7 @@ def _quadratic_complex(
                 x1v=x1v, X2=X2, k1=k1, k2=k2, x3v=x3v, w2=w2, w3v=w3v,
                 beta=beta, wbeta=wbeta, cosB=cosB, sinB=sinB, T=T, t=t, kF=kF,
                 m_star=m_star, epsilon_bg=epsilon_bg, kappa=kappa,
-                well_width=well_width, n_xi=n_xi, n_phi=n_phi,
-            )
+                well_width=well_width, n_xi=n_xi, n_phi=n_phi, g_s=g_s)
             f2 = f0(X2).expand(n_xi, n_phi)
             f3 = f0(x3v)
             f4 = f0(X4).expand(n_xi, n_phi)
@@ -1316,6 +1321,7 @@ def quadratic_vertex(
     n_xi: int = 24,
     xi_cut: float = 10.0,
     n_phi: int = 512,
+    g_s: float = 2.0,
 ) -> torch.Tensor:
     """Finite-T particle-hole-odd quadratic e-e vertex (thermoelectric).
 
