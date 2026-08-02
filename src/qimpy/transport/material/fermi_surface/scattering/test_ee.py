@@ -1127,3 +1127,78 @@ def test_L1_finite_difference_vs_reference() -> None:
     closes = float((full - (L1 + Q2 + C3)).abs().max()
                    / full.abs().max().clamp(min=1e-300))
     assert closes < 1e-10, f"L1+Q2+C3 != B-F: {closes:.2e}"
+
+
+@pytest.mark.parametrize("m_test", [2, 3])
+def test_full_Cf_vs_unreduced_definition(m_test: int) -> None:
+    """END-TO-END, ABSOLUTE: the ASSEMBLED production operator against a
+    from-scratch evaluation of the governing integral, with NONE of the
+    analytic reduction shared.
+
+    What every other test leaves uncovered.  The vertex/kernel tests compare
+    the operator against `exact_collision_reference`, which shares the entire
+    kinematic reduction -- the azimuth roots, the 1/(k2 k4 |sin(phi4-phi2)|)
+    Jacobian, the van-Hove excision, and the quadrature nodes themselves.  A
+    conceptual error in the reduction is common-mode and invisible there, and
+    the tolerances of 1e-9/1e-10 are attainable precisely BECAUSE the
+    discretization error cancels.  `test_unreduced_vs_reduced_reference` does
+    exercise the reduction, but only on the bare kernel, at ONE (x1, phi1), for
+    m=2, at a single sigma.
+
+    This test closes the loop: it takes L_coeff -- the object the solver
+    actually integrates, after the radial Galerkin projection, the null-space
+    projection and the PSD clamp -- and compares it with the reduction-FREE
+    evaluator, Richardson-extrapolated in the energy-delta width.
+
+    Rotational invariance makes it cheap: a pure cos(m phi) input produces a
+    pure cos(m phi) output, so the angular Galerkin overlap 2<fdot cos m phi>
+    equals fdot at phi1 = 0 and one azimuth suffices.
+
+    m = 2 is the shear mode that sets the viscosity.  m = 3 is an ODD harmonic:
+    its closed-form kernel K_m is log-divergent and gated to zero, so the odd
+    rate comes entirely from the exact thermal-shell evaluation (a
+    backscattering log cut off by the finite T, with a small |M_2kF|^2).  It is
+    therefore the channel with NO closed-form cross-check at all, and the one
+    the residual closure's parity split is built to protect -- worth pinning
+    against the definition directly.
+    """
+    torch.set_default_dtype(torch.float64)
+    fs = make_fs(M_theta=4, Nr=1,
+                 ee=dict(epsilon_bg=EPS_B, nonlinear=False,
+                         check_convergence=False))
+    ee = fs.ee_scattering
+    prod = float(ee.L_coeff[2 * m_test - 1, 0, 0])       # production linear rate
+
+    with torch.device("cpu"):
+        xg = torch.tensor(np.linspace(-9.0, 9.0, 19), dtype=torch.float64)
+        ph0 = torch.zeros_like(xg)
+        w_occ = lambda x: 0.25 / torch.cosh(x / 2) ** 2
+        df = lambda x, phi: w_occ(x) * torch.cos(m_test * phi) / T0
+        common2 = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B,
+                       kappa=KAPPA, g_s=ee.g_s)
+        dx = float(xg[1] - xg[0])
+        Gband = float(w_occ(xg).sum() * dx)
+
+        def ref_rate(sigma, n_xi2):
+            """Galerkin-projected LINEAR rate from the reduction-free path."""
+            fdot = _kernels.unreduced_collision_reference(
+                df, xg, ph0, linearize=True, sigma=sigma, n_xi2=n_xi2,
+                n_xi3=20, n_phi=112, xi_cut=9.0, x2chunk=4, **common2,
+            )
+            # fdot at phi=0 IS the cos(m phi) overlap (rotational invariance);
+            # convert to the Phi-code rate and radially Galerkin-project.
+            return -float((fdot * 4 * T0 * torch.cosh(xg / 2) ** 2
+                           * w_occ(xg)).sum() * dx / Gband)
+
+        r_hi = ref_rate(0.4, 220)          # bias O(sigma^2)
+        r_lo = ref_rate(0.2, 440)
+        ref = (4.0 * r_lo - r_hi) / 3.0    # Richardson sigma -> 0
+
+    rel = abs(prod / ref - 1.0)
+    print(f"\n  m={m_test} full C[f] vs definition: production {prod:.6e}, "
+          f"unreduced sigma=0.4 {r_hi:.6e}, sigma=0.2 {r_lo:.6e}, "
+          f"Richardson {ref:.6e}, rel {rel:.3%}")
+    assert prod * ref > 0, "assembled operator has the WRONG SIGN vs eq (6)"
+    assert rel < 0.02, (
+        f"assembled C[f] disagrees with the reduction-free definition by "
+        f"{rel:.2%} (production {prod:.4e} vs {ref:.4e})")
