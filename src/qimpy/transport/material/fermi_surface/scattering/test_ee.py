@@ -124,15 +124,20 @@ def _real_coeffs(c_vec, M):
     return ghat
 
 
-def _reference_eps_terms(df_of_phi, x1, phi1, n_phi, order):
+def _reference_eps_terms(df_of_phi, x1, phi1, n_phi, order,
+                         n_xi=24, xi_cut=10.0):
     """Amplitude-isolate the eps^k term of exact_collision_reference at the
     given (x1, phi1) via the 4-point stencil of proto_cubic_nr1.
 
-    order=2 -> Q (even, eps^2): (f(1)+f(-1))/2 [order-0 vanishes on shell].
-    order=3 -> C (odd, eps^3):  (o2 - 2 o1)/6, o_s = (f(s)-f(-s))/2.
+    B - F is EXACTLY cubic in the amplitude and its order-0 part vanishes on
+    shell (detailed balance), so with o_s = (f(s) - f(-s))/2 = s L1 + s^3 C3:
+
+    order=1 -> L (odd, eps^1):   (8 o1 - o2)/6
+    order=2 -> Q (even, eps^2):  (f(1) + f(-1))/2
+    order=3 -> C (odd, eps^3):   (o2 - 2 o1)/6
     """
     common = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
-    refkw = dict(n_xi=24, xi_cut=10.0, n_phi=n_phi, chunk=2, **common)
+    refkw = dict(n_xi=n_xi, xi_cut=xi_cut, n_phi=n_phi, chunk=2, **common)
     fd = {
         s: _kernels.exact_collision_reference(
             (lambda s_: (lambda x, phi: df_of_phi(x, phi) * s_))(s),
@@ -144,6 +149,8 @@ def _reference_eps_terms(df_of_phi, x1, phi1, n_phi, order):
         return 0.5 * (fd[1.0] + fd[-1.0])
     o1 = 0.5 * (fd[1.0] - fd[-1.0])
     o2 = 0.5 * (fd[2.0] - fd[-2.0])
+    if order == 1:
+        return (8.0 * o1 - o2) / 6.0
     return (o2 - 2.0 * o1) / 6.0
 
 
@@ -1062,3 +1069,61 @@ def test_spin_degeneracy_scales_the_rate() -> None:
     fs = make_fs(M_theta=2, Nr=1, ee=dict(epsilon_bg=EPS_B, nonlinear=False))
     assert fs.ee_scattering.g_s == 2.0
     assert abs(fs.ee_scattering.kappa - 2 * M_STAR / EPS_B) < 1e-15
+
+
+def test_L1_finite_difference_vs_reference() -> None:
+    """The LINEARIZED bracket (eq 6) against a finite difference of the
+    UNEXPANDED B - F.
+
+    Why this test exists.  `L_blocks`, `exact_collision_reference(
+    linearize=True)` and `unreduced_collision_reference` all implement the SAME
+    hand-derived formula  W (Phi3 + Phi4 - Phi1 - Phi2),  W = f1 f2 (1-f3)(1-f4).
+    It is common-mode across every evaluator in the repository, so
+    `test_L_blocks_pointwise_vs_reference` -- which compares two of them --
+    cannot see an error in the linearization itself.  Yet L1 IS the production
+    linear operator, hence tau_ee, l_ee and every linear transport coefficient.
+
+    Here the reference is run with linearize=False (raw B - F) and the linear
+    term is extracted by the amplitude stencil, L1 = (8 o1 - o2)/6, which is
+    EXACT in exact arithmetic because B - F terminates at cubic order.  A wrong
+    hand derivation shows up immediately; only float cancellation limits it.
+    """
+    # AMPLITUDE MATTERS.  The stencil is exact in exact arithmetic, but it
+    # extracts L1 by cancelling the C3 contributions, and C3/L1 ~ A^2.  The
+    # natural field w_occ(x)/T0 is delta-f ~ 1.9e4 -- absurdly nonlinear -- and
+    # at that amplitude the cancellation alone gives 1.2e-3.  Measured scan
+    # (rel vs amplitude A): 1e0 -> 1.17e-3, 1e-1 -> 4.0e-7, 1e-2 -> 2.2e-9,
+    # 1e-3 -> 1.5e-12, 1e-4 -> 3.0e-15, 1e-5 -> 3.5e-15; flat in n_phi.  Falls
+    # as A^2 and floors at round-off => cancellation, NOT a derivation error.
+    AMP = 1e-4
+    n_xi, xi_cut, n_phi = 16, 9.0, 256
+    x_chk = torch.tensor([-2.0, 1.0], dtype=torch.float64)
+    common = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
+    R = _kernels.L_blocks(
+        x_nodes=x_chk, psi_coeff=torch.ones(1, 1, dtype=torch.float64),
+        m_list=[2], n_xi=n_xi, xi_cut=xi_cut, n_phi=n_phi, **common,
+    )
+    w_occ = lambda x: 0.25 / torch.cosh(x / 2) ** 2
+    df = lambda x, phi: AMP * w_occ(x) * torch.cos(2 * phi) / T0
+    L1 = _reference_eps_terms(
+        df, x_chk, torch.zeros(2, dtype=torch.float64), n_phi, order=1,
+        n_xi=n_xi, xi_cut=xi_cut,
+    )
+    phidot = L1 * 4 * T0 * torch.cosh(x_chk / 2) ** 2 / AMP
+    rel = float((R[0, :, 0] + phidot).abs().max()
+                / phidot.abs().max().clamp(min=1e-300))
+    assert rel < 1e-12, f"hand-derived L1 disagrees with FD of raw B-F: {rel:.2e}"
+
+    # the stencil must also reproduce the OTHER orders on the same data, i.e.
+    # L1 + Q2 + C3 == the full bracket at unit amplitude (no missing piece)
+    Q2 = _reference_eps_terms(df, x_chk, torch.zeros(2, dtype=torch.float64),
+                              n_phi, order=2, n_xi=n_xi, xi_cut=xi_cut)
+    C3 = _reference_eps_terms(df, x_chk, torch.zeros(2, dtype=torch.float64),
+                              n_phi, order=3, n_xi=n_xi, xi_cut=xi_cut)
+    full = _kernels.exact_collision_reference(
+        df, x_chk, torch.zeros(2, dtype=torch.float64), linearize=False,
+        n_xi=n_xi, xi_cut=xi_cut, n_phi=n_phi, chunk=2, **common,
+    )
+    closes = float((full - (L1 + Q2 + C3)).abs().max()
+                   / full.abs().max().clamp(min=1e-300))
+    assert closes < 1e-10, f"L1+Q2+C3 != B-F: {closes:.2e}"
