@@ -1202,3 +1202,96 @@ def test_full_Cf_vs_unreduced_definition(m_test: int) -> None:
     assert rel < 0.02, (
         f"assembled C[f] disagrees with the reduction-free definition by "
         f"{rel:.2%} (production {prod:.4e} vs {ref:.4e})")
+
+
+def test_full_Cf_NONLINEAR_vs_unreduced_definition() -> None:
+    """END-TO-END, ABSOLUTE, NONLINEAR: the assembled CUBIC channel against the
+    reduction-free evaluation of the same object.
+
+    test_full_Cf_vs_unreduced_definition covers L_coeff -- the LINEAR block
+    only.  The quadratic and cubic vertices have never been compared against
+    anything that does not share the kinematic reduction: every vertex test
+    uses exact_collision_reference, which carries the same roots, the same
+    1/(k2 k4 |sin(phi4-phi2)|) Jacobian and the same caustic excision.  Per the
+    derivation note the cubic shares the LEADING T^2/E_F with the linear term
+    ("the cubic competes with the linear once Phi ~ O(1)"), so it is the
+    dominant physics of the strongly-driven regime, not a correction.
+
+    DESIGN NOTE -- why this is modal, not pointwise.  At Nr = 1 the operator
+    has ONE radial degree of freedom, so its output x-dependence is forced to
+    be exactly w_eq(x); the reference has real radial structure that the Nr = 1
+    basis projects away.  A pointwise comparison therefore fails by
+    construction (measured: production identical at x = +-0.5, reference
+    differing by 20x at x = -+2).  Both sides must be Galerkin-projected the
+    same way.
+
+    Cheap angular extraction: a cos(2 phi) input generates ONLY m = 2+2-2 = 2
+    and m = 2+2+2 = 6, so the output is A cos 2phi + B cos 6phi and two
+    azimuths determine (A, B) exactly -- no angular quadrature.  M_theta >= 6
+    so production retains both.
+    """
+    torch.set_default_dtype(torch.float64)
+    M_theta = 6
+    fs = make_fs(M_theta=M_theta, Nr=1,
+                 ee=dict(epsilon_bg=EPS_B, nonlinear=True,
+                         check_convergence=False))
+    ee = fs.ee_scattering
+    dim = fs.angular.dim
+    amp = 2.0 * T0                                   # delta-f ~ 0.5 at the peak
+    a = torch.zeros(dim, dtype=torch.float64, device=rc.device)
+    a[3] = amp
+    a4 = a.reshape(1, dim)
+    lin = (-torch.einsum("cij,jc->ic", ee.L_coeff, a4)).reshape(-1)
+    cub = (0.5 * (ee.a_dot(a) - ee.a_dot(-a)) - lin).cpu()
+    prod = {2: float(cub[3]), 6: float(cub[11])}     # cos2phi, cos6phi channels
+
+    with torch.device("cpu"):
+        xg = torch.tensor(np.linspace(-9.0, 9.0, 13), dtype=torch.float64)
+        ph = torch.tensor([0.0, np.pi / 6.0], dtype=torch.float64)   # 2 azimuths
+        X, P = torch.meshgrid(xg, ph, indexing="ij")
+        Xf, Pf = X.reshape(-1), P.reshape(-1)
+        w_occ = lambda x: 0.25 / torch.cosh(x / 2) ** 2
+        df = lambda x, phi: w_occ(x) * (amp * torch.cos(2 * phi)) / T0
+        common2 = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B,
+                       kappa=KAPPA, g_s=ee.g_s)
+        dx = float(xg[1] - xg[0])
+        Gband = float(w_occ(xg).sum() * dx)
+        # A cos2phi + B cos6phi at the two azimuths -> solve the 2x2
+        Vt = torch.tensor([[np.cos(2 * float(p)), np.cos(6 * float(p))]
+                           for p in ph], dtype=torch.float64)
+        Vinv = torch.linalg.inv(Vt)
+
+        def ref_coeffs(sigma, n_xi2):
+            fd = {s: _kernels.unreduced_collision_reference(
+                      (lambda s_: (lambda x, p: df(x, p) * s_))(s),
+                      Xf, Pf, linearize=False, sigma=sigma, n_xi2=n_xi2,
+                      n_xi3=18, n_phi=96, xi_cut=9.0, x2chunk=4, **common2)
+                  for s in (1.0, 2.0, -1.0, -2.0)}
+            o1 = 0.5 * (fd[1.0] - fd[-1.0])
+            o2 = 0.5 * (fd[2.0] - fd[-2.0])
+            C3 = ((o2 - 2.0 * o1) / 6.0).reshape(len(xg), len(ph))
+            AB = C3 @ Vinv.T                          # (nx, 2): [A(x), B(x)]
+            # radial Galerkin at Nr = 1 (psi_0 = const), fdot -> Phi_dot
+            Phi = AB * (4 * T0 * torch.cosh(xg / 2) ** 2)[:, None]
+            g = (Phi * w_occ(xg)[:, None]).sum(0) * dx / Gband
+            return {2: float(g[0]), 6: float(g[1])}
+
+        r_hi = ref_coeffs(0.3, 320)
+        r_lo = ref_coeffs(0.15, 640)
+        ref = {m: (4.0 * r_lo[m] - r_hi[m]) / 3.0 for m in (2, 6)}
+
+    conv = {m: abs(r_lo[m] / r_hi[m] - 1.0) for m in (2, 6)}
+    print(f"\n  NONLINEAR full C[f] vs definition (cubic modal coefficients):")
+    for m in (2, 6):
+        rel = abs(prod[m] / ref[m] - 1.0)
+        print(f"    m={m}: production {prod[m]:+.5e}  sigma=0.3 {r_hi[m]:+.5e}"
+              f"  sigma=0.15 {r_lo[m]:+.5e}  Richardson {ref[m]:+.5e}"
+              f"  rel {rel:.2%}  (sigma-drift {conv[m]:.1%})")
+    for m in (2, 6):
+        assert conv[m] < 0.10, (
+            f"m={m}: reference not in the asymptotic regime "
+            f"(sigma drift {conv[m]:.1%}); Richardson is not valid")
+        assert prod[m] * ref[m] > 0, f"m={m}: cubic SIGN flipped vs definition"
+        assert abs(prod[m] / ref[m] - 1.0) < 0.15, (
+            f"m={m}: assembled cubic disagrees with the reduction-free "
+            f"definition: production {prod[m]:.4e} vs {ref[m]:.4e}")
