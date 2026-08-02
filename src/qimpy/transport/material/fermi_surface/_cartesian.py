@@ -54,7 +54,7 @@ class Cartesian(KRepresentation):
         annulus_xi: float = 0.0, te_fac_max: float = 1.0,
         local_te_rates: bool = True, projection_iters: int = 8,
         projection_tol: float = 1e-14,
-        newton_iters: int = 8, frame_polish: int = 2,
+        newton_iters: int = 8, frame_polish: int = 3,
         cell_chunk: int = 4096, mem_budget_gb: float = 3.0,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
@@ -191,6 +191,9 @@ class Cartesian(KRepresentation):
         # amplified (mu/T)^2-fold from total-E binning noise; the full-eps
         # polish restores machine recovery, validated to 9e-14 T):
         self._eps_polish = eps_dos if self._annulus_on else None
+        # k over the SAME point set the polish sums over, so the
+        # polish can use drift-centred energies (see _recover_frame).
+        self._k_polish = k[act | frozen] if self._annulus_on else None
         self._eps_dos_full = None
 
         # torch.compile the per-step table builders: they are long elementwise
@@ -321,9 +324,63 @@ class Cartesian(KRepresentation):
         Te, mu = self._newton_TeMu(Te, mu, n, E_rest,
                                    self._dos_eps[None, :], self._dos_g[None, :] * w,
                                    self.newton_iters)
-        eps_pol = self.eps_k if self._eps_polish is None else self._eps_polish
-        Te, mu = self._newton_TeMu(Te, mu, n, E_rest,
-                                   eps_pol[None, :], w, self.frame_polish)
+        # POLISH: full 4x4 Newton on (kD_x, kD_y, Te, mu) against the EXACT
+        # grid moments (n, p_x, p_y, E).
+        #
+        # Two things were wrong with the 2x2 version.  (1) It fitted the model
+        # using the LAB energies |k|^2/2m*, but the model it represents is
+        # centred at kD, with energies |k - kD|^2/2m*; the two agree only at
+        # kD = 0.  (2) kD itself was never solved for -- kD = p/n is exact only
+        # in the continuum, where the model's momentum moment is n*kD by
+        # symmetry; on a lattice it is n*kD plus a quadrature error.
+        #
+        # Newton had CONVERGED in both cases (more polish iterations changed
+        # nothing to every digit) -- it was solving the wrong equations.
+        # Measured on an exact drifted-heated FD at kD = 3 cells, Te = 1.6 T,
+        # dmu = 2 T, the leftover |df_loc|/|df| was 1.2e-2.
+        k_pol = self.k if self._k_polish is None else self._k_polish
+        return self._newton_frame(kD, Te, mu, n, p, E, k_pol, w,
+                                  self.frame_polish)
+
+    def _newton_frame(self, kD, Te, mu, n, p, E, k_pol, w, iters):
+        """Match (n, p_x, p_y, E) exactly by Newton on (kD, Te, mu).
+
+        Derivatives of f_le = sigma(-(|k-kD|^2/2m* - mu)/Te):
+            df/dmu    = w_eq/Te
+            df/dTe    = w_eq x/Te
+            df/dkD_j  = w_eq (k_j - kD_j)/(m* Te)
+        so the Jacobian is J[a,b] = sum_k w phi_a df/dparam_b with the moment
+        set phi = (1, k_x, k_y, eps_lab) -- 16 reductions per pass, cheap next
+        to everything else in the apply.
+        """
+        m2 = 2.0 * self.m_star
+        eps_lab = k_pol.square().sum(-1) / m2
+        tgt = torch.stack([n, p[:, 0], p[:, 1], E], dim=-1)          # (c,4)
+        eye = torch.eye(4, device=kD.device, dtype=kD.dtype)
+        for _ in range(max(int(iters), 1)):
+            kp = k_pol[None] - kD[:, None]                           # (c,Nk,2)
+            x = (kp.square().sum(-1) / m2 - mu[:, None]) / Te[:, None]
+            f = torch.special.expit(-x)
+            c_mu = (f * (1 - f)) / Te[:, None]                       # w_eq/Te
+            drv = (c_mu.unsqueeze(-1)
+                   * torch.stack([kp[..., 0] / self.m_star,
+                                  kp[..., 1] / self.m_star,
+                                  x, torch.ones_like(x)], dim=-1))   # (c,Nk,4)
+            phis = (None, k_pol[:, 0], k_pol[:, 1], eps_lab)         # None = 1
+            J = torch.empty(kD.shape[0], 4, 4, device=kD.device, dtype=kD.dtype)
+            cur = torch.empty(kD.shape[0], 4, device=kD.device, dtype=kD.dtype)
+            for a, ph in enumerate(phis):
+                if ph is None:                                       # phi = 1
+                    cur[:, a] = f.sum(-1) * w
+                    J[:, a, :] = drv.sum(1) * w
+                else:
+                    cur[:, a] = (f * ph).sum(-1) * w
+                    J[:, a, :] = torch.einsum("k,ckb->cb", ph, drv) * w
+            J = J + 1e-13 * float(J.diagonal(dim1=-2, dim2=-1).abs().mean()) * eye
+            d = torch.linalg.solve(J, (tgt - cur).unsqueeze(-1))[..., 0]
+            kD = kD + d[:, :2]
+            Te = (Te + d[:, 2]).clamp_min(0.05 * self.T_temp)
+            mu = mu + d[:, 3]
         return kD, Te, mu
 
     def _newton_TeMu(self, Te, mu, n, E_rest, eps, gw, iters):
