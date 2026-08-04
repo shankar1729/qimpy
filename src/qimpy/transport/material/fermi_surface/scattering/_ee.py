@@ -461,10 +461,21 @@ class EEScattering(TreeNode):
 
     def _check_quadrature_convergence(self, T: float) -> None:
         """Verify the (auto or explicit) quadrature is converged: recompute the
-        representative linear rates at a refined ``n_phi`` and warn if they move
-        by more than ``tol``.  The angular resolution ``n_phi`` (collinear edge +
+        representative rates at a refined ``n_phi`` and warn if they move by more
+        than ``tol``.  The angular resolution ``n_phi`` (collinear edge +
         dealiasing) is the binding axis; ``n_xi``/``n_xi_proj`` converge
-        spectrally and faster, so refining ``n_phi`` is the decisive test."""
+        spectrally and faster, so refining ``n_phi`` is the decisive test.
+
+        BOTH the linear blocks and, when ``nonlinear``, the quadratic and cubic
+        vertices are checked.  Checking only the linear part is NOT sufficient
+        and was a real hole: measured on the GaAs 2DEG of the notes at the auto
+        ``n_phi = 254``, the linear rates are converged to 0.4 % while the cubic
+        ``(n=0, m=2)`` modal coefficient still moves **3.5 %** on ``n_phi ->
+        508`` (and sits ~9 % below the reduction-free definition).  The vertices
+        carry up to ``3 M`` harmonics and the same collinear edge, so they bind
+        harder than ``L_blocks`` does.  The nonlinear leg is priced at ONE
+        output node (the build itself sweeps ``n_xi_proj ~ 96``), so the check
+        costs ~2 % of the build rather than 2.25x it."""
         fs = self.fermi_surface
         M = fs.M_theta
         if M < 2:
@@ -482,18 +493,39 @@ class EEScattering(TreeNode):
             L = torch.einsum("ij,jf,mfl->mil", Ginv, P, R)  # (len, Nr, Nr)
             return torch.stack([torch.linalg.norm(L[i]) for i in range(len(m_chk))])
 
+        def vertex_norms(n_phi: int) -> torch.Tensor:
+            """Quadratic + cubic vertex magnitudes at ONE representative output
+            node (xi_1 = 0, the thermal shell) -- enough to resolve the angular
+            convergence, which is node-independent, at 1/n_xi_proj of the cost."""
+            kin = dict(
+                x_nodes=x_fine[len(x_fine) // 2].reshape(1), psi_coeff=psi_coeff,
+                M=M, kF=fs.kF, m_star=self.m_star, T=T,
+                epsilon_bg=self.epsilon_bg, kappa=self.kappa,
+                well_width=self.well_width, n_xi=self.n_xi,
+                xi_cut=self.xi_cut, n_phi=n_phi, g_s=self.g_s,
+            )
+            Qc, _ = _kernels.quadratic_kernel_complex(**kin)
+            Tc, Tc1, _ = _kernels._cubic_complex(**kin)
+            return torch.stack([torch.linalg.norm(v.reshape(-1).abs().double())
+                                for v in (Qc, Tc, Tc1)])
+
         n_phi_ref = int(np.ceil(1.5 * self.n_phi))
-        g0, g1 = block_norms(self.n_phi), block_norms(n_phi_ref)
-        rel = ((g1 - g0).abs() / g0.clamp_min(1e-300)).max().item()
+        parts = {"gamma_m": (block_norms(self.n_phi), block_norms(n_phi_ref))}
+        if self.nonlinear:
+            parts["vertex"] = (vertex_norms(self.n_phi), vertex_norms(n_phi_ref))
+        moves = {k: ((b - a).abs() / a.clamp_min(1e-300)).max().item()
+                 for k, (a, b) in parts.items()}
+        rel = max(moves.values())
+        detail = ", ".join(f"d({k}) = {v:.1e}" for k, v in moves.items())
         if rel > self.tol:
             log.info(
-                f"WARNING: e-e quadrature may be under-resolved -- gamma_m moved"
-                f" {rel:.1e} when n_phi {self.n_phi} -> {n_phi_ref}"
+                f"WARNING: e-e quadrature may be under-resolved -- {detail}"
+                f" when n_phi {self.n_phi} -> {n_phi_ref}"
                 f" (tol = {self.tol:.0e}). Lower `tol` or set `n_phi` explicitly."
             )
         else:
             log.info(
-                f"quadrature convergence OK: max d(gamma_m) = {rel:.1e}"
+                f"quadrature convergence OK: {detail}"
                 f" <= tol = {self.tol:.0e} (n_phi {self.n_phi} -> {n_phi_ref})"
             )
 
@@ -875,7 +907,7 @@ class EEScattering(TreeNode):
         kin = dict(
             T=T, t=t, kF=fs.kF, m_star=self.m_star, epsilon_bg=self.epsilon_bg,
             kappa=self.kappa, well_width=self.well_width,
-            n_xi=self.n_xi, n_phi=self.n_phi,
+            n_xi=self.n_xi, n_phi=self.n_phi, g_s=self.g_s,
         )
         Nf = len(x_fine)
         ng = self.n_xi * self.n_phi

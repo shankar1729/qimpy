@@ -663,19 +663,40 @@ def test_unreduced_vs_reduced_reference():
     for both the linear and the full nonlinear bracket)."""
     common = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
     w_occ = lambda x: 0.25 / torch.cosh(x / 2) ** 2
-    x1 = torch.zeros(1, dtype=torch.float64)
-    phi1 = torch.tensor([0.3], dtype=torch.float64)  # generic (off-axis) point
+    x1 = torch.zeros(1, dtype=torch.float64, device=rc.device)
+    phi1 = torch.tensor([0.3], dtype=torch.float64, device=rc.device)
+
+    def reduced(fn, linearize):
+        with torch.device(rc.device):   # internal grids must match x1's device
+            return _kernels.exact_collision_reference(
+                fn, x1, phi1, linearize=linearize, n_xi=32, xi_cut=9.0,
+                n_phi=2048, chunk=1, **common)[0].item()
+
+    def unreduced(fn, linearize):
+        """Reduction-free value, Richardson-extrapolated in sigma at the
+        CALIBRATED angular resolution (n_phi = 0).  Both are required: at a
+        fixed coarse n_phi the sigma trend is not even monotone (measured, this
+        point, linear channel: 0.50 % at sigma=0.4, 2.15 % at 0.3, 2.71 % at
+        0.2, 2.16 % at 0.15) and Richardson then EXTRAPOLATES THE CONTAMINANT,
+        landing at 3.45 % -- worse than any raw value, and worse than the 0.5 %
+        that the coarse sigma=0.4 point reached by cancellation.  At n_phi = 0
+        the trend is clean (2.60, 1.53, 0.72, 0.46 %) and both Richardson pairs
+        agree to 0.004 % of each other."""
+        with torch.device(rc.device):
+            u = [_kernels.unreduced_collision_reference(
+                     fn, x1, phi1, linearize=linearize, sigma=sg, n_phi=0,
+                     n_xi3=24, xi_cut=9.0, x2chunk=2, **common)[0].item()
+                 for sg in (0.4, 0.2)]
+        return (4.0 * u[1] - u[0]) / 3.0        # bias is O(sigma^2)
 
     # (1) Linearized operator on a shear (cos 2phi) Fermi-surface mode:
     df = lambda x, phi: w_occ(x) * torch.cos(2 * phi) / T0
-    red = _kernels.exact_collision_reference(
-        df, x1, phi1, linearize=True, n_xi=32, xi_cut=9.0, n_phi=2048,
-        chunk=1, **common)[0].item()
-    unr = _kernels.unreduced_collision_reference(
-        df, x1, phi1, linearize=True, sigma=0.4, n_phi=128, n_xi3=24,
-        xi_cut=9.0, **common)[0].item()
+    red = reduced(df, True)
+    unr = unreduced(df, True)
     rel_lin = abs(unr - red) / abs(red)
-    assert rel_lin < 0.015, (
+    print(f"\n  reduction check (linear):    reduced {red:.6e}  "
+          f"reduction-free {unr:.6e}  rel {rel_lin:.3%}")
+    assert rel_lin < 0.005, (
         f"linear reduction mismatch: reduced={red:.4e} unreduced={unr:.4e}"
         f" (rel={rel_lin:.2e})")
 
@@ -685,21 +706,173 @@ def test_unreduced_vs_reduced_reference():
     # exercises the cubic/quadratic reduction, not just the linear part), then
     # check the reduction-free value reproduces the reduced one:
     dfn = lambda x, phi: w_occ(x) * torch.cos(2 * phi)
-    redL = _kernels.exact_collision_reference(
-        dfn, x1, phi1, linearize=True, n_xi=32, xi_cut=9.0, n_phi=2048,
-        chunk=1, **common)[0].item()
-    redF = _kernels.exact_collision_reference(
-        dfn, x1, phi1, linearize=False, n_xi=32, xi_cut=9.0, n_phi=2048,
-        chunk=1, **common)[0].item()
+    redL = reduced(dfn, True)
+    redF = reduced(dfn, False)
     assert abs(redF - redL) / abs(redL) > 0.10, (
         "nonlinear content too small to discriminate the reduction")
-    unrF = _kernels.unreduced_collision_reference(
-        dfn, x1, phi1, linearize=False, sigma=0.4, n_phi=128, n_xi3=24,
-        xi_cut=9.0, **common)[0].item()
+    unrF = unreduced(dfn, False)
     rel_nl = abs(unrF - redF) / abs(redF)
-    assert rel_nl < 0.08, (
+    print(f"  reduction check (nonlinear): reduced {redF:.6e}  "
+          f"reduction-free {unrF:.6e}  rel {rel_nl:.3%}")
+    assert rel_nl < 0.03, (
         f"nonlinear reduction mismatch: reduced={redF:.4e} unreduced={unrF:.4e}"
         f" (rel={rel_nl:.2e})")
+
+
+def test_full_Cf_QUADRATIC_vs_unreduced_definition() -> None:
+    """END-TO-END, ABSOLUTE, QUADRATIC: the assembled Q2 channel against the
+    reduction-free evaluation of the same object.
+
+    The last uncovered order.  test_full_Cf_vs_unreduced_definition reaches
+    L_coeff and test_full_Cf_NONLINEAR_vs_unreduced_definition reaches the
+    cubic; the QUADRATIC (particle-hole-odd, thermoelectric) vertex had never
+    been compared against anything that does not share the kinematic reduction.
+
+    Two design points, both mandatory and both learned the hard way:
+
+    * ``Nr >= 2``.  Q2's coefficients are odd under particle-hole conjugation,
+      so the output profile in ``x1`` is ODD, and ``psi_0`` (constant) overlaps
+      it only through the ``O(T/E_F)`` band-curvature remainder -- a near
+      cancellation that no reference resolves reliably.  ``psi_1 ~ xi`` is the
+      non-cancelling, physically leading projection.  This test therefore reads
+      the ``(n = 1, m = 4)`` coefficient and would be meaningless at ``Nr = 1``.
+    * ``n_phi`` must be laddered, not ``sigma``.  See the warning on
+      ``unreduced_collision_reference``: the reference's collinear peak makes
+      its error nearly ``sigma``-INDEPENDENT, so a ``sigma`` ladder alone
+      certifies nothing.  ``n_phi = 0`` requests the calibrated auto value; the
+      test additionally asserts that the ``sigma`` extrapolation is in the
+      asymptotic regime.
+
+    A cos(2 phi) input generates ONLY the harmonics {0, +-4} in the quadratic
+    (``mo = ma + mb`` with ``ma, mb`` in ``{+-2}``), so 5 azimuths give an exact
+    DFT and the even amplitude stencil ``[F(1) + F(-1)]/2`` isolates Q2 from L1
+    and C3 exactly.
+    """
+    torch.set_default_dtype(torch.float64)
+    fs = make_fs(M_theta=6, Nr=3,
+                 ee=dict(epsilon_bg=EPS_B, nonlinear=True,
+                         check_convergence=False))
+    ee = fs.ee_scattering
+    dim = fs.angular.dim
+    Nr = fs.Nr
+    psi_coeff = ee._radial_galerkin(T0)[0].cpu()
+    w_occ = lambda x: 0.25 / torch.cosh(x / 2) ** 2
+
+    def psi_eval(x):
+        v = torch.tanh(0.5 * x)
+        cols = [torch.ones_like(x), x]
+        pe, po = 2, 1
+        while len(cols) < Nr:
+            cols.append(v ** pe); pe += 2
+            if len(cols) < Nr:
+                cols.append(v ** po); po += 2
+        return torch.stack(cols[:Nr], dim=-1) @ psi_coeff
+
+    xg = torch.tensor(np.linspace(-9.0, 9.0, 9), dtype=torch.float64)
+    psi_g = psi_eval(xg)
+    amp = 0.30 / float((w_occ(xg) * psi_g[:, 0]).abs().max()) * T0  # peak df=0.3
+    psi_dev = psi_coeff.to(rc.device)
+
+    a = torch.zeros(Nr * dim, dtype=torch.float64, device=rc.device)
+    a[3] = amp                                   # (n = 0, cos 2phi)
+    # the EVEN amplitude combination cancels the linear and cubic exactly:
+    quad = (0.5 * (ee.a_dot(a) + ee.a_dot(-a))).cpu()
+    prod = float(quad[1 * dim + 7])              # (n = 1, cos 4phi)
+
+    ph = torch.tensor(np.linspace(0.0, 2 * np.pi, 5, endpoint=False),
+                      dtype=torch.float64)
+    X, P = torch.meshgrid(xg, ph, indexing="ij")
+    Xf, Pf = X.reshape(-1).to(rc.device), P.reshape(-1).to(rc.device)
+
+    def df(x, p):   # the reference runs on rc.device (n_phi ~ 500: GPU or bust)
+        v = torch.tanh(0.5 * x)
+        cols = [torch.ones_like(x), x]
+        pe, po = 2, 1
+        while len(cols) < Nr:
+            cols.append(v ** pe); pe += 2
+            if len(cols) < Nr:
+                cols.append(v ** po); po += 2
+        psi0 = (torch.stack(cols[:Nr], dim=-1) @ psi_dev)[..., 0]
+        return w_occ(x) * psi0 * (amp * torch.cos(2 * p)) / T0
+    common2 = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B,
+                   kappa=KAPPA, g_s=ee.g_s)
+    dx = float(xg[1] - xg[0])
+    W = w_occ(xg)
+    Ginv = torch.linalg.inv(torch.einsum("xn,xm,x->nm", psi_g, psi_g, W) * dx)
+
+    def ref_coeff(sigma, n_xi2):
+        with torch.device(rc.device):
+            fd = {s: _kernels.unreduced_collision_reference(
+                      (lambda s_: (lambda x, p: df(x, p) * s_))(s),
+                      Xf, Pf, linearize=False, sigma=sigma, n_xi2=n_xi2,
+                      n_xi3=16, n_phi=0, xi_cut=9.0, x2chunk=2, **common2).cpu()
+                  for s in (1.0, -1.0)}
+        Q2 = (0.5 * (fd[1.0] + fd[-1.0])).reshape(len(xg), len(ph))
+        c4 = (Q2 * (2.0 / len(ph)) * torch.cos(4 * ph)).sum(1)   # exact DFT
+        Phi = c4 * (4 * T0 * torch.cosh(xg / 2) ** 2)
+        return float(torch.einsum("nm,xm,x,x->n", Ginv, psi_g, W * dx, Phi)[1])
+
+    r_hi = ref_coeff(0.4, 240)                   # bias O(sigma^2)
+    r_lo = ref_coeff(0.2, 480)
+    ref = (4.0 * r_lo - r_hi) / 3.0              # Richardson sigma -> 0
+    drift = abs(r_lo / r_hi - 1.0)
+    rel = abs(prod / ref - 1.0)
+    print(f"\n  QUADRATIC full C[f] vs definition, Q(n=1, m=4): production "
+          f"{prod:+.5e}  sigma=0.4 {r_hi:+.5e}  sigma=0.2 {r_lo:+.5e}"
+          f"  Richardson {ref:+.5e}  rel {rel:.2%}  (sigma-drift {drift:.1%})")
+    assert drift < 0.10, (
+        f"reference not in the asymptotic regime (sigma drift {drift:.1%});"
+        " Richardson is not valid")
+    assert prod * ref > 0, "assembled quadratic has the WRONG SIGN vs eq (1)"
+    assert rel < 0.08, (
+        f"assembled quadratic disagrees with the reduction-free definition by "
+        f"{rel:.2%} (production {prod:.4e} vs {ref:.4e})")
+
+
+def test_unreduced_reference_angular_convergence() -> None:
+    """The reference's OWN binding axis, pinned.
+
+    ``unreduced_collision_reference`` has no Jacobian, but it does not thereby
+    escape the caustic -- see its warning.  This guards the auto ``n_phi`` rule
+    that the rest of the definitional tests now rely on: at the auto value the
+    quadratic bracket must already be converged, i.e. refining ``n_phi`` by
+    1.5x must not move it.  Run on the QUADRATIC channel, which is ~10x more
+    sensitive to this than the linear one (at n_phi = 112 the linear rate is
+    right to ~1 % while Q(1, m=4) is 18 % low).
+    """
+    torch.set_default_dtype(torch.float64)
+    common = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
+    w_occ = lambda x: 0.25 / torch.cosh(x / 2) ** 2
+    x1 = torch.tensor([1.0, -1.0], dtype=torch.float64)
+    phi1 = torch.tensor([0.3, 0.3], dtype=torch.float64)
+    df = lambda x, phi: w_occ(x) * torch.cos(2 * phi)
+
+    def Q2_at(n_phi):
+        with torch.device(rc.device):
+            fd = {s: _kernels.unreduced_collision_reference(
+                      (lambda s_: (lambda x, p: df(x, p) * s_))(s),
+                      x1.to(rc.device), phi1.to(rc.device), linearize=False,
+                      sigma=0.4, n_xi2=240, n_xi3=16, n_phi=n_phi, xi_cut=9.0,
+                      x2chunk=2, **common)
+                  for s in (1.0, -1.0)}
+        # particle-hole-ODD part of the even (quadratic) amplitude combination
+        q = 0.5 * (fd[1.0] + fd[-1.0])
+        return float(q[0] - q[1])
+
+    q_auto = Q2_at(0)
+    q_fine = Q2_at(2 * int(np.ceil(1.5 * _auto_n_phi(0.4, 9.0))))
+    rel = abs(q_auto / q_fine - 1.0)
+    print(f"\n  unreduced reference angular convergence: auto {q_auto:+.5e},"
+          f" 1.5x n_phi {q_fine:+.5e}, rel {rel:.2%}")
+    assert rel < 0.02, (
+        f"the auto n_phi rule is NOT converged ({rel:.1%} on refinement);"
+        " every definitional test that uses it is unreliable")
+
+
+def _auto_n_phi(sigma: float, xi_cut: float) -> int:
+    """Mirror of the auto rule in unreduced_collision_reference (t is tiny here,
+    so the lower limit is -xi_cut)."""
+    return int(np.ceil(np.pi / (0.07 * np.sqrt(sigma / xi_cut))))
 
 
 def test_a_dot_regression_baseline():
@@ -1169,7 +1342,7 @@ def test_full_Cf_vs_unreduced_definition(m_test: int) -> None:
     ee = fs.ee_scattering
     prod = float(ee.L_coeff[2 * m_test - 1, 0, 0])       # production linear rate
 
-    with torch.device("cpu"):
+    with torch.device(rc.device):
         xg = torch.tensor(np.linspace(-9.0, 9.0, 19), dtype=torch.float64)
         ph0 = torch.zeros_like(xg)
         w_occ = lambda x: 0.25 / torch.cosh(x / 2) ** 2
@@ -1183,7 +1356,7 @@ def test_full_Cf_vs_unreduced_definition(m_test: int) -> None:
             """Galerkin-projected LINEAR rate from the reduction-free path."""
             fdot = _kernels.unreduced_collision_reference(
                 df, xg, ph0, linearize=True, sigma=sigma, n_xi2=n_xi2,
-                n_xi3=20, n_phi=112, xi_cut=9.0, x2chunk=4, **common2,
+                n_xi3=20, n_phi=0, xi_cut=9.0, x2chunk=4, **common2,
             )
             # fdot at phi=0 IS the cos(m phi) overlap (rotational invariance);
             # convert to the Phi-code rate and radially Galerkin-project.
@@ -1245,7 +1418,7 @@ def test_full_Cf_NONLINEAR_vs_unreduced_definition() -> None:
     cub = (0.5 * (ee.a_dot(a) - ee.a_dot(-a)) - lin).cpu()
     prod = {2: float(cub[3]), 6: float(cub[11])}     # cos2phi, cos6phi channels
 
-    with torch.device("cpu"):
+    with torch.device(rc.device):
         xg = torch.tensor(np.linspace(-9.0, 9.0, 13), dtype=torch.float64)
         ph = torch.tensor([0.0, np.pi / 6.0], dtype=torch.float64)   # 2 azimuths
         X, P = torch.meshgrid(xg, ph, indexing="ij")
@@ -1265,7 +1438,7 @@ def test_full_Cf_NONLINEAR_vs_unreduced_definition() -> None:
             fd = {s: _kernels.unreduced_collision_reference(
                       (lambda s_: (lambda x, p: df(x, p) * s_))(s),
                       Xf, Pf, linearize=False, sigma=sigma, n_xi2=n_xi2,
-                      n_xi3=18, n_phi=96, xi_cut=9.0, x2chunk=4, **common2)
+                      n_xi3=18, n_phi=0, xi_cut=9.0, x2chunk=4, **common2)
                   for s in (1.0, 2.0, -1.0, -2.0)}
             o1 = 0.5 * (fd[1.0] - fd[-1.0])
             o2 = 0.5 * (fd[2.0] - fd[-2.0])
@@ -1287,6 +1460,20 @@ def test_full_Cf_NONLINEAR_vs_unreduced_definition() -> None:
         print(f"    m={m}: production {prod[m]:+.5e}  sigma=0.3 {r_hi[m]:+.5e}"
               f"  sigma=0.15 {r_lo[m]:+.5e}  Richardson {ref[m]:+.5e}"
               f"  rel {rel:.2%}  (sigma-drift {conv[m]:.1%})")
+    # NOTE on the tolerance.  Against the CONVERGED reduction-free reference
+    # (n_phi = 0) the cubic m = 6 channel lands at ~0.9 % but m = 2 at ~7 %.
+    # That is the (n = 0, m = 2) cubic modal coefficient, the one channel of the
+    # thirteen in the L/Q/C sweep that does not close to ~0.5 % of its order's
+    # peak: measured at Nr = 3, production gives -1.573e-10 (n_xi = 24,
+    # n_phi = 508, n_xi_proj = 160) against -1.666e-10 (reduction-free) and
+    # -1.679e-10 (reduced brute force) -- 1.6 % of the cubic peak |C(2,2)| =
+    # 6.56e-10, on which the two agree to 0.08 %.  Neither side is converged on
+    # it: production moves it 3.5-7.6 % across n_phi / n_xi / n_xi_proj (and
+    # those shifts partly CANCEL rather than add), and the reference moves it
+    # 1-2 % across its own n_xi and projection grid.  So this is the resolution
+    # floor of the comparison on a subdominant channel, not a demonstrated
+    # error -- but it is the largest open residual in the C[f] chain and the
+    # tolerance is deliberately left wide enough to show it rather than hide it.
     for m in (2, 6):
         assert conv[m] < 0.10, (
             f"m={m}: reference not in the asymptotic regime "

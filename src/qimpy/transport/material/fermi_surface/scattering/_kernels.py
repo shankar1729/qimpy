@@ -276,7 +276,7 @@ def unreduced_collision_reference(
     sigma: float = 0.3,
     n_xi2: int = 0,
     n_xi3: int = 24,
-    n_phi: int = 160,
+    n_phi: int = 0,
     xi_cut: float = 9.0,
     linearize: bool = False,
     x2chunk: int = 8,
@@ -303,13 +303,46 @@ def unreduced_collision_reference(
     ``n_xi2 ~ (xi range)/(0.1 sigma)`` (auto-set when ``n_xi2 == 0``).
 
     Agreement with ``exact_collision_reference`` therefore validates the angular
-    reduction itself.  Demonstrated for the GaAs 2DEG of the notes: at
-    ``sigma = 0.3``, well resolved, the two agree to ``< 1 %`` (Richardson
-    ``sigma -> 0``: ``< 0.4 %``) for both the linearized and the full nonlinear
-    bracket -- i.e. the reduction is correct to quadrature precision, with no
-    shared-assumption asterisk.  ``O(n_xi2 n_xi3 n_phi^2)`` per point;
-    verification only.  Units and conventions match
-    ``exact_collision_reference`` (``x = xi / T``; ``delta_f`` in occupation).
+    reduction itself.  ``O(n_xi2 n_xi3 n_phi^2)`` per point; verification only.
+    Units and conventions match ``exact_collision_reference``
+    (``x = xi / T``; ``delta_f`` in occupation).
+
+    .. warning::
+       **``n_phi`` IS THE BINDING AXIS AND A ``sigma``-LADDER CANNOT SEE IT.**
+       Having no Jacobian does not mean having no caustic -- it relocates it.
+       Once the fine ``x2`` rule has integrated the Gaussian across the shell,
+       what survives is the reciprocal slope
+
+           ``1 / |de/dx2| = 1 / |1 - k4 cos(phi4 - phi2) / k2|``
+
+       which degenerates on the collinear locus ``k2 || k4`` -- the same
+       van-Hove configuration the reduced form shows as
+       ``1/|sin(phi4 - phi2)|``.  It is not a true singularity here (the
+       Gaussian stops localizing once ``|de/dx2| < sigma / X``, ``X`` the
+       ``x2`` range), but it leaves a peak in the AZIMUTHS of height ``~X/sigma``
+       and width ``~sqrt(2 sigma / X)``, on a grid that is UNIFORM and shared
+       between ``phi2`` and ``phi3``.  Resolving it needs roughly
+
+           ``n_phi >~ 2 pi / (0.1 sqrt(2 sigma / X))``   (auto-set at n_phi = 0)
+
+       -- about 500 for the GaAs 2DEG of the notes, not the 112-160 previously
+       used here.  Because the peak's AREA is ``~sqrt(sigma) * 1/sqrt(sigma)``,
+       i.e. nearly ``sigma``-independent, **the resulting error is nearly flat
+       in sigma**: a ``sigma``-ladder run at fixed nodes-per-``sigma`` (the
+       correct way to hold the ``x2`` resolution) reports a stable answer that
+       is stably WRONG.  Measured, on the quadratic channel Q(n=1, m=4) of the
+       (n=0, m=2) input at ``sigma = 0.3`` (the reduced evaluators give
+       ``6.18-6.23e-10`` across their own ladders)::
+
+           n_phi   112       224       448       896
+           Q(1,4)  5.091e-10 5.971e-10 6.104e-10 6.109e-10
+
+       i.e. **18 % low at n_phi = 112 and converged by ~448**, while the same
+       ``n_phi = 112`` reproduces the LINEAR rate to ~1 %.  Q is the sensitive
+       channel because its coefficients are first differences of ``f0`` between
+       legs, which weight the collinear region far more than ``L1``'s
+       ``W`` or the ``f0``-free ``C3``.  Always ladder ``n_phi`` -- alone among
+       the knobs, it is not visible in a ``sigma`` extrapolation.
     """
     E_F = 0.5 * kF**2 / m_star
     t = T / E_F
@@ -317,6 +350,14 @@ def unreduced_collision_reference(
     lo = -min(xi_cut, 0.8 / t)
     if n_xi2 <= 0:  # ~10 quadrature nodes across the O(sigma)-wide energy peak
         n_xi2 = int(np.ceil((xi_cut - lo) / (0.1 * sigma)))
+    if n_phi <= 0:
+        # ~14 nodes across the collinear peak of width sqrt(2 sigma / X) (see
+        # the warning above).  Calibrated on the measured Q(1,4) ladder: at
+        # sigma = 0.3, X = 18 the peak is 0.183 rad wide and n_phi = 448
+        # (13.0 nodes across it) is converged to 0.2 %, 224 (6.5) is 3.5 % low
+        # and 112 (3.3) is 18 % low.
+        n_phi = 2 * int(np.ceil(
+            np.pi / (0.07 * np.sqrt(2 * sigma / (xi_cut - lo)))))
 
     # x2: uniform (trapezoid) to resolve the Gaussian-shell peak; x3: Gauss-
     # Legendre; phi2, phi3: uniform periodic (spectral for the smooth angles):
@@ -1125,7 +1166,7 @@ def cubic_vertex(
     Tc_full, Tc_leg1, conv = _cubic_complex(
         x_nodes=x_nodes, psi_coeff=psi_coeff, M=M, kF=kF, m_star=m_star, T=T,
         epsilon_bg=epsilon_bg, kappa=kappa, well_width=well_width, n_xi=n_xi,
-        xi_cut=xi_cut, n_phi=n_phi,
+        xi_cut=xi_cut, n_phi=n_phi, g_s=g_s,
     )
     Tc = Tc_full + Tc_leg1[:, :, None, :, :, :, :]
 
@@ -1359,7 +1400,7 @@ def quadratic_vertex(
     Qc_full, Qc_leg1, conv = _quadratic_complex(
         x_nodes=x_nodes, psi_coeff=psi_coeff, M=M, kF=kF, m_star=m_star, T=T,
         epsilon_bg=epsilon_bg, kappa=kappa, well_width=well_width, n_xi=n_xi,
-        xi_cut=xi_cut, n_phi=n_phi,
+        xi_cut=xi_cut, n_phi=n_phi, g_s=g_s,
     )
     # Qc_full[f, la, A, lb, B] -> Qc[f, la, lb, A, B]; add leg-1 (ma broadcast):
     Qc = Qc_full.permute(0, 1, 3, 2, 4).contiguous()
