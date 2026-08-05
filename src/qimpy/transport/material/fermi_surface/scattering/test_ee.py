@@ -875,6 +875,105 @@ def _auto_n_phi(sigma: float, xi_cut: float) -> int:
     return int(np.ceil(np.pi / (0.07 * np.sqrt(sigma / xi_cut))))
 
 
+def test_detailed_balance_and_H_theorem() -> None:
+    """Two properties of eq (1) that no quadrature choice can excuse.
+
+    (a) The drifted, HEATED Fermi-Dirac is annihilated exactly, for any
+        (u, T_e, mu).  This is a NONLINEAR null state -- the linearized operator
+        annihilates only the four collision invariants -- so it tests the full
+        bracket, and it is independent of every resolution knob.
+    (b) Entropy production Sdot = -Int fdot ln(f/(1-f)) is non-negative, and
+        vanishes on that state.
+
+    Measured on the reduction-sharing reference (no truncation, no basis, no
+    projector): C[f_le]/C[f_neq] ~ 2e-14 and Sdot[f_neq] = +1.5e-5.
+    """
+    torch.set_default_dtype(torch.float64)
+    theta, dmu, U = 0.769, 0.5, 0.30          # T/Te = 0.769  =>  Te = 1.3 T
+    t = T0 / (0.5 * KF**2 / M_STAR)
+    f0 = lambda x: torch.sigmoid(-x)
+
+    def df_le(x, p):
+        return torch.sigmoid(-theta * (
+            x - dmu - U * torch.sqrt(torch.clamp(1 + t * x, min=0))
+            * torch.cos(p))) - f0(x)
+
+    w_occ = lambda x: 0.25 / torch.cosh(x / 2) ** 2
+    df_neq = lambda x, p: 1.2 * w_occ(x) * torch.cos(2 * p)
+
+    xg = torch.tensor(np.linspace(-9.0, 9.0, 15), dtype=torch.float64)
+    ph = torch.tensor(np.linspace(0.0, 2 * np.pi, 12, endpoint=False),
+                      dtype=torch.float64)
+    X, P = torch.meshgrid(xg, ph, indexing="ij")
+    common = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
+    with torch.device(rc.device):
+        Xf, Pf = X.reshape(-1).to(rc.device), P.reshape(-1).to(rc.device)
+        fd = {k: _kernels.exact_collision_reference(
+                  f, Xf, Pf, linearize=False, n_xi=32, xi_cut=9.0, n_phi=512,
+                  chunk=2, **common).cpu()
+              for k, f in (("le", df_le), ("neq", df_neq))}
+
+    ratio = float(fd["le"].abs().max() / fd["neq"].abs().max())
+    print(f"\n  detailed balance: max|C[f_le]| / max|C[f_neq]| = {ratio:.3e}")
+    assert ratio < 1e-10, (
+        "the drifted-heated Fermi-Dirac is NOT annihilated: eq (1)'s nonlinear"
+        f" null state leaks at {ratio:.2e} of a comparable non-equilibrium field")
+
+    sdot = {}
+    for k, fn in (("le", df_le), ("neq", df_neq)):
+        f = (f0(X) + fn(X, P)).clamp(1e-14, 1 - 1e-14)
+        s = -(fd[k].reshape(len(xg), len(ph)) * torch.log(f / (1 - f)))
+        sdot[k] = float(s.sum() * float(xg[1] - xg[0]) * (2 * np.pi / len(ph)))
+    print(f"  H-theorem: Sdot[f_le] = {sdot['le']:+.3e}, "
+          f"Sdot[f_neq] = {sdot['neq']:+.3e}")
+    assert sdot["neq"] > 0.0, "ENTROPY PRODUCTION IS NEGATIVE -- H-theorem violated"
+    assert abs(sdot["le"]) < 1e-8 * abs(sdot["neq"]), (
+        "entropy production does not vanish on the drifted-heated Fermi-Dirac")
+
+
+def test_nonlinear_packing_dense_vs_matrix_free() -> None:
+    """The unordered-pair / unordered-triple PACKING, against no packing at all.
+
+    The dense path assembles the quadratic and cubic from unordered leg
+    tuples with explicit multiplicities (1, 2 for pairs; 1, 3, 6 for triples);
+    the matrix-free path evaluates Q2 and C3 POINTWISE on the quadrature grid
+    and never packs anything.  Agreement therefore verifies the multiplicity and
+    permutation bookkeeping against an implementation that has none.
+
+    CRITICAL: the input must be MULTI-MODE.  With a single mode the only
+    contributing pair/triple is the DIAGONAL one, whose multiplicity is 1, so
+    every off-diagonal branch -- precisely where a permutation bug would live --
+    is dead code.  A sin harmonic is included as well, so the real<->complex
+    fold and the Hermitian completion see an input with a non-vanishing
+    imaginary part.
+    """
+    torch.set_default_dtype(torch.float64)
+    outs = []
+    for backend in ("dense", "matrix_free"):
+        fs = make_fs(M_theta=6, Nr=3,
+                     ee=dict(epsilon_bg=EPS_B, nonlinear=True, backend=backend,
+                             check_convergence=False, n_xi=12, n_phi=128,
+                             n_xi_proj=8))
+        ee = fs.ee_scattering
+        dim = fs.angular.dim
+        a = torch.zeros(3 * dim, dtype=torch.float64, device=rc.device)
+        a[0 * dim + 1] = 0.9 * T0          # cos(phi),   radial mode 0
+        a[1 * dim + 3] = 0.6 * T0          # cos(2 phi), radial mode 1
+        a[2 * dim + 6] = 0.8 * T0          # sin(3 phi), radial mode 2
+        ad_p, ad_m = ee.a_dot(a).cpu(), ee.a_dot(-a).cpu()
+        outs.append(dict(Q=0.5 * (ad_p + ad_m), full=ad_p,
+                         odd=0.5 * (ad_p - ad_m)))
+    for key in ("Q", "odd", "full"):
+        d, m = outs[0][key], outs[1][key]
+        rel = float((d - m).abs().max() / d.abs().max().clamp(min=1e-300))
+        print(f"\n  packing {key}: |dense| = {float(d.abs().max()):.4e}, "
+              f"dense vs matrix-free rel = {rel:.2e}")
+        assert rel < 1e-11, (
+            f"{key}: the packed (dense) assembly disagrees with the "
+            f"packing-free matrix-free evaluation by {rel:.1e} on a multi-mode "
+            "input -- suspect the multiplicity or permutation bookkeeping")
+
+
 def test_a_dot_regression_baseline():
     """The optimized (convolution-form) a_dot reproduces the pre-optimization
     operator bit-for-bit (<= 1e-11).  Baseline saved by the regression harness
