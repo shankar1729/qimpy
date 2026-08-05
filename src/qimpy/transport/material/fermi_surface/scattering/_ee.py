@@ -414,7 +414,20 @@ class EEScattering(TreeNode):
         # Fine radial quadrature for the Galerkin projection.  Keep all nodes
         # above the band bottom (xi/T > -1/t for parabolic bands):
         xg, xw = np.polynomial.legendre.leggauss(self.n_xi_proj)
-        x_span = max(8.0, float(xi_c.abs().max()) + 2.0) if Nr > 1 else 8.0
+        # DOMAIN.  The Galerkin overlap integrand is w_eq psi_l Phi_dot.  Phi_dot
+        # is O(1) at large |x| and w_eq ~ e^{-|x|}, while psi_1 ~ xi GROWS and the
+        # tanh-power modes only saturate around |x| ~ 6 -- so the integrand decays
+        # like |x| e^{-|x|} and truncating at X leaves a relative tail
+        # ~ (1 + X) e^{-X}.  The old fixed X = 8 leaves 3e-3 of it, and because
+        # the HIGHER modes carry more tail weight the induced error GROWS WITH Nr:
+        # measured against a reference projected over a converged domain, the
+        # linear block was off by 5.4 % at Nr = 3, 13 % at Nr = 4 and 22 % at
+        # Nr = 6, all of which vanished when the domain was matched.  X = 16 puts
+        # the tail at 2e-6; the n_xi_proj >= 96 Gauss rule still converges there
+        # (nearest pole of the Fermi factor is at +-i pi, giving a Bernstein
+        # parameter 1.22 and an error ~1.22^-192).  Still capped short of the band
+        # bottom, where the 1/(k2 k4) factors are quadrature-hostile.
+        x_span = max(16.0, float(xi_c.abs().max()) + 2.0) if Nr > 1 else 16.0
         x_span = min(x_span, 0.9 / t_ratio)
         if float(xi_c.abs().max()) >= 0.95 / t_ratio:
             raise InvalidInputException(
