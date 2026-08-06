@@ -105,6 +105,7 @@ class Cartesian(KRepresentation):
         self._n_frozen = self._E_frozen = 0.0
         self._p_frozen = torch.zeros(2, device=rc.device, dtype=dtype)
         self._eps_dos_full = None
+        self._k_polish_full = None
         self._annulus_on = False
         if circular:
             r_act = k_max + 1.5 * dk
@@ -143,6 +144,11 @@ class Cartesian(KRepresentation):
                 # frame-recovery Newton needs the FULL-band density of states
                 # (the FD model's moments must be comparable to the totals):
                 self._eps_dos_full = eps_full[act | frozen].to(dtype)
+                # k over the SAME full-band point set -- MUST be sliced here,
+                # before `k = k[act]` below rebinds k to the active subset.
+                # (Indexing the reduced k with the full-grid mask raised
+                # IndexError: annulus + frame_polish had no test coverage.)
+                self._k_polish_full = k[act | frozen]
                 self._annulus_on = bool(int(frozen.sum()))
             self._full2act = torch.full((Nk,), -1, dtype=torch.long, device=rc.device)
             self._full2act[act] = torch.arange(int(act.sum().item()), device=rc.device)
@@ -193,7 +199,7 @@ class Cartesian(KRepresentation):
         self._eps_polish = eps_dos if self._annulus_on else None
         # k over the SAME point set the polish sums over, so the
         # polish can use drift-centred energies (see _recover_frame).
-        self._k_polish = k[act | frozen] if self._annulus_on else None
+        self._k_polish = self._k_polish_full if self._annulus_on else None
         self._eps_dos_full = None
 
         # torch.compile the per-step table builders: they are long elementwise
