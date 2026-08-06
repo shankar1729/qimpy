@@ -459,6 +459,28 @@ class FermiSurface(Material):
             a_dot = a_dot + self.k_speed * Ga4.reshape(*a.shape)
         return a_dot
 
+    def gamma_max(self) -> float:
+        """Largest linear collision rate (a.u.).
+
+        Sets the collision sub-step budget for operator splitting: an explicit
+        sub-flow needs ``gamma_max * dt_coll`` bounded.  NOTE this is the
+        fastest eigenvalue over ALL retained modes, which is much larger than
+        1/tau_ee read off the m=2 shear mode -- do not size a sub-step from
+        l_ee.  Cached; the blocks are tiny (N_r x N_r per angular index).
+        """
+        if getattr(self, "_gamma_max", None) is None:
+            g = float(self.rates_modal.max())
+            ee = getattr(self, "ee_scattering", None)
+            if ee is not None:
+                L = ee.L_coeff
+                Lsym = 0.5 * (L + L.transpose(-1, -2))
+                g = max(g, float(torch.linalg.eigvalsh(Lsym).max()))
+            gr = self.gamma_residual()
+            if gr is not None:
+                g = max(g, float(torch.as_tensor(gr).max()))
+            self._gamma_max = g
+        return self._gamma_max
+
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         if (self.rates_modal.abs().sum() == 0 and self.k_speed == 0.0

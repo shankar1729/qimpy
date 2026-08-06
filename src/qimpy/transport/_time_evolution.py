@@ -24,6 +24,7 @@ class TimeEvolution(TreeNode):
     save_interval: int  #: Save results every so many steps
     n_collate: int  #: Collect these many save steps into a single checkpoint
     integrator: str  #: Time-step style used for integration
+    collision_interval: int  #: Strang-split the collision over this many streaming steps
     steady_state: dict[str, Union[str, float]]
 
     def __init__(
@@ -36,6 +37,7 @@ class TimeEvolution(TreeNode):
         t_max: float = 0.0,
         n_collate: int = 0,
         integrator: str = "RK2",
+        collision_interval: int = 1,
         positivity: bool = False,
         steady_state: dict[str, Union[str, float]] = None,
         checkpoint_in: CheckpointPath = CheckpointPath(),
@@ -100,6 +102,7 @@ class TimeEvolution(TreeNode):
             # the residual scale ill-defined.
             self.warmup_steps = int(self.steady_state.get("warmup_steps", 0))
             self.integrator = self.steady_state.get("integrator", "RK2")
+            self.collision_interval = 1        # root-finding: no splitting
             self.positivity = False
             self.dt = 0.0
             self.t = 0.0
@@ -138,6 +141,12 @@ class TimeEvolution(TreeNode):
             self.integrator = integrator
             if integrator not in {"RK2", "RK4", "SSPRK3"}:
                 raise InvalidInputException(f"Unrecognized {integrator = }")
+            self.collision_interval = max(1, int(collision_interval))
+            if self.collision_interval > 1:
+                log.info(
+                    f"Strang-splitting the collision every "
+                    f"{self.collision_interval} steps "
+                    f"(dt_coll = {self.collision_interval * self.dt:.4g})")
             self.positivity = bool(positivity)
             if self.positivity and integrator != "SSPRK3":
                 log.info("positivity=True is only rigorously guaranteed with "
@@ -145,6 +154,58 @@ class TimeEvolution(TreeNode):
                          f"the end-of-step state with {integrator}.")
 
     def time_step(self, geometry: Geometry) -> None:
+        """Advance one step of dt.
+
+        With ``collision_interval = N > 1`` the collision is Strang-split out
+        of the streaming: each window of N steps is bracketed by two half-kicks
+        of the collision alone over ``N*dt/2``, and the N streaming steps in
+        between run with the collision suppressed.  This is second order in the
+        splitting, and the state is a physical whole-step state at every step
+        boundary (the half-kicks are NOT fused across windows), so checkpoints
+        and observables stay exact.
+
+        Why this is worth doing: dt is set by the streaming CFL on the k-grid,
+        which for the Cartesian representation is far finer than any collision
+        timescale -- the collision ends up applied O(100) times per 1/gamma_max
+        while costing ~50x the streaming step.  N must be laddered against a
+        converged N=1 answer, not assumed: the relevant number is
+        ``material.gamma_max() * N * dt``, and gamma_max is the fastest mode,
+        NOT 1/tau_ee from l_ee.
+
+        N = 1 takes the original code path exactly (bit-identical).
+        """
+        N = self.collision_interval
+        if N > 1:
+            if not hasattr(geometry, "collision_dot"):
+                raise InvalidInputException(
+                    "collision_interval > 1 needs a geometry implementing"
+                    " collision_dot (finite_volume)")
+            j = self.i_step % N
+            dt_half = 0.5 * N * self.dt
+            if j == 0:
+                self._collision_kick(geometry, dt_half)
+            geometry.collision_enabled = False
+            try:
+                self._rk_step(geometry)
+            finally:
+                geometry.collision_enabled = True
+            if j == N - 1:
+                self._collision_kick(geometry, dt_half)
+            return
+        self._rk_step(geometry)
+
+    def _collision_kick(self, geometry: Geometry, dt_coll: float) -> None:
+        """Advance the collision sub-flow ALONE over dt_coll (explicit midpoint).
+
+        Second order, two collision applies.  Stability needs
+        ``gamma_max * dt_coll < 2``; accuracy in practice wants it well below 1.
+        """
+        rho0 = geometry.rho
+        k1 = geometry.collision_dot(rho0)
+        k2 = geometry.collision_dot(rho0 + (0.5 * dt_coll) * k1)
+        geometry.rho = rho0 + dt_coll * k2
+
+    def _rk_step(self, geometry: Geometry) -> None:
         """Advance one step (RK2/RK4, or SSPRK3 for positivity preservation)."""
         t = self.t
         dt = self.dt

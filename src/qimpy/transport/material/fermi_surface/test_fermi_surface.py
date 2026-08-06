@@ -451,6 +451,33 @@ def test_residual_closure_damps_even_harmonics() -> None:
         f"even residual damped at {abs(ov)/fs.gamma_residual():.2f} x gamma_res")
 
 
+def test_cartesian_annulus_with_frame_polish() -> None:
+    """A frozen-sea annulus run must build AND apply.
+
+    Regression (45baa7ad -> 011c0a59): ``_k_polish`` was sliced out of the
+    ALREADY-reduced active ``k`` using the FULL-grid mask ``act | frozen``, so
+    every ``annulus_xi > 0`` run raised IndexError before its first step.  It
+    went unnoticed because nothing in the suite set ``annulus_xi`` at all and
+    the ballistic campaign predates the 4x4 frame polish that introduced it.
+    """
+    T = 0.05
+    fs = FermiSurface(
+        kF=1.0, vF=1.5, M_theta=6, Nr=4, T=T, xi_max=6.0, tau_ee=200.0,
+        cartesian=dict(dk=T / 4.5, annulus_xi=8.0, local_te_rates=False),
+        process_grid=_pg())
+    rep = fs.representation
+    assert rep._annulus_on, "annulus did not engage: test is vacuous"
+    assert rep._k_polish is not None
+    # the polish set is the FULL band (active + frozen), so strictly larger
+    # than the active set the dynamics carry
+    assert rep._k_polish.shape[0] > rep.k.shape[0]
+    assert rep._k_polish.shape[0] == rep._eps_polish.shape[0]
+    torch.manual_seed(0)
+    df = 0.01 * torch.randn(3, rep.Nk, device=rep.k.device, dtype=rep.k.dtype)
+    out = rep.apply_collision(df, fs._modal_collision)
+    assert torch.isfinite(out).all()
+
+
 def test_residual_closure_off_is_bit_identical() -> None:
     """residual_damping=False must reproduce the pre-closure path exactly."""
     fs_off = FermiSurface(

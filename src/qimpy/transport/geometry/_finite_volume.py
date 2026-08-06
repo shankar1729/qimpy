@@ -606,6 +606,10 @@ class FiniteVolume(Geometry):
         # identically zero (rates and cyclotron speed both zero) its rho_dot is a
         # no-op, so skip the per-step call entirely -- it otherwise allocates a
         # zero tensor and (via the rates check) forces a GPU->CPU sync each step.
+        # Operator-splitting support: TimeEvolution suppresses the collision
+        # during the streaming stages when collision_interval > 1, and applies
+        # it separately over the longer sub-step via collision_dot below.
+        self.collision_enabled = True
         rm = getattr(material, "rates_modal", None)
         ks = getattr(material, "k_speed", 0.0)
         has_ee = hasattr(material, "ee_scattering")   # microscopic e-e: NOT in rates_modal
@@ -961,11 +965,28 @@ class FiniteVolume(Geometry):
         if self._decomp is not None:
             self._decomp.exchange(u)                          # fill halo ghost rows
         out = self._srhs_fn(u, t)                             # de-alias + spatial RHS (fused)
-        if not self._skip_collision:                          # ballistic: collision is exactly 0
+        if self.collision_enabled and not self._skip_collision:   # ballistic: exactly 0
             # collision = from_modes(-rates * to_modes(.)); its to_modes already
             # annihilates the ghost, so the raw (un-de-aliased) u is exact here.
             lo, hi = self._own_start, self._own_stop
             out[lo:hi] = out[lo:hi] + self.material.rho_dot(u[lo:hi], t, id(self))
+        if self._owned_mask is not None:
+            out = out * self._owned_mask
+        return TensorList([out])
+
+    def collision_dot(self, rho: TensorList) -> TensorList:
+        """The material collision term ALONE, with no spatial RHS.
+
+        Used by operator splitting (``collision_interval > 1``).  The collision
+        is local to a cell, so unlike :meth:`rho_dot` this needs no halo
+        exchange, and no de-aliasing either -- the representation's
+        ``to_modes`` already annihilates the rank-r ghost.
+        """
+        u = rho[0]
+        out = torch.zeros_like(u)
+        if not self._skip_collision:
+            lo, hi = self._own_start, self._own_stop
+            out[lo:hi] = self.material.rho_dot(u[lo:hi], 0.0, id(self))
         if self._owned_mask is not None:
             out = out * self._owned_mask
         return TensorList([out])
