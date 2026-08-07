@@ -15,6 +15,15 @@ External mesh format (NumPy ``.npz``)
                                        matches a key in the ``contacts`` dict is a
                                        contact, anything else (e.g. 'wall') reflects
     lattice           (nL, 2) float   OPTIONAL periodic displacement vectors
+    cell_regions      (K,)    str     OPTIONAL per-cell named region, '' = none.
+                                       Named cell sets the solver can average an
+                                       observable over -- e.g. the outer end of
+                                       each arm, which is what a probe voltage
+                                       IS.  These are geometry, so they are
+                                       defined here by the mesh generator rather
+                                       than as coordinate boxes in a run config,
+                                       where they would silently select the
+                                       wrong cells on a different mesh.
 
 Only ``vertices`` and ``triangles`` are strictly required; without boundary
 markers every physical face defaults to a reflective wall.
@@ -35,6 +44,7 @@ class MeshResult:
     edge_marker: dict              # sorted (vi, vj) -> marker id (>0)
     marker_names: list             # id -> name (id 0 reserved/unused)
     projectors: dict               # id -> curve-projection fn, or None (straight)
+    cell_regions: Optional[np.ndarray] = None   # (K,) str, '' = no region
     _lattice: Optional[list] = None
 
 
@@ -58,7 +68,16 @@ def load_mesh(path: str) -> MeshResult:
             edge_marker[tuple(sorted((int(a), int(b))))] = name_id[name]
     projectors = {i: None for i in range(len(marker_names))}
 
-    mesh = MeshResult(VX, VY, EToV, edge_marker, marker_names, projectors)
+    cell_regions = None
+    if "cell_regions" in d:
+        cell_regions = np.asarray(
+            [str(x) for x in np.asarray(d["cell_regions"]).ravel()], dtype=object)
+        if len(cell_regions) != len(EToV):
+            raise ValueError(
+                f"cell_regions has {len(cell_regions)} entries for "
+                f"{len(EToV)} triangles in {path}")
+    mesh = MeshResult(VX, VY, EToV, edge_marker, marker_names, projectors,
+                      cell_regions)
     if "lattice" in d:
         lat = np.asarray(d["lattice"], float)
         if lat.size:
@@ -67,7 +86,7 @@ def load_mesh(path: str) -> MeshResult:
 
 
 def save_mesh(path: str, vertices, triangles, boundary_edges=None,
-              boundary_markers=None, lattice=None) -> None:
+              boundary_markers=None, lattice=None, cell_regions=None) -> None:
     """Write an external triangle mesh in the format :func:`load_mesh` reads.
 
     Convenience for external mesh generators; qimpy itself never calls this
@@ -81,4 +100,6 @@ def save_mesh(path: str, vertices, triangles, boundary_edges=None,
         out["boundary_markers"] = np.asarray(boundary_markers, dtype=object)
     if lattice is not None:
         out["lattice"] = np.asarray(lattice, float)
+    if cell_regions is not None:
+        out["cell_regions"] = np.asarray(cell_regions, dtype=object)
     np.savez(path, **out)

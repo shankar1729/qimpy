@@ -334,6 +334,9 @@ class TimeEvolution(TreeNode):
                     break
 
                 self.time_step(transport.geometry)
+                probe = getattr(transport.geometry, "maybe_probe", None)
+                if probe is not None:
+                    probe(self.i_step + 1, self.t + self.dt)
 
                 log.info(
                     f"Step {self.i_step} done of {self.n_steps} at t[s]: {rc.clock():.2f}"

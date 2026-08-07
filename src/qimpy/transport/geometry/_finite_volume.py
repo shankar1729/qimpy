@@ -436,6 +436,8 @@ class FiniteVolume(Geometry):
         compile: bool = False,
         save_rho: bool = False,
         save_terms: bool = False,
+        probe_interval: int = 0,
+        probe_file: str = "",
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
@@ -606,6 +608,46 @@ class FiniteVolume(Geometry):
         # identically zero (rates and cyclotron speed both zero) its rho_dot is a
         # no-op, so skip the per-step call entirely -- it otherwise allocates a
         # zero tensor and (via the rates check) forces a GPU->CPU sync each step.
+        # ---- dense in-run probe (every probe_interval steps) -------------
+        # dt_save is sized by checkpoint cost (rho is ~0.4 GB/frame), so the
+        # only V(t) / I(t) record a CLI run leaves behind is one point per
+        # checkpoint.  That is far too sparse to watch a transient relax.  This
+        # writes a small CSV every probe_interval steps instead: per-contact
+        # currents plus the mean chemical potential over each named region.
+        # Cost is bounded by evaluating get_cell_scalars on the PROBE CELLS
+        # ONLY (the per-cell frame Newton is the expensive part), so a typical
+        # 4-region mixer probe every 10 steps is ~1% of a collision step.
+        self.probe_interval = int(probe_interval)
+        self.probe_file = str(probe_file)
+        self._probe_regions = {}
+        self._probe_idx = None
+        self._probe_header = False
+        if self.probe_interval > 0:
+            names = self.mesh.cell_regions
+            if names is None:
+                raise InvalidInputException(
+                    f"probe_interval > 0 but {self.mesh_file} defines no"
+                    " cell_regions; label the probe cells in the mesh"
+                    " generator (regions are geometry, not run config)")
+            lo, hi = self._own_start, self._own_stop
+            local = np.asarray(names)[lo:hi]
+            uniq = sorted({n for n in local.tolist() if n})
+            sel_all = np.zeros(hi - lo, dtype=bool)
+            for n in uniq:
+                m = local == n
+                self._probe_regions[n] = m
+                sel_all |= m
+            idx = np.flatnonzero(sel_all)
+            # self._u does not exist yet at this point in __init__; realise the
+            # index tensor lazily on the first probe instead.
+            self._probe_idx = idx
+            pos = {int(g): i for i, g in enumerate(idx)}
+            self._probe_regions = {
+                n: np.array([pos[int(g)] for g in np.flatnonzero(m)], dtype=int)
+                for n, m in self._probe_regions.items()}
+            log.info(f"Probing regions {uniq} ({len(idx)} cells) every "
+                     f"{self.probe_interval} steps -> {self.probe_file}")
+
         # Operator-splitting support: TimeEvolution suppresses the collision
         # during the streaming stages when collision_interval > 1, and applies
         # it separately over the longer sub-step via collision_dot below.
@@ -1018,6 +1060,41 @@ class FiniteVolume(Geometry):
             I = float((c.cur * uup_b[c.idx]).sum())           # this rank's edges
             out[c.name] = self.comm.allreduce(I) if self._mpi else I
         return out
+
+    def maybe_probe(self, i_step: int, t: float) -> None:
+        """Append one probe row every ``probe_interval`` steps (else a no-op)."""
+        if self.probe_interval <= 0 or self._probe_idx is None:
+            return
+        if i_step % self.probe_interval:
+            return
+        if not torch.is_tensor(self._probe_idx):
+            self._probe_idx = torch.as_tensor(
+                np.asarray(self._probe_idx), dtype=torch.long,
+                device=self._u.device)
+        with torch.no_grad():
+            cur = self.contact_currents(t)
+            names = self.material.get_cell_scalar_names()
+            i_mu = names.index("chemical_potential")
+            sc = self.material.get_cell_scalars(
+                self._u[self._probe_idx], t)[:, i_mu].detach().cpu().numpy()
+        row = {"i_step": i_step, "t": t}
+        row.update({f"I_{k}": v for k, v in cur.items()})
+        for name, sel in self._probe_regions.items():
+            if self._mpi:
+                tot = self.comm.allreduce(float(sc[sel].sum()))
+                cnt = self.comm.allreduce(int(sel.size))
+            else:
+                tot, cnt = float(sc[sel].sum()), int(sel.size)
+            row[f"V_{name}"] = tot / max(cnt, 1)
+        if self._mpi and self.comm.rank:
+            return
+        new = not self._probe_header
+        with open(self.probe_file, "a") as fh:
+            if new:
+                fh.write(",".join(row.keys()) + "\n")
+                self._probe_header = True
+            fh.write(",".join(f"{v!r}" if isinstance(v, int) else f"{v:.10e}"
+                              for v in row.values()) + "\n")
 
     def contact_potentials(self) -> dict[str, float]:
         """Self-adjusting level of each feedback contact, from the last evaluation."""
