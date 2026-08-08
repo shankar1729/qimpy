@@ -2,6 +2,8 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, Optional
 
+import os
+import time
 import numpy as np
 import torch
 
@@ -83,6 +85,7 @@ class EEScattering(TreeNode):
         check_convergence: bool = True,
         backend: str = "auto",
         dense_budget_gb: float = 2.0,
+        dense_cache_dir: str = "",
         dense_chunk: int = 0,
         recon: str = "auto",
         checkpoint_in: CheckpointPath = CheckpointPath(),
@@ -192,6 +195,8 @@ class EEScattering(TreeNode):
         self.on_shell = on_shell
         self.tol = tol
         self.dense_budget_gb = float(dense_budget_gb)
+        self.dense_cache_dir = str(dense_cache_dir) or os.path.expanduser(
+            "~/.cache/qimpy/ee_dense")
         self.dense_chunk = int(dense_chunk)
         if backend not in ("auto", "dense", "matrix_free"):
             raise InvalidInputException(
@@ -355,7 +360,7 @@ class EEScattering(TreeNode):
                     else "matrix_free"
                 )
             if self.backend == "dense":
-                self._build_dense_vertices(T)
+                self._build_dense_vertices_cached(T)
                 vb = (self._sp_S.numel() * self._sp_S.element_size()
                       + self._sq_S.numel() * self._sq_S.element_size())
                 log.info(
@@ -669,6 +674,75 @@ class EEScattering(TreeNode):
         }
         self._nh = nh
         self._ps = torch.arange(-M, M + 1).to(device)
+
+    # tensors produced by _build_dense_vertices; the whole cached payload
+    _DENSE_TENSORS = ("_sp_S", "_sp_p1", "_sp_p2", "_sp_p3", "_sp_mo",
+                      "_sq_S", "_sq_q1", "_sq_q2", "_sq_mo")
+    _DENSE_CACHE_VERSION = 1   # BUMP whenever the vertex math changes
+
+    def _dense_cache_key(self, T: float) -> str:
+        """Hash of everything the packed vertices depend on.
+
+        Conservative by construction: it includes the radial basis coefficients
+        themselves (bytes), not just the inputs that generate them, so a change
+        in the basis construction cannot silently reuse a stale kernel.
+        """
+        import hashlib
+        fs = self.fermi_surface
+        psi_coeff = self._radial_galerkin(T)[0]
+        h = hashlib.sha256()
+        h.update(repr((
+            self._DENSE_CACHE_VERSION, float(fs.kF), float(fs.vF),
+            float(self.m_star), float(T), int(fs.M_theta), int(fs.Nr),
+            float(fs.xi_max), float(self.epsilon_bg), float(self.kappa),
+            float(self.well_width), float(self.g_s), int(self.n_alpha),
+            int(self.n_xi), int(self.n_phi), int(self.n_xi_proj),
+            float(self.xi_cut), bool(self.on_shell), str(fs.v.dtype),
+        )).encode())
+        h.update(psi_coeff.detach().cpu().contiguous().numpy().tobytes())
+        return h.hexdigest()[:32]
+
+    def _build_dense_vertices_cached(self, T: float) -> None:
+        """Disk-cached :meth:`_build_dense_vertices`.
+
+        The packed vertices depend only on the physics + quadrature parameters,
+        never on the state, the mesh, the drive or the time -- but a chunked run
+        is a fresh process per chunk, so without a cache the identical ~163 MB
+        kernel is recomputed every restart (measured 28 min at M=32/Nr=6, i.e.
+        ~9 h over a 20-chunk run).
+
+        Set ``dense_cache_dir`` to relocate, or QIMPY_EE_CACHE=0 to disable.
+        """
+        if os.environ.get("QIMPY_EE_CACHE", "1") == "0":
+            self._build_dense_vertices(T)
+            return
+        key = self._dense_cache_key(T)
+        path = os.path.join(self.dense_cache_dir, f"{key}.pt")
+        if os.path.isfile(path):
+            try:
+                blob = torch.load(path, map_location=rc.device,
+                                  weights_only=True)
+                for name in self._DENSE_TENSORS:
+                    setattr(self, name, blob[name])
+                self._dc_M, self._dc_nh = blob["_dc_M"], blob["_dc_nh"]
+                self._build_harmonic_tables()      # cheap; sets _U/_R/_null_proj
+                log.info(f"e-e dense vertices loaded from cache {path}")
+                return
+            except Exception as exc:               # corrupt/stale -> rebuild
+                log.info(f"e-e dense cache unusable ({exc}); rebuilding")
+        t0 = time.time()
+        self._build_dense_vertices(T)
+        try:
+            os.makedirs(self.dense_cache_dir, exist_ok=True)
+            blob = {n: getattr(self, n) for n in self._DENSE_TENSORS}
+            blob["_dc_M"], blob["_dc_nh"] = self._dc_M, self._dc_nh
+            tmp = path + f".tmp{os.getpid()}"      # atomic: never a partial file
+            torch.save(blob, tmp)
+            os.replace(tmp, path)
+            log.info(f"e-e dense vertices built in {time.time()-t0:.0f}s,"
+                     f" cached to {path}")
+        except Exception as exc:
+            log.info(f"e-e dense cache write failed ({exc}); continuing")
 
     def _build_dense_vertices(self, T: float) -> None:
         """Precontract the cubic + quadratic vertices into a fully-reduced SPARSE
