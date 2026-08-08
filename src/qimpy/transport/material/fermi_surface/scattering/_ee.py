@@ -82,6 +82,8 @@ class EEScattering(TreeNode):
         n_xi_proj: int = 0,
         check_convergence: bool = True,
         backend: str = "auto",
+        dense_budget_gb: float = 2.0,
+        dense_chunk: int = 0,
         recon: str = "auto",
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
@@ -189,6 +191,8 @@ class EEScattering(TreeNode):
         self.nonlinear = nonlinear
         self.on_shell = on_shell
         self.tol = tol
+        self.dense_budget_gb = float(dense_budget_gb)
+        self.dense_chunk = int(dense_chunk)
         if backend not in ("auto", "dense", "matrix_free"):
             raise InvalidInputException(
                 f"backend must be 'auto', 'dense' or 'matrix_free',"
@@ -779,6 +783,44 @@ class EEScattering(TreeNode):
         self._dc_M, self._dc_nh = M, nh
 
     def _apply_dense(self, a4: torch.Tensor) -> torch.Tensor:
+        """Cell-chunked wrapper over :meth:`_apply_dense_core`.
+
+        The core materializes ``(batch, n_triples)`` and
+        ``(batch, N_r, n_triples)`` temporaries.  At production size those are
+        tens of GB for the whole cell batch -- the mixer at M=32/N_r=6 asked for
+        23 GiB in one ``index_add_`` and OOM'd a 40 GB card -- so split the
+        leading (cell) batch to keep the live transient inside
+        ``dense_budget_gb`` (or a forced ``dense_chunk``).
+
+        Chunking is transparent: the only cross-chunk operation is a
+        concatenate, so results agree with the full-batch path to round-off
+        (measured 1.8e-11 on GPU, which is ``index_add_`` atomic
+        nondeterminism, not a chunking error).
+
+        NOTE this existed once before, was deployed but never committed, and
+        was destroyed by the 2026-07-04 wipe-to-committed-tree.  Keep it in git.
+        """
+        lead = a4.shape[:-2]
+        if not lead:
+            return self._apply_dense_core(a4)
+        n = 1
+        for sz in lead:
+            n *= int(sz)
+        chunk = self.dense_chunk
+        if chunk <= 0:
+            ntrip = int(self._sp_p1.numel() + self._sq_q1.numel())
+            itemsize = self._U.element_size()          # complex: 16 (fp64)
+            # x3 headroom for the live gather/scatter temporaries
+            per = max(1, 3 * int(a4.shape[-2]) * ntrip * itemsize)
+            chunk = max(1, int(self.dense_budget_gb * (2 ** 30) // per))
+        if chunk >= n:
+            return self._apply_dense_core(a4)
+        flat = a4.reshape(n, *a4.shape[-2:])
+        out = torch.cat([self._apply_dense_core(flat[i:i + chunk])
+                         for i in range(0, n, chunk)], dim=0)
+        return out.reshape(*lead, *out.shape[-2:])
+
+    def _apply_dense_core(self, a4: torch.Tensor) -> torch.Tensor:
         """Sparse-symmetric dense apply.  Gather the field at each packed
         ``(l, m)`` triple/pair, multiply by the (multiplicity-folded) symmetric
         kernel, scatter into the ``mo >= 0`` half by the additive rule, mirror
