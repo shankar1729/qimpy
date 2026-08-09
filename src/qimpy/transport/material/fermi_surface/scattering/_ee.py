@@ -701,14 +701,23 @@ class EEScattering(TreeNode):
     # tensors produced by _build_dense_vertices; the whole cached payload
     _DENSE_TENSORS = ("_sp_S", "_sp_p1", "_sp_p2", "_sp_p3", "_sp_mo",
                       "_sq_S", "_sq_q1", "_sq_q2", "_sq_mo")
-    _DENSE_CACHE_VERSION = 1   # BUMP whenever the vertex math changes
+    _DENSE_CACHE_VERSION = 2   # BUMP whenever the vertex math changes
 
     def _dense_cache_key(self, T: float) -> str:
         """Hash of everything the packed vertices depend on.
 
-        Conservative by construction: it includes the radial basis coefficients
-        themselves (bytes), not just the inputs that generate them, so a change
-        in the basis construction cannot silently reuse a stale kernel.
+        Conservative by construction: it hashes the actual QUADRATURE -- the
+        radial basis coefficients AND the azimuthal nodes/weights -- as bytes,
+        not merely the parameters that generate them.  So any change to how a
+        grid is built invalidates the cache automatically, without anyone
+        remembering to bump the version.
+
+        That is not hypothetical.  The beta grid gained its second graded edge
+        family while _DENSE_CACHE_VERSION stayed at 1, and the dense path then
+        served kernels built with the OLD grid to runs using the new one: the
+        dense and matrix-free backends disagreed by 5.0e-02 on the quadratic
+        with the cache warm, and by 1.9e-14 with it cold.  A key must depend on
+        the thing it caches, not on a promise to remember.
         """
         import hashlib
         fs = self.fermi_surface
@@ -723,6 +732,10 @@ class EEScattering(TreeNode):
             float(self.xi_cut), bool(self.on_shell), str(fs.v.dtype),
         )).encode())
         h.update(psi_coeff.detach().cpu().contiguous().numpy().tobytes())
+        # the azimuthal rule itself: captures n_phi, t, AND the grid construction
+        beta, wbeta = _kernels._beta_grid(self.n_phi, float(T) / self.E_F)
+        h.update(beta.detach().cpu().contiguous().numpy().tobytes())
+        h.update(wbeta.detach().cpu().contiguous().numpy().tobytes())
         return h.hexdigest()[:32]
 
     def _build_dense_vertices_cached(self, T: float) -> None:
