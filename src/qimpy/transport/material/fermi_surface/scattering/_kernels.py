@@ -174,7 +174,7 @@ def exact_collision_reference(
     # van-Hove point (beta = pi) -- shared with the production kinematics
     # (_beta_grid); phi3 is rebuilt as phi1 + beta per eval point below so the
     # edge is resolved at every phi1, not only phi1 = 0:
-    beta, wphi = _beta_grid(n_phi)
+    beta, wphi = _beta_grid(n_phi, t)
 
     def f0(x):
         return torch.sigmoid(-x)  # 1/(e^x + 1)
@@ -505,7 +505,7 @@ def L_blocks(
     w2 = torch.tensor(0.5 * (xi_cut - lo) * xw, **dd)
     # phi1 = 0 canonical (isotropy), so phi3 = beta; edge-clustered at beta = pi
     # (shared with the production kinematics via _beta_grid):
-    phi3, wphi = _beta_grid(n_phi)
+    phi3, wphi = _beta_grid(n_phi, t)
 
     def f0(x):
         return torch.sigmoid(-x)
@@ -641,31 +641,79 @@ def _complex_to_real(M: int) -> torch.Tensor:
 # ----------------------------------------------------------------------------
 # Shared thermal-shell kinematics for the nonlinear vertices
 # ----------------------------------------------------------------------------
-def _beta_grid(n_phi: int):
-    """Azimuth ``beta = phi3 - phi1`` quadrature on ``(0, 2 pi)`` with quadratic
-    node clustering at ``beta = pi``.
+def _beta_grid(n_phi: int, t: float = 0.0):
+    """Azimuth ``beta = phi3 - phi1`` on ``(0, 2 pi)``, graded at BOTH singular
+    families.
 
-    Backscattering (``beta = pi``) is where the two ``phi2`` roots coalesce and
-    the ``1/|sin(phi4 - phi2)|`` Jacobian develops its integrable ``1/sqrt``
-    van-Hove edge -- the dominant kinematic singularity for the
-    thermally-weighted shell (verified to sit at ``beta = pi`` for all relevant
-    energy nodes).  Plain Gauss-Legendre converges only algebraically and
-    non-monotonically there.  Mapping ``beta = pi (1 + u|u|)`` with
-    ``u = (s - pi)/pi`` and ``s`` a GL node gives ``dbeta/ds = 2|u| -> 0`` at
-    the edge: the quadratic grading exactly cancels the ``1/sqrt`` (the
-    integrand times ``|dbeta/ds|`` is regular at ``beta = pi``), restoring
-    smooth, monotone convergence.  This is a fixed numerical scheme (like the
-    Gauss-Legendre choice itself) -- no physical free parameter.  Returns
-    ``(beta, wbeta)`` in float64.
+    There are TWO distinct 1/sqrt structures here, not one:
+
+    * ``beta = pi`` (backscattering): the two ``phi2`` roots coalesce and the
+      ``1/|sin(phi4 - phi2)|`` Jacobian develops its van-Hove edge.
+
+    * ``beta = O(t)`` (near-forward): the root boundary ``|cos_arg| = 1`` is
+      ``k4 = |q +- k2|``.  Every momentum lies within ``O(t)`` of ``kF`` and
+      ``q ~ k beta`` at small ``beta``, so that boundary sits at
+      ``beta* ~ t |dxi|`` -- a FAMILY of edges whose positions MOVE with the
+      energy nodes.  The old single map ``beta = pi(1 + u|u|)`` graded only the
+      first family and had its COARSEST spacing (``dbeta/du -> 2 pi``) exactly
+      where the second one lives; only Gauss-Legendre endpoint clustering
+      resolved it (~11 nodes below ``beta = 2t`` at ``n_phi = 254``).  That is
+      why the CUBIC vertex converged algebraically and NON-MONOTONICALLY (|C|
+      moves of 0.70% then 2.18% on successive doublings, 17% low at the auto
+      ``n_phi``) while the linear blocks looked converged.
+
+    Four panels, each with a pure quadratic map that vanishes at the singular
+    end, so every panel integrand is smooth and Gauss-Legendre is spectral on
+    it -- no ``|u|`` kink anywhere (the old rule had one at ``beta = pi``,
+    which capped it at algebraic convergence even for the smooth part):
+
+        (0, bc)          beta = bc v^2            grades at 0
+        (bc, pi)         beta = pi - (pi-bc) v^2  grades at pi
+        (pi, 2pi-bc)     mirror
+        (2pi-bc, 2pi)    mirror
+
+    ``bc ~ 40 t`` covers the moving edge family out to ``xi_cut``.  Node counts
+    sum EXACTLY to ``n_phi`` (a caller reshaping to ``(n_xi, n_phi)`` depends on
+    it), and ``sum(wbeta) = 2 pi`` to machine precision.
+
+    ``t = 0`` reproduces the old single-graded rule bit-for-bit.
     """
     dd = dict(dtype=torch.float64)
-    pg, pw = np.polynomial.legendre.leggauss(n_phi)
-    s = np.pi * (pg + 1.0)  # (0, 2 pi)
-    u = (s - np.pi) / np.pi  # (-1, 1)
-    beta = np.pi * (1.0 + u * np.abs(u))  # clustered at beta = pi
-    wbeta = np.pi * pw * (2.0 * np.abs(u))  # dbeta/ds = 2|u|
+    if t <= 0.0:
+        pg, pw = np.polynomial.legendre.leggauss(n_phi)
+        s_ = np.pi * (pg + 1.0)
+        u = (s_ - np.pi) / np.pi
+        beta = np.pi * (1.0 + u * np.abs(u))
+        wbeta = np.pi * pw * (2.0 * np.abs(u))
+        return torch.tensor(beta, **dd), torch.tensor(wbeta, **dd)
+    beta_c = float(min(40.0 * t, 0.4))
+    # exact partition of n_phi over the four panels (edges get ~1/8 each)
+    n_e = max(4, n_phi // 8)
+    n_b = max(4, (n_phi - 2 * n_e) // 2)
+    counts = [n_e, n_b, n_b, n_e]
+    counts[1] += n_phi - sum(counts)          # absorb the remainder in a bulk panel
+    if counts[1] < 4:                          # tiny n_phi: fall back to one panel
+        pg, pw = np.polynomial.legendre.leggauss(n_phi)
+        s_ = np.pi * (pg + 1.0)
+        u = (s_ - np.pi) / np.pi
+        beta = np.pi * (1.0 + u * np.abs(u))
+        wbeta = np.pi * pw * (2.0 * np.abs(u))
+        return torch.tensor(beta, **dd), torch.tensor(wbeta, **dd)
+    half = np.pi - beta_c
+    bs, ws = [], []
+    for n, (span, anchor, sgn) in zip(counts, (
+            (beta_c, 0.0, +1.0),     # (0, bc):        beta = 0  + bc v^2
+            (half, np.pi, -1.0),     # (bc, pi):       beta = pi - half v^2
+            (half, np.pi, +1.0),     # (pi, 2pi-bc):   beta = pi + half v^2
+            (beta_c, 2 * np.pi, -1.0))):  # (2pi-bc,2pi): beta = 2pi - bc v^2
+        vg, vw = np.polynomial.legendre.leggauss(n)
+        v = 0.5 * (vg + 1.0)
+        bs.append(anchor + sgn * span * v * v)
+        ws.append(0.5 * vw * 2.0 * span * v)   # |dbeta/dv| = 2 span v
+    order = np.argsort(np.concatenate(bs))
+    beta = np.concatenate(bs)[order]
+    wbeta = np.concatenate(ws)[order]
     return torch.tensor(beta, **dd), torch.tensor(wbeta, **dd)
-
 
 def _shell_quadrature(T: float, E_F: float, n_xi: int, xi_cut: float, n_phi: int):
     """Energy (x2) Gauss-Legendre and azimuth (beta = phi3 - phi1) grids.
@@ -682,7 +730,7 @@ def _shell_quadrature(T: float, E_F: float, n_xi: int, xi_cut: float, n_phi: int
     xg, xw = np.polynomial.legendre.leggauss(n_xi)
     x2 = torch.tensor(0.5 * (xi_cut + lo) + 0.5 * (xi_cut - lo) * xg, **dd)
     w2 = torch.tensor(0.5 * (xi_cut - lo) * xw, **dd)
-    beta, wbeta = _beta_grid(n_phi)
+    beta, wbeta = _beta_grid(n_phi, t)
     return x2, w2, beta, wbeta, torch.cos(beta), torch.sin(beta)
 
 

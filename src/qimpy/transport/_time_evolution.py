@@ -25,6 +25,7 @@ class TimeEvolution(TreeNode):
     n_collate: int  #: Collect these many save steps into a single checkpoint
     integrator: str  #: Time-step style used for integration
     collision_interval: int  #: Strang-split the collision over this many streaming steps
+    collision_fuse: bool  #: merge adjacent half-kicks across windows (2x fewer applies)
     steady_state: dict[str, Union[str, float]]
 
     def __init__(
@@ -38,6 +39,7 @@ class TimeEvolution(TreeNode):
         n_collate: int = 0,
         integrator: str = "RK2",
         collision_interval: int = 1,
+        collision_fuse: bool = True,
         positivity: bool = False,
         steady_state: dict[str, Union[str, float]] = None,
         checkpoint_in: CheckpointPath = CheckpointPath(),
@@ -103,6 +105,7 @@ class TimeEvolution(TreeNode):
             self.warmup_steps = int(self.steady_state.get("warmup_steps", 0))
             self.integrator = self.steady_state.get("integrator", "RK2")
             self.collision_interval = 1        # root-finding: no splitting
+            self.collision_fuse = False
             self.positivity = False
             self.dt = 0.0
             self.t = 0.0
@@ -142,11 +145,24 @@ class TimeEvolution(TreeNode):
             if integrator not in {"RK2", "RK4", "SSPRK3"}:
                 raise InvalidInputException(f"Unrecognized {integrator = }")
             self.collision_interval = max(1, int(collision_interval))
+            self.collision_fuse = bool(collision_fuse)
+            self._half_pending = False
             if self.collision_interval > 1:
+                N = self.collision_interval
+                if self.collision_fuse and self.save_interval % N:
+                    # A fused window defers its trailing half-kick, so a
+                    # checkpoint is only EXACT at a window boundary.  Round the
+                    # save interval up so saves land there.
+                    old = self.save_interval
+                    self.save_interval = ((old + N - 1) // N) * N
+                    log.info(f"save_interval {old} -> {self.save_interval}"
+                             f" (multiple of collision_interval {N}, so"
+                             f" checkpoints land on window boundaries)")
                 log.info(
-                    f"Strang-splitting the collision every "
-                    f"{self.collision_interval} steps "
-                    f"(dt_coll = {self.collision_interval * self.dt:.4g})")
+                    f"Strang-splitting the collision every {N} steps"
+                    f" (dt_coll = {N * self.dt:.4g}),"
+                    f" {'FUSED' if self.collision_fuse else 'unfused'}"
+                    f" -> {2 if self.collision_fuse else 4} applies per window")
             self.positivity = bool(positivity)
             if self.positivity and integrator != "SSPRK3":
                 log.info("positivity=True is only rigorously guaranteed with "
@@ -180,19 +196,46 @@ class TimeEvolution(TreeNode):
                 raise InvalidInputException(
                     "collision_interval > 1 needs a geometry implementing"
                     " collision_dot (finite_volume)")
-            j = self.i_step % N
             dt_half = 0.5 * N * self.dt
-            if j == 0:
-                self._collision_kick(geometry, dt_half)
+            j = self.i_step % N
+            if self.collision_fuse:
+                # Fused: the trailing half-kick of one window and the leading
+                # half of the next are adjacent (no streaming between them), so
+                # apply them as ONE full kick -- 2 applies per window instead of
+                # 4.  The cost is that mid-window the state carries a pending
+                # trailing half-kick; flush_collision() settles it, and saves are
+                # aligned to window boundaries so checkpoints stay exact.
+                if j == 0:
+                    if self._half_pending:
+                        self._collision_kick(geometry, 2.0 * dt_half)
+                    else:
+                        self._collision_kick(geometry, dt_half)
+                        self._half_pending = True
+            else:
+                if j == 0:
+                    self._collision_kick(geometry, dt_half)
             geometry.collision_enabled = False
             try:
                 self._rk_step(geometry)
             finally:
                 geometry.collision_enabled = True
-            if j == N - 1:
+            if (not self.collision_fuse) and j == N - 1:
                 self._collision_kick(geometry, dt_half)
             return
         self._rk_step(geometry)
+
+    def flush_collision(self, geometry: Geometry) -> None:
+        """Settle the deferred trailing half-kick of a fused window.
+
+        A no-op unless fusing is on and a half-kick is outstanding.  Must be
+        called before anything reads the state as physical -- checkpoints,
+        stashed observables -- otherwise the snapshot is short by half a
+        collision sub-step.
+        """
+        if self.collision_interval > 1 and self.collision_fuse \
+                and getattr(self, "_half_pending", False):
+            self._collision_kick(geometry, 0.5 * self.collision_interval * self.dt)
+            self._half_pending = False
 
     def _collision_kick(self, geometry: Geometry, dt_coll: float) -> None:
         """Advance the collision sub-flow ALONE over dt_coll (explicit midpoint).
@@ -321,6 +364,7 @@ class TimeEvolution(TreeNode):
             while self.i_step <= self.n_steps:
                 should_save = (self.i_step > self.i_step_initial) or (self.i_step == 0)
                 if self.i_step % self.save_interval == 0 and should_save:
+                    self.flush_collision(transport.geometry)
                     transport.geometry.update_stash(self.i_step, self.t)
                     i_collate += 1
                     log.info(f"Stashed results of step {self.i_step}")
@@ -329,6 +373,7 @@ class TimeEvolution(TreeNode):
                         i_collate = 0
 
                 if self.i_step == self.n_steps:
+                    self.flush_collision(transport.geometry)
                     if i_collate:
                         transport.save(self.i_step)
                     break

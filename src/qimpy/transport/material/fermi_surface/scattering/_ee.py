@@ -245,7 +245,20 @@ class EEScattering(TreeNode):
         self.n_xi = n_xi if n_xi else int(np.ceil(max(16, 4 * Nr) * s))
         # >= 96 so ALL hybrid Gram entries are machine-converged (memo):
         self.n_xi_proj = max(n_xi_proj, 96, Nr + 6)
-        nphi_auto = max(6 * M + 2, int(np.ceil(8.0 * s / max(t_ratio, 1e-3))))
+        # Edge resolution: the collinear/van-Hove feature has angular width
+        # ~t_ratio, so this term puts `edge_pts` quadrature nodes across it.
+        # MEASURED (M=4 and M=32, GaAs 2DEG, T/E_F = 0.0317): 8 points is
+        # enough for the LINEAR blocks but leaves the CUBIC vertex 17% low --
+        # |C| = 48.6 at n_phi = 254 (8 pts) against 58.3 at n_phi = 2032, with
+        # 56.6 at 508 (16 pts) and 57.0 at 1016 (32 pts).  The linear rates
+        # converge at 8 because they carry M harmonics; the cubic carries 3M
+        # over the same edge and binds ~4x harder.  So the nonlinear build
+        # needs 32, not 8.  This is a build-time cost only (the apply is
+        # unaffected) and the vertices are disk-cached, so it is paid once.
+        edge_pts = 32.0 if nonlinear else 8.0
+        nphi_auto = max(6 * M + 2,
+                        int(np.ceil(edge_pts * s / max(t_ratio, 1e-3))))
+        self._n_phi_auto = not n_phi        # was it the library's choice?
         self.n_phi = n_phi if n_phi else nphi_auto + (nphi_auto % 2)
         self.xi_cut = xi_cut if xi_cut else 10.0
         self.n_alpha = n_alpha if n_alpha else 4096
@@ -540,11 +553,21 @@ class EEScattering(TreeNode):
         rel = max(moves.values())
         detail = ", ".join(f"d({k}) = {v:.1e}" for k, v in moves.items())
         if rel > self.tol:
-            log.info(
-                f"WARNING: e-e quadrature may be under-resolved -- {detail}"
-                f" when n_phi {self.n_phi} -> {n_phi_ref}"
-                f" (tol = {self.tol:.0e}). Lower `tol` or set `n_phi` explicitly."
-            )
+            msg = (f"e-e quadrature under-resolved -- {detail} when n_phi"
+                   f" {self.n_phi} -> {n_phi_ref} (tol = {self.tol:.0e})."
+                   f" Raise `n_phi`, lower `tol`, or set check_convergence=False"
+                   f" to proceed deliberately.")
+            # A silently under-resolved NONLINEAR vertex is not a warning-level
+            # event: it was measured 17% low on the production mixer and ran for
+            # a day as a log line nobody read.  Fail the build -- but ONLY when
+            # n_phi was the library's own automatic choice.  An EXPLICIT n_phi is
+            # a deliberate decision (the equivalence tests set a small one on
+            # purpose: they compare two implementations at the SAME quadrature
+            # and do not care about absolute accuracy), so there it stays a
+            # warning.  The run that motivated this used the auto value.
+            if self.nonlinear and self._n_phi_auto and rel > 10.0 * self.tol:
+                raise InvalidInputException(msg)
+            log.info("WARNING: " + msg)
         else:
             log.info(
                 f"quadrature convergence OK: {detail}"
