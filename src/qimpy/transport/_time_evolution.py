@@ -13,6 +13,13 @@ from qimpy.io import CheckpointPath, CheckpointContext, InvalidInputException
 from .geometry import Geometry, TensorList
 
 
+def _amax(x) -> float:
+    """max |.| over a TensorList (or a bare Tensor). Forces one sync."""
+    if torch.is_tensor(x):
+        return float(x.abs().max())
+    return max((float(xi.abs().max()) for xi in x), default=0.0)
+
+
 class TimeEvolution(TreeNode):
     """Time evolution parameters."""
 
@@ -26,6 +33,8 @@ class TimeEvolution(TreeNode):
     integrator: str  #: Time-step style used for integration
     collision_interval: int  #: Strang-split the collision over this many streaming steps
     collision_fuse: bool  #: merge adjacent half-kicks across windows (2x fewer applies)
+    collision_s_max: float  #: Adaptive-substep bound on the measured collision rate
+    collision_rho_max: float  #: Abort if the collision kick leaves max|rho| above this
     steady_state: dict[str, Union[str, float]]
 
     def __init__(
@@ -40,6 +49,8 @@ class TimeEvolution(TreeNode):
         integrator: str = "RK2",
         collision_interval: int = 1,
         collision_fuse: bool = True,
+        collision_s_max: float = 0.0,
+        collision_rho_max: float = 0.0,
         positivity: bool = False,
         steady_state: dict[str, Union[str, float]] = None,
         checkpoint_in: CheckpointPath = CheckpointPath(),
@@ -73,6 +84,37 @@ class TimeEvolution(TreeNode):
             :yaml:`Integrator for time-stepping: RK2, RK4 or SSPRK3.`
             SSPRK3 is the 3-stage strong-stability-preserving Runge-Kutta scheme
             required for the positivity guarantee below.
+        collision_fuse
+            :yaml:`Merge adjacent half-kicks across Strang windows.`
+            Halves the number of collision applies per window. Note the merged
+            kick spans twice the interval, so it doubles the stability number
+            `s` below.
+        collision_s_max
+            :yaml:`Adaptive bound on the measured collision stability number.`
+            If > 0, each Strang collision kick is subdivided so that
+
+                s = 0.5 * h * max|C[rho]| / max|rho|     (~ gamma_eff * h / 2)
+
+            stays below this on every substep; s is re-measured each substep
+            from k1, which the midpoint has already evaluated, so the control
+            costs one reduction per substep and no extra applies. Zero
+            (default) disables it and takes the original single-midpoint path
+            exactly.
+
+            Size this from a MEASUREMENT, not from the linear gamma_max: C[f]
+            is cubic, so gamma_eff grows with amplitude and a step sized once
+            from gamma_max is not safe for a run whose amplitude evolves.
+            Measured on the M=32/Nr=6 mixer at 17.66 uA: s = 0.19 diverges
+            (gain 1.002 per kick early, 3.7e7 by the end, and |df| > 1 some
+            700 steps before the overflow), while s <= 0.040 is flat over the
+            same window. Recommended: 0.05.
+        collision_rho_max
+            :yaml:`Abort if a collision kick leaves max|rho| above this.`
+            rho is the deviation df about f0, so |df| <= 1 identically for a
+            Fermi occupation and anything above 1 is unphysical. Setting this
+            to ~1 turns a slow numerical divergence into an immediate, located
+            failure instead of an overflow thousands of steps later. Zero
+            (default) disables the check. NaN also trips it.
         positivity
             :yaml:`Enforce a non-negative density via a Zhang-Shu scaling limiter.`
             Applied to the m=0 (density) channel after each stage; conservative
@@ -106,6 +148,8 @@ class TimeEvolution(TreeNode):
             self.integrator = self.steady_state.get("integrator", "RK2")
             self.collision_interval = 1        # root-finding: no splitting
             self.collision_fuse = False
+            self.collision_s_max = 0.0
+            self.collision_rho_max = float(collision_rho_max)
             self.positivity = False
             self.dt = 0.0
             self.t = 0.0
@@ -146,6 +190,8 @@ class TimeEvolution(TreeNode):
                 raise InvalidInputException(f"Unrecognized {integrator = }")
             self.collision_interval = max(1, int(collision_interval))
             self.collision_fuse = bool(collision_fuse)
+            self.collision_s_max = float(collision_s_max)
+            self.collision_rho_max = float(collision_rho_max)
             self._half_pending = False
             if self.collision_interval > 1:
                 N = self.collision_interval
@@ -163,6 +209,12 @@ class TimeEvolution(TreeNode):
                     f" (dt_coll = {N * self.dt:.4g}),"
                     f" {'FUSED' if self.collision_fuse else 'unfused'}"
                     f" -> {2 if self.collision_fuse else 4} applies per window")
+            if self.collision_s_max > 0.0:
+                log.info(f"Adaptive collision substepping: s <= "
+                         f"{self.collision_s_max:g} (measured per substep)")
+            if self.collision_rho_max > 0.0:
+                log.info(f"Collision validity gate: max|rho| <= "
+                         f"{self.collision_rho_max:g}")
             self.positivity = bool(positivity)
             if self.positivity and integrator != "SSPRK3":
                 log.info("positivity=True is only rigorously guaranteed with "
@@ -237,16 +289,93 @@ class TimeEvolution(TreeNode):
             self._collision_kick(geometry, 0.5 * self.collision_interval * self.dt)
             self._half_pending = False
 
+    #: Absolute floor on max|rho| in the substep control, so the ratio is
+    #: defined at a cold start where rho is identically zero. Far below fp64
+    #: noise on an O(1) occupation, so it never binds on a live state.
+    _RHO_ATOL = 1e-12
+    #: Refuse to subdivide a single kick further than this (fail loudly rather
+    #: than spin forever if the rate estimate blows up).
+    _MAX_SUBSTEPS = 4096
+
     def _collision_kick(self, geometry: Geometry, dt_coll: float) -> None:
         """Advance the collision sub-flow ALONE over dt_coll (explicit midpoint).
 
-        Second order, two collision applies.  Stability needs
-        ``gamma_max * dt_coll < 2``; accuracy in practice wants it well below 1.
+        Second order, two collision applies per substep.
+
+        With ``collision_s_max = 0`` (default) this is a single midpoint step
+        over the whole of dt_coll, bit-identical to the original scheme.
+
+        With ``collision_s_max > 0`` the interval is subdivided so that the
+        MEASURED stability number
+
+            s = 0.5 * h * max|C[rho]| / max|rho|          (~ gamma_eff * h / 2)
+
+        stays below ``collision_s_max`` on every substep.  s is re-measured
+        each substep from k1 -- which the midpoint has already evaluated -- so
+        the control costs one reduction per substep and no extra applies.
+
+        Do NOT size this step from ``gamma_max * dt_coll < 2``, the linear
+        criterion this docstring used to quote.  C[f] is cubic, so gamma_eff
+        rises with amplitude: on the M=32/Nr=6 mixer at 17.66 uA a kick that
+        started at s = 0.19 was already growing by 1.002 per kick, reached
+        |df| > 1 (unphysical) ~700 steps later and overflowed to 1e156 by step
+        124,099, while the same state at s <= 0.040 was flat over the same
+        window.  Hence: measure s, do not assume it, and keep it <= 0.05.
+
+        Note ``collision_fuse`` doubles dt_coll on the merged kicks, hence
+        doubles s -- another reason to bound the measurement rather than a
+        nominal N.
         """
-        rho0 = geometry.rho
-        k1 = geometry.collision_dot(rho0)
-        k2 = geometry.collision_dot(rho0 + (0.5 * dt_coll) * k1)
-        geometry.rho = rho0 + dt_coll * k2
+        rho = geometry.rho
+        s_max = self.collision_s_max
+        if s_max <= 0.0:
+            k1 = geometry.collision_dot(rho)
+            k2 = geometry.collision_dot(rho + (0.5 * dt_coll) * k1)
+            geometry.rho = rho + dt_coll * k2
+            self._check_collision_rho(geometry.rho)
+            return
+
+        t_left = dt_coll
+        k1 = geometry.collision_dot(rho)
+        n_sub = 0
+        while t_left > 0.0:
+            n_sub += 1
+            if n_sub > self._MAX_SUBSTEPS:
+                raise RuntimeError(
+                    f"collision kick at step {self.i_step} still needs "
+                    f"substeps after {self._MAX_SUBSTEPS}: the collision rate "
+                    "is diverging, not merely stiff. Inspect the state rather "
+                    "than raising the substep cap.")
+            # Rate measured from the state the substep actually starts at. The
+            # maxima of |k1| and |rho| may sit in different cells, which only
+            # makes h more conservative -- and it matches the quantity the
+            # instability was diagnosed with.
+            rate = 0.5 * _amax(k1) / max(_amax(rho), self._RHO_ATOL)
+            h = t_left if rate <= 0.0 else min(t_left, s_max / rate)
+            k2 = geometry.collision_dot(rho + (0.5 * h) * k1)
+            rho = rho + h * k2
+            t_left -= h  # h is min(t_left, .), so the last substep lands exactly
+            if t_left > 0.0:
+                k1 = geometry.collision_dot(rho)
+        geometry.rho = rho
+        self._check_collision_rho(rho)
+        if n_sub != getattr(self, "_n_sub_last", 0):
+            log.info(f"Collision substeps: {n_sub} (dt_coll = {dt_coll:.4g}, "
+                     f"step {self.i_step})")
+            self._n_sub_last = n_sub
+
+    def _check_collision_rho(self, rho) -> None:
+        """Trip on an unphysical state as soon as the kick produces one."""
+        if self.collision_rho_max > 0.0:
+            a = _amax(rho)
+            if not (a <= self.collision_rho_max):  # also catches NaN
+                raise RuntimeError(
+                    f"collision kick at step {self.i_step} left "
+                    f"max|rho| = {a:.6e}, above collision_rho_max = "
+                    f"{self.collision_rho_max:g}. rho is the deviation df "
+                    "about f0, so |df| <= 1 identically: the state is no "
+                    "longer physical. Reduce collision_s_max (or "
+                    "collision_interval) rather than raising this bound.")
 
     def _rk_step(self, geometry: Geometry) -> None:
         """Advance one step (RK2/RK4, or SSPRK3 for positivity preservation)."""
