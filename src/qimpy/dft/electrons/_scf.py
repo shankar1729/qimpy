@@ -2,8 +2,9 @@ from __future__ import annotations
 from typing import Optional, Sequence
 
 import torch
+import torch.distributed as dist
 
-from qimpy import dft, Energy, MPI
+from qimpy import dft, Energy
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import globalreduce
 from qimpy.algorithms import Pulay
@@ -27,7 +28,7 @@ class SCF(Pulay[FieldH]):
     def __init__(
         self,
         *,
-        comm: MPI.Comm,
+        group: dist.ProcessGroup,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         n_iterations: int = 50,
         energy_threshold: float = 1e-8,
@@ -100,7 +101,7 @@ class SCF(Pulay[FieldH]):
         self.eig_threshold = float(eig_threshold)
         self.mix_density = mix_density
         super().__init__(
-            comm=comm,
+            group=group,
             name="SCF",
             checkpoint_in=checkpoint_in,
             n_iterations=n_iterations,
@@ -139,7 +140,7 @@ class SCF(Pulay[FieldH]):
         iG = grid.get_mesh("H").to(torch.double)  # half-space
         Gsq = ((iG @ grid.lattice.Gbasis.T) ** 2).sum(dim=-1)
         # --- regularize Gsq by q_kappa or min(G!=0) as appropriate
-        Gsq_min = globalreduce.min(Gsq[Gsq > 0.0], self.comm)
+        Gsq_min = globalreduce.min(Gsq[Gsq > 0.0], self.group)
         q_kappa_sq = 0.0 if (self.q_kappa is None) else (self.q_kappa**2)
         Gsq_reg = (Gsq + q_kappa_sq) if q_kappa_sq else torch.clamp(Gsq, min=Gsq_min)
         # --- compute kernels
@@ -166,7 +167,7 @@ class SCF(Pulay[FieldH]):
         # Compute eigenvalue difference for extra convergence threshold:
         eig_cur = electrons.eig[..., : electrons.fillings.n_bands]
         deig = (eig_cur - eig_prev).abs()
-        deig_max = globalreduce.max(deig, electrons.comm)
+        deig_max = globalreduce.max(deig, electrons.group).item()
         return [deig_max]
 
     @property

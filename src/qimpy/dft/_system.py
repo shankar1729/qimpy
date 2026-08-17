@@ -134,7 +134,7 @@ class System(TreeNode):
             checkpoint_in,
             lattice=self.lattice,
             symmetries=self.symmetries,
-            comm=self.electrons.comm,  # Parallel
+            group=self.electrons.group,  # Parallel
             ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff,
         )
 
@@ -152,7 +152,7 @@ class System(TreeNode):
             Geometry,
             geometry,
             checkpoint_in,
-            comm=self.electrons.comm,
+            group=self.electrons.group,
             lattice=self.lattice,
         )
         self.add_child(

@@ -31,8 +31,8 @@ class TaskDivision:
         # Compute remaining attributes:
         self.n_each = qimpy.math.ceildiv(n_tot, n_procs)
         self.n_prev = np.minimum(n_tot, self.n_each * np.arange(n_procs + 1))
-        self.i_start = self.n_prev[i_proc]
-        self.i_stop = self.n_prev[i_proc + 1]
+        self.i_start = int(self.n_prev[i_proc])
+        self.i_stop = int(self.n_prev[i_proc + 1])
         self.n_mine = self.i_stop - self.i_start
         # Optionally report counts and imbalance:
         if name:

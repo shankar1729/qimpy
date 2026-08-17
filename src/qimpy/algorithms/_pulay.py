@@ -4,11 +4,12 @@ from abc import ABC, abstractmethod
 from collections import deque
 
 import numpy as np
+import torch
+import torch.distributed as dist
 
-from qimpy import log, rc, TreeNode, Energy, MPI
+from qimpy import log, rc, TreeNode, Energy
 from qimpy.io import CheckpointPath
 from ._optimizable import Optimizable, ConvergenceCheck
-
 
 Variable = TypeVar("Variable", bound=Optimizable)
 
@@ -19,7 +20,7 @@ class Pulay(Generic[Variable], ABC, TreeNode):
     by the `Optimizable` abstract base class.
     """
 
-    comm: MPI.Comm  #: Communicator over which algorithm operates in unison
+    group: dist.ProcessGroup  #: Process group over which algorithm operates in unison
     name: str  #: Name of algorithm instance used in reporting eg. 'SCF'.
     n_iterations: int  #: Maximum number of iterations
     energy_threshold: float  #: Convergence threshold on energy change
@@ -42,7 +43,7 @@ class Pulay(Generic[Variable], ABC, TreeNode):
         self,
         *,
         checkpoint_in: CheckpointPath,
-        comm: MPI.Comm,
+        group: dist.ProcessGroup,
         name: str,
         n_iterations: int,
         energy_threshold: float,
@@ -54,7 +55,7 @@ class Pulay(Generic[Variable], ABC, TreeNode):
     ) -> None:
         """Initialize Pulay algorithm parameters."""
         super().__init__()
-        self.comm = comm
+        self.group = group
         self.name = name
         self.n_iterations = n_iterations
         self.energy_threshold = energy_threshold
@@ -97,6 +98,7 @@ class Pulay(Generic[Variable], ABC, TreeNode):
     @variable.setter  # type: ignore
     @abstractmethod
     def variable(self, v: Variable) -> None:
+        """Set current variable in the state of the system."""
         ...
 
     @property
@@ -212,4 +214,6 @@ class Pulay(Generic[Variable], ABC, TreeNode):
 
     def _sync(self, v: float) -> float:
         """Ensure `v` is consistent on `comm`."""
-        return self.comm.bcast(v)
+        buf = torch.tensor(v, device=rc.device)
+        dist.broadcast(buf, group=self.group)
+        return buf.item()  # TODO: maybe keep energy as scalar tensors

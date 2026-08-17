@@ -4,8 +4,9 @@ from functools import cache
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import rc, log, TreeNode, grid, MPI
+from qimpy import rc, log, TreeNode, grid
 from qimpy.mpi import TaskDivision
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.lattice import Lattice
@@ -15,7 +16,7 @@ from ._fft import init_grid_fft, FFT, IFFT, IndicesType
 
 class Grid(TreeNode):
     """Real and reciprocal space grids for a unit cell.
-    The grid could either be local or distributed over an MPI communicator,
+    The grid could either be local or distributed over a process group,
     and this class provides FFT routines to switch fields on these grids,
     and routines to convert fields between grids.
     """
@@ -23,9 +24,9 @@ class Grid(TreeNode):
     lattice: Lattice
     symmetries: Symmetries
     _field_symmetrizer: Optional[grid.FieldSymmetrizer]
-    comm: Optional[MPI.Comm]  #: Communicator to split grid and FFTs over
-    n_procs: int  #: Size of comm
-    i_proc: int  #: Rank within comm
+    group: Optional[dist.ProcessGroup]  #: Process group to split grid and FFTs over
+    n_procs: int  #: Size of proces group
+    i_proc: int  #: Rank within process group
     is_split: bool  #: Whether the grid is split over MPI
     ke_cutoff: float  #: Kinetic energy of Nyquist-frequency plane-waves
     shape: tuple[int, ...]  #: Global real-space grid dimensions
@@ -48,7 +49,7 @@ class Grid(TreeNode):
         *,
         lattice: Lattice,
         symmetries: Symmetries,
-        comm: Optional[MPI.Comm],
+        group: Optional[dist.ProcessGroup],
         checkpoint_in: CheckpointPath = CheckpointPath(),
         ke_cutoff_wavefunction: Optional[float] = None,
         ke_cutoff: Optional[float] = None,
@@ -64,8 +65,8 @@ class Grid(TreeNode):
             Symmetries with which grid dimensions will be made commensurate,
             checked if specified explicitly by shape below and used for
             symmetrization of :class:`Field`'s associated with this grid.
-        comm
-            Communicator to split grid (and its FFTs) over, if provided.
+        group
+            Process group to split grid (and its FFTs) over, if provided.
         ke_cutoff_wavefunction
             Plane-wave kinetic-energy cutoff in :math:`E_h` for any electronic
             wavefunctions to be used with this grid. This is an internally set
@@ -86,10 +87,10 @@ class Grid(TreeNode):
         self.symmetries = symmetries
         self._field_symmetrizer = None
 
-        # MPI settings (identify local or split):
-        self.comm = comm
+        # Process group settings (identify local or split):
+        self.group = group
         self.n_procs, self.i_proc = (
-            (1, 0) if (comm is None) else (comm.Get_size(), comm.Get_rank())
+            (1, 0) if (group is None) else (group.size(), group.rank())
         )
         self.is_split = self.n_procs == 1
 
@@ -107,7 +108,7 @@ class Grid(TreeNode):
             elif self.ke_cutoff < 4 * ke_cutoff_wavefunction:
                 log.info(
                     f"Note: ke_cutoff (={self.ke_cutoff:g}) < 4"
-                    f"*ke_cutoff_wavefunction (={4*ke_cutoff_wavefunction:g})"
+                    f"*ke_cutoff_wavefunction (={4 * ke_cutoff_wavefunction:g})"
                     " truncates high wave vectors in density calculation"
                 )
 
@@ -125,7 +126,7 @@ class Grid(TreeNode):
             )
             # Align to multiple of 4 for FFT efficiency:
             shape_min = 4 * np.ceil(np.array(shape_min) / 4).astype(int)
-            log.info(f"minimum multiple-of-4 shape: {tuple(shape_min)}")
+            log.info(f"minimum multiple-of-4 shape: {tuple(shape_min.tolist())}")
 
         if shape is not None:
             self.shape = tuple(shape)
@@ -139,7 +140,7 @@ class Grid(TreeNode):
                     "At least one of ke-cutoff-wavefunction, "
                     "ke-cutoff or shape must be specified"
                 )
-            self.shape = tuple(symmetries.get_grid_shape(shape_min))
+            self.shape = tuple(symmetries.get_grid_shape(shape_min).tolist())
         log.info(f"selected shape: {self.shape}")
         init_grid_fft(self)
 

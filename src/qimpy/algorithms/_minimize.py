@@ -3,8 +3,10 @@ from typing import Generic, Sequence, NamedTuple, Optional, Union
 from abc import ABC, abstractmethod
 
 import numpy as np
+import torch
+import torch.distributed as dist
 
-from qimpy import log, Energy, TreeNode, MPI
+from qimpy import rc, log, Energy, TreeNode
 from qimpy.io import CheckpointPath
 from qimpy.io.dict import key_cleanup
 from ._minimize_lbfgs import lbfgs
@@ -52,7 +54,7 @@ class Minimize(Generic[Vector], ABC, TreeNode):
         energy: float = 1e-4  #: Dimensionless minimum energy reduction in step
         gradient: float = 0.9  #: Required reduction of projected gradient
 
-    comm: MPI.Comm  #: Communicator over which algorithm operates in unison
+    group: dist.ProcessGroup  #: Process group over which algorithm operates in unison
     name: str  #: Name of algorithm instance used in reporting eg. 'Ionic'
     i_iter_start: int  #: Starting iteration number (eg. if continuing from checkpoint)
     n_iterations: int  #: Maximum number of iterations
@@ -77,7 +79,7 @@ class Minimize(Generic[Vector], ABC, TreeNode):
         self,
         *,
         checkpoint_in: CheckpointPath,
-        comm: MPI.Comm,
+        group: dist.ProcessGroup,
         name: str,
         n_iterations: int,
         energy_threshold: float,
@@ -94,7 +96,7 @@ class Minimize(Generic[Vector], ABC, TreeNode):
     ) -> None:
         """Initialize minimization algorithm parameters."""
         super().__init__()
-        self.comm = comm
+        self.group = group
         self.name = name
         self.i_iter_start = i_iter_start
         self.n_iterations = n_iterations
@@ -177,7 +179,7 @@ class Minimize(Generic[Vector], ABC, TreeNode):
         approaching 1 for a range of step sizes, with deviations at lower
         step sizes due to round off error and at higher step sizes due to
         nonlinearity."""
-        log.info(f'{self.name}: {"-"*12} Finite difference test {"-"*12}')
+        log.info(f'{self.name}: {"-" * 12} Finite difference test {"-" * 12}')
         if step_sizes is None:
             step_sizes = np.logspace(-9, 1, 11).tolist()
         # Initial state with gradient:
@@ -196,15 +198,17 @@ class Minimize(Generic[Vector], ABC, TreeNode):
             log.info(
                 f"{self.name}: step size: {step_size:.3e}"
                 f"  d{state.energy.name}"
-                f" ratio: {deltaE/dE_expected:.11f}"
+                f" ratio: {deltaE / dE_expected:.11f}"
             )
-        log.info(f'{self.name}: {"-"*48}')
+        log.info(f'{self.name}: {"-" * 48}')
         # Restore original position:
         self.step(direction, -step_size_prev)
 
     def _sync(self, v: float) -> float:
         """Ensure `v` is consistent on `comm`."""
-        return self.comm.bcast(v)
+        buf = torch.tensor(v, device=rc.device)
+        dist.broadcast(buf, group=self.group)
+        return buf.item()  # TODO: maybe keep energy as scalar tensors
 
     def _compute(self, state: MinimizeState[Vector], energy_only: bool) -> float:
         """Internal helper to prepare `state`, call `compute`

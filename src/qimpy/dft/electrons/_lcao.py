@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import rc, dft, MPI
+from qimpy import rc, dft
 from qimpy.io import CheckpointPath, CheckpointContext
-from qimpy.mpi import BufferView
 from qimpy.math import eighg, dagger
 from qimpy.algorithms import Minimize, MinimizeState, MatrixArray
 from qimpy.grid import FieldH, FieldR, Grid
@@ -20,7 +20,7 @@ class LCAO(Minimize[MatrixArray]):
     def __init__(
         self,
         *,
-        comm: MPI.Comm,
+        group: dist.ProcessGroup,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         n_iterations: int = 30,
         energy_threshold: float = 1e-6,
@@ -40,7 +40,7 @@ class LCAO(Minimize[MatrixArray]):
             falls below this threshold.
         """
         super().__init__(
-            comm=comm,
+            group=group,
             name="LCAO",
             checkpoint_in=checkpoint_in,
             method="cg",
@@ -120,8 +120,8 @@ class LCAO(Minimize[MatrixArray]):
         E_mu_num = (wf_eig * dH_sub_diag).sum(dim=(1, 2))
         E_mu_den = wf_eig.sum(dim=(1, 2))  # TODO: make this more general:
         rc.current_stream_synchronize()
-        el.kpoints.comm.Allreduce(MPI.IN_PLACE, BufferView(E_mu_num), MPI.SUM)
-        el.kpoints.comm.Allreduce(MPI.IN_PLACE, BufferView(E_mu_den), MPI.SUM)
+        dist.all_reduce(E_mu_num, group=el.kpoints.group)
+        dist.all_reduce(E_mu_den, group=el.kpoints.group)
         E_mu_den.clamp_(max=-1e-20)  # avoid 0/0 in large-gap corner cases
         if (el.n_spins == 1) or el.fillings.M_constrain:
             E_mu = E_mu_num / E_mu_den  # N of each spin channel constrained
@@ -144,6 +144,6 @@ class LCAO(Minimize[MatrixArray]):
         E_H_aux = self._rot_prev @ E_H_aux @ dagger_rot_prev
         K_E_H_aux = self._rot_prev @ K_E_H_aux @ dagger_rot_prev
         # Store gradients:
-        state.gradient = MatrixArray(M=E_H_aux, comm=el.kpoints.comm)
-        state.K_gradient = MatrixArray(M=K_E_H_aux, comm=el.kpoints.comm)
+        state.gradient = MatrixArray(M=E_H_aux, group=el.kpoints.group)
+        state.K_gradient = MatrixArray(M=K_E_H_aux, group=el.kpoints.group)
         state.extra = [np.sqrt(state.gradient.vdot(state.gradient))]

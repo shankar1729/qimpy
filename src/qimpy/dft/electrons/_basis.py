@@ -160,7 +160,7 @@ class Basis(TreeNode):
             checkpoint_in,
             lattice=lattice,
             symmetries=symmetries,
-            comm=None,  # Never parallel
+            group=None,  # Never parallel
             ke_cutoff_wavefunction=self.ke_cutoff,
         )
 

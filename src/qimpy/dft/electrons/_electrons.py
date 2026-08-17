@@ -5,9 +5,9 @@ import numpy as np
 import torch
 import torch.distributed as dist
 
-from qimpy import log, rc, TreeNode, dft, MPI
+from qimpy import log, rc, TreeNode, dft
 from qimpy.io import CheckpointPath, CheckpointContext, Checkpoint
-from qimpy.mpi import ProcessGrid, globalreduce, BufferView
+from qimpy.mpi import ProcessGrid, globalreduce
 from qimpy.math import abs_squared
 from qimpy.lattice import Lattice, Kpoints, Kmesh, Kpath
 from qimpy.symmetries import Symmetries
@@ -228,7 +228,7 @@ class Electrons(TreeNode):
                 raise ValueError("lcao must be False or LCAO parameters")
             self.lcao = None
         else:
-            self.add_child("lcao", LCAO, lcao, checkpoint_in, comm=self.comm)
+            self.add_child("lcao", LCAO, lcao, checkpoint_in, group=self.group)
 
         # Initialize diagonalizer:
         self.add_child_one_of(
@@ -251,7 +251,7 @@ class Electrons(TreeNode):
         log.info("\nDiagonalization: " + repr(self.diagonalize))
 
         # Initialize SCF:
-        self.add_child("scf", SCF, scf, checkpoint_in, comm=self.comm)
+        self.add_child("scf", SCF, scf, checkpoint_in, group=self.group)
 
     def initialize_wavefunctions(self, system: dft.System) -> None:
         """Initialize wavefunctions to LCAO / random (if not from checkpoint).
@@ -478,8 +478,8 @@ class Electrons(TreeNode):
                         if i_dir != j_dir:
                             lattice_grad_mine[j_dir, i_dir] += result
 
-            # Collect above local contributions over MPI:
-            self.comm.Allreduce(MPI.IN_PLACE, BufferView(lattice_grad_mine))
+            # Collect above local contributions over processes:
+            dist.all_reduce(lattice_grad_mine, group=self.group)
             system.lattice.grad += lattice_grad_mine
 
             # Volume contributions:
