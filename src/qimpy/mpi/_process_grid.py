@@ -2,34 +2,28 @@ from typing import Optional, Sequence
 import functools
 
 import numpy as np
+import torch.distributed as dist
 
 import qimpy
-from qimpy import log, MPI
-
+from qimpy import rc, log
 
 IMBALANCE_THRESHOLD = 20.0  #: max cpu time% waste tolerated in process grid dimension
 
 
 class ProcessGrid:
-    """Process grid of `shape` dimensions over communicator `comm`.
+    """Process grid of `shape` dimensions over the global process group.
     Any -1 entries in `shape` are undetermined and will be resolved after the
     number of tasks split along that dimension are set using `provide_n_tasks`.
-    Subsequently, use `get_comm` to get arbitrary hyperplane communicators that
+    Subsequently, use `get_group` to get arbitrary hyperplane process groups that
     connect processes whose index only varies along specified subsets of dimensions.
     """
 
-    comm: MPI.Comm  #: Overall communicator within which grid is set-up.
-    n_procs: int  #: Total number of processes in grid.
-    i_proc: int  #: Overall rank of current process in grid.
     dim_names: str  #: Each character (must be unique) names a dimension.
     shape: np.ndarray  #: Grid dimensions. Unresolved dimensions are -1.
+    is_resolved: bool  #: Whether all dimensions have been resolved
+    device_mesh: dist.DeviceMesh  #: Corresponding device mesh
 
-    def __init__(
-        self, comm: MPI.Comm, dim_names: str, shape: Optional[Sequence[int]] = None
-    ) -> None:
-        self.comm = comm
-        self.n_procs = comm.size
-        self.i_proc = comm.rank
+    def __init__(self, dim_names: str, shape: Optional[Sequence[int]] = None) -> None:
         self.dim_names = dim_names
         assert len(set(dim_names)) == len(dim_names)  # characters must be unique
         if shape:
@@ -62,9 +56,9 @@ class ProcessGrid:
 
         # Dimension undetermined: set it based on n_tasks
         prod_known = self.shape[self.shape != -1].prod()
-        prod_unknown = self.n_procs // prod_known
+        prod_unknown = rc.n_procs // prod_known
         n_procs_dim = np.arange(1, prod_unknown + 1, dtype=int)  # shape[dim] candidates
-        n_procs_dim = n_procs_dim[self.n_procs % n_procs_dim == 0]  # must be a factor
+        n_procs_dim = n_procs_dim[rc.n_procs % n_procs_dim == 0]  # must be a factor
         # --- filter by imbalance:
         n_tasks_each = qimpy.math.ceildiv(n_tasks, n_procs_dim)  # for each candidate
         imbalance = 100.0 * (1.0 - n_tasks / (n_tasks_each * n_procs_dim))
@@ -74,54 +68,25 @@ class ProcessGrid:
         self._check_report()
 
     @functools.cache
-    def get_comm(self, dim_names: str) -> MPI.Comm:
+    def get_submesh(self, dim_names: str) -> dist.DeviceMesh:
+        """Get device mesh with a subset of dimensions."""
+        return self.device_mesh[tuple(dim_names)]
+
+    @functools.cache
+    def get_group(self, dim_names: str) -> dist.ProcessGroup:
         """Get communicator for a hyper-plane spanning `dim_names`.
         The resulting communicator will connect processes whose index in
         the process grid only varies along dimensions within `dim_names`.
-        Dimensions before and including those in `dim_names` must be known,
-        except when `dim_names` is a contiguous block of dimensions whose
-        product can be determined now based on other dimensions."""
-
-        # Check input:
-        if not dim_names:
-            return MPI.COMM_SELF  # no varying dimensions => self only
-        dim_names_uniq = set(dim_names)
-        assert len(dim_names_uniq) == len(dim_names)  # no repetitions
-        assert dim_names_uniq.issubset(self.dim_names)  # each dim valid
-        if len(dim_names) == len(self.dim_names):
-            return self.comm  # all dimensions varying => original communicator
-
-        # Create mask of dimensions to be indexed:
-        shape = list(self.shape)
-        mask = [(dim_name in dim_names_uniq) for dim_name in self.dim_names]
-
-        # Coalesce contiguous indexed / not-indexed dimensions:
-        i_dim = 0
-        while i_dim + 1 < len(shape):
-            if mask[i_dim] == mask[i_dim + 1]:
-                mask.pop(i_dim + 1)
-                # Correspondingly merge shape:
-                shape_next = shape.pop(i_dim + 1)
-                shape_cur = shape[i_dim]
-                shape_unknown = (shape_next == -1) or (shape_cur == -1)
-                shape[i_dim] = -1 if shape_unknown else (shape_next * shape_cur)
-            i_dim += 1
-        shape_arr, n_unknown = self._fill_unkwown(np.array(shape))
-        shape = list(shape_arr)
-        assert n_unknown == 0  # need to know full shape (after coalescing) to proceed
-
-        # Find processes that only vary along selected dimensions:
-        index_cur = np.unravel_index(self.i_proc, shape)
-        index = tuple(
-            (slice(None) if mask_i else index_i)
-            for index_i, mask_i in zip(index_cur, mask)
-        )
-        proc_list_all = np.arange(self.n_procs).reshape(shape)
-        proc_list: Sequence[int] = proc_list_all[index].flatten()  # type: ignore
-        return self.comm.Create_group(self.comm.Get_group().Incl(proc_list))
+        All dimensions should be fully resolved before getting any groups."""
+        assert self.is_resolved
+        if len(dim_names) == 1:
+            return self.device_mesh.get_group(dim_names[0])
+        else:
+            return self.get_submesh(dim_names)._flatten().get_group(0)
 
     def _check_report(self) -> None:
-        """Check known dimensions and report current state."""
+        """Check known dimensions and report current state.
+        If fully resolved, initialize the device mesh."""
         self.shape, n_unknown = self._fill_unkwown(self.shape)
         dims_str = " x ".join(
             f"{dim} {name}" for dim, name in zip(self.shape, self.dim_names)
@@ -129,26 +94,35 @@ class ProcessGrid:
         unknown_str = " (-1's determined later)" if n_unknown else ""
         log.info(f"Process grid: {dims_str}{unknown_str}")
 
+        # Initialize the device mesh if all dimensions are resolved:
+        self.is_resolved = n_unknown == 0
+        if self.is_resolved:
+            self.device_mesh = dist.init_device_mesh(
+                "cuda" if rc.use_cuda else "cpu",
+                self.shape.tolist(),
+                mesh_dim_names=tuple(self.dim_names),
+            )
+
     def _fill_unkwown(self, shape: np.ndarray) -> tuple[np.ndarray, int]:
         """Fill in unknown dimensions in special cases where possible.
         Returns modified shape and number of dimensions that remain unknown."""
 
         # Check compatibility of known dimensions with total:
         prod_known = shape[shape != -1].prod()
-        if self.n_procs % prod_known:
+        if rc.n_procs % prod_known:
             raise ValueError(
-                f"Cannot distribute {self.n_procs} processes to"
+                f"Cannot distribute {rc.n_procs} processes to"
                 f" {' x '.join(map(str, shape))} grid"
             )
 
         # Compute a single unknown dimension if present:
-        n_unknown = np.count_nonzero(shape == -1)
+        n_unknown = int(np.count_nonzero(shape == -1))
         if n_unknown == 1:
-            shape[shape == -1] = self.n_procs // prod_known
+            shape[shape == -1] = rc.n_procs // prod_known
             n_unknown = 0
 
         # Set unknown dimensions to 1 if no factor left:
-        if n_unknown and (prod_known == self.n_procs):
+        if n_unknown and (prod_known == rc.n_procs):
             shape[shape == -1] = 1
             n_unknown = 0
 

@@ -13,7 +13,7 @@ CUDA_VISIBLE_DEVICES before any torch or MPI calls.
 """
 
 from typing import Optional
-import contextlib
+import socket
 import datetime
 import time
 import os
@@ -117,6 +117,28 @@ def init(
     gpu_ids_local = np.zeros(n_procs_node, dtype=int)
     comm_node.Allgather(gpu_ids_mine, gpu_ids_local)
     n_gpus = np.count_nonzero(np.unique(gpu_ids_local) >= 0) / n_procs_node
+
+    # Initialize torch distributed:
+    backend = os.environ.get("BACKEND", None)
+    head_host = None
+    head_port = None
+    head_socket = None
+    if is_head:
+        head_host = socket.gethostname()
+        head_socket = get_socket_with_port()
+        head_port = head_socket.getsockname()[1]
+    head_port = comm.bcast(head_port)
+    head_host = comm.bcast(head_host)
+    if is_head:
+        head_socket.close()  # Free up head_port (after MPI ops above)
+    store = dist.TCPStore(head_host, head_port, n_procs, is_head)
+    dist.init_process_group(
+        backend=backend,
+        store=store,
+        world_size=n_procs,
+        rank=i_proc,
+        device_id=(device if use_cuda else None),
+    )
 
     # Threads:
     # --- First priority: override argument

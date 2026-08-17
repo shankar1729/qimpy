@@ -3,6 +3,7 @@ from typing import Union, Optional
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
 from qimpy import log, rc, TreeNode, dft, MPI
 from qimpy.io import CheckpointPath, CheckpointContext, Checkpoint
@@ -20,7 +21,7 @@ from ._hamiltonian import _hamiltonian
 class Electrons(TreeNode):
     """Electronic subsystem"""
 
-    comm: MPI.Comm  #: Overall electronic communicator (k-points and bands/basis)
+    group: dist.ProcessGroup  #: Net electrons process group (k-points + bands/basis)
     kpoints: Kpoints  #: Set of kpoints (mesh or path)
     spin_polarized: bool  #: Whether calculation is spin-polarized
     spinorial: bool  #: Whether calculation is relativistic / spinorial
@@ -152,7 +153,7 @@ class Electrons(TreeNode):
             ),
             have_default=True,
         )
-        self.comm = process_grid.get_comm("kb")
+        self.group = process_grid.get_group("kb")
 
         # Initialize spin:
         self.spin_polarized = spin_polarized

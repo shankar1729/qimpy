@@ -3,9 +3,10 @@ from typing import Union, Sequence, Optional
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
 import qimpy
-from qimpy import log, rc, TreeNode, MPI
+from qimpy import log, rc, TreeNode
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import ProcessGrid, TaskDivision
 from . import Lattice
@@ -14,7 +15,7 @@ from . import Lattice
 class Kpoints(TreeNode):
     """Set of k-points in Brillouin zone."""
 
-    comm: MPI.Comm  #: Communicator for k-point division
+    group: dist.ProcessGroup  #: Process group for k-point division
     k: torch.Tensor  #: Array of k-points (N x 3)
     wk: torch.Tensor  #: Integration weights for each k (adds to 1)
     division: TaskDivision  #: Division of k-points across `comm`
@@ -42,11 +43,11 @@ class Kpoints(TreeNode):
 
         # Initialize process grid dimension (if -1) and split k-points:
         process_grid.provide_n_tasks("k", k.shape[0])
-        self.comm = process_grid.get_comm("k")
+        self.group = process_grid.get_group("k")
         self.division = TaskDivision(
             n_tot=k.shape[0],
-            n_procs=self.comm.size,
-            i_proc=self.comm.rank,
+            n_procs=self.group.size(),
+            i_proc=self.group.rank(),
             name="k-point",
         )
 

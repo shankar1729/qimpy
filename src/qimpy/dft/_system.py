@@ -3,7 +3,7 @@ from typing import Union, Optional, Any, Sequence
 import numpy as np
 import torch
 
-from qimpy import rc, log, TreeNode, Energy, MPI
+from qimpy import rc, log, TreeNode, Energy
 from qimpy.io import Checkpoint, CheckpointPath
 from qimpy.mpi import ProcessGrid
 from qimpy.lattice import Lattice
@@ -48,7 +48,6 @@ class System(TreeNode):
         export: Union[Export, dict, None] = None,
         checkpoint: Optional[str] = None,
         checkpoint_out: Optional[str] = None,
-        comm: Optional[MPI.Comm] = None,
         process_grid_shape: Optional[Sequence[int]] = None,
     ):
         """Compose a System to calculate from its pieces. Each piece
@@ -82,17 +81,13 @@ class System(TreeNode):
         checkpoint_out
             :yaml:`Checkpoint file to write.`
             Defaults to `checkpoint` if unspecified.
-        comm
-            Overall communicator for system. Defaults to `qimpy.rc.comm` if unspecified.
         process_grid_shape
             Parallelization dimensions over replicas, k-points and bands/basis, used
             to initialize a `qimpy.mpi.ProcessGrid`. Dimensions that are -1 will be
             auto-determined based on number of tasks available to split along them.
             Default: all process grid dimensions are auto-determined."""
         super().__init__()
-        self.process_grid = ProcessGrid(
-            comm if comm else rc.comm, "rkb", process_grid_shape
-        )
+        self.process_grid = ProcessGrid("rkb", process_grid_shape)
         # Set in and out checkpoints:
         checkpoint_in = CheckpointPath()
         if checkpoint is not None:
