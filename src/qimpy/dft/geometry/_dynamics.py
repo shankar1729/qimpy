@@ -3,10 +3,10 @@ from typing import Union, Optional, Callable
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import rc, log, TreeNode, dft, MPI
+from qimpy import rc, log, TreeNode, dft
 from qimpy.io import Unit, UnitOrFloat, Checkpoint, CheckpointPath, CheckpointContext
-from qimpy.mpi import BufferView
 from qimpy.dft.ions import Ions
 from qimpy.dft.ions.symbols import ATOMIC_WEIGHTS, ATOMIC_NUMBERS
 from ._stepper import Stepper
@@ -23,7 +23,7 @@ class Dynamics(TreeNode):
     system: dft.System  #: System being optimized currently
     masses: torch.Tensor  #: Mass of each ion in system (Dim: n_ions x 1 for bcast)
     stepper: Stepper
-    comm: MPI.Comm  #: Communictaor over which forces consistent
+    group: dist.ProcessGroup  #: Communictaor over which forces consistent
     dt: float  #: Time step
     n_steps: int  #: Number of MD steps
     thermostat: Thermostat  #: Thermostat/barostat method
@@ -47,7 +47,7 @@ class Dynamics(TreeNode):
     def __init__(
         self,
         *,
-        comm: MPI.Comm,
+        group: dist.ProcessGroup,
         dt: float,
         n_steps: int,
         thermostat: Union[Thermostat, dict, str, None] = None,
@@ -105,7 +105,7 @@ class Dynamics(TreeNode):
             The functional will be called as `report_callback(dynamics, i_iter)`.
         """
         super().__init__()
-        self.comm = comm
+        self.group = group
         self.dt = dt
         self.n_steps = n_steps
         self.seed = seed
@@ -126,7 +126,7 @@ class Dynamics(TreeNode):
         self.drag_wavefunctions = drag_wavefunctions
         if save_history:
             self.add_child(
-                "history", History, {}, checkpoint_in, comm=comm, n_max=(n_steps + 1)
+                "history", History, {}, checkpoint_in, group=group, n_max=(n_steps + 1)
             )
         else:
             self.history = None
@@ -191,7 +191,7 @@ class Dynamics(TreeNode):
             )
             / self.masses.sqrt()
         )
-        self.comm.Bcast(BufferView(velocities))
+        dist.broadcast(velocities, group=self.group)
         velocities = self.stepper.constrain(self.create_gradient(velocities)).ions
         # Normalize to set temperature:
         T_current = self.get_T(self.get_KE(velocities))

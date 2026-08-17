@@ -3,11 +3,11 @@ from typing import Union, Optional
 import os
 
 import torch
+import torch.distributed as dist
 
-from qimpy import log, dft, MPI
+from qimpy import log, dft
 from qimpy.lattice import Lattice
 from qimpy.io import Checkpoint, CheckpointPath, CheckpointContext
-from qimpy.mpi import BufferView
 from qimpy.algorithms import Minimize, MinimizeState
 from ._gradient import Gradient
 from ._stepper import Stepper
@@ -27,7 +27,7 @@ class Relax(Minimize[Gradient]):
     def __init__(
         self,
         *,
-        comm: MPI.Comm,
+        group: dist.ProcessGroup,
         lattice: Lattice,
         i_iter: int = 0,
         n_iterations: int = 20,
@@ -98,7 +98,7 @@ class Relax(Minimize[Gradient]):
             extra_thresholds["|stress|"] = stress_threshold
         super().__init__(
             checkpoint_in=checkpoint_in,
-            comm=comm,
+            group=group,
             name="Relax",
             i_iter_start=i_iter,
             n_iterations=n_iterations,
@@ -118,7 +118,7 @@ class Relax(Minimize[Gradient]):
                 History,
                 {},
                 checkpoint_in,
-                comm=comm,
+                group=group,
                 n_max=(n_iterations + 1),
             )
         else:
@@ -160,9 +160,11 @@ class Relax(Minimize[Gradient]):
             # Extra convergence checks:
             system = self.stepper.system
             state.extra = [
-                system.ions.forces.norm(dim=1).max().item()
-                if system.ions.n_ions
-                else 0.0
+                (
+                    system.ions.forces.norm(dim=1).max().item()
+                    if system.ions.n_ions
+                    else 0.0
+                )
             ]  # fmax
             if system.lattice.movable:
                 state.extra.append(system.lattice.stress.norm().item())  # |stress|
@@ -183,8 +185,7 @@ class Relax(Minimize[Gradient]):
         def _randn_like(t: torch.Tensor) -> torch.Tensor:
             """Return an MPI-consistent random tensor with same shape as `t`."""
             result = torch.randn_like(t)
-            if self.comm.size > 1:
-                self.comm.Bcast(BufferView(result))
+            dist.broadcast(result, group=self.group)
             return result
 
         # Prepare a random direction to test along:

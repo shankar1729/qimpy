@@ -2,10 +2,11 @@ from __future__ import annotations
 from typing import Union
 
 import torch
+import torch.distributed as dist
 import numpy as np
 
 
-from qimpy import rc, TreeNode, MPI
+from qimpy import rc, TreeNode
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import TaskDivision
 
@@ -13,7 +14,7 @@ from qimpy.mpi import TaskDivision
 class History(TreeNode):
     """Helper to save history along trajectory."""
 
-    comm: MPI.Comm
+    group: dist.ProcessGroup
     iter_division: TaskDivision  # Division of iterations over MPI
     i_iter: int  # Current iteration / last iteration for which history available
     save_map: dict[str, np.ndarray]  # Names and data for quantities to save
@@ -21,15 +22,15 @@ class History(TreeNode):
     def __init__(
         self,
         *,
-        comm: MPI.Comm,
+        group: dist.ProcessGroup,
         n_max: int,
         i_iter: int = 0,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         super().__init__()
-        self.comm = comm
+        self.group = group
         self.iter_division = TaskDivision(
-            n_tot=n_max, n_procs=comm.size, i_proc=comm.rank
+            n_tot=n_max, n_procs=group.size(), i_proc=group.rank()
         )
         self.i_iter = i_iter
         self.save_map = {}

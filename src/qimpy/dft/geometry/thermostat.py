@@ -1,4 +1,5 @@
 """Geometry actions: relaxation and dynamics."""
+
 from __future__ import annotations
 from typing import Union, Protocol, Callable, Optional
 
@@ -330,7 +331,7 @@ class Langevin(TreeNode):
         dynamics = self.dynamics
         # Generate MPI-consistent stochastic acceleration (not velocity dependent):
         rand = torch.randn_like(velocity.ions)
-        self.dynamics.comm.Bcast(BufferView(rand))
+        self.dynamics.group.Bcast(BufferView(rand))
         variances = 2 * dynamics.T0 / (dynamics.masses * (dynamics.t_damp_T * dt))
         acceleration_noise = Gradient(ions=(rand * variances.sqrt()))
         # Take step including velocity-dependent damping:
