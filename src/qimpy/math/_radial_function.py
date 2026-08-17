@@ -2,9 +2,10 @@ from typing import Optional, Union
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import log, MPI
-from qimpy.mpi import BufferView, TaskDivision
+from qimpy import log
+from qimpy.mpi import TaskDivision
 from . import spherical_bessel, quintic_spline
 
 
@@ -62,21 +63,21 @@ class RadialFunction:
         cls,
         radial_functions: list["RadialFunction"],
         Gmax: float,
-        comm: MPI.Comm,
+        group: dist.ProcessGroup,
         name: str = "",
     ) -> None:
         """Initialize reciprocal space version of radial functions.
         For efficiency, perform this together on all radial functions
         that share the same radial grid (r and dr) and parallelize the
-        computation over MPI communicator `comm`.
+        computation over process `group`.
         """
-        # Collect all radial functions together, dividing r over comm:
+        # Collect all radial functions together, dividing r over group:
         if not radial_functions:
             return  # Nothing to do
         r_div = TaskDivision(
             n_tot=radial_functions[0].r.shape[0],
-            n_procs=comm.Get_size(),
-            i_proc=comm.Get_rank(),
+            n_procs=group.size(),
+            i_proc=group.rank(),
         )
         r_slice = slice(r_div.i_start, r_div.i_stop)
         r = radial_functions[0].r[r_slice]
@@ -103,7 +104,7 @@ class RadialFunction:
             f_tilde[sel] = (f[sel] * (r ** (2 * l_i)) * wr) @ jl_by_Grl[l_i]
         if f_tilde.is_cuda:
             torch.cuda.current_stream().synchronize()
-        comm.Allreduce(MPI.IN_PLACE, BufferView(f_tilde), op=MPI.SUM)  # collect over r
+        dist.all_reduce(f_tilde, group=group)  # collect over r
 
         # Compute spline coefficients:
         f_tilde_coeff = quintic_spline.get_coeff(f_tilde)

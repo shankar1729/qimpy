@@ -134,7 +134,7 @@ class _LocalTerms:
         Gmax = grid.get_Gmax()
         ion_width = system.coulomb.ion_width
         for i_type, ps in enumerate(ions.pseudopotentials):
-            ps.update(Gmax, ion_width, system.electrons.comm)
+            ps.update(Gmax, ion_width, system.electrons.group)
             Vloc_coeff.append(ps.Vloc.f_tilde_coeff)
             n_core_coeff.append(ps.n_core.f_tilde_coeff)
         self.Vloc_coeff = torch.hstack(Vloc_coeff)
