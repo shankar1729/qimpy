@@ -21,6 +21,8 @@ import os
 import torch
 import numpy as np
 from psutil import cpu_count
+import torch.distributed as dist
+from torch.distributed.elastic.utils.distributed import get_socket_with_port
 
 from . import log, set_gpu_visibility, MPI
 
@@ -33,11 +35,6 @@ __all__ = (
     "cpu",
     "device",
     "use_cuda",
-    "compute_stream",
-    "compute_stream_context",
-    "compute_stream_wait_current",
-    "current_stream_wait_compute",
-    "current_stream_synchronize",
     "clock",
     "report_end",
 )
@@ -49,23 +46,13 @@ is_head: bool = i_proc == 0  #: Whether head of `comm`
 cpu: torch.device = torch.device("cpu")  #: CPU torch device
 device: torch.device = cpu  #: Preferred torch device for calculation (CPU / GPU)
 use_cuda: bool = False  #: Whether `device` is a CUDA GPU
-compute_stream: Optional[torch.cuda.Stream] = None  #: Asynchronous CUDA compute stream
 t_start: float = time.time()  #: Start time used for `clock` (set by `init`)
 
 # Set reasonable pre-init defaults for torch:
 torch.set_default_dtype(torch.double)
 torch.set_num_threads(1)  # to prevent overcommit between MPI processes
 
-# Declare type mappings from torch to MPI and numpy:
-mpi_type: dict[torch.dtype, MPI.Datatype] = {
-    torch.int32: MPI.INT,
-    torch.int64: MPI.LONG,
-    torch.float32: MPI.FLOAT,
-    torch.float64: MPI.DOUBLE,
-    torch.complex64: MPI.COMPLEX,
-    torch.complex128: MPI.DOUBLE_COMPLEX,
-}  #: Mapping from torch to MPI datatypes
-
+# Declare type mappings from torch to numpy:
 np_type: dict[torch.dtype, type] = {
     torch.bool: np.bool_,
     torch.uint8: np.uint8,
@@ -85,6 +72,7 @@ def init(
     *, comm_override: Optional[MPI.Comm] = None, cores_override: Optional[int] = None
 ) -> None:
     """Initialize overall hardware resources to be used by QimPy.
+    Initializes GPU resources
 
     Parameters
     ----------
@@ -117,17 +105,11 @@ def init(
     gpu_id = set_gpu_visibility(i_proc_node)
 
     # Initialize torch:
-    global device, use_cuda, compute_stream
+    global device, use_cuda
     if torch.cuda.is_available():
         device = torch.device("cuda:0")
         use_cuda = True
         torch.cuda.device(device)  # set as default CUDA device
-        # Enable compute stream based on environment (default on):
-        if os.environ.get("QIMPY_COMPUTE_STREAM", "1") in {"1", "yes"}:
-            compute_stream = torch.cuda.Stream(device=device)
-            log.info("Async compute stream enabled for GPU operations.")
-        else:
-            log.info("Async compute stream disabled for GPU operations.")
     else:
         gpu_id = -1
     # --- count unique GPUs on node using IDs (average over processes on same node)
@@ -161,34 +143,6 @@ def init(
     log.info(
         f"Run totals: {n_procs} processes, {n_threads_tot} threads, {n_gpus_tot} GPUs"
     )
-
-
-def compute_stream_context():
-    """Context manager to enter compute stream.
-    Equivalent to calling `torch.cuda.stream(rc.compute_stream)`, but also
-    works correctly when cuda is not supported (and `compute_stream` is None)."""
-    if compute_stream is None:
-        return contextlib.nullcontext()
-    else:
-        return torch.cuda.StreamContext(compute_stream)
-
-
-def compute_stream_wait_current():
-    """Make `compute_stream` (if used) wait on current stream."""
-    if compute_stream is not None:
-        compute_stream.wait_stream(torch.cuda.current_stream())
-
-
-def current_stream_wait_compute():
-    """Make current stream wait on `compute_stream` (if used)."""
-    if compute_stream is not None:
-        torch.cuda.current_stream().wait_stream(compute_stream)
-
-
-def current_stream_synchronize():
-    """Wait for all tasks in current CUDA stream to complete."""
-    if use_cuda:
-        torch.cuda.current_stream().synchronize()
 
 
 def clock():

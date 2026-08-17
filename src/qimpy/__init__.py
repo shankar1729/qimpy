@@ -22,7 +22,8 @@ __all__ = (
 
 # Module import definition
 from .pre_init import log, set_gpu_visibility
-from mpi4py import MPI  #: Must initialize MPI after pre_init for correct GPU behavior.
+import torch  # Initialize torch after pre_init for correct GPU behavior.
+from mpi4py import MPI  #: Initialize MPI after pre_init for correct GPU behavior.
 from . import rc, profiler, io, mpi, math
 from ._tree import TreeNode
 from ._energy import Energy
