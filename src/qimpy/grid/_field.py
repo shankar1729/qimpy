@@ -186,6 +186,7 @@ class Field(Gradable[FieldType]):
             result = data.sum(dim=(-3, -2, -1)) * grid.dV
         # Collect over process group if needed:
         if self.grid.group is not None:
+            result = result.contiguous()
             dist.all_reduce(result, group=self.grid.group)
         return result
 
@@ -211,6 +212,7 @@ class Field(Gradable[FieldType]):
             result *= self.grid.dV  # real space integration weight
         # Collect over process group if needed:
         if self.grid.group is not None:
+            result = result.contiguous()
             dist.all_reduce(result, group=self.grid.group)
         return result
 
@@ -222,6 +224,7 @@ class Field(Gradable[FieldType]):
         """
         result = torch.vdot(self.data.flatten(), other.data.flatten()).real
         if self.grid.group is not None:
+            result = result.contiguous()
             dist.all_reduce(result, group=self.grid.group)
         return result.item()
 

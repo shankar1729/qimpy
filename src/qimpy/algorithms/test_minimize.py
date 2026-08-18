@@ -81,7 +81,8 @@ class RandomFunction(Minimize[FieldR]):  # type: ignore
         E = torch.tensor(self.E0, device=rc.device)
         for i_M, M in enumerate(self.M):
             v = M @ (self.x - self.x0).data.flatten()  # partial results, full array
-            dist.all_reduce(v, group=self.group)
+            with torch.no_grad():
+                dist.all_reduce(v, group=self.group)
             E += (v**2).sum() ** (i_M + 1) * grid.dV
         state.energy["E"] = E.item()
 
@@ -90,7 +91,8 @@ class RandomFunction(Minimize[FieldR]):  # type: ignore
             E_x = self.x.data.grad
             # Apply preconditioner:
             K_E_x = self.K @ E_x.flatten()  # partial results, full array
-            dist.all_reduce(K_E_x, group=self.group)
+            with torch.no_grad():
+                dist.all_reduce(K_E_x, group=self.group)
             K_E_x = K_E_x.view(grid.shape)[self.i0slice]  # full results, partial array
             # Convert to fields:
             state.gradient = FieldR(grid, data=E_x)
