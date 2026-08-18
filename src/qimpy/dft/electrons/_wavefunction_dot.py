@@ -12,7 +12,7 @@ from qimpy.dft import electrons
 
 def _norm(self: electrons.Wavefunction) -> float:
     """Return overall norm of wavefunctions"""
-    return np.sqrt(globalreduce.sum(abs_squared(self.coeff), self.basis.comm))
+    return np.sqrt(globalreduce.sum(abs_squared(self.coeff), self.basis.group).item())
 
 
 @stopwatch(name="Wavefunction.dot")
