@@ -3,10 +3,10 @@ from typing import NamedTuple, Optional
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import rc, dft, MPI
+from qimpy import rc, dft
 from qimpy.profiler import stopwatch
-from qimpy.mpi import BufferView
 from qimpy.math import ortho_matrix, cis, abs_squared
 
 
@@ -50,7 +50,7 @@ class Lowdin:
         if spin_polarized and self.C.spinorial:
             # Need off-diagonal density matrix components for spinorial magnetization:
             Rho = torch.einsum("skab, skb, skAb -> aA", lowdin, wf, lowdin.conj())
-            basis.kpoints.comm.Allreduce(MPI.IN_PLACE, BufferView(Rho))
+            dist.all_reduce(Rho, group=basis.kpoints.group)
             result = torch.empty((4, ions.n_ions), device=rc.device)
             i_psi_start = 0
             for slice_i, ps in zip(ions.slices, ions.pseudopotentials):
@@ -72,7 +72,7 @@ class Lowdin:
         else:
             # Diagonal components of density matrix suffice:
             Rho = torch.einsum("skb, skab -> sa", wf, abs_squared(lowdin))
-            basis.kpoints.comm.Allreduce(MPI.IN_PLACE, BufferView(Rho))
+            dist.all_reduce(Rho, group=basis.kpoints.group)
             # Reduce to (spin)-number on each atom:
             Ns = torch.zeros((Rho.shape[0], ions.n_ions), device=rc.device)
             Ns.index_add_(1, i_ion, Rho)

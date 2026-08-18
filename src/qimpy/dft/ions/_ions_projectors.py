@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import rc, dft, MPI
+from qimpy import rc, dft
 from qimpy.profiler import stopwatch
-from qimpy.mpi import BufferView
 from qimpy.math import RadialFunction, spherical_harmonics as sh
 from qimpy.math.quintic_spline import Interpolator
 from qimpy.dft import ions
@@ -122,7 +122,7 @@ def projectors_grad(
             # Prepare for next species:
             i_proj_start = i_proj_stop
 
-        basis.kpoints.comm.Allreduce(MPI.IN_PLACE, BufferView(pos_grad))
+        dist.all_reduce(pos_grad, group=basis.kpoints.group)
         self.positions.grad += pos_grad
 
     # Projector stress:
@@ -176,5 +176,5 @@ def projectors_grad(
             # Prepare for next species:
             i_proj_start = i_proj_stop
 
-        basis.kpoints.comm.Allreduce(MPI.IN_PLACE, BufferView(lattice_grad))
+        dist.all_reduce(lattice_grad, group=basis.kpoints.group)
         self.lattice.grad += lattice_grad
