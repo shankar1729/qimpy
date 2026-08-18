@@ -6,10 +6,10 @@ import torch
 from qimpy import log, TreeNode, MPI
 from qimpy.profiler import StopWatch
 from qimpy.io import CheckpointPath, CheckpointContext
+from qimpy.mpi import get_comm
 from qimpy.grid import FieldH, FieldR
 from .functional import Functional, get_libxc_functional_names, FunctionalsLibxc
 from . import lda, gga, mgga, PlusU
-
 
 N_CUT = 1e-16  # Regularization threshold for densities
 
@@ -264,8 +264,8 @@ class XC(TreeNode):
             watch.stop()
 
         # Collect energy
-        if grid.comm is not None:
-            E = grid.comm.allreduce(E, MPI.SUM)
+        if grid.group is not None:
+            E = get_comm(grid.group).allreduce(E, MPI.SUM)
         return E
 
 

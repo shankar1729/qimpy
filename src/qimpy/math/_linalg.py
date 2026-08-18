@@ -3,7 +3,6 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from qimpy import rc
 from qimpy.profiler import stopwatch
 from qimpy.mpi import Waitable
 
@@ -169,15 +168,9 @@ def eighg(
     V : torch.Tensor
         Eigenvectors (same shape as H and O)
     """
-    # Start orthogonoalization:
-    rc.compute_stream_wait_current()
-    with rc.compute_stream_context():
-        U = ortho_matrix(O, use_cholesky)
-    # Finish pending communication on H (if any)
-    Hresult = H.wait()
-    # Finish orthogonalization:
-    rc.current_stream_wait_compute()
-    # Diagonalize:
-    E, V = torch.linalg.eigh(dagger(U) @ (Hresult @ U))
+    # Orthogonalize:
+    U = ortho_matrix(O, use_cholesky)
+    # Diagonalize (after finishing any pending communication on H):
+    E, V = torch.linalg.eigh(dagger(U) @ (H.wait() @ U))
     V = U @ V  # transform eigenvectors back to original basis
     return E, V

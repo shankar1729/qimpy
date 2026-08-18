@@ -2,10 +2,7 @@ from typing import Protocol, TypeVar, Deque
 from dataclasses import dataclass
 
 import torch
-
-from qimpy import MPI
-from qimpy.mpi import BufferView
-
+import torch.distributed as dist
 
 T = TypeVar("T")
 
@@ -14,29 +11,21 @@ class Optimizable(Protocol):
     """Class requirements for use as vector space in optimization algorithms.
     This is required in :class:`Pulay` and :class:`Minimize`, for example."""
 
-    def __add__(self: T, other: T) -> T:
-        ...
+    def __add__(self: T, other: T) -> T: ...
 
-    def __iadd__(self: T, other: T) -> T:
-        ...
+    def __iadd__(self: T, other: T) -> T: ...
 
-    def __sub__(self: T, other: T) -> T:
-        ...
+    def __sub__(self: T, other: T) -> T: ...
 
-    def __isub__(self: T, other: T) -> T:
-        ...
+    def __isub__(self: T, other: T) -> T: ...
 
-    def __mul__(self: T, other: float) -> T:
-        ...
+    def __mul__(self: T, other: float) -> T: ...
 
-    def __rmul__(self: T, other: float) -> T:
-        ...
+    def __rmul__(self: T, other: float) -> T: ...
 
-    def __imul__(self: T, other: float) -> T:
-        ...
+    def __imul__(self: T, other: float) -> T: ...
 
-    def vdot(self: T, other: T) -> float:
-        ...
+    def vdot(self: T, other: T) -> float: ...
 
 
 class ConvergenceCheck(Deque[bool]):
@@ -67,24 +56,24 @@ class MatrixArray:
     subspace rotations, such as in `LCAO` and `Wannier`."""
 
     M: torch.Tensor  #: Array of matrices with dimension ..., N x N
-    comm: MPI.Comm  #: Communicator where M is split on some dimension(s)
+    group: dist.ProcessGroup  #: Process group where M is split on some dimension(s)
 
     def __add__(self, other: "MatrixArray") -> "MatrixArray":
-        return MatrixArray(M=(self.M + other.M), comm=self.comm)
+        return MatrixArray(M=(self.M + other.M), group=self.group)
 
     def __iadd__(self, other: "MatrixArray") -> "MatrixArray":
         self.M += other.M
         return self
 
     def __sub__(self, other: "MatrixArray") -> "MatrixArray":
-        return MatrixArray(M=(self.M - other.M), comm=self.comm)
+        return MatrixArray(M=(self.M - other.M), group=self.group)
 
     def __isub__(self, other: "MatrixArray") -> "MatrixArray":
         self.M -= other.M
         return self
 
     def __mul__(self, other: float) -> "MatrixArray":
-        return MatrixArray(M=(self.M * other), comm=self.comm)
+        return MatrixArray(M=(self.M * other), group=self.group)
 
     __rmul__ = __mul__
 
@@ -93,7 +82,7 @@ class MatrixArray:
         return self
 
     def vdot(self, other: "MatrixArray") -> float:
-        """Global vector-space dot product collected over `comm`."""
+        """Global vector-space dot product collected over process group."""
         result = torch.vdot(self.M.flatten(), other.M.flatten()).real
-        self.comm.Allreduce(MPI.IN_PLACE, BufferView(result), MPI.SUM)
+        dist.all_reduce(result, group=self.group)
         return result.item()

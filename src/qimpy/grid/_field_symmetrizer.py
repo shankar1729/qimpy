@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
 from qimpy import rc, log
 from qimpy.profiler import stopwatch
-from qimpy.mpi import BufferView, TaskDivision
+from qimpy.mpi import TaskDivision
 from qimpy.math import cis
 from . import Grid, FieldH
 
@@ -130,7 +131,7 @@ class FieldSymmetrizer:
 
         # Collect data by orbits, transfering over MPI as needed:
         if grid.n_procs > 1:
-            assert grid.comm is not None
+            assert grid.group is not None
             # Send data from grid to process containing orbit:
             src_data = v_data[:, self.grid_index].T.contiguous()
             dest_data = torch.empty(
@@ -138,15 +139,10 @@ class FieldSymmetrizer:
                 dtype=v_data.dtype,
                 device=rc.device,
             )
-            mpi_type = rc.mpi_type[v_data.dtype]
-            send_counts = np.diff(self.send_prev) * n_batch
-            send_offsets = self.send_prev[:-1] * n_batch
-            recv_counts = np.diff(self.recv_prev) * n_batch
-            recv_offsets = self.recv_prev[:-1] * n_batch
-            rc.current_stream_synchronize()
-            grid.comm.Alltoallv(
-                (BufferView(src_data), send_counts, send_offsets, mpi_type),
-                (BufferView(dest_data), recv_counts, recv_offsets, mpi_type),
+            send_counts = np.diff(self.send_prev)
+            recv_counts = np.diff(self.recv_prev)
+            dist.all_to_all_single(
+                dest_data, src_data, recv_counts, send_counts, group=grid.group
             )
             # Rearrange data by orbit:
             v_orbits = dest_data[self.orbit_index].T.view(
@@ -167,13 +163,11 @@ class FieldSymmetrizer:
         # Set results back to original grid, transfering over MPI as needed:
         v_data.zero_()
         if grid.n_procs > 1:
-            assert grid.comm is not None
+            assert grid.group is not None
             # Rerrange data and send to process that holds grid point:
             dest_data = v_orbits.flatten(1).T[self.recv_index].contiguous()
-            rc.current_stream_synchronize()
-            grid.comm.Alltoallv(
-                (BufferView(dest_data), recv_counts, recv_offsets, mpi_type),
-                (BufferView(src_data), send_counts, send_offsets, mpi_type),
+            dist.all_to_all_single(
+                src_data, dest_data, send_counts, recv_counts, group=grid.group
             )
             # Set back to grid (accumulate with all possible rotations):
             v_data.index_put_(

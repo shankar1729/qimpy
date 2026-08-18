@@ -295,15 +295,6 @@ class Basis(TreeNode):
     _fft_block_size_reported = False  #: Make sure FFT block size reported once
     _mpi_block_size_reported = False  #: Make sure MPI block size reported once
 
-    '''
-    def allreduce_in_place(self, x: torch.Tensor, op: MPI.Op = MPI.SUM) -> None:
-        """Allreduce `x` in place using `op` over `self.comm`.
-        Convenient wrapper used in many basis operations."""
-        if self.division.n_procs > 1:
-            rc.current_stream_synchronize()
-            self.comm.Allreduce(MPI.IN_PLACE, BufferView(x), op)
-    '''
-
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:

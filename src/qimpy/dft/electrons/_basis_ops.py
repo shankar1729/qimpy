@@ -3,12 +3,13 @@ from typing import Optional
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import rc, MPI
+from qimpy import rc
 from qimpy.profiler import stopwatch
 from qimpy.math import ceildiv, accum_prod_, accum_norm_
 from qimpy.grid import FieldR, FieldH
-from qimpy.mpi import get_block_slices, Waitable, Iallreduce_in_place
+from qimpy.mpi import get_block_slices
 from qimpy.dft import electrons
 
 
@@ -73,7 +74,7 @@ def _apply_potential(
 
         # Prepare first input block ('g' indicates G-vectors of basis together):
         Cg = C[:, :, mpi_block_slices[0]].split_bands().wait()
-        VCg: electrons.Wavefunction  # created at end of first iteration below
+        VCg: Optional[electrons.Wavefunction] = None  # created in first iteration below
 
         for mpi_block_slice_prev, mpi_block_slice_next in zip(
             (None, *mpi_block_slices[:-1]), (*mpi_block_slices[1:], None)
@@ -87,8 +88,8 @@ def _apply_potential(
             if mpi_block_slice_next:  # get started on next block
                 Cg_next = C[:, :, mpi_block_slice_next].split_bands()
 
-            # Start compute:
-            apply_potential_kernel(Cg)
+            # Compute:
+            VCg = apply_potential_kernel(Cg)
 
             # Finish communication of previous output block:
             if mpi_block_slice_prev:
@@ -98,16 +99,12 @@ def _apply_potential(
             if mpi_block_slice_next:
                 Cg = Cg_next.wait()
 
-            # Finish compute:
-            VCg = apply_potential_kernel.wait()
-
         # Finish final output block:
         VC[:, :, mpi_block_slices[-1]] = VCg.split_basis().wait()
 
     else:
         # Basis together already => no transfers needed
-        VC = C.clone()
-        apply_potential_kernel(VC).wait()
+        VC = apply_potential_kernel(C.clone())
 
     VC.constrain()  # project out spurious entries (padding and real symmetry)
     return VC
@@ -180,28 +177,20 @@ class _ApplyPotentialKernel(_KernelCommon):
         self.spin_dm_mode = spin_dm_mode
         self.Vdata = Vdata
 
-    def __call__(self, C: electrons.Wavefunction) -> Waitable[electrons.Wavefunction]:
+    def __call__(self, C: electrons.Wavefunction) -> electrons.Wavefunction:
         """Apply potential to C in-place. C must be in bands-divided mode.
         Note that C could have a subset of bands of C_tot passed to __init__."""
         fft_block_slices = get_block_slices(C.n_bands(), self.fft_block_size)
-        rc.compute_stream_wait_current()
-        with rc.compute_stream_context():
-            for fft_block_slice in fft_block_slices:
-                # Expand -> ifft -> multiply V -> fft -> reduce back (on block)
-                VCb = self.expand_ifft(C.coeff, fft_block_slice)
-                if self.spin_dm_mode:
-                    VCb = torch.einsum("uvxyz, skbvxyz -> skbuxyz", self.Vdata, VCb)
-                else:
-                    VCb *= self.Vdata
-                VCb = self.grid.fft(VCb).flatten(-3)
-                C.coeff[:, :, fft_block_slice] = VCb[self.index].permute(2, 0, 3, 4, 1)
-        self.result = C  # return in wait() when above is asynchronous
-        return self  # so that the output is Waitable
-
-    def wait(self) -> electrons.Wavefunction:
-        """Wait for completion (if running in separate stream)."""
-        rc.current_stream_wait_compute()
-        return self.result
+        for fft_block_slice in fft_block_slices:
+            # Expand -> ifft -> multiply V -> fft -> reduce back (on block)
+            VCb = self.expand_ifft(C.coeff, fft_block_slice)
+            if self.spin_dm_mode:
+                VCb = torch.einsum("uvxyz, skbvxyz -> skbuxyz", self.Vdata, VCb)
+            else:
+                VCb *= self.Vdata
+            VCb = self.grid.fft(VCb).flatten(-3)
+            C.coeff[:, :, fft_block_slice] = VCb[self.index].permute(2, 0, 3, 4, 1)
+        return C
 
 
 @stopwatch(name="Basis.collect_density")
@@ -260,16 +249,13 @@ def _collect_density(
             if mpi_block_slice_next:  # get started on next block
                 Cg_next = C[:, :, mpi_block_slice_next].split_bands()
 
-            # Start compute:
+            # Compute:
             collect_density_kernel(Cg, prefac_cur)
 
             # Finish communication of next input block:
             if mpi_block_slice_next:
                 Cg = Cg_next.wait()
                 prefac_cur = prefac[:, :, mpi_block_slice_next]
-
-            # Finish compute:
-            collect_density_kernel.wait()
     else:
         collect_density_kernel(C, prefac).wait()
 
@@ -284,9 +270,8 @@ def _collect_density(
         density.data[2] = 2.0 * rho_dn_up.imag  # My
 
     # Collect over MPI:
-    if self.comm_kb.size > 1:
-        rc.current_stream_synchronize()
-        Iallreduce_in_place(self.comm_kb, density.data, MPI.SUM).wait()
+    if self.group_kb.size() > 1:
+        dist.all_reduce(density.data, group=self.group_kb)
     return density
 
 
@@ -307,37 +292,28 @@ class _CollectDensityKernel(_KernelCommon):
         self.rho_diag = rho_diag
         self.rho_dn_up = rho_dn_up
 
-    def __call__(
-        self, C: electrons.Wavefunction, prefac: torch.Tensor
-    ) -> Waitable[None]:
+    def __call__(self, C: electrons.Wavefunction, prefac: torch.Tensor) -> None:
         """Collect density from wave-function `C` with prefactors `prefac`
         (related to fillings). C must be in bands-divided mode.
         Note that C could have a subset of bands of C_tot passed to __init__."""
         fft_block_slices = get_block_slices(C.n_bands(), self.fft_block_size)
-        rc.compute_stream_wait_current()
-        with rc.compute_stream_context():
-            prefac_mine = (
-                prefac[:, :, C.band_division.i_start : C.band_division.i_stop]
-                if C.band_division
-                else prefac
-            )
-            for fft_block_slice in fft_block_slices:
-                # Expand -> ifft -> collect | |^2
-                ICb = self.expand_ifft(C.coeff, fft_block_slice)
-                prefac_cur = prefac_mine[:, :, fft_block_slice]
-                if self.rho_dn_up is not None:  # vector-magnetization mode
-                    accum_norm_(prefac_cur, ICb, self.rho_diag, start_dim=0)
-                    accum_prod_(
-                        prefac_cur,
-                        ICb[:, :, :, 1],
-                        ICb[:, :, :, 0].conj(),
-                        self.rho_dn_up,
-                        start_dim=0,
-                    )
-                else:
-                    accum_norm_(prefac_cur, ICb, self.rho_diag, start_dim=1)
-        return self  # so that the output is Waitable
-
-    def wait(self) -> None:
-        """Wait for completion (if running in separate stream)."""
-        rc.current_stream_wait_compute()
+        prefac_mine = (
+            prefac[:, :, C.band_division.i_start : C.band_division.i_stop]
+            if C.band_division
+            else prefac
+        )
+        for fft_block_slice in fft_block_slices:
+            # Expand -> ifft -> collect | |^2
+            ICb = self.expand_ifft(C.coeff, fft_block_slice)
+            prefac_cur = prefac_mine[:, :, fft_block_slice]
+            if self.rho_dn_up is not None:  # vector-magnetization mode
+                accum_norm_(prefac_cur, ICb, self.rho_diag, start_dim=0)
+                accum_prod_(
+                    prefac_cur,
+                    ICb[:, :, :, 1],
+                    ICb[:, :, :, 0].conj(),
+                    self.rho_dn_up,
+                    start_dim=0,
+                )
+            else:
+                accum_norm_(prefac_cur, ICb, self.rho_diag, start_dim=1)

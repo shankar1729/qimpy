@@ -119,7 +119,6 @@ class LCAO(Minimize[MatrixArray]):
         wf_eig = el.basis.w_sk * el.fillings.f_eig
         E_mu_num = (wf_eig * dH_sub_diag).sum(dim=(1, 2))
         E_mu_den = wf_eig.sum(dim=(1, 2))  # TODO: make this more general:
-        rc.current_stream_synchronize()
         dist.all_reduce(E_mu_num, group=el.kpoints.group)
         dist.all_reduce(E_mu_den, group=el.kpoints.group)
         E_mu_den.clamp_(max=-1e-20)  # avoid 0/0 in large-gap corner cases

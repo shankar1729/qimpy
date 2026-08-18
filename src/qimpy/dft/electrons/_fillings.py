@@ -4,13 +4,14 @@ from numbers import Integral
 
 import numpy as np
 import torch
+import torch.distributed as dist
 from scipy import optimize
 
-from qimpy import rc, log, TreeNode, Energy, dft, MPI
+from qimpy import rc, log, TreeNode, Energy, dft
 from qimpy.profiler import stopwatch
 from qimpy.dft.ions import Ions
 from qimpy.io import CheckpointPath, CheckpointContext, fmt, Default, cast_default
-from qimpy.mpi import BufferView, globalreduce
+from qimpy.mpi import globalreduce
 
 
 class SmearingResults(NamedTuple):
@@ -176,7 +177,7 @@ class Fillings(TreeNode):
             self.sigma = float((2 * kT) if (kT is not None) else sigma)
             self.n_bands_min += 1  # need at least one extra empty band
         sigma_str = (
-            f"{self.sigma:g} (equivalent kT: {0.5*self.sigma:g})"
+            f"{self.sigma:g} (equivalent kT: {0.5 * self.sigma:g})"
             if self.sigma
             else str(None)
         )
@@ -317,7 +318,7 @@ class Fillings(TreeNode):
         # Guess chemical potential from eigenvalues if needed:
         if np.isnan(self.mu):
             n_full = int(np.floor(self.n_electrons / (el.w_spin * el.n_spins)))
-            self.mu = globalreduce.min(eig[:, :, n_full], el.comm)
+            self.mu = globalreduce.min(eig[:, :, n_full], el.group).item()
 
         # Weights that generate number / magnetization and their targets:
         if el.spin_polarized:
@@ -364,10 +365,9 @@ class Fillings(TreeNode):
                 dim=(2, 3, 4)
             )
             # Collect across MPI and make consistent to machine precision:
-            rc.current_stream_synchronize()
             for tensor in (NM, NM_mu_B):
-                el.kpoints.comm.Allreduce(MPI.IN_PLACE, BufferView(tensor), MPI.SUM)
-                el.comm.Bcast(BufferView(tensor))
+                dist.reduce(tensor, group=el.kpoints.group, group_dst=0)
+                dist.broadcast(tensor, group=el.kpoints.group, group_src=0)
             self.f = f
             self.f_eig = f_eig
             results["NM"] = NM
@@ -401,7 +401,7 @@ class Fillings(TreeNode):
         else:  # B is free: use a quasi-Newton method
             # Find mu and/or B to match N and/or M as appropriate:
             # --- start with a larger sigma and reduce down for stability:
-            eig_diff_max = globalreduce.max(eig.diff(dim=-1), el.kpoints.comm)
+            eig_diff_max = globalreduce.max(eig.diff(dim=-1), el.kpoints.group).item()
             sigma_cur = max(self.sigma, min(0.1, eig_diff_max))
             final_step = False
             while not final_step:
@@ -424,8 +424,8 @@ class Fillings(TreeNode):
 
         # Update fillings and entropy accordingly:
         energy["-TS"] = (-0.5 * self.sigma) * globalreduce.sum(
-            w_sk * results["S"], el.kpoints.comm
-        )
+            w_sk * results["S"], el.kpoints.group
+        ).item()
         # --- update n_electrons or mu, depending on which is free
         n_electrons = results["NM"][0].item()
         if self.mu_constrain:

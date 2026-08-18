@@ -391,8 +391,8 @@ class Electrons(TreeNode):
         f = self.fillings.f
         system.energy["KE"] = globalreduce.sum(
             self.C.band_ke()[:, :, : f.shape[2]] * self.basis.w_sk * f,
-            self.kpoints.comm,
-        )
+            self.kpoints.group,
+        ).item()
         # Nonlocal projector:
         beta_C = self.C.proj[..., : self.fillings.n_bands]
         system.energy["Enl"] = globalreduce.sum(
@@ -401,8 +401,8 @@ class Electrons(TreeNode):
                 * self.basis.w_sk
                 * f
             ).real,
-            self.kpoints.comm,
-        )
+            self.kpoints.group,
+        ).item()
 
     def accumulate_geometry_grad(self, system: dft.System) -> None:
         """Accumulate geometry gradient contributions of electronic energy.

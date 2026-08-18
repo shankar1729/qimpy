@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Optional
 
 import torch
+import torch.distributed as dist
 
 from qimpy import rc
 from qimpy.io import CheckpointPath
@@ -232,7 +233,8 @@ class Wavefunction(Gradable["Wavefunction"]):
             result = (coeff_sq @ basis.real.Gweight_mine).sum(dim=-1)
         else:
             result = coeff_sq.sum(dim=(-2, -1))
-        basis.allreduce_in_place(result)
+        if basis.group.size() > 1:
+            dist.all_reduce(result, group=basis.group)
         return result.sqrt()
 
     def band_ke(self: Wavefunction) -> torch.Tensor:
@@ -243,7 +245,8 @@ class Wavefunction(Gradable["Wavefunction"]):
         if basis.real_wavefunctions:
             ke *= basis.real.Gweight_mine
         result = torch.einsum("skbxg, kg -> skb", abs_squared(self.coeff), ke)
-        basis.allreduce_in_place(result)
+        if basis.group.size() > 1:
+            dist.all_reduce(result, group=basis.group)
         return result
 
     def band_spin(self: Wavefunction) -> torch.Tensor:
@@ -252,7 +255,8 @@ class Wavefunction(Gradable["Wavefunction"]):
         assert not self.band_division
         assert self.spinorial
         rho_s = torch.einsum("skbxg, skbyg -> skbxy", self.coeff, self.coeff.conj())
-        self.basis.allreduce_in_place(rho_s)
+        if self.basis.group.size() > 1:
+            dist.all_reduce(rho_s, group=self.basis.group)
         return torch.cat(
             (
                 2.0 * rho_s[..., 1, 0].real,  # Sx
