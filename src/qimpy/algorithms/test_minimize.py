@@ -2,11 +2,11 @@ from typing import Sequence
 
 import numpy as np
 import torch
+import torch.distributed as dist
 import pytest
 
-from qimpy import rc, MPI
+from qimpy import rc
 from qimpy.io import CheckpointPath, log_config
-from qimpy.mpi import BufferView
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
 from qimpy.grid import Grid, FieldR
@@ -30,7 +30,7 @@ class RandomFunction(Minimize[FieldR]):  # type: ignore
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
         super().__init__(
-            comm=rc.comm,
+            group=dist.group.WORLD,
             checkpoint_in=checkpoint_in,
             name="TestMinimize",
             n_iterations=100,
@@ -45,7 +45,7 @@ class RandomFunction(Minimize[FieldR]):  # type: ignore
             lattice=lattice,
             symmetries=symmetries,
             shape=(n_dim, 1, 1),
-            comm=rc.comm,
+            group=dist.group.WORLD,
         )
         self.grid = grid
         self.i0slice = slice(grid.split0.i_start, grid.split0.i_stop)
@@ -81,8 +81,7 @@ class RandomFunction(Minimize[FieldR]):  # type: ignore
         E = torch.tensor(self.E0, device=rc.device)
         for i_M, M in enumerate(self.M):
             v = M @ (self.x - self.x0).data.flatten()  # partial results, full array
-            rc.current_stream_synchronize()
-            self.comm.Allreduce(MPI.IN_PLACE, BufferView(v), MPI.SUM)
+            dist.all_reduce(v, group=self.group)
             E += (v**2).sum() ** (i_M + 1) * grid.dV
         state.energy["E"] = E.item()
 
@@ -91,7 +90,7 @@ class RandomFunction(Minimize[FieldR]):  # type: ignore
             E_x = self.x.data.grad
             # Apply preconditioner:
             K_E_x = self.K @ E_x.flatten()  # partial results, full array
-            self.comm.Allreduce(MPI.IN_PLACE, BufferView(K_E_x), MPI.SUM)
+            dist.all_reduce(K_E_x, group=self.group)
             K_E_x = K_E_x.view(grid.shape)[self.i0slice]  # full results, partial array
             # Convert to fields:
             state.gradient = FieldR(grid, data=E_x)

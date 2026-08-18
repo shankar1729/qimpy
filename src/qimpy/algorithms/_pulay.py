@@ -215,5 +215,5 @@ class Pulay(Generic[Variable], ABC, TreeNode):
     def _sync(self, v: float) -> float:
         """Ensure `v` is consistent on `comm`."""
         buf = torch.tensor(v, device=rc.device)
-        dist.broadcast(buf, group=self.group)
+        dist.broadcast(buf, group=self.group, group_src=0)
         return buf.item()  # TODO: maybe keep energy as scalar tensors

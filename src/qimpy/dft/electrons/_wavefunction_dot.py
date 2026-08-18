@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import MPI
 from qimpy.profiler import stopwatch
-from qimpy.mpi import Waitable, Waitless, globalreduce, Iallreduce_in_place
+from qimpy.mpi import Waitable, Waitless, globalreduce
 from qimpy.math import abs_squared, ortho_matrix
 from qimpy.dft import electrons
 
@@ -102,7 +102,7 @@ def _dot(
     # Reduce asynchronously if needed:
     need_reduce = (basis.division.n_procs > 1) and (not full_basis)
     if need_reduce:
-        return Iallreduce_in_place(basis.comm, result, op=MPI.SUM)
+        return dist.all_reduce(result, basis.group, async_op=True)
     else:
         return Waitless(result)  # Result available now
 

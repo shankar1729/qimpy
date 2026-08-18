@@ -207,7 +207,7 @@ class Minimize(Generic[Vector], ABC, TreeNode):
     def _sync(self, v: float) -> float:
         """Ensure `v` is consistent on `comm`."""
         buf = torch.tensor(v, device=rc.device)
-        dist.broadcast(buf, group=self.group)
+        dist.broadcast(buf, group=self.group, group_src=0)
         return buf.item()  # TODO: maybe keep energy as scalar tensors
 
     def _compute(self, state: MinimizeState[Vector], energy_only: bool) -> float:
