@@ -3,10 +3,10 @@ from typing import Callable
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import log, rc, grid, MPI
-from qimpy.mpi import TaskDivision, BufferView
-
+from qimpy import log, rc, grid
+from qimpy.mpi import TaskDivision
 
 IndicesType = tuple[torch.Tensor, torch.Tensor, torch.Tensor]
 FunctionFFT = Callable[[torch.Tensor, str], torch.Tensor]
@@ -150,7 +150,7 @@ def init_grid_fft(self: grid.Grid) -> None:
 
 
 def parallel_transform(
-    comm: MPI.Comm,
+    group: dist.ProcessGroup,
     v: torch.Tensor,
     norm: str,
     shape_in: tuple[int, ...],
@@ -173,8 +173,8 @@ def parallel_transform(
 
     Parameters
     ----------
-    comm
-        Communicator that this transform is split on
+    group
+        Process group that this transform is split on
     v
         Input tensor, 3D, real for rfft and complex for all else
     norm
@@ -207,12 +207,19 @@ def parallel_transform(
     send_prev = in_prev * v_tilde.shape[1]
     recv_prev = out_prev * (np.prod(shape_out[:2]) * n_batch)
     v_tmp = torch.zeros(recv_prev[-1], dtype=v_tilde.dtype, device=v_tilde.device)
-    mpi_type = rc.mpi_type[v_tilde.dtype]
-    rc.current_stream_synchronize()
-    comm.Alltoallv(
-        (BufferView(v_tilde), np.diff(send_prev), send_prev[:-1], mpi_type),
-        (BufferView(v_tmp), np.diff(recv_prev), recv_prev[:-1], mpi_type),
+    dist.all_to_all_single(
+        v_tmp,
+        v_tilde.flatten(),
+        np.diff(recv_prev).tolist(),
+        np.diff(send_prev).tolist(),
+        group=group,
     )
+    # mpi_type = rc.mpi_type[v_tilde.dtype]
+    # rc.current_stream_synchronize()
+    # comm.Alltoallv(
+    #     (BufferView(v_tilde), np.diff(send_prev), send_prev[:-1], mpi_type),
+    #     (BufferView(v_tmp), np.diff(recv_prev), recv_prev[:-1], mpi_type),
+    # )
 
     # Unscramble:
     if n_batch == 1:
@@ -237,9 +244,9 @@ def fft(self: grid.Grid, v: torch.Tensor, norm: str) -> torch.Tensor:
             return v
         if self.n_procs == 1:
             return torch.fft.fftn(v, s=self.shape, norm=norm)
-        assert self.comm is not None
+        assert self.group is not None
         return parallel_transform(
-            self.comm,
+            self.group,
             v,
             norm,
             self.shapeR_mine,
@@ -262,9 +269,9 @@ def fft(self: grid.Grid, v: torch.Tensor, norm: str) -> torch.Tensor:
         if self.n_procs == 1:
             return torch.fft.rfftn(v, s=self.shape, norm=norm)
         assert v.dtype.is_floating_point
-        assert self.comm is not None
+        assert self.group is not None
         return parallel_transform(
-            self.comm,
+            self.group,
             v,
             norm,
             self.shapeR_mine,
@@ -287,8 +294,10 @@ def ifft(self: grid.Grid, v: torch.Tensor, norm: str) -> torch.Tensor:
     assert v.dtype.is_complex
     shape2 = v.shape[-1]
     if self.n_procs > 1:
-        assert self.comm is not None
-        shape2 = self.comm.allreduce(shape2, MPI.SUM)
+        assert self.group is not None
+        buf = torch.tensor(shape2, device=rc.device)
+        dist.all_reduce(buf, group=self.group)
+        shape2 = buf.item()
 
     if shape2 == self.shape[2]:
         # Complex to complex inverse transform:
@@ -296,9 +305,9 @@ def ifft(self: grid.Grid, v: torch.Tensor, norm: str) -> torch.Tensor:
             return v
         if self.n_procs == 1:
             return torch.fft.ifftn(v, s=self.shape, norm=norm)
-        assert self.comm is not None
+        assert self.group is not None
         return parallel_transform(
-            self.comm,
+            self.group,
             v.swapaxes(-1, -3),
             norm,
             self.shapeG_mine[::-1],
@@ -321,10 +330,10 @@ def ifft(self: grid.Grid, v: torch.Tensor, norm: str) -> torch.Tensor:
         if self.n_procs == 1:
             return torch.fft.irfftn(v, s=self.shape, norm=norm)
         assert v.dtype.is_complex
-        assert self.comm is not None
+        assert self.group is not None
         shapeR_mine_complex = (self.split0.n_mine, self.shape[1], self.shapeH[2])
         return parallel_transform(
-            self.comm,
+            self.group,
             v.swapaxes(-1, -3),
             norm,
             self.shapeH_mine[::-1],

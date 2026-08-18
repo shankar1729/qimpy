@@ -3,9 +3,10 @@ from typing import Optional, TypeVar
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import rc, grid, MPI
-from qimpy.mpi import TaskDivision, TaskDivisionCustom, BufferView
+from qimpy import grid
+from qimpy.mpi import TaskDivision, TaskDivisionCustom
 from . import Grid
 
 
@@ -19,26 +20,20 @@ def scatter(v: torch.Tensor, split_out: TaskDivision, dim: int) -> torch.Tensor:
 def gather(
     v: torch.Tensor,
     split_in: TaskDivision,
-    comm: MPI.Comm,
+    group: dist.ProcessGroup,
     dim: int,
 ) -> torch.Tensor:
     """Return the contents of v, changed from split based on split_in on
-    communicator comm and dimension dim, to not-split i.e. fully available
+    process group and dimension dim, to not-split i.e. fully available
     on all processes."""
     # Bring split dimension to outermost (if necessary):
     sendbuf = (v.swapaxes(0, dim) if dim else v).contiguous()
-    prod_rest = np.prod(sendbuf.shape[1:])  # number in all but the split dim
-    mpi_type = rc.mpi_type[v.dtype]
     # Gather pieces from each process to all:
     recvbuf = torch.empty(
         (split_in.n_tot,) + sendbuf.shape[1:], dtype=v.dtype, device=v.device
     )
-    recv_prev = split_in.n_prev * prod_rest
-    rc.current_stream_synchronize()
-    comm.Allgatherv(
-        (BufferView(sendbuf), split_in.n_mine * prod_rest, 0, mpi_type),
-        (BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1], mpi_type),
-    )
+    recv_sizes = np.diff(split_in.n_prev).tolist()
+    dist.all_gather(list(recvbuf.split(recv_sizes, dim=0)), sendbuf, group=group)
     # Restore dimension order of output (if necessary):
     return recvbuf.swapaxes(0, dim) if dim else recvbuf
 
@@ -47,15 +42,14 @@ def redistribute(
     v: torch.Tensor,
     split_in: TaskDivision,
     split_out: TaskDivision,
-    comm: MPI.Comm,
+    group: dist.ProcessGroup,
     dim: int,
 ) -> torch.Tensor:
     """Return the contents of v, changed from split based on split_in to split
-    based on split_out, on the same communicator comm and dimension dim."""
+    based on split_out, on the same process group and dimension dim."""
     # Bring split dimension to outermost (if necessary):
     sendbuf = (v.swapaxes(0, dim) if dim else v).contiguous()
     prod_rest = np.prod(sendbuf.shape[1:])  # number in all but the split dim
-    mpi_type = rc.mpi_type[v.dtype]
     # Determine destinations of my input pieces:
     send_prev = (
         np.maximum(np.minimum(split_out.n_prev, split_in.i_stop), split_in.i_start)
@@ -70,10 +64,12 @@ def redistribute(
     recvbuf = torch.empty(
         (split_out.n_mine,) + sendbuf.shape[1:], dtype=v.dtype, device=v.device
     )
-    rc.current_stream_synchronize()
-    comm.Alltoallv(
-        (BufferView(sendbuf), np.diff(send_prev), send_prev[:-1], mpi_type),
-        (BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1], mpi_type),
+    dist.all_to_all_single(
+        recvbuf.view(-1),
+        sendbuf.view(-1),
+        np.diff(recv_prev),
+        np.diff(send_prev),
+        group=group,
     )
     # Restore dimension order of output (if necessary):
     return recvbuf.swapaxes(0, dim) if dim else recvbuf
@@ -82,27 +78,27 @@ def redistribute(
 def fix_split(
     v: torch.Tensor,
     split_in: TaskDivision,
-    comm_in: Optional[MPI.Comm],
+    group_in: Optional[dist.ProcessGroup],
     split_out: TaskDivision,
-    comm_out: Optional[MPI.Comm],
+    group_out: Optional[dist.ProcessGroup],
     dim: int,
 ) -> torch.Tensor:
-    """Fix how v is split along dimension dim, from split_in on comm_in
-    at input to split_out on comm_out at output. One or more communicators
+    """Fix how v is split along dimension dim, from split_in on group_in
+    at input to split_out on group_out at output. One or more process groups
     could be None, corresponding to no split in the data at input and/or
-    output. If data is split both before and after, comm_in and comm_out
-    must be the same communicator."""
-    if comm_in is None:
-        if comm_out is None:
+    output. If data is split both before and after, group_in and group_out
+    must be the same process group."""
+    if group_in is None:
+        if group_out is None:
             return v  # No split before or after
         else:
             return scatter(v, split_out, dim)
     else:
-        if comm_out is None:
-            return gather(v, split_in, comm_in, dim)
+        if group_out is None:
+            return gather(v, split_in, group_in, dim)
         else:
-            assert comm_in is comm_out
-            return redistribute(v, split_in, split_out, comm_in, dim)
+            assert group_in is group_out
+            return redistribute(v, split_in, split_out, group_in, dim)
 
 
 FieldTypeReal = TypeVar("FieldTypeReal", "grid.FieldR", "grid.FieldC")
@@ -114,7 +110,7 @@ def _change_real(v: FieldTypeReal, grid_out: Grid) -> FieldTypeReal:
     grid_in = v.grid
     assert grid_in.shape == grid_out.shape
     data_out = fix_split(
-        v.data, grid_in.split0, grid_in.comm, grid_out.split0, grid_out.comm, -3
+        v.data, grid_in.split0, grid_in.group, grid_out.split0, grid_out.group, -3
     )
     return v.__class__(grid_out, data=data_out)
 
@@ -203,17 +199,16 @@ def _change_recip(v: FieldTypeRecip, grid_out: Grid) -> FieldTypeRecip:
                     if whose_neg == split_in.i_proc:
                         neg_slice = data[..., neg_start - split_in.i_start]
                         if whose_pos != split_in.i_proc:
-                            assert grid_in.comm is not None
-                            neg_slice = neg_slice.contiguous()
-                            rc.current_stream_synchronize()
-                            grid_in.comm.Send(BufferView(neg_slice), whose_pos)
+                            assert grid_in.group is not None
+                            dist.send(
+                                neg_slice, group=grid_in.group, group_dst=whose_pos
+                            )
                     elif whose_pos == split_in.i_proc:
                         neg_slice = torch.zeros(
                             data.shape[:-1], dtype=data.dtype, device=data.device
                         )
-                        assert grid_in.comm is not None
-                        rc.current_stream_synchronize()
-                        grid_in.comm.Recv(BufferView(neg_slice), whose_neg)
+                        assert grid_in.group is not None
+                        dist.recv(neg_slice, group=grid_in.group, group_src=whose_neg)
                     # Negative Nyquist slice is now on proc with positive one
                 neg_start += 1  # can only have + Nyquist freq in output
             sel = torch.where(torch.logical_or(i_mine <= S_hlf, i_mine >= neg_start))[0]
@@ -234,10 +229,12 @@ def _change_recip(v: FieldTypeRecip, grid_out: Grid) -> FieldTypeRecip:
                 data_out[..., i_pos] *= 0.5
 
         # Revised split_in to match updated data (for MPI rearrangement below):
-        split_in = TaskDivisionCustom(n_mine=n_mine_new, comm=grid_in.comm)
+        split_in = TaskDivisionCustom(n_mine=n_mine_new, group=grid_in.group)
     else:
         data_out = data
 
     # Rearrange data as needed:
-    data_out = fix_split(data_out, split_in, grid_in.comm, split_out, grid_out.comm, -1)
+    data_out = fix_split(
+        data_out, split_in, grid_in.group, split_out, grid_out.group, -1
+    )
     return v.__class__(grid_out, data=data_out)

@@ -5,7 +5,7 @@ import numpy as np
 import torch.distributed as dist
 
 import qimpy
-from qimpy import rc, log
+from qimpy import rc, log, MPI
 
 IMBALANCE_THRESHOLD = 20.0  #: max cpu time% waste tolerated in process grid dimension
 
@@ -127,3 +127,10 @@ class ProcessGrid:
             n_unknown = 0
 
         return shape, n_unknown
+
+
+@functools.cache
+def get_comm(group: dist.ProcessGroup) -> MPI.Comm:
+    """Get MPI communicator corresponding to process group."""
+    proc_list = dist.get_process_group_ranks(group)
+    return rc.comm.Create_group(rc.comm.Get_group().Incl(proc_list))

@@ -4,15 +4,14 @@ from abc import abstractmethod
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import rc, MPI
+from qimpy import rc
 from qimpy.algorithms import Gradable
 from qimpy.math import random
-from qimpy.mpi import BufferView
 from qimpy.io import CheckpointPath
 from . import Grid
 from ._change import _change_real, _change_recip
-
 
 FieldType = TypeVar("FieldType", bound="Field")  #: Type for field ops.
 
@@ -185,11 +184,9 @@ class Field(Gradable[FieldType]):
                 result = result.real  # due to Hermitian symmetry
         else:
             result = data.sum(dim=(-3, -2, -1)) * grid.dV
-        # Collect over MPI if needed:
-        if self.grid.comm is not None:
-            result = result.contiguous()
-            rc.current_stream_synchronize()
-            self.grid.comm.Allreduce(MPI.IN_PLACE, BufferView(result), MPI.SUM)
+        # Collect over process group if needed:
+        if self.grid.group is not None:
+            dist.all_reduce(result, group=self.grid.group)
         return result
 
     def dot(self: FieldType, other: FieldType) -> torch.Tensor:
@@ -212,11 +209,9 @@ class Field(Gradable[FieldType]):
             result *= self.grid.lattice.volume  # reciprocal space integration weight
         else:
             result *= self.grid.dV  # real space integration weight
-        # Collect over MPI if needed:
-        if self.grid.comm is not None:
-            result = result.contiguous()
-            rc.current_stream_synchronize()
-            self.grid.comm.Allreduce(MPI.IN_PLACE, BufferView(result), MPI.SUM)
+        # Collect over process group if needed:
+        if self.grid.group is not None:
+            dist.all_reduce(result, group=self.grid.group)
         return result
 
     __xor__ = dot
@@ -226,8 +221,8 @@ class Field(Gradable[FieldType]):
         (Scalar contraction needed for the `Pulay` or `Minimizer` algorithm templates.)
         """
         result = torch.vdot(self.data.flatten(), other.data.flatten()).real
-        if self.grid.comm is not None:
-            self.grid.comm.Allreduce(MPI.IN_PLACE, BufferView(result), MPI.SUM)
+        if self.grid.group is not None:
+            dist.all_reduce(result, group=self.grid.group)
         return result.item()
 
     def norm(self: FieldType) -> torch.Tensor:

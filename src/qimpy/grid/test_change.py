@@ -82,7 +82,7 @@ def test_resample(cls: Type[FieldType]) -> None:
 
 
 def get_plot_slice(v: Field) -> tuple[np.ndarray, np.ndarray]:
-    assert v.grid.comm is None
+    assert v.grid.group is None
     Lz = v.grid.lattice.Rbasis[:, 2].norm().item()
     Nz = v.grid.shape[2]
     z = np.arange(Nz) * (Lz / Nz)

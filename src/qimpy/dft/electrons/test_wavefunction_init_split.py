@@ -60,9 +60,9 @@ def get_Cb(
 
 # Combinations of system, n_bands, b_start, b_stop
 parameter_combinations = [
-    (make_system(real=True, spinorial=False, polarized=True), 317, 8, 51),
-    (make_system(real=False, spinorial=False, polarized=False), 128, 16, 96),
-    (make_system(real=False, spinorial=True, polarized=False), 64, 0, 64),
+    (dict(real=True, spinorial=False, polarized=True), 317, 8, 51),
+    (dict(real=False, spinorial=False, polarized=False), 128, 16, 96),
+    (dict(real=False, spinorial=True, polarized=False), 64, 0, 64),
 ]
 
 # Combinations with system, n_bands alone:
@@ -70,11 +70,12 @@ system_band_combinations = [combination[:2] for combination in parameter_combina
 
 
 @pytest.mark.mpi
-@pytest.mark.parametrize("system, n_bands, b_start, b_stop", parameter_combinations)
+@pytest.mark.parametrize("sys_args, n_bands, b_start, b_stop", parameter_combinations)
 def test_split_bands_inverse(
-    system: dft.System, n_bands: int, b_start: int, b_stop: int
+    sys_args: dict, n_bands: int, b_start: int, b_stop: int
 ) -> None:
     """Check that inv(split_bands) = split_basis."""
+    system = make_system(**sys_args)
     Cg = get_Cg(system, n_bands, b_start, b_stop)
     Cgb = Cg.split_bands().wait()
     Cgbg = Cgb.split_basis().wait()
@@ -82,11 +83,12 @@ def test_split_bands_inverse(
 
 
 @pytest.mark.mpi
-@pytest.mark.parametrize("system, n_bands, b_start, b_stop", parameter_combinations)
+@pytest.mark.parametrize("sys_args, n_bands, b_start, b_stop", parameter_combinations)
 def test_split_basis_inverse(
-    system: dft.System, n_bands: int, b_start: int, b_stop: int
+    sys_args: dict, n_bands: int, b_start: int, b_stop: int
 ) -> None:
     """Check that inv(split_basis) = split_bands."""
+    system = make_system(**sys_args)
     Cb = get_Cb(system, n_bands, b_start, b_stop)
     Cbg = Cb.split_basis().wait()
     Cbgb = Cbg.split_bands().wait()
@@ -94,19 +96,19 @@ def test_split_basis_inverse(
 
 
 @pytest.mark.mpi
-@pytest.mark.parametrize("system, n_bands, b_start, b_stop", parameter_combinations)
-def test_random_equiv(
-    system: dft.System, n_bands: int, b_start: int, b_stop: int
-) -> None:
+@pytest.mark.parametrize("sys_args, n_bands, b_start, b_stop", parameter_combinations)
+def test_random_equiv(sys_args: dict, n_bands: int, b_start: int, b_stop: int) -> None:
     """Check that randomization is consistent between different splits."""
+    system = make_system(**sys_args)
     Cg = get_Cg(system, n_bands, b_start, b_stop)
     Cb = get_Cb(system, n_bands, b_start, b_stop)
     assert (Cb - Cg.split_bands().wait()).norm() < 1e-8
     assert (Cg - Cb.split_basis().wait()).norm() < 1e-8
 
 
-@pytest.mark.parametrize("system, n_bands", system_band_combinations)
-def test_orthonormalize(system: dft.System, n_bands: int) -> None:
+@pytest.mark.parametrize("sys_args, n_bands", system_band_combinations)
+def test_orthonormalize(sys_args: dict, n_bands: int) -> None:
+    system = make_system(**sys_args)
     C = get_Cg(system, n_bands).orthonormalize()
     C_OC = C.dot_O(C).wait()
     expected = torch.eye(n_bands, device=rc.device)[None, None]

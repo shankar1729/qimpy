@@ -2,9 +2,10 @@ from typing import Optional
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
 import qimpy
-from qimpy import log, MPI
+from qimpy import log
 
 
 class TaskDivision:
@@ -56,19 +57,20 @@ class TaskDivision:
 
 
 class TaskDivisionCustom(TaskDivision):
-    """Customized division of a number of tasks over MPI."""
+    """Customized division of a number of tasks over a process group."""
 
     n_each_custom: np.ndarray  #: Custom number of tasks on each process
 
-    def __init__(self, *, n_mine: int, comm: Optional[MPI.Comm]) -> None:
+    def __init__(self, *, n_mine: int, group: Optional[dist.ProcessGroup]) -> None:
         """Initialize given local number of tasks on each processes."""
         # Collect n_mine on each process and initialize process parameters:
-        if comm is None:
+        if group is None:
             self.n_each_custom = np.full(1, n_mine)
             super().__init__(n_tot=0, n_procs=1, i_proc=0)
         else:
+            comm = qimpy.mpi.get_comm(group)
             self.n_each_custom = np.array(comm.allgather(n_mine))
-            super().__init__(n_tot=0, n_procs=comm.Get_size(), i_proc=comm.Get_rank())
+            super().__init__(n_tot=0, n_procs=group.size(), i_proc=group.rank())
         # Override base-class settings:
         self.n_mine = n_mine
         self.n_each = 0  # not applicable for custom division

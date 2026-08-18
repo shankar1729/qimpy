@@ -1,7 +1,16 @@
 from typing import Sequence, Any
 
 import numpy as np
-from scipy.special import sph_harm
+
+try:
+    from scipy.special import sph_harm_y
+except ImportError:
+    # Support for older scipy
+    def sph_harm_y(l, m, theta, phi):
+        from scipy.special import sph_harm
+
+        return sph_harm(m, l, phi, theta)
+
 
 from qimpy import log, rc
 from qimpy.io import log_config
@@ -17,7 +26,7 @@ def get_harmonics_ref(l_max: int, r: np.ndarray) -> np.ndarray:
     for l in range(l_max + 1):
         result = np.zeros((2 * l + 1,) + r.shape[:-1])
         for m in range(0, l + 1):
-            ylm = ((-1) ** m) * (rMag**l) * sph_harm(m, l, phi, theta)
+            ylm = ((-1) ** m) * (rMag**l) * sph_harm_y(l, m, theta, phi)
             if m == 0:
                 result[l] = ylm.real
             else:
