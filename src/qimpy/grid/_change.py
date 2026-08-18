@@ -27,13 +27,31 @@ def gather(
     process group and dimension dim, to not-split i.e. fully available
     on all processes."""
     # Bring split dimension to outermost (if necessary):
-    sendbuf = (v.swapaxes(0, dim) if dim else v).contiguous()
-    # Gather pieces from each process to all:
-    recvbuf = torch.empty(
-        (split_in.n_tot,) + sendbuf.shape[1:], dtype=v.dtype, device=v.device
-    )
-    recv_sizes = np.diff(split_in.n_prev).tolist()
-    dist.all_gather(list(recvbuf.split(recv_sizes, dim=0)), sendbuf, group=group)
+    sendbuf = v.swapaxes(0, dim) if dim else v
+    recv_sizes = np.diff(split_in.n_prev)
+    equal_sizes = recv_sizes.min() == split_in.n_each
+    if equal_sizes or (dist.get_backend(group) == "nccl"):
+        # Directly gather with equal sizes, or leveraging support for unequal sizes:
+        recv_shape = (split_in.n_tot,) + sendbuf.shape[1:]
+        recvbuf = torch.empty(recv_shape, dtype=v.dtype, device=v.device)
+        recvbuf_views = list(recvbuf.split(recv_sizes.tolist(), dim=0))
+        dist.all_gather(recvbuf_views, sendbuf.contiguous(), group=group)
+    else:
+        # Pad inputs to constant size:
+        common_shape = (split_in.n_each,) + sendbuf.shape[1:]
+        if split_in.n_mine != split_in.n_each:
+            padded_buf = torch.empty(common_shape, dtype=v.dtype, device=v.device)
+            padded_buf[: split_in.n_mine] = sendbuf
+            sendbuf = padded_buf
+        recvbufs = [
+            torch.empty(common_shape, dtype=v.dtype, device=v.device)
+            for i_proc in range(split_in.n_procs)
+        ]
+        dist.all_gather(recvbufs, sendbuf.contiguous(), group=group)
+        # Remove padding from outputs:
+        recvbuf = torch.cat(
+            [buf[:size] for buf, size in zip(recvbufs, recv_sizes)], dim=0
+        )
     # Restore dimension order of output (if necessary):
     return recvbuf.swapaxes(0, dim) if dim else recvbuf
 
@@ -197,7 +215,7 @@ def _change_recip(v: FieldTypeRecip, grid_out: Grid) -> FieldTypeRecip:
                 # Prepare negative Nyquist slice for symmetrization:
                 if not is_half:
                     if whose_neg == split_in.i_proc:
-                        neg_slice = data[..., neg_start - split_in.i_start]
+                        neg_slice = data[..., neg_start - split_in.i_start].contiguous()
                         if whose_pos != split_in.i_proc:
                             assert grid_in.group is not None
                             dist.send(

@@ -16,6 +16,8 @@ class TaskDivision:
     i_proc: int  #: Rank of current process
     n_each: int  #: Number of tasks on each process (till we run out)
     n_prev: np.ndarray  #: Cumulative task counts (n_procs+1 ints)
+    i_start: int
+    i_stop: int
     i_start: int  #: Task start index on current process
     i_stop: int  #: Task stop index on current process
     n_mine: int  #: Number of tasks on current process
@@ -73,7 +75,7 @@ class TaskDivisionCustom(TaskDivision):
             super().__init__(n_tot=0, n_procs=group.size(), i_proc=group.rank())
         # Override base-class settings:
         self.n_mine = n_mine
-        self.n_each = 0  # not applicable for custom division
+        self.n_each = int(self.n_each_custom.max())  # use for constant padded size
         # Compute remaining attributes:
         self.n_prev = np.concatenate((np.zeros(1), self.n_each_custom.cumsum())).astype(
             int

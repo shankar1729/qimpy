@@ -23,7 +23,7 @@ def get_test_field(cls: Type[FieldType], grid: Grid) -> Field[Any]:
 
 
 def get_test_shapes() -> Sequence[Sequence[int]]:
-    return (36, 40, 48), (40, 48, 64)
+    return (36, 40, 48), (41, 47, 67)
 
 
 def get_shape_field_combinations() -> Sequence[tuple[Sequence[int], Type]]:
