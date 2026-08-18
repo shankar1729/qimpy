@@ -1,4 +1,5 @@
 from __future__ import annotations
+from dataclasses import dataclass
 
 import numpy as np
 import torch
@@ -102,9 +103,21 @@ def _dot(
     # Reduce asynchronously if needed:
     need_reduce = (basis.division.n_procs > 1) and (not full_basis)
     if need_reduce:
-        return dist.all_reduce(result, basis.group, async_op=True)
+        return DotResult(
+            result, dist.all_reduce(result, group=basis.group, async_op=True)
+        )
     else:
         return Waitless(result)  # Result available now
+
+
+@dataclass
+class DotResult:
+    result: torch.Tensor
+    request: dist.Work
+
+    def wait(self) -> torch.Tensor:
+        self.request.wait()
+        return self.result
 
 
 def _dot_O(
