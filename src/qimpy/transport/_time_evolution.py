@@ -325,10 +325,14 @@ class TimeEvolution(TreeNode):
     _RHO_ATOL = 1e-12
     #: Refuse to subdivide a single kick further than this (fail loudly rather
     #: than spin forever if the rate estimate blows up).
-    _MAX_SUBSTEPS = 4096
+    #: Env-overridable so a DIAGNOSTIC rerun can fail fast. At ~15 s/substep on
+    #: the M=32/Nr=6 mixer the default budget costs ~17 h of grinding before it
+    #: raises, which is exactly the wait that made the 2026-08-18 failure so
+    #: expensive; a reproduce-the-divergence run wants ~96, not 4096.
+    _MAX_SUBSTEPS = int(os.environ.get("QIMPY_MAX_SUBSTEPS", 4096))
     #: Dump the state once when a kick first needs this many substeps. Normal
     #: operation on the M=32/Nr=6 mixer is 1-2, so this only fires on trouble.
-    _WARN_SUBSTEPS = 64
+    _WARN_SUBSTEPS = int(os.environ.get("QIMPY_WARN_SUBSTEPS", 64))
     #: Log every kick at or above this count, not just on a change in count.
     _LOUD_SUBSTEPS = 4
 
