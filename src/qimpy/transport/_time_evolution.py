@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Union
 from dataclasses import dataclass
+import os
 
 import numpy as np
 import torch
@@ -18,6 +19,35 @@ def _amax(x) -> float:
     if torch.is_tensor(x):
         return float(x.abs().max())
     return max((float(xi.abs().max()) for xi in x), default=0.0)
+
+
+def _patches(x) -> list:
+    """View a TensorList (or bare Tensor) as a list of patch tensors."""
+    return [x] if torch.is_tensor(x) else list(x)
+
+
+def _clone(x):
+    """Deep copy of a TensorList (or bare Tensor), preserving the type."""
+    if torch.is_tensor(x):
+        return x.detach().clone()
+    return type(x)(xi.detach().clone() for xi in x)
+
+
+def _amax_where(x) -> tuple[float, int, tuple]:
+    """(max|.|, patch index, unraveled index) -- WHERE the extremum sits.
+
+    The whole point of the divergence dump: a scalar max says the state blew
+    up, this says which cell did.  Only called on the dump path, so the extra
+    argmax never costs anything in the substep loop.
+    """
+    best = (-1.0, -1, ())
+    for ip, xi in enumerate(_patches(x)):
+        a = xi.abs()
+        flat = int(a.argmax())
+        val = float(a.reshape(-1)[flat])
+        if val > best[0]:
+            best = (val, ip, tuple(int(j) for j in np.unravel_index(flat, a.shape)))
+    return best
 
 
 class TimeEvolution(TreeNode):
@@ -296,6 +326,11 @@ class TimeEvolution(TreeNode):
     #: Refuse to subdivide a single kick further than this (fail loudly rather
     #: than spin forever if the rate estimate blows up).
     _MAX_SUBSTEPS = 4096
+    #: Dump the state once when a kick first needs this many substeps. Normal
+    #: operation on the M=32/Nr=6 mixer is 1-2, so this only fires on trouble.
+    _WARN_SUBSTEPS = 64
+    #: Log every kick at or above this count, not just on a change in count.
+    _LOUD_SUBSTEPS = 4
 
     def _collision_kick(self, geometry: Geometry, dt_coll: float) -> None:
         """Advance the collision sub-flow ALONE over dt_coll (explicit midpoint).
@@ -332,43 +367,88 @@ class TimeEvolution(TreeNode):
             k1 = geometry.collision_dot(rho)
             k2 = geometry.collision_dot(rho + (0.5 * dt_coll) * k1)
             geometry.rho = rho + dt_coll * k2
-            self._check_collision_rho(geometry.rho)
+            # rho is untouched here (all ops out-of-place), so it IS the entry
+            # state -- no clone, so this path stays bit-identical.
+            self._check_collision_rho(geometry.rho, rho)
             return
 
         t_left = dt_coll
         k1 = geometry.collision_dot(rho)
         n_sub = 0
+        # Snapshot the state ENTERING the kick.  This is the object worth
+        # having: the kick is where the runaway happens, so replaying it in
+        # 0-D from rho_entry reproduces the divergence with no streaming and
+        # no multi-hour march.  One device-side copy per kick (kicks are every
+        # collision_interval steps and the state is small next to the e-e
+        # vertices), so the cost is noise against the 4 applies per window.
+        rho_entry = _clone(rho)
+        hist: list[tuple[int, float, float, float, float]] = []
         while t_left > 0.0:
             n_sub += 1
+            # Rate measured from the state the substep actually starts at. The
+            # maxima of |k1| and |rho| may sit in different cells, which only
+            # makes h more conservative -- and it matches the quantity the
+            # instability was diagnosed with.
+            a_rho = _amax(rho)
+            a_k1 = _amax(k1)
+            rate = 0.5 * a_k1 / max(a_rho, self._RHO_ATOL)
+            h = t_left if rate <= 0.0 else min(t_left, s_max / rate)
+            hist.append((n_sub, a_rho, a_k1, rate, h))
+            # Physicality guard, INSIDE the loop.  It used to run only after
+            # the loop returned, so a kick that diverged internally ground
+            # through the full substep budget (~17 h at ~15 s/substep on the
+            # M=32/Nr=6 mixer) instead of failing in seconds.  a_rho is
+            # already synced for the rate above, so this costs nothing.
+            if self.collision_rho_max > 0.0 and not (a_rho <= self.collision_rho_max):
+                self._dump_collision_state(
+                    "rho_max", rho_entry, rho, k1, hist, dt_coll, t_left, n_sub)
+                raise RuntimeError(
+                    f"collision kick at step {self.i_step} reached "
+                    f"max|rho| = {a_rho:.6e} at substep {n_sub}, above "
+                    f"collision_rho_max = {self.collision_rho_max:g}. rho is "
+                    "the deviation df about f0, so |df| <= 1 identically: the "
+                    "state is no longer physical.")
             if n_sub > self._MAX_SUBSTEPS:
+                self._dump_collision_state(
+                    "max_substeps", rho_entry, rho, k1, hist, dt_coll, t_left, n_sub)
                 raise RuntimeError(
                     f"collision kick at step {self.i_step} still needs "
                     f"substeps after {self._MAX_SUBSTEPS}: the collision rate "
                     "is diverging, not merely stiff. Inspect the state rather "
                     "than raising the substep cap.")
-            # Rate measured from the state the substep actually starts at. The
-            # maxima of |k1| and |rho| may sit in different cells, which only
-            # makes h more conservative -- and it matches the quantity the
-            # instability was diagnosed with.
-            rate = 0.5 * _amax(k1) / max(_amax(rho), self._RHO_ATOL)
-            h = t_left if rate <= 0.0 else min(t_left, s_max / rate)
+            # One early snapshot, long before the cap, so a run that recovers
+            # still leaves evidence of what a hard kick looked like.
+            if n_sub == self._WARN_SUBSTEPS and not getattr(self, "_warned_sub", False):
+                self._warned_sub = True
+                log.info(f"Collision substeps passed {self._WARN_SUBSTEPS} at step "
+                         f"{self.i_step} (rate {rate:.6e}, max|rho| {a_rho:.6e}) "
+                         "-- dumping state")
+                self._dump_collision_state(
+                    "warn", rho_entry, rho, k1, hist, dt_coll, t_left, n_sub)
             k2 = geometry.collision_dot(rho + (0.5 * h) * k1)
             rho = rho + h * k2
             t_left -= h  # h is min(t_left, .), so the last substep lands exactly
             if t_left > 0.0:
                 k1 = geometry.collision_dot(rho)
         geometry.rho = rho
-        self._check_collision_rho(rho)
-        if n_sub != getattr(self, "_n_sub_last", 0):
+        self._check_collision_rho(rho, rho_entry)
+        # Log on change (as before), but ALSO whenever the kick was hard: the
+        # count is a ceil, so a rate climbing within the 1->2 band is invisible
+        # until it crosses, and the run that died went 1,2,1,2,... then >4096
+        # with nothing in between.
+        if n_sub != getattr(self, "_n_sub_last", 0) or n_sub >= self._LOUD_SUBSTEPS:
             log.info(f"Collision substeps: {n_sub} (dt_coll = {dt_coll:.4g}, "
-                     f"step {self.i_step})")
+                     f"step {self.i_step}, max rate {max(r[3] for r in hist):.4e})")
             self._n_sub_last = n_sub
 
-    def _check_collision_rho(self, rho) -> None:
+    def _check_collision_rho(self, rho, rho_entry=None) -> None:
         """Trip on an unphysical state as soon as the kick produces one."""
         if self.collision_rho_max > 0.0:
             a = _amax(rho)
             if not (a <= self.collision_rho_max):  # also catches NaN
+                self._dump_collision_state(
+                    "rho_max_post", rho_entry, rho, None, [], float("nan"),
+                    0.0, -1)
                 raise RuntimeError(
                     f"collision kick at step {self.i_step} left "
                     f"max|rho| = {a:.6e}, above collision_rho_max = "
@@ -376,6 +456,64 @@ class TimeEvolution(TreeNode):
                     "about f0, so |df| <= 1 identically: the state is no "
                     "longer physical. Reduce collision_s_max (or "
                     "collision_interval) rather than raising this bound.")
+
+    def _dump_collision_state(
+        self, reason, rho_entry, rho_now, k1_now, hist, dt_coll, t_left, n_sub
+    ) -> str:
+        """Write everything needed to replay a diverging kick offline.
+
+        Losing this is what made the 2026-08-18 failure undiagnosable: the run
+        raised after ~17 h inside one kick, the newest checkpoint was ~19k
+        steps upstream, and FINAL.h5 was a byte copy of it -- so the diverging
+        state was never on disk at all.
+
+        ``rho_entry`` is the state ENTERING the kick and is the useful one:
+        feeding it to collision_dot alone reproduces the runaway in 0-D, which
+        is what distinguishes a genuine ODE blow-up (blow-up time invariant
+        under h -> h/10) from a mere step-size instability.
+
+        Never allowed to mask the RuntimeError it accompanies: any failure to
+        write is logged and swallowed.
+        """
+        prefix = os.environ.get("QIMPY_COLLISION_DUMP", "collision_divergence")
+        path = f"{prefix}_step{self.i_step:07d}_{reason}.h5"
+        try:
+            with h5py.File(path, "w") as fp:
+                fp.attrs["reason"] = reason
+                fp.attrs["i_step"] = int(self.i_step)
+                fp.attrs["t"] = float(self.t)
+                fp.attrs["dt"] = float(self.dt)
+                fp.attrs["dt_coll"] = float(dt_coll)
+                fp.attrs["t_left"] = float(t_left)
+                fp.attrs["n_sub"] = int(n_sub)
+                fp.attrs["collision_s_max"] = float(self.collision_s_max)
+                fp.attrs["collision_rho_max"] = float(self.collision_rho_max)
+                fp.attrs["collision_interval"] = int(self.collision_interval)
+                fp.attrs["collision_fuse"] = bool(self.collision_fuse)
+                for name, x in (("rho_entry", rho_entry),
+                                ("rho", rho_now), ("k1", k1_now)):
+                    if x is None:
+                        continue
+                    g = fp.create_group(name)
+                    for ip, xi in enumerate(_patches(x)):
+                        g.create_dataset(f"patch{ip}",
+                                         data=xi.detach().cpu().numpy())
+                    val, ip, idx = _amax_where(x)
+                    g.attrs["amax"] = val
+                    g.attrs["amax_patch"] = ip
+                    g.attrs["amax_index"] = np.asarray(idx, dtype=np.int64)
+                if hist:
+                    # (substep, max|rho|, max|k1|, rate, h) -- the only place
+                    # the runaway is visible, since the substep COUNT is a
+                    # ceil and stays flat until the rate crosses an integer.
+                    fp.create_dataset("substep_history",
+                                      data=np.asarray(hist, dtype=np.float64))
+                    fp["substep_history"].attrs["columns"] = \
+                        "n_sub,amax_rho,amax_k1,rate,h"
+            log.info(f"Collision divergence dump written to {path}")
+        except Exception as exc:  # never mask the real error
+            log.warning(f"FAILED to write collision divergence dump {path}: {exc}")
+        return path
 
     def _rk_step(self, geometry: Geometry) -> None:
         """Advance one step (RK2/RK4, or SSPRK3 for positivity preservation)."""
