@@ -4,11 +4,12 @@ from typing import Optional
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
 from qimpy import rc, log, TreeNode, dft, MPI
 from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext
-from qimpy.mpi import BufferView, Waitable, globalreduce
+from qimpy.mpi import Waitable, globalreduce, get_comm
 from qimpy.math import eighg, dagger
 from . import Wavefunction
 
@@ -112,8 +113,7 @@ class Davidson(TreeNode):
         # Find low-norm bands:
         if C.basis.division.n_procs > 1:
             # guard against machine-precision differences between procs
-            rc.current_stream_synchronize()
-            C.basis.comm.Bcast(BufferView(norm))
+            dist.broadcast(norm, group=C.basis.group, group_src=0)
         low_norm = norm < self._norm_cut
         i_spin, i_k, i_band = torch.where(low_norm)
         if not len(i_spin):
@@ -128,8 +128,8 @@ class Davidson(TreeNode):
         n_bands = electrons.fillings.n_bands
         return globalreduce.sum(
             electrons.basis.w_sk * electrons.eig[..., :n_bands],
-            electrons.kpoints.comm,
-        )
+            electrons.kpoints.group,
+        ).item()
 
     def _check_deig(
         self, deig: torch.Tensor, eig_threshold: float
@@ -137,11 +137,11 @@ class Davidson(TreeNode):
         """Return maximum change in eigenvalues and how many
         eigenvalues are converged at all spin and k"""
         n_bands = self.electrons.fillings.n_bands
-        deig_max = globalreduce.max(deig[..., :n_bands], self.electrons.comm)
+        deig_max = globalreduce.max(deig[..., :n_bands], self.electrons.group).item()
         pending = torch.where(
             (deig[..., :n_bands] > eig_threshold).flatten(0, 1).any(dim=0)
         )[0]
-        n_eigs_done = self.electrons.comm.allreduce(
+        n_eigs_done = get_comm(self.electrons.group).allreduce(
             pending[0].item() if len(pending) else n_bands, MPI.MIN
         )
         return deig_max, n_eigs_done
@@ -155,7 +155,7 @@ class Davidson(TreeNode):
         el = self.electrons
         n_bands = el.fillings.n_bands
         n_bands_max = n_bands + el.fillings.n_bands_extra
-        helper = type(self) != Davidson
+        helper = type(self) is not Davidson
         inner_loop = not (
             helper or ((n_iterations is None) and (eig_threshold is None))
         )
@@ -167,7 +167,7 @@ class Davidson(TreeNode):
         if 2 * n_bands_max >= el.basis.n_min:
             raise ValueError(
                 f"n_bands + n_bands_extra = {n_bands_max} exceeds"
-                f" min(n_basis)/2 = {el.basis.n_min//2} in Davidson"
+                f" min(n_basis)/2 = {el.basis.n_min // 2} in Davidson"
             )
         HC = el.hamiltonian(el.C)
         el.eig, V = torch.linalg.eigh((el.C ^ HC).wait())  # subspace eigs
