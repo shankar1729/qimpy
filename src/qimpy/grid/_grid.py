@@ -11,7 +11,7 @@ from qimpy.mpi import TaskDivision
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
-from ._fft import init_grid_fft, FFT, IFFT, IndicesType
+from ._fft import init_grid_fft, FFT, IFFT
 
 
 class Grid(TreeNode):
@@ -39,10 +39,6 @@ class Grid(TreeNode):
     split2H: TaskDivision  #: MPI split of half-reciprocal dimension 2
     _mesh1D: dict[str, tuple[torch.Tensor, ...]]  # Global 1D meshes
     _mesh1D_mine: dict[str, tuple[torch.Tensor, ...]]  # Local 1D meshes
-    _indices_fft: IndicesType  #: All-to-all unscramble indices for `fft`
-    _indices_ifft: IndicesType  #: All-to-all unscramble indices for `ifft`
-    _indices_rfft: IndicesType  #: All-to-all unscramble indices for `rfft`
-    _indices_irfft: IndicesType  #: All-to-all unscramble indices for `irfft`
 
     def __init__(
         self,

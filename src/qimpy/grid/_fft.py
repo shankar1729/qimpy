@@ -8,7 +8,6 @@ import torch.distributed as dist
 from qimpy import log, rc, grid
 from qimpy.mpi import TaskDivision
 
-IndicesType = tuple[torch.Tensor, torch.Tensor, torch.Tensor]
 FunctionFFT = Callable[[torch.Tensor, str], torch.Tensor]
 
 
@@ -81,73 +80,6 @@ def init_grid_fft(self: grid.Grid) -> None:
         "H": iG1D[:2] + (iG1D[2][self.split2H.i_start : self.split2H.i_stop],),
     }
 
-    def get_indices(in_prev: np.ndarray, n_out_mine: int) -> IndicesType:
-        """Get index arrays for unscrambling data after MPI rearrangement.
-
-        A common operation below is taking an array split along axis
-        'in' and doing an MPI all-to-all to split it along axis 'out'.
-        Before the MPI transfer, the array must be rearranged to bring
-        the out axis as dimension 0. After doing this, the array will
-        have dimensions n_out x (batch-dims) x n_inMine x S[1]. Note
-        that the middle spatial dimension S[1] is never split.
-
-        The differing chunk-size in all-to-all scrambles the result,
-        and this routine provides indices that put the data in the right
-        order to then view as (batch-dims) x n_out_mine x S[1] x n_in.
-        The results of this function should be linearly combined with 1,
-        i_batch and n_batch to get net indexes for a given batch size.
-
-        Parameters
-        ----------
-        in_prev : numpy.array of ints
-            Cumulative counts of dimension split at input
-        n_out_mine : int
-            Local length of dimension split at output
-
-        Returns
-        -------
-        index_1 : torch.Tensor of ints
-            Coefficient of 1 in final index
-        index_i_batch : torch.Tensor of ints
-            Coefficient of i_batch in final index
-        index_n_batch : torch.Tensor of ints
-            Coefficient of n_batch in final index
-        """
-        i_out_mine = np.arange(n_out_mine)  # 1D index on out-split array
-        i_in = np.arange(in_prev[-1])  # 1D index on out-unified array
-        in_each = in_prev[1] - in_prev[0]  # block size of input split
-        in_counts = np.diff(in_prev)  # actual n_in on each process
-        src_proc = i_in // in_each  # index of source process by output entry
-        # Return index as a linear combination with three terms:
-        # (This allows handling all batch combinations with the same arrays)
-        S1 = self.shape[1]  # length of middle spatial dimension (never split)
-        i1 = np.arange(S1)  # index over middle spatial dimension
-        # --- coefficient of 1
-        index_1 = torch.tensor(
-            S1 * (i_in - in_prev[src_proc])[None, None, None, :]
-            + i1[None, None, :, None]
-        ).to(rc.device)
-        # --- coefficient of i_batch
-        index_i_batch = torch.tensor(S1 * in_counts[None, None, None, src_proc]).to(
-            rc.device
-        )
-        # --- coefficient of n_batch
-        index_n_batch = torch.tensor(
-            n_out_mine * S1 * in_prev[None, None, None, src_proc]
-            + (
-                i_out_mine[None, :, None, None]
-                * S1
-                * in_counts[None, None, None, src_proc]
-            )
-        ).to(rc.device)
-        return index_1, index_i_batch, index_n_batch
-
-    # Pre-calculate these arrays for each of the transforms:
-    self._indices_fft = get_indices(self.split0.n_prev, self.split2.n_mine)
-    self._indices_ifft = get_indices(self.split2.n_prev, self.split0.n_mine)
-    self._indices_rfft = get_indices(self.split0.n_prev, self.split2H.n_mine)
-    self._indices_irfft = get_indices(self.split2H.n_prev, self.split0.n_mine)
-
 
 def parallel_transform(
     group: dist.ProcessGroup,
@@ -159,9 +91,6 @@ def parallel_transform(
     fft_after: FunctionFFT,
     in_prev: np.ndarray,
     out_prev: np.ndarray,
-    index_1: torch.Tensor,
-    index_i_batch: torch.Tensor,
-    index_n_batch: torch.Tensor,
 ) -> torch.Tensor:
     """Helper function that performs the work of all the parallel
     FFT functions in class qimpy.grid.Grid. This function should
@@ -191,12 +120,6 @@ def parallel_transform(
         TaskDivision.n_prev of the dimension together at input, that splits
     out_prev
         TaskDivision.n_prev of the dimension initially split, joined at output
-    index_1
-        relevant unscramble index (coefficient of 1) from _init_grid_fft
-    index_i_batch
-        relevant unscramble index (coefficient of i_batch) from _init_grid_fft
-    index_n_batch
-        relevant unscramble index (coefficient of n_batch) from _init_grid_fft
     """
     assert v.shape[-3:] == shape_in
     n_batch = int(np.prod(v.shape[:-3]))
@@ -248,7 +171,6 @@ def fft(self: grid.Grid, v: torch.Tensor, norm: str) -> torch.Tensor:
             safe_fft,
             self.split2.n_prev,
             self.split0.n_prev,
-            *self._indices_fft,
         ).swapaxes(-1, -3)
     else:
         # Real to complex forward transform:
@@ -273,7 +195,6 @@ def fft(self: grid.Grid, v: torch.Tensor, norm: str) -> torch.Tensor:
             safe_fft2,
             self.split2H.n_prev,
             self.split0.n_prev,
-            *self._indices_rfft,
         ).swapaxes(-1, -3)
 
 
@@ -309,7 +230,6 @@ def ifft(self: grid.Grid, v: torch.Tensor, norm: str) -> torch.Tensor:
             safe_ifft2,
             self.split0.n_prev,
             self.split2.n_prev,
-            *self._indices_ifft,
         )
     else:
         # Complex to real inverse transform:
@@ -335,7 +255,6 @@ def ifft(self: grid.Grid, v: torch.Tensor, norm: str) -> torch.Tensor:
             safe_irfft,
             self.split0.n_prev,
             self.split2H.n_prev,
-            *self._indices_irfft,
         )
 
 
