@@ -4,10 +4,10 @@ from __future__ import annotations
 from typing import Union, Protocol, Callable, Optional
 
 import torch
+import torch.distributed as dist
 
 from qimpy import rc, TreeNode
 from qimpy.io import CheckpointPath, CheckpointContext, Unit, UnitOrFloat
-from qimpy.mpi import BufferView
 from qimpy.dft import geometry
 from ._gradient import Gradient
 
@@ -331,7 +331,7 @@ class Langevin(TreeNode):
         dynamics = self.dynamics
         # Generate MPI-consistent stochastic acceleration (not velocity dependent):
         rand = torch.randn_like(velocity.ions)
-        self.dynamics.group.Bcast(BufferView(rand))
+        dist.broadcast(rand, group=self.dynamics.group, group_src=0)
         variances = 2 * dynamics.T0 / (dynamics.masses * (dynamics.t_damp_T * dt))
         acceleration_noise = Gradient(ions=(rand * variances.sqrt()))
         # Take step including velocity-dependent damping:
