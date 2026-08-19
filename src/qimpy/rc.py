@@ -35,6 +35,8 @@ __all__ = (
     "cpu",
     "device",
     "use_cuda",
+    "init",
+    "free",
     "clock",
     "report_end",
 )
@@ -165,6 +167,11 @@ def init(
     log.info(
         f"Run totals: {n_procs} processes, {n_threads_tot} threads, {n_gpus_tot} GPUs"
     )
+
+
+def free():
+    """Cleanup any resources initialized in `init`."""
+    dist.destroy_process_group()
 
 
 def clock():

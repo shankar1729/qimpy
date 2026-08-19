@@ -26,6 +26,7 @@ def main() -> None:
     input_dict = io.dict.key_cleanup(io.yaml.load(args.input_file))
     run(**input_dict)
 
+    rc.free()
     rc.report_end()
     StopWatch.print_stats()
 

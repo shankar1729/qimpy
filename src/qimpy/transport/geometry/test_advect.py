@@ -109,7 +109,7 @@ def run(
 
     # Return RMS error in density:
     log.info(
-        f"Done with {rho_mae = :.6f} for {grid_spacing = :g}"
+        f"Done with MAE(rho) = {rho_mae:.6f} for grid spacing {grid_spacing:g}"
         f" at t[s]: {rc.clock():.2f}\n"
     )
     return rho_mae
@@ -220,6 +220,7 @@ def main():
             plt.legend()
             plt.savefig("convergence.pdf", bbox_inches="tight")
 
+    rc.free()
     rc.report_end()
     StopWatch.print_stats()
 

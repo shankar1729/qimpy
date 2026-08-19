@@ -59,6 +59,7 @@ def main():
         include_tilde=True
     ):
         test_fft(shape, n_batch, field_type, n_repeat=10)
+    rc.free()
     StopWatch.print_stats()
 
 

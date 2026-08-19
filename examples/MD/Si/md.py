@@ -73,6 +73,7 @@ def main() -> None:
         checkpoint="md.h5",
     )
     system.run()
+    qp.rc.free()
     qp.rc.report_end()
     qp.profiler.StopWatch.print_stats()
 

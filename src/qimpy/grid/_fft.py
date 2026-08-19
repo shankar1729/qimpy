@@ -214,12 +214,6 @@ def parallel_transform(
         np.diff(send_prev).tolist(),
         group=group,
     )
-    # mpi_type = rc.mpi_type[v_tilde.dtype]
-    # rc.current_stream_synchronize()
-    # comm.Alltoallv(
-    #     (BufferView(v_tilde), np.diff(send_prev), send_prev[:-1], mpi_type),
-    #     (BufferView(v_tmp), np.diff(recv_prev), recv_prev[:-1], mpi_type),
-    # )
 
     # Unscramble:
     if n_batch == 1:
