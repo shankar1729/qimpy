@@ -6,7 +6,7 @@ import torch
 import torch.distributed as dist
 
 from qimpy import grid
-from qimpy.mpi import TaskDivision, TaskDivisionCustom
+from qimpy.mpi import TaskDivision, TaskDivisionCustom, all_gather_padded
 from . import Grid
 
 
@@ -26,34 +26,9 @@ def gather(
     """Return the contents of v, changed from split based on split_in on
     process group and dimension dim, to not-split i.e. fully available
     on all processes."""
-    # Bring split dimension to outermost (if necessary):
-    sendbuf = v.swapaxes(0, dim) if dim else v
-    recv_sizes = np.diff(split_in.n_prev)
-    equal_sizes = recv_sizes.min() == split_in.n_each
-    if equal_sizes or (dist.get_backend(group) == "nccl"):
-        # Directly gather with equal sizes, or leveraging support for unequal sizes:
-        recv_shape = (split_in.n_tot,) + sendbuf.shape[1:]
-        recvbuf = torch.empty(recv_shape, dtype=v.dtype, device=v.device)
-        recvbuf_views = list(recvbuf.split(recv_sizes.tolist(), dim=0))
-        dist.all_gather(recvbuf_views, sendbuf.contiguous(), group=group)
-    else:
-        # Pad inputs to constant size:
-        common_shape = (split_in.n_each,) + sendbuf.shape[1:]
-        if split_in.n_mine != split_in.n_each:
-            padded_buf = torch.empty(common_shape, dtype=v.dtype, device=v.device)
-            padded_buf[: split_in.n_mine] = sendbuf
-            sendbuf = padded_buf
-        recvbufs = [
-            torch.empty(common_shape, dtype=v.dtype, device=v.device)
-            for i_proc in range(split_in.n_procs)
-        ]
-        dist.all_gather(recvbufs, sendbuf.contiguous(), group=group)
-        # Remove padding from outputs:
-        recvbuf = torch.cat(
-            [buf[:size] for buf, size in zip(recvbufs, recv_sizes)], dim=0
-        )
-    # Restore dimension order of output (if necessary):
-    return recvbuf.swapaxes(0, dim) if dim else recvbuf
+    sendbuf = v.swapaxes(0, dim) if dim else v  # bring split dimension to 0
+    recvbuf = all_gather_padded(sendbuf, sizes=np.diff(split_in.n_prev), group=group)
+    return recvbuf.swapaxes(0, dim) if dim else recvbuf  # restore dimension order
 
 
 def redistribute(

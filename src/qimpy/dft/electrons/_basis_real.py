@@ -3,7 +3,7 @@ import numpy as np
 import torch
 
 from qimpy import rc, log
-from qimpy.mpi import BufferView, get_comm
+from qimpy.mpi import get_comm, all_gather_padded
 from qimpy.dft import electrons
 
 
@@ -16,7 +16,8 @@ class BasisReal:
     iz0_conj_self: torch.Tensor  #: Conjugate indices within Gz = 0 set
     iz0_mine_local: torch.Tensor  #: Local Gz = 0 indices on current process
     iz0_mine_conj: torch.Tensor  #: Global conjugates of `iz0_mine_local`
-    nz0_prev: np.ndarray  #: Number of Gz = 0 entries before this process
+    nz0_each: np.ndarray  #: Number of Gz = 0 at each process
+    nz0_prev: np.ndarray  #: Number of Gz = 0 entries before each process
     Gweight: torch.Tensor  #: Weight of all plane waves
     Gweight_mine: torch.Tensor  #: Weight of local plane waves
     Gweight_tot: float  #: Total weight of all plane waves
@@ -54,7 +55,8 @@ class BasisReal:
         )[0]
         self.iz0_mine_local = self.iz0[mine] - div.i_start
         self.iz0_mine_conj = self.iz0_conj[mine]
-        self.nz0_prev = np.cumsum([0] + get_comm(basis.group).allgather(len(mine)))
+        self.nz0_each = np.array(get_comm(basis.group).allgather(len(mine)))
+        self.nz0_prev = np.cumsum(np.concatenate(([0], self.nz0_each)))
 
         # Weight by element for overlaps:
         self.Gweight = torch.where(iGz == 0, 1.0, 2.0)
@@ -70,26 +72,9 @@ class BasisReal:
         # Collect all the z0 coefficients:
         is_split = not (coeff.shape[-1] == basis.n_tot)
         if is_split:
-            coeff_z0 = torch.empty(
-                (self.nz0_prev[-1],) + coeff.shape[:-1],
-                dtype=coeff.dtype,
-                device=coeff.device,
-            )
-            coeff_z0_mine = (
-                coeff[..., self.iz0_mine_local]
-                .permute(4, 0, 1, 2, 3)  # basis at front
-                .contiguous()
-            )
-            mpi_type = rc.mpi_type[coeff.dtype]
-            sendcount = coeff_z0_mine.numel()
-            prod_rest = np.prod(coeff.shape[:-1])  # number in all other dims
-            recvcounts = np.diff(self.nz0_prev) * prod_rest
-            offsets = self.nz0_prev[:-1] * prod_rest
-            rc.current_stream_synchronize()
-            basis.comm.Allgatherv(
-                (BufferView(coeff_z0_mine), sendcount, 0, mpi_type),
-                (BufferView(coeff_z0), recvcounts, offsets, mpi_type),
-            )
+            # Bring basis to front for gather:
+            coeff_z0_mine = coeff[..., self.iz0_mine_local].permute(4, 0, 1, 2, 3)
+            coeff_z0 = all_gather_padded(coeff_z0_mine, self.nz0_each, basis.group)
             coeff_z0 = coeff_z0.permute(1, 2, 3, 4, 0)  # put basis back at end
         else:  # All coefficients local already:
             coeff_z0 = coeff[..., self.iz0]
