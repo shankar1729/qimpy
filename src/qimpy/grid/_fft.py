@@ -204,25 +204,24 @@ def parallel_transform(
     v_tilde = v_tilde.flatten(0, -2).T.contiguous()  # bring last dim to front
 
     # MPI rearrangement:
-    send_prev = in_prev * v_tilde.shape[1]
     recv_prev = out_prev * (np.prod(shape_out[:2]) * n_batch)
-    v_tmp = torch.zeros(recv_prev[-1], dtype=v_tilde.dtype, device=v_tilde.device)
-    dist.all_to_all_single(
-        v_tmp,
-        v_tilde.flatten(),
-        np.diff(recv_prev).tolist(),
-        np.diff(send_prev).tolist(),
-        group=group,
-    )
+    recv_sizes = np.diff(recv_prev)
+    in_sizes = np.diff(in_prev)
+    out_sizes = np.diff(out_prev)
+    send_sizes = in_sizes * v_tilde.shape[1]
+    buf = torch.zeros(recv_prev[-1], dtype=v_tilde.dtype, device=v_tilde.device)
+    dist.all_to_all_single(buf, v_tilde.flatten(), recv_sizes, send_sizes, group=group)
 
     # Unscramble:
-    if n_batch == 1:
-        index = index_1 + index_n_batch
-    else:
-        i_batch = torch.arange(n_batch, device=index_1.device).view(n_batch, 1, 1, 1)
-        index = index_1 + index_i_batch * i_batch + index_n_batch * n_batch
-    v_tilde = v_tmp[index].view(v.shape[:-3] + shape_out)
-    del v_tmp
+    v_tilde = torch.cat(
+        [
+            chunk.view(shape_out[0], n_batch, out_size, shape_out[1]).permute(
+                1, 0, 3, 2
+            )
+            for chunk, out_size in zip(buf.split(recv_sizes.tolist()), out_sizes)
+        ],
+        dim=-1,
+    ).view(v.shape[:-3] + shape_out)
     return fft_after(v_tilde, norm)  # Transform 1 or 2 dims here
 
 
