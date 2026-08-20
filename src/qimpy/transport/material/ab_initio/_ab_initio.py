@@ -114,7 +114,6 @@ class AbInitio(Material):
             By default, only n (number density) is output.
         """
         super().__init__()
-        self.comm = process_grid.get_comm("k")
         self.file = file
         self.orbital_zeeman = orbital_zeeman
         self.mu = mu
@@ -134,11 +133,11 @@ class AbInitio(Material):
                         f"L not available in {file} for orbital-zeeman"
                     )
             if T > (Tmax := float(attrs["Tmax"])) * (1 + 1e-6):
-                raise InvalidInputException(f"{T = } exceeds {Tmax = }")
+                raise InvalidInputException(f"{T=} exceeds {Tmax=}")
             self.T = T
             wk = 1 / float(attrs["nkTot"])
             nk, n_bands = data_file["E"].shape
-            log.info(f"Initializing AbInitio material with {nk = } and {n_bands = }")
+            log.info(f"Initializing AbInitio material with {nk=} and {n_bands=}")
             self.initialize(
                 wk=wk,
                 nk=nk,
@@ -242,26 +241,26 @@ class AbInitio(Material):
                 observables.append(P_diag)
             elif match_S.match(observable_name):
                 if self.S is None:
-                    raise InvalidInputException(f"{observable_name = } unavailable")
+                    raise InvalidInputException(f"{observable_name=} unavailable")
                 observables.append(self.S[:, dir_name_to_index[observable_name[1]]])
             elif match_j_S.match(observable_name):
                 if self.S is None:
-                    raise InvalidInputException(f"{observable_name = } unavailable")
+                    raise InvalidInputException(f"{observable_name=} unavailable")
                 Pi = self.P[:, dir_name_to_index[observable_name[1]]]
                 Sj = self.S[:, dir_name_to_index[observable_name[4]]]
                 observables.append(0.5 * (Pi @ Sj + Sj @ Pi))
             elif match_L.match(observable_name):
                 if self.L is None:
-                    raise InvalidInputException(f"{observable_name = } unavailable")
+                    raise InvalidInputException(f"{observable_name=} unavailable")
                 observables.append(self.L[:, dir_name_to_index[observable_name[1]]])
             elif match_j_L.match(observable_name):
                 if self.L is None:
-                    raise InvalidInputException(f"{observable_name = } unavailable")
+                    raise InvalidInputException(f"{observable_name=} unavailable")
                 Pi = self.P[:, dir_name_to_index[observable_name[1]]]
                 Lj = self.L[:, dir_name_to_index[observable_name[4]]]
                 observables.append(0.5 * (Pi @ Lj + Lj @ Pi))
             else:
-                raise InvalidInputException(f"{observable_name = } is not supported")
+                raise InvalidInputException(f"{observable_name=} is not supported")
         self.observables = torch.stack(observables, dim=0)
         self.observable_names = list(observable_names)
         self.include_coherent = False

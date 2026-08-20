@@ -11,7 +11,7 @@ from qimpy.io import (
     InvalidInputException,
     CheckpointContext,
 )
-from qimpy.mpi import BufferView
+from qimpy.mpi import all_gather_padded, get_comm
 from qimpy.math import ceildiv
 from qimpy.profiler import stopwatch
 from qimpy.transport import material
@@ -54,7 +54,7 @@ class Lindblad(TreeNode):
             eps = 1e-12
             dmu_eps = 1e-8
 
-            self.mu0 = torch.ones(1,1).to(rc.device) * ab_initio.mu
+            self.mu0 = torch.ones(1, 1).to(rc.device) * ab_initio.mu
 
             self.max_dbetamu = max_dmu / ab_initio.T
             self.max_dmu = max_dmu
@@ -63,8 +63,9 @@ class Lindblad(TreeNode):
             self.dmu_eps = float(dmu_eps)
             self.exp_betaE = torch.exp(ab_initio.E / ab_initio.T)[None, None]
         elif detailed_balance not in ["single", "none", "emission"]:
-            raise InvalidInputException(f"{detailed_balance} detailed_balance only has spatial, single, and none implemented")
-          
+            raise InvalidInputException(
+                f"{detailed_balance} detailed_balance only has spatial, single, and none implemented"
+            )
 
         if not bool(data_file.attrs["ePhEnabled"]):
             raise InvalidInputException("No e-ph scattering available in data file")
@@ -82,20 +83,14 @@ class Lindblad(TreeNode):
         prefactor = np.pi * ab_initio.wk
 
         # Collect together evecs for all k if needed:
-        if (ab_initio.comm.size == 1) or (ab_initio.evecs is None):
+        if (ab_initio.group.size() == 1) or (ab_initio.evecs is None):
             evecs = ab_initio.evecs
         else:
-            sendbuf = ab_initio.evecs.contiguous()
-            recvbuf = torch.zeros(
-                (nk,) + sendbuf.shape[1:], dtype=sendbuf.dtype, device=rc.device
+            evecs = all_gather_padded(
+                ab_initio.evecs.contiguous(),
+                np.diff(ab_initio.k_division.n_prev),
+                ab_initio.group,
             )
-            mpi_type = rc.mpi_type[sendbuf.dtype]
-            recv_prev = ab_initio.k_division.n_prev * n_bands_sq
-            ab_initio.comm.Allgatherv(
-                (BufferView(sendbuf), np.prod(sendbuf.shape), 0, mpi_type),
-                (BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1], mpi_type),
-            )
-            evecs = recvbuf
 
         def get_mine(ik) -> Union[torch.Tensor, slice, None]:
             """Utility to fetch efficient slices of relevant k-points."""
@@ -175,16 +170,21 @@ class Lindblad(TreeNode):
         self.P_eye = apply_batched(
             self.P, torch.tile(ab_initio.eye_bands[None], (nk, 1, 1))[..., None]
         )
-        nnzP = ab_initio.comm.allreduce(torch.count_nonzero(self.P))
-        ntotP = ab_initio.comm.allreduce(np.prod(self.P.shape))
+        comm = get_comm(ab_initio.group)
+        nnzP = comm.allreduce(torch.count_nonzero(self.P).item())
+        ntotP = comm.allreduce(int(np.prod(self.P.shape)))
         fill_percent_P = 100.0 * nnzP / ntotP
         log.info(f"P tensor fill fraction: {fill_percent_P:.1f}%")
 
         if detailed_balance in ["none", "emission"]:
-            log.info(f"Setting rho_dot0 to zero for {detailed_balance} detailed balance scheme")
-            self.rho_dot0 = 0 
+            log.info(
+                f"Setting rho_dot0 to zero for {detailed_balance} detailed balance scheme"
+            )
+            self.rho_dot0 = 0
         else:
-            log.info(f"Computing rho_dot0 for {detailed_balance} detailed balance scheme")
+            log.info(
+                f"Computing rho_dot0 for {detailed_balance} detailed balance scheme"
+            )
             self.rho_dot0 = self._calculate(ph.unpack(ab_initio.rho0))
 
         self.constant_params = dict(
@@ -214,7 +214,7 @@ class Lindblad(TreeNode):
                 self.mu0 = torch.tile(self.mu0, rho.shape[:2])
             self.rho_dot0 = self._update_rho_dot0(rho)
         return self.scale_factor[patch_id] * (self._calculate(rho) - self.rho_dot0)
-  
+
     def _update_rho_dot0(self, rho: torch.Tensor) -> torch.Tensor:
         """Update rho_dot0 for detailed balance."""
         ab_initio = self.ab_initio
@@ -227,16 +227,16 @@ class Lindblad(TreeNode):
         rho0 = torch.diag_embed(fk_eq)
         return self._calculate(ph.unpack(rho0))
 
-    def find_mu(self, f: torch.Tensor,mu0: torch.Tensor) -> torch.Tensor:
-        '''find mu based on occupations f, Does not work for k-point parralelization '''
+    def find_mu(self, f: torch.Tensor, mu0: torch.Tensor) -> torch.Tensor:
+        """find mu based on occupations f, Does not work for k-point parralelization"""
         ab_initio = self.ab_initio
         T = ab_initio.T
         betamu = mu0 / T
         sum_rule = "xykb -> xy"
-        f_total = torch.einsum(sum_rule, f) 
-        reshape = betamu.shape + (1,1)
+        f_total = torch.einsum(sum_rule, f)
+        reshape = betamu.shape + (1, 1)
         # Fermi-dirac distribution, shape (Nx, Ny, Nk, Nb)
-        
+
         exp_beta_Emu = self.exp_betaE / torch.exp(betamu).reshape(reshape)
         distribution = 1 / (exp_beta_Emu + 1)
         F = torch.einsum(sum_rule, distribution) - f_total
@@ -254,11 +254,13 @@ class Lindblad(TreeNode):
             F = torch.einsum(sum_rule, distribution) - f_total
             if torch.max(torch.abs(dbetamu)) < self.dbetamu_eps:
                 break
-            if  c > 100:
-                log.info(f'mu not found after 100 iterations. {torch.max(torch.abs(dbetamu))}')
-                break 
+            if c > 100:
+                log.info(
+                    f"mu not found after 100 iterations. {torch.max(torch.abs(dbetamu))}"
+                )
+                break
             c += 1
-        return betamu*T, distribution
+        return betamu * T, distribution
 
     def _calculate(self, rho: torch.Tensor) -> torch.Tensor:
         """Internal drho/dt calculation without detailed balance / scaling."""
@@ -275,23 +277,14 @@ class Lindblad(TreeNode):
         """Collect rho from all MPI processes and transpose batch dimension.
         Batch dimension is put at end for efficient matrix multiplication."""
         ab_initio = self.ab_initio
-        if ab_initio.comm.size == 1:
+        if ab_initio.group.size() == 1:
             return torch.einsum("...kab -> kab...", rho)
-        nk = ab_initio.k_division.n_tot
-        n_bands = ab_initio.n_bands
         batch_shape = rho.shape[:-3]
-        n_batch = int(np.prod(batch_shape))
-        sendbuf = rho.reshape(n_batch, -1).T.contiguous()
-        recvbuf = torch.zeros(
-            (n_batch, nk * n_bands * n_bands), dtype=rho.dtype, device=rc.device
-        )
-        mpi_type = rc.mpi_type[rho.dtype]
-        recv_prev = ab_initio.k_division.n_prev * n_bands * n_bands * n_batch
-        ab_initio.comm.Allgatherv(
-            (BufferView(sendbuf), np.prod(rho.shape), 0, mpi_type),
-            (BufferView(recvbuf), np.diff(recv_prev), recv_prev[:-1], mpi_type),
-        )
-        return recvbuf.reshape((nk, n_bands, n_bands) + batch_shape)
+        return all_gather_padded(
+            rho.flatten(0, -4).permute(1, 2, 3, 0).contiguous(),
+            np.diff(ab_initio.k_division.n_prev),
+            ab_initio.group,
+        ).unflatten(-1, batch_shape)
 
 
 def apply_batched(P: torch.Tensor, rho: torch.Tensor) -> torch.Tensor:
