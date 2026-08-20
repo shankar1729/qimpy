@@ -257,7 +257,7 @@ def _collect_density(
                 Cg = Cg_next.wait()
                 prefac_cur = prefac[:, :, mpi_block_slice_next]
     else:
-        collect_density_kernel(C, prefac).wait()
+        collect_density_kernel(C, prefac)
 
     # Convert density matrix components to density, magnetization:
     n_densities = 4 if need_Mvec else n_spins
