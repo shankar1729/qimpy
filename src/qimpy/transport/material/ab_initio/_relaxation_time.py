@@ -3,10 +3,10 @@ from typing import Union, Sequence
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import TreeNode, log, rc, MPI
+from qimpy import TreeNode, log, rc
 from qimpy.io import CheckpointPath, CheckpointContext, InvalidInputException
-from qimpy.mpi import BufferView
 from qimpy.math import ortho_matrix
 from qimpy.profiler import stopwatch
 from qimpy.transport import material
@@ -107,7 +107,7 @@ class RelaxationTime(TreeNode):
             if np.all(np.isfinite(tau_s_e)):
                 log.info("Enable separate spin relaxation time for conduction bands.")
                 self.proj_S_e = get_projector(
-                    ab_initio.S[..., nv:, nv:], ab_initio.comm
+                    ab_initio.S[..., nv:, nv:], ab_initio.group
                 )
                 if only_diagonal:
                     raise InvalidInputException("Cannot use only_diagonal with tau_s_e")
@@ -121,7 +121,7 @@ class RelaxationTime(TreeNode):
             if np.all(np.isfinite(tau_s_h)):
                 log.info("Enable separate spin relaxation time for valence bands.")
                 self.proj_S_h = get_projector(
-                    ab_initio.S[..., :nv, :nv], ab_initio.comm
+                    ab_initio.S[..., :nv, :nv], ab_initio.group
                 )
                 if only_diagonal:
                     raise InvalidInputException("Cannot use only_diagonal with tau_s_h")
@@ -250,7 +250,7 @@ class RelaxationTime(TreeNode):
             else:
                 drho = rho[..., bslice, bslice] - torch.diag_embed(fe_eq)
                 if patch_id in self.tau_s_e:
-                    drho_S = apply_projector(drho, self.proj_S_e, self.ab_initio.comm)
+                    drho_S = apply_projector(drho, self.proj_S_e, self.ab_initio.group)
                     drho -= drho_S.sum(dim=-1)  # leave non-spin parts in drho
                     result[..., bslice, bslice] -= (
                         drho_S / (2 * self.tau_s_e[patch_id][..., None, None, :])
@@ -273,7 +273,7 @@ class RelaxationTime(TreeNode):
             else:
                 drho = rho[..., bslice, bslice] - torch.diag_embed(fh_eq)
                 if patch_id in self.tau_s_h:
-                    drho_S = apply_projector(drho, self.proj_S_h, self.ab_initio.comm)
+                    drho_S = apply_projector(drho, self.proj_S_h, self.ab_initio.group)
                     drho -= drho_S.sum(dim=-1)  # leave non-spin parts in drho
                     result[..., bslice, bslice] -= (
                         drho_S / (2 * self.tau_s_h[patch_id][..., None, None, :])
@@ -306,22 +306,22 @@ class RelaxationTime(TreeNode):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         betamu = betamu0
         sum_rule = self.sum_rules[betamu.ndim]
-        comm = self.ab_initio.comm if (betamu.ndim == 2) else None
+        group = self.ab_initio.group if (betamu.ndim == 2) else None
         f_total = torch.einsum(sum_rule, f)
-        if comm:
-            comm.Allreduce(MPI.IN_PLACE, BufferView(f_total))
+        if group:
+            dist.all_reduce(f_total, group=group)
         reshape = betamu.shape + (1,) * (4 - betamu.ndim)
         # Fermi-dirac distribution, shape (Nx, Ny, Nk, Nb)
         exp_beta_Emu = exp_betaE / torch.exp(betamu).reshape(reshape)
         distribution = 1 / (exp_beta_Emu + 1)
         F = torch.einsum(sum_rule, distribution)
-        if comm:
-            comm.Allreduce(MPI.IN_PLACE, BufferView(F))
+        if group:
+            dist.all_reduce(F, group=group)
         F -= f_total
         while torch.max(torch.abs(F)) > self.eps:
             dF = torch.einsum(sum_rule, exp_beta_Emu / (exp_beta_Emu + 1) ** 2)
-            if comm:
-                comm.Allreduce(MPI.IN_PLACE, BufferView(dF))
+            if group:
+                dist.all_reduce(dF, group=group)
             dbetamu = F / dF
             limit_ind = (
                 torch.abs(dbetamu) > self.max_dbetamu
@@ -331,25 +331,25 @@ class RelaxationTime(TreeNode):
             exp_beta_Emu = exp_betaE / torch.exp(betamu).reshape(reshape)
             distribution = 1 / (exp_beta_Emu + 1)
             F = torch.einsum(sum_rule, distribution)
-            if comm:
-                comm.Allreduce(MPI.IN_PLACE, BufferView(F))
+            if group:
+                dist.all_reduce(F, group=group)
             F -= f_total
             if torch.max(torch.abs(dbetamu)) < self.dbetamu_eps:
                 break
         return betamu, distribution
 
 
-def get_projector(M: torch.Tensor, comm: MPI.Comm) -> torch.Tensor:
+def get_projector(M: torch.Tensor, group: dist.ProcessGroup) -> torch.Tensor:
     """Construct projector for density matrices onto space spanned by `M`."""
     overlap = torch.einsum("kiab, kjab -> ij", M, M.conj())
-    comm.Allreduce(MPI.IN_PLACE, BufferView(overlap))
+    dist.all_reduce(overlap, group=group)
     return torch.einsum("kiab, ij -> kjab", M, ortho_matrix(overlap))
 
 
 def apply_projector(
-    rho: torch.Tensor, proj: torch.Tensor, comm: MPI.Comm
+    rho: torch.Tensor, proj: torch.Tensor, group: dist.ProcessGroup
 ) -> torch.Tensor:
     """Project `rho` onto space defined by orthonormal projectors `proj`."""
     overlap = torch.einsum("...kab, kiab -> ...i", rho, proj.conj())
-    comm.Allreduce(MPI.IN_PLACE, BufferView(overlap))
+    dist.all_reduce(overlap, group=group)
     return torch.einsum("kiab, ...i -> ...kabi", proj, overlap)
