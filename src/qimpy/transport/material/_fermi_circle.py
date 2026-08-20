@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Callable
 from functools import cache
+import operator
 
 import numpy as np
 import torch
@@ -359,16 +360,21 @@ def ring_exchange(
         rank = group.rank()
         rank_l = (rank - 1) % n_procs  # rank to the "left" on ring
         rank_r = (rank + 1) % n_procs  # rank to the "right" on ring
-        # Send to the left:
         send_buf_l = buf_l.contiguous()
-        recv_buf_r = torch.zeros_like(send_buf_l)
-        request = dist.irecv(recv_buf_r, group=group, group_src=rank_r)
-        dist.send(send_buf_l, group=group, group_dst=rank_l)
-        request.wait()
-        # Send to the right:
         send_buf_r = buf_r.contiguous()
+        recv_buf_r = torch.zeros_like(send_buf_l)
         recv_buf_l = torch.zeros_like(send_buf_r)
-        request = dist.irecv(recv_buf_l, group=group, group_src=rank_l)
-        dist.send(send_buf_r, group=group, group_dst=rank_r)
-        request.wait()
+        requests = []
+        for direction in (operator.lt, operator.gt):
+            # Post all low to hi group-rank send/recvs first, and then all hi to lo ones
+            if direction(rank_r, rank):
+                requests.append(dist.irecv(recv_buf_r, group=group, group_src=rank_r))
+            if direction(rank, rank_l):
+                requests.append(dist.isend(send_buf_l, group=group, group_dst=rank_l))
+            if direction(rank_l, rank):
+                requests.append(dist.irecv(recv_buf_l, group=group, group_src=rank_l))
+            if direction(rank, rank_r):
+                requests.append(dist.isend(send_buf_r, group=group, group_dst=rank_r))
+        for request in requests:
+            request.wait()
         return recv_buf_l, recv_buf_r
