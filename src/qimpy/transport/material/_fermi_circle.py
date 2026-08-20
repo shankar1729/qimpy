@@ -4,9 +4,10 @@ from functools import cache
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import rc, MPI
-from qimpy.mpi import ProcessGrid, BufferView, TaskDivision
+from qimpy import rc
+from qimpy.mpi import ProcessGrid, TaskDivision
 from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.transport.advect import Advect, N_GHOST
@@ -130,7 +131,7 @@ class FermiCircle(Material):
 
     def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
         return SpecularReflector(
-            n, self.v_all, self.comm, self.k_division, self.specularity
+            n, self.v_all, self.group, self.k_division, self.specularity
         )
 
     @stopwatch
@@ -152,7 +153,7 @@ class FermiCircle(Material):
     def pad_ghost(self, rho: torch.Tensor) -> torch.Tensor:
         """Pad by ghost zones for monetum-space advection."""
         assert self.nk_mine >= 1
-        rhoL, rhoR = ring_exchange(self.comm, rho[..., 0], rho[..., -1])
+        rhoL, rhoR = ring_exchange(self.group, rho[..., 0], rho[..., -1])
         rho_padded = torch.nn.functional.pad(rho, (N_GHOST, N_GHOST))
         rho_padded[..., N_GHOST - 1] = rhoL
         rho_padded[..., -N_GHOST] = rhoR
@@ -163,7 +164,7 @@ class FermiCircle(Material):
     ) -> torch.Tensor:
         """Accumulate momentum-space advection edge contributions `outL` and `outR`
         into `out`, and return `out` for convenience."""
-        outL, outR = ring_exchange(self.comm, outL, outR)
+        outL, outR = ring_exchange(self.group, outL, outR)
         out[..., 0] += outL
         out[..., -1] += outR
         return out
@@ -173,18 +174,18 @@ class FermiCircle(Material):
             return torch.zeros_like(rho)  # no scattering
 
         # Compute stationary carrier density:
-        rho_sum = rho.sum(dim=-1)
-        if self.comm.size > 1:
-            self.comm.Allreduce(MPI.IN_PLACE, BufferView(rho_sum))
+        rho_sum = rho.sum(dim=-1).contiguous()
+        if self.group.size() > 1:
+            dist.all_reduce(rho_sum, group=self.group)
         rho_0 = self.nk_inv * rho_sum[..., None]
         result = (rho_0 - rho) * (self.tau_inv_p + self.tau_inv_ee)
 
         # Compute moving equlibrium carrier density if needed:
         if self.tau_inv_ee:
             v = self.transport_velocity
-            rho_v_sum = torch.einsum("...k, ki -> ...i", rho, v)
-            if self.comm.size > 1:
-                self.comm.Allreduce(MPI.IN_PLACE, BufferView(rho_v_sum))
+            rho_v_sum = torch.einsum("...k, ki -> ...i", rho, v).contiguous()
+            if self.group.size() > 1:
+                dist.all_reduce(rho_v_sum, group=self.group)
             rho_v = torch.einsum("...i, ij, kj -> ...k", rho_v_sum, self.vv_inv, v)
             result += rho_v * self.tau_inv_ee  # combines with rho_0 - rho above
 
@@ -228,7 +229,7 @@ class SpecularReflector:
         self,
         n: torch.Tensor,
         v: torch.Tensor,
-        comm: MPI.Comm,
+        group: dist.ProcessGroup,
         k_division: TaskDivision,
         specularity: float,
     ) -> None:
@@ -238,31 +239,33 @@ class SpecularReflector:
         v0_reflected = v[None, 0, 0] - 2 * v0_normal
         v0_diff = (v0_reflected[:, None] - v[None, :, 0]).norm(dim=-1)
         i0_reflected = v0_diff.argmin(dim=1)
-        comm.Bcast(BufferView(i0_reflected))  # ensure indices consistent
+        dist.broadcast(i0_reflected, group=group, group_src=0)  # ensure consistency
         # Map the rest correspondingly:
         nk = k_division.n_tot
         i_reflected = (i0_reflected[:, None] - torch.arange(nk, device=rc.device)) % nk
 
         # Compute flattened index on Nr x Nk_mine for efficient indexing
         self.k_division = k_division
-        self.comm = comm
+        self.group = group
         nr = len(n)
         ir = torch.arange(nr, device=rc.device)[:, None]
-        if comm.size == 1:
+        i_proc = group.rank()
+        n_procs = group.size()
+        if n_procs == 1:
             self.i_reflected_flat = (ir * nk + i_reflected).flatten()
         else:
             # Determine how to receive data:
             i_reflected_cur = i_reflected[:, k_division.i_start : k_division.i_stop]
             j_proc = i_reflected_cur.flatten() // k_division.n_each
-            self.recv_counts, self.recv_offsets = get_counts_offsets(j_proc, comm.size)
+            self.recv_counts, self.recv_offsets = get_counts_offsets(j_proc, n_procs)
             self.recv_index = invert_index(j_proc.argsort(stable=True))
             # Determine how to send data:
-            send_sel = torch.where(i_reflected // k_division.n_each == comm.rank)
+            send_sel = torch.where(i_reflected // k_division.n_each == i_proc)
             send_sel_index_mine = send_sel[0] * k_division.n_mine + (
                 i_reflected[send_sel] - k_division.i_start
             )
             j_proc = send_sel[1] // k_division.n_each
-            self.send_counts, self.send_offsets = get_counts_offsets(j_proc, comm.size)
+            self.send_counts, self.send_offsets = get_counts_offsets(j_proc, n_procs)
             self.send_index = send_sel_index_mine[j_proc.argsort(stable=True)]
 
         # Prepare input and output projectors for diffuse scattering
@@ -276,10 +279,10 @@ class SpecularReflector:
             # Select flattened indices local to current process:
             ik_start = k_division.i_start
             nk_mine = k_division.n_mine
-            sel = torch.nonzero(out_k // k_division.n_each == comm.rank).flatten()
+            sel = torch.nonzero(out_k // k_division.n_each == i_proc).flatten()
             self.diffuse_out_r = out_r[sel]
             self.diffuse_out_rk = self.diffuse_out_r * nk_mine + out_k[sel] - ik_start
-            sel = torch.nonzero(in_k // k_division.n_each == comm.rank).flatten()
+            sel = torch.nonzero(in_k // k_division.n_each == i_proc).flatten()
             self.diffuse_in_r = in_r[sel]
             self.diffuse_in_rk = self.diffuse_in_r * nk_mine + in_k[sel] - ik_start
 
@@ -289,21 +292,21 @@ class SpecularReflector:
 
     def __call__(self, rho: torch.Tensor) -> torch.Tensor:
         rho_flat = rho.flatten(1, 2)  # flatten r and k indices
-        comm = self.comm
-        if comm.size == 1:
+        group = self.group
+        if group.size() == 1:
             out_flat = rho_flat[:, self.i_reflected_flat]
         else:
             n_ghost, nr, _ = rho.shape  # same on all processes
             send_buf = rho_flat.T[self.send_index].contiguous()
             send_counts = self.send_counts * n_ghost
-            send_offsets = self.send_offsets * n_ghost
             recv_counts = self.recv_counts * n_ghost
-            recv_offsets = self.recv_offsets * n_ghost
             recv_buf = torch.empty_like(send_buf)
-            mpi_type = rc.mpi_type[rho.dtype]
-            comm.Alltoallv(
-                (BufferView(send_buf), send_counts, send_offsets, mpi_type),
-                (BufferView(recv_buf), recv_counts, recv_offsets, mpi_type),
+            dist.all_to_all_single(
+                recv_buf.view(-1),
+                send_buf.view(-1),
+                recv_counts,
+                send_counts,
+                group=group,
             )
             out_flat = recv_buf[self.recv_index].T
 
@@ -316,8 +319,8 @@ class SpecularReflector:
             rho_out_sum.index_add_(
                 1, self.diffuse_out_r, rho_flat[:, self.diffuse_out_rk]
             )
-            if comm.size > 1:
-                comm.Allreduce(MPI.IN_PLACE, BufferView(rho_out_sum))
+            if group.size() > 1:
+                dist.all_reduce(rho_out_sum, group=group)
 
             # Accumulate to incoming rho with normalization:
             rho_out_sum *= self.diffuse_normalization
@@ -345,25 +348,27 @@ def invert_index(indices: torch.Tensor) -> torch.Tensor:
 
 
 def ring_exchange(
-    comm: MPI.Comm, buf_l: torch.Tensor, buf_r: torch.Tensor
+    group: dist.ProcessGroup, buf_l: torch.Tensor, buf_r: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Send `buf_l` and `buf_r` to left and right neighbors of `comm`, taken as a ring.
+    """Send `buf_l` and `buf_r` to left and right neighbors of `group`, taken as a ring.
     Return the results received from the left and right neighbors respectively."""
-    if comm.size == 1:
+    n_procs = group.size()
+    if n_procs == 1:
         return buf_r, buf_l
     else:
-        rank = comm.rank
-        rank_l = (rank - 1) % comm.size  # rank to the "left" on ring
-        rank_r = (rank + 1) % comm.size  # rank to the "right" on ring
+        rank = group.rank()
+        rank_l = (rank - 1) % n_procs  # rank to the "left" on ring
+        rank_r = (rank + 1) % n_procs  # rank to the "right" on ring
+        # Send to the left:
         send_buf_l = buf_l.contiguous()
+        recv_buf_r = torch.zeros_like(send_buf_l)
+        request = dist.irecv(recv_buf_r, group=group, group_src=rank_r)
+        dist.send(send_buf_l, group=group, group_dst=rank_l)
+        request.wait()
+        # Send to the right:
         send_buf_r = buf_r.contiguous()
         recv_buf_l = torch.zeros_like(send_buf_r)
-        recv_buf_r = torch.zeros_like(send_buf_l)
-        requests = [
-            comm.Isend(BufferView(send_buf_r), rank_r, 1),
-            comm.Isend(BufferView(send_buf_l), rank_l, 2),
-            comm.Irecv(BufferView(recv_buf_l), rank_l, 1),
-            comm.Irecv(BufferView(recv_buf_r), rank_r, 2),
-        ]
-        MPI.Request.Waitall(requests)  # finish all async communications
+        request = dist.irecv(recv_buf_l, group=group, group_src=rank_l)
+        dist.send(send_buf_r, group=group, group_dst=rank_r)
+        request.wait()
         return recv_buf_l, recv_buf_r

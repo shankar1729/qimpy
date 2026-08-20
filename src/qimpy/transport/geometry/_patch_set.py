@@ -1,11 +1,13 @@
 from __future__ import annotations
 from typing import Optional
+import operator
 
 import torch
+import torch.distributed as dist
 
-from qimpy import MPI, rc
+from qimpy import rc
 from qimpy.io import CheckpointPath, CheckpointContext
-from qimpy.mpi import ProcessGrid, BufferView
+from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
 from qimpy.transport.material import Material
 from qimpy.transport.advect import (
@@ -148,7 +150,7 @@ class PatchSet(Geometry):
             out_list.append(out)
             grho_edge_list.append(grho_edges)
 
-        # Pass-through boundaries (may involve MPI communication):
+        # Pass-through boundaries (may involve process communication):
         grho_edge_list = self.edge_exchange(grho_edge_list)
         for out, grho_edges, patch in zip(out_list, grho_edge_list, self.patches):
             for i_edge, edge_data in enumerate(grho_edges):
@@ -184,7 +186,7 @@ class PatchSet(Geometry):
                     # Accumulate contribution:
                     grho_dot[EDGES[i_edge]] += edge_data
 
-        # Pass-through boundaries (may involve MPI communication):
+        # Pass-through boundaries (may involve process communication):
         grho_dot_edge_list = self.edge_exchange(
             [grho_dot_edges for _, grho_dot_edges in grho_dot_list]
         )
@@ -206,8 +208,8 @@ class PatchSet(Geometry):
         If `velocity_mode` is True, the edge data is vectorial along the short axis
         of the edges, as used for communication of velocities, and hence changes
         sign when the short axis is flipped across a pass-through edge."""
-        requests = []
-        pending_reads = []  # keep reference to data so that it doesn't deallocate
+        sends = []
+        recvs = []
         edge_list_out = [[None, None, None, None] for _ in range(len(self.patches))]
         for i_patch, adjacency in enumerate(self.sub_quad_set.adjacency):
             for i_edge, (other_patch, other_edge) in enumerate(adjacency):
@@ -233,11 +235,7 @@ class PatchSet(Geometry):
                                     edge_data = -edge_data
                         if not write_mine:
                             write_whose = self.patch_division.whose(i_patch)
-                            edge_data = edge_data.contiguous()
-                            pending_reads.append(edge_data)  # hold till transfers done
-                            requests.append(
-                                self.comm.Isend(BufferView(edge_data), write_whose, tag)
-                            )
+                            sends.append((write_whose, tag, edge_data.contiguous()))
                     if write_mine:
                         i_patch_mine = i_patch - self.patch_division.i_start
                         if read_mine:
@@ -249,13 +247,23 @@ class PatchSet(Geometry):
                                 device=rc.device,
                             )
                             edge_list_out[i_patch_mine][i_edge] = edge_data
-                            requests.append(
-                                self.comm.Irecv(BufferView(edge_data), read_whose, tag)
-                            )
+                            recvs.append((read_whose, tag, edge_data))
 
-        # Finish pending data transfers:
-        if requests:
-            MPI.Request.Waitall(requests)
+        # Post send/recvs sorted by tag:
+        sends.sort()
+        recvs.sort()
+        requests = []
+        i_proc = self.group.rank()
+        for direction in (operator.lt, operator.gt):
+            # Post all low to hi group rank send/recvs first, and then all hi to lo ones
+            for i_dst, _, send in sends:
+                if direction(i_proc, i_dst):
+                    requests.append(dist.isend(send, group=self.group, group_dst=i_dst))
+            for i_src, _, recv in recvs:
+                if direction(i_src, i_proc):
+                    requests.append(dist.irecv(recv, group=self.group, group_src=i_src))
+        for request in requests:
+            request.wait()
         return edge_list_out
 
     def update_padded_velocities(self):

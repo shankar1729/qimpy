@@ -87,7 +87,7 @@ def run(
 
     # Initialize density
     for patch in geometry.patches:
-        if transport.material.comm.rank == 0:
+        if transport.material.group.rank() == 0:
             patch.rho[..., 0] = gaussian_blob(patch.q, q0, Rbasis, sigma)
 
     transport.run()
@@ -97,7 +97,7 @@ def run(
     rho_sum_tot = 0.0
     rho_err_tot = 0.0
     for patch in geometry.patches:
-        if transport.material.comm.rank == 0:
+        if transport.material.group.rank() == 0:
             rho_sum, rho_err_sum = gaussian_blob_error(
                 patch.g, patch.rho[..., 0], patch.q, q_final, Rbasis, sigma
             )

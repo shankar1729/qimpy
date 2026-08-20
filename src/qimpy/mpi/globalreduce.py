@@ -29,7 +29,7 @@ def min(v: torch.Tensor, group: dist.ProcessGroup) -> torch.Tensor:
         result = v.min()
     else:
         info = torch.finfo if v.dtype.is_floating_point else torch.iinfo
-        result = torch.full(1, info(v.dtype).max, dtype=v.dtype, device=v.device)
+        result = torch.full((1,), info(v.dtype).max, dtype=v.dtype, device=v.device)
     dist.all_reduce(result, op=dist.ReduceOp.MIN, group=group)
     return result
 
@@ -40,6 +40,6 @@ def max(v: torch.Tensor, group: dist.ProcessGroup) -> torch.Tensor:
         result = v.max()
     else:
         info = torch.finfo if v.dtype.is_floating_point else torch.iinfo
-        result = torch.full(1, info(v.dtype).min, dtype=v.dtype, device=v.device)
+        result = torch.full((1,), info(v.dtype).min, dtype=v.dtype, device=v.device)
     dist.all_reduce(result, op=dist.ReduceOp.MAX, group=group)
     return result

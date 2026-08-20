@@ -3,11 +3,12 @@ from typing import Optional
 from abc import abstractmethod
 
 import torch
+import torch.distributed as dist
 import numpy as np
 
 from qimpy import log, rc, TreeNode, MPI
 from qimpy.io import CheckpointPath, CheckpointContext
-from qimpy.mpi import ProcessGrid, TaskDivision
+from qimpy.mpi import ProcessGrid, TaskDivision, get_comm
 from ..material import Material
 from . import (
     TensorList,
@@ -23,14 +24,14 @@ from . import (
 class Geometry(TreeNode):
     """Geometry specification."""
 
-    comm: MPI.Comm  #: Communicator for real-space split over patches
+    group: dist.ProcessGroup  #: Process group for real-space split over patches
     material: Material  #: Corresponding material
     grid_spacing: float  #: Grid spacing used for discretization
     contacts: dict[str, Optional[dict]]  #: SVG contact names to material parameters
     quad_set: QuadSet  #: Original geometry specification from SVG
     sub_quad_set: SubQuadSet  #: Division into smaller quads for tuning parallelization
     patches: list[Patch]  #: Advection for each quad patch local to this process
-    patch_division: TaskDivision  #: Division of patches over `comm`
+    patch_division: TaskDivision  #: Division of patches over `group`
     stash: ResultStash  #: Saved results for collating into fewer checkpoints
     dt_max: float  #: Maximum stable time step
     save_rho: bool  #: whether to write rho to checkpoint file
@@ -79,7 +80,7 @@ class Geometry(TreeNode):
             The default is choosing from the backward, central or forward derivative.
         """
         super().__init__()
-        self.comm = process_grid.get_comm("r")
+        self.group = process_grid.get_group("r")
         self.material = material
         self.quad_set = quad_set
         self.grid_spacing = grid_spacing
@@ -96,19 +97,19 @@ class Geometry(TreeNode):
 
         # Subdivide:
         if grid_size_max:
-            log.info(f"Using specified {grid_size_max = }")
+            log.info(f"Using specified {grid_size_max=}")
         else:
-            grid_size_max = select_division(quad_set, self.comm.size)
+            grid_size_max = select_division(quad_set, self.group.size())
         self.sub_quad_set = subdivide(quad_set, grid_size_max)
         log.info(
             f"Subdivided {len(quad_set.quads)} quads to "
             f"{len(self.sub_quad_set.quad_index)} for split "
-            f"over {self.comm.size} processes."
+            f"over {self.group.size()} processes."
         )
         self.patch_division = TaskDivision(
             n_tot=len(self.sub_quad_set.quad_index),
-            n_procs=self.comm.size,
-            i_proc=self.comm.rank,
+            n_procs=self.group.size(),
+            i_proc=self.group.rank(),
         )
 
         # Build an advect object for each sub-quad local to this process:
@@ -139,7 +140,7 @@ class Geometry(TreeNode):
                     checkpoint_in=checkpoint_in.relative(f"quad{i_quad}"),
                 )
             )
-        self.dt_max = self.comm.allreduce(
+        self.dt_max = get_comm(self.group).allreduce(
             min((patch.dt_max for patch in self.patches), default=np.inf), op=MPI.MIN
         )
         self.stash = ResultStash(len(self.patches))

@@ -3,17 +3,18 @@ from typing import Callable
 from abc import abstractmethod
 
 import torch
+import torch.distributed as dist
 import numpy as np
 
-from qimpy import TreeNode, MPI, rc
-from qimpy.mpi import ProcessGrid, TaskDivision, BufferView
+from qimpy import TreeNode, rc
+from qimpy.mpi import ProcessGrid, TaskDivision
 from qimpy.io import CheckpointPath
 
 
 class Material(TreeNode):
     """Base class / interface for material specifications."""
 
-    comm: MPI.Comm  #: Communicator for reciprocal-space split over k
+    group: dist.ProcessGroup  #: Process group for reciprocal-space split over k
     k_division: TaskDivision  #: Division of k-points over MPI
     k_mine: slice  #: slice of k on current process
     nk_mine: int  #: number of k-points on current process
@@ -39,9 +40,9 @@ class Material(TreeNode):
         process_grid: ProcessGrid,
     ) -> None:
         """Initialize shared material parameters (call from a derived class.)"""
-        self.comm = process_grid.get_comm("k")
+        self.group = process_grid.get_group("k")
         self.k_division = TaskDivision(
-            n_tot=nk, i_proc=self.comm.rank, n_procs=self.comm.size
+            n_tot=nk, i_proc=self.group.rank(), n_procs=self.group.size()
         )
         self.nk_mine = self.k_division.n_mine
         self.k_mine = slice(self.k_division.i_start, self.k_division.i_stop)
@@ -106,9 +107,9 @@ class Material(TreeNode):
     def measure_observables(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         """Return expectation value of observables, (Nx x Ny x No)."""
         result = self.wk * torch.einsum("xya, oa -> xyo", rho, self.get_observables(t))
-        if self.comm.size > 1:
+        if self.group.size() > 1:
             result = result.contiguous()
-            self.comm.Allreduce(MPI.IN_PLACE, BufferView(result))
+            dist.all_reduce(result, group=self.group)
         return result
 
 

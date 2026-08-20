@@ -94,12 +94,12 @@ class Patch:
         # Initialize velocities:
         v = material.transport_velocity
         self.V = torch.einsum("ka, ...Ba -> ...kB", v, torch.linalg.inv(jacobian))
-        self.dt_max = 0.5 / globalreduce.max(self.V.abs(), material.comm)
+        self.dt_max = 0.5 / globalreduce.max(self.V.abs(), material.group).item()
         self.wk = material.wk
 
         # Initialize distribution function:
         Nkbb = v.shape[0]  # flattened density-matrix count (Nkbb_mine of material)
-        nk_prev = material.k_division.n_prev[material.comm.rank]
+        nk_prev = material.k_division.n_prev[material.group.rank()]
         Nkbb_offset = nk_prev * (material.n_bands**2)
         self.rho_offset = tuple(grid_start) + (Nkbb_offset,)
         self.rho_shape = (N[0], N[1], Nkbb)
@@ -196,7 +196,7 @@ class Patch:
         cp, path = cp_path
         assert cp is not None
         grid_offset = self.rho_offset[:-1]
-        if self.material.comm.rank == 0:
+        if self.material.group.rank() == 0:
             # Write quantities not divided over material:
             cp.write_slice(cp[path + "/q"], grid_offset + (0,), self.q)
             cp.write_slice(cp[path + "/g"], grid_offset, self.g[:, :, 0])

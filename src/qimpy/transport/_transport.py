@@ -1,7 +1,6 @@
 from typing import Optional, Sequence, Union
 
-from qimpy import rc, log, TreeNode
-from qimpy.rc import MPI
+from qimpy import log, TreeNode
 from qimpy.io import CheckpointPath, Checkpoint, CheckpointContext
 from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
@@ -28,7 +27,6 @@ class Transport(TreeNode):
         time_evolution: Optional[Union[TimeEvolution, dict]] = None,
         checkpoint: Optional[str] = None,
         checkpoint_out: Optional[str] = None,
-        comm: Optional[MPI.Comm] = None,
         process_grid_shape: Optional[Sequence[int]] = None,
     ):
         """Compose a System to calculate from its pieces. Each piece
@@ -60,17 +58,13 @@ class Transport(TreeNode):
             :yaml:`Checkpoint file pattern to write at regular intervals.`
             The pattern should contain an integer format eg. '{:04d}'
             that can be replaced with the frame number.
-        comm
-            Overall communicator for system. Defaults to `qimpy.rc.comm` if unspecified.
         process_grid_shape
             Parallelization dimensions over replicas, k-points and bands/basis, used
             to initialize a `qimpy.mpi.ProcessGrid`. Dimensions that are -1 will be
             auto-determined based on number of tasks available to split along them.
             Default: all process grid dimensions are auto-determined."""
         super().__init__()
-        self.process_grid = ProcessGrid(
-            comm if comm else rc.comm, "rk", process_grid_shape
-        )
+        self.process_grid = ProcessGrid("rk", process_grid_shape)
         self.process_grid.provide_n_tasks("k", 1)  # prefer r-split if unspecified
         # Set in and out checkpoints:
         checkpoint_in = CheckpointPath()
