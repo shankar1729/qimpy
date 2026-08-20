@@ -2,7 +2,6 @@
 
 # List exported symbols for doc generation
 __all__ = (
-    "BufferView",
     "ProcessGrid",
     "get_comm",
     "TaskDivision",
@@ -14,7 +13,6 @@ __all__ = (
     "globalreduce",
 )
 
-from ._bufferview import BufferView
 from ._process_grid import ProcessGrid, get_comm
 from ._taskdivision import TaskDivision, TaskDivisionCustom, get_block_slices
 from ._waitable import Waitable, Waitless
