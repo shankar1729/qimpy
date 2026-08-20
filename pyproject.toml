@@ -1,8 +1,39 @@
 [build-system]
-requires = [
-    "setuptools>=42",
-    "wheel",
-    "pybind11",
-    "torch"
-]
+requires = ["setuptools>=80", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "qimpy"
+authors = [
+    { name = "QimPy Collaboration", email = "author@example.com" },
+]
+description = "Quantum-Integrated Multi-PhYsics"
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.9"
+dependencies = [
+    "torch >1.10",
+    "pyyaml",
+    "numpy",
+    "scipy",
+    "mpi4py",
+    "h5py",
+    "psutil",
+    "svg.path",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://qimpy.org"
+"Bug Tracker" = "https://github.com/shankar1729/qimpy/issues"
+
+[tool.setuptools_scm]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-v"
+testpaths = ["src"]

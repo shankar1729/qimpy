@@ -1,4 +1,5 @@
 """QimPy: Quantum-Integrated Multi-PhYsics"""
+
 # List exported symbols for doc generation
 __all__ = (
     "log",
@@ -29,8 +30,11 @@ from ._tree import TreeNode
 from ._energy import Energy
 from . import algorithms, lattice, symmetries, grid, dft, transport
 
-# Automatic versioning added by versioneer
-from ._version import get_versions
+# Automatic versioning
+from importlib.metadata import version, PackageNotFoundError
 
-__version__: str = get_versions()["version"]
-del get_versions
+try:
+    __version__ = version("qimpy")
+except PackageNotFoundError:
+    __version__ = "0.0.0.dev0"
+del torch, version, PackageNotFoundError
