@@ -22,7 +22,7 @@ import torch
 import numpy as np
 from psutil import cpu_count
 import torch.distributed as dist
-from torch.distributed.elastic.utils.distributed import get_socket_with_port
+from torch.distributed.elastic.utils.distributed import get_free_port
 
 from . import log, set_gpu_visibility, MPI
 
@@ -122,25 +122,15 @@ def init(
 
     # Initialize torch distributed:
     backend = os.environ.get("BACKEND", None)
-    head_host = None
-    head_port = None
-    head_socket = None
-    if is_head:
-        head_host = socket.gethostname()
-        head_socket = get_socket_with_port()
-        head_port = head_socket.getsockname()[1]
-    head_port = comm.bcast(head_port)
-    head_host = comm.bcast(head_host)
-    if is_head:
-        head_socket.close()  # Free up head_port (after MPI ops above)
-    store = dist.TCPStore(head_host, head_port, n_procs, is_head)
-    dist.init_process_group(
-        backend=backend,
-        store=store,
-        world_size=n_procs,
-        rank=i_proc,
-        device_id=(device if use_cuda else None),
-    )
+    if "MASTER_ADDR" not in os.environ:
+        os.environ["MASTER_ADDR"] = comm.bcast(socket.gethostname() if is_head else "")
+    if "MASTER_PORT" not in os.environ:
+        os.environ["MASTER_PORT"] = str(comm.bcast(get_free_port() if is_head else 0))
+    os.environ["LOCAL_RANK"] = str(i_proc_node)
+    os.environ["RANK"] = str(i_proc)
+    os.environ["WORLD_SIZE"] = str(n_procs)
+    dist.init_process_group(backend=backend, device_id=(device if use_cuda else None))
+    dist.barrier()
 
     # Threads:
     # --- First priority: override argument
