@@ -108,15 +108,12 @@ def init(
 
     # Initialize torch:
     global device, use_cuda
-    if cuda_dev_str := os.environ.get("CUDA_VISIBLE_DEVICES"):
-        # Select one GPU and make sure it's only one visible to torch:
-        cuda_devs = [int(s) for s in cuda_dev_str.split(",")]
-        i_gpu = i_proc_node % len(cuda_devs)
-        gpu_id = cuda_devs[i_gpu]
-        if torch.cuda.is_available():
-            device = torch.device(f"cuda:{i_gpu}")
-            torch.cuda.device(device)  # set as default CUDA device
-            use_cuda = True
+    if torch.cuda.is_available():
+        # Select GPU based on local rank:
+        gpu_id = i_proc_node % torch.cuda.device_count()
+        device = torch.device(f"cuda:{gpu_id}")
+        torch.cuda.device(device)  # set as default CUDA device
+        use_cuda = True
     # --- count unique GPUs on node using IDs (average over processes on same node)
     gpu_ids_mine = np.array([gpu_id], dtype=int)
     gpu_ids_local = np.zeros(n_procs_node, dtype=int)
