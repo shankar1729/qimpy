@@ -3,13 +3,12 @@
 # List exported symbols for doc generation
 __all__ = (
     "log",
-    "set_gpu_visibility",
+    "__version__",
     "MPI",
     "rc",
     "profiler",
     "io",
     "mpi",
-    "utils",
     "math",
     "TreeNode",
     "Energy",
@@ -22,19 +21,9 @@ __all__ = (
 )
 
 # Module import definition
-from .pre_init import log, set_gpu_visibility
-import torch  # Initialize torch after pre_init for correct GPU behavior.
-from mpi4py import MPI  #: Initialize MPI after pre_init for correct GPU behavior.
+from .pre_init import log, __version__
+from mpi4py import MPI
 from . import rc, profiler, io, mpi, math
 from ._tree import TreeNode
 from ._energy import Energy
 from . import algorithms, lattice, symmetries, grid, dft, transport
-
-# Automatic versioning
-from importlib.metadata import version, PackageNotFoundError
-
-try:
-    __version__ = version("qimpy")
-except PackageNotFoundError:
-    __version__ = "0.0.0.dev0"
-del torch, version, PackageNotFoundError

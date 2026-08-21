@@ -24,7 +24,7 @@ from psutil import cpu_count
 import torch.distributed as dist
 from torch.distributed.elastic.utils.distributed import get_free_port
 
-from . import log, set_gpu_visibility, MPI
+from . import log, MPI
 
 # List exported symbols for doc generation
 __all__ = (
@@ -100,20 +100,22 @@ def init(
         n_procs = comm.size
         is_head = i_proc == 0
 
-    # Select GPU before initializing torch:
+    # Determine local rank for GPU selection:
     comm_node = comm.Split_type(MPI.COMM_TYPE_SHARED)  # on-node communicator
     i_proc_node = comm_node.Get_rank()
     n_procs_node = comm_node.Get_size()
-    gpu_id = set_gpu_visibility(i_proc_node)
+    gpu_id = -1
 
     # Initialize torch:
     global device, use_cuda
-    if torch.cuda.is_available():
-        device = torch.device("cuda:0")
-        use_cuda = True
-        torch.cuda.device(device)  # set as default CUDA device
-    else:
-        gpu_id = -1
+    if cuda_dev_str := os.environ.get("CUDA_VISIBLE_DEVICES"):
+        # Select one GPU and make sure it's only one visible to torch:
+        cuda_devs = [int(s) for s in cuda_dev_str.split(",")]
+        gpu_id = cuda_devs[i_proc_node % len(cuda_devs)]
+        if torch.cuda.is_available():
+            device = torch.device(f"cuda:{gpu_id}")
+            torch.cuda.device(device)  # set as default CUDA device
+            use_cuda = True
     # --- count unique GPUs on node using IDs (average over processes on same node)
     gpu_ids_mine = np.array([gpu_id], dtype=int)
     gpu_ids_local = np.zeros(n_procs_node, dtype=int)
@@ -121,7 +123,7 @@ def init(
     n_gpus = np.count_nonzero(np.unique(gpu_ids_local) >= 0) / n_procs_node
 
     # Initialize torch distributed:
-    backend = os.environ.get("BACKEND", None)
+    backend = os.environ.get("BACKEND", dist.get_default_backend_for_device(device))
     if "MASTER_ADDR" not in os.environ:
         os.environ["MASTER_ADDR"] = comm.bcast(socket.gethostname() if is_head else "")
     if "MASTER_PORT" not in os.environ:
@@ -130,7 +132,7 @@ def init(
     os.environ["RANK"] = str(i_proc)
     os.environ["WORLD_SIZE"] = str(n_procs)
     dist.init_process_group(backend=backend, device_id=(device if use_cuda else None))
-    dist.barrier()
+    dist.barrier()  # Force lazy backend intialization to complete
 
     # Threads:
     # --- First priority: override argument

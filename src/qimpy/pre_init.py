@@ -1,36 +1,21 @@
 """
 Initialization that must occur before all other imports:
-- Create log.
-- Set GPU visibility before importing MPI and torch when possible.
+- Create log
+- Import torch before any other libraries (e.g. MPI) that could cause version issues
+- Get package version
 """
 
 import logging
-import os
+from importlib.metadata import version, PackageNotFoundError
 
+import torch
 
 log: logging.Logger = logging.getLogger("qimpy")
-"Log for the qimpy module, configurable using :func:`qimpy.mpi.log_config`"
+"Log for the qimpy module, configurable using :func:`qimpy.io.log_config`"
 
+del torch
 
-def set_gpu_visibility(local_rank: int) -> int:
-    """Update CUDA_VISIBLE_DEVICES to select one GPU based on `local_rank` of process.
-    Return the device number of the selected GPU, and -1 if no GPUs specified.
-    (Note that CUDA_VISIBLE_DEVICES must be set explicitly to use GPUs.)"""
-    cuda_dev_str = os.environ.get("CUDA_VISIBLE_DEVICES")
-    if cuda_dev_str:
-        # Select one GPU and make sure it's only one visible to torch:
-        cuda_devs = [int(s) for s in cuda_dev_str.split(",")]
-        cuda_dev_selected = cuda_devs[local_rank % len(cuda_devs)]
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(cuda_dev_selected)
-        return cuda_dev_selected
-    else:
-        # Disable GPUs unless explicitly requested:
-        os.environ["CUDA_VISIBLE_DEVICES"] = ""
-        return -1
-
-
-# Process GPU visibility in environment BEFORE torch and MPI imports
-for local_rank_key in ("OMPI_COMM_WORLD_LOCAL_RANK", "SLURM_LOCALID"):
-    if local_rank_str := os.environ.get(local_rank_key):
-        set_gpu_visibility(int(local_rank_str))
-        break
+try:
+    __version__ = version("qimpy")
+except PackageNotFoundError:
+    __version__ = "unknown"
