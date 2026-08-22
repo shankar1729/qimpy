@@ -110,8 +110,8 @@ def init(
     is_node_head = i_proc_node == 0
     node_proc_list = comm_node.gather(i_proc)
     # --- collect above and hostname across heads of each node
-    comm_node_inter = comm.Split(i_proc_node, i_proc)  # inter-node communicator
-    host_proc_lists = None
+    comm_node_inter = comm.Split(i_proc_node)  # inter-node communicator
+    host_proc_lists: list[HostProcessList] = []
     if is_node_head:
         host_proc_lists = comm_node_inter.allgather(
             HostProcessList(socket.gethostname(), node_proc_list)
@@ -139,7 +139,7 @@ def init(
     # Initialize torch distributed:
     backend = os.environ.get("BACKEND", dist.get_default_backend_for_device(device))
     if "MASTER_ADDR" not in os.environ:
-        os.environ["MASTER_ADDR"] = comm.bcast(socket.gethostname() if is_head else "")
+        os.environ["MASTER_ADDR"] = host_proc_lists[0].hostname
     if "MASTER_PORT" not in os.environ:
         os.environ["MASTER_PORT"] = str(comm.bcast(get_free_port() if is_head else 0))
     os.environ["LOCAL_RANK"] = str(i_proc_node)
