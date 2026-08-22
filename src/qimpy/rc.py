@@ -12,7 +12,9 @@ uses SLURM_LOCALID or OMPI_COMM_WORLD_LOCAL_RANK to pick a specific GPU and alte
 CUDA_VISIBLE_DEVICES before any torch or MPI calls.
 """
 
-from typing import Optional
+from typing import Optional, NamedTuple
+from itertools import groupby
+from operator import itemgetter
 import socket
 import datetime
 import time
@@ -100,13 +102,27 @@ def init(
         n_procs = comm.size
         is_head = i_proc == 0
 
-    # Determine local rank for GPU selection:
+    # Determine nodes and process distribution:
     comm_node = comm.Split_type(MPI.COMM_TYPE_SHARED)  # on-node communicator
     i_proc_node = comm_node.Get_rank()
     n_procs_node = comm_node.Get_size()
-    gpu_id = -1
+    # --- collect processes running on each host at head of comm_node
+    is_node_head = i_proc_node == 0
+    node_proc_list = comm_node.gather(i_proc)
+    # --- collect above and hostname across heads of each node
+    comm_node_inter = comm.Split(i_proc_node, i_proc)  # inter-node communicator
+    host_proc_lists = None
+    if is_node_head:
+        host_proc_lists = comm_node_inter.allgather(
+            HostProcessList(socket.gethostname(), node_proc_list)
+        )
+    # --- distribute to all processes and report
+    host_proc_lists = comm_node.bcast(host_proc_lists)
+    host_proc_str = " ".join(str(host_proc_list) for host_proc_list in host_proc_lists)
+    log.info(f"Hosts(processes): {host_proc_str}")
 
     # Initialize torch:
+    gpu_id = -1
     global device, use_cuda
     if torch.cuda.is_available():
         # Select GPU based on local rank:
@@ -174,3 +190,23 @@ def report_end():
     t_stop = time.time()
     duration = datetime.timedelta(seconds=(t_stop - t_start))
     log.info(f"\nEnd time: {time.ctime(t_stop)} (Duration: {duration})")
+
+
+class HostProcessList(NamedTuple):
+    """List of processes running on each hostname"""
+
+    hostname: str
+    process_list: list[int]
+
+    def __str__(self) -> str:
+        """Format as, e.g., `hostname(0,3-5,8-10)`."""
+        proc_ranges = []
+        for _, index_proc_pair in groupby(
+            enumerate(self.process_list), lambda i_pair: i_pair[0] - i_pair[1]
+        ):
+            procs = list(map(itemgetter(1), index_proc_pair))
+            if len(procs) == 1:
+                proc_ranges.append(str(procs[0]))
+            else:
+                proc_ranges.append(f"{procs[0]}-{procs[-1]}")
+        return f"{self.hostname}({','.join(proc_ranges)})"
