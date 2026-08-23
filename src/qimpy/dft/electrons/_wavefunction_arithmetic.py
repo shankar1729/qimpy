@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Union
 
 import torch
 
@@ -7,7 +6,7 @@ from qimpy.dft import electrons
 
 
 def _mul(
-    self: electrons.Wavefunction, scale: Union[float, torch.Tensor]
+    self: electrons.Wavefunction, scale: float | torch.Tensor
 ) -> electrons.Wavefunction:
     is_suitable = is_band_scale = isinstance(scale, float)
     if isinstance(scale, torch.Tensor) and (len(scale.shape) == 5):
@@ -26,7 +25,7 @@ def _mul(
 
 
 def _imul(
-    self: electrons.Wavefunction, scale: Union[float, torch.Tensor]
+    self: electrons.Wavefunction, scale: float | torch.Tensor
 ) -> electrons.Wavefunction:
     is_suitable = is_band_scale = isinstance(scale, float)
     if isinstance(scale, torch.Tensor) and (len(scale.shape) == 5):

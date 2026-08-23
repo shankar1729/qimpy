@@ -1,8 +1,8 @@
 """Generate and evaluate quintic (fifth-order) splines."""
+
 # List exported symbols for doc generation
 __all__ = ["get_coeff", "Interpolator"]
 
-from typing import Optional
 
 import numpy as np
 import torch
@@ -69,7 +69,7 @@ class Interpolator:
 
     _shape: tuple[int, ...]  #: Dimensions of x to reproduced at output
     _mat: torch.Tensor  #: internal sparse matrix used for interpolation
-    _BLIP_TO_POLY: Optional[torch.Tensor] = None  #: blip to poly transform
+    _BLIP_TO_POLY: torch.Tensor | None = None  #: blip to poly transform
 
     def __init__(self, x: torch.Tensor, dx: float, deriv: int = 0):
         """Initialize interpolator for evaluating at points `x`. Here `dx` is

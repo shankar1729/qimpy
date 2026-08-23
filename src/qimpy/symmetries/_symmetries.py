@@ -1,5 +1,3 @@
-from typing import Union, Optional
-
 import numpy as np
 import torch
 
@@ -18,7 +16,7 @@ class Symmetries(TreeNode):
     symmetrize properties such as positions, forces and densities."""
 
     lattice: Lattice  #: Corresponding lattice vectors
-    labeled_positions: Optional[LabeledPositions]  #: Positions determining space group
+    labeled_positions: LabeledPositions | None  #: Positions determining space group
     tolerance: float  #: Relative error threshold in detecting symmetries
     n_sym: int  #: Number of space group operations
     rot: torch.Tensor  #: Rotations in fractional coordinates (n_sym x 3 x 3)
@@ -39,10 +37,10 @@ class Symmetries(TreeNode):
         *,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         lattice: Lattice,
-        labeled_positions: Optional[LabeledPositions] = None,
+        labeled_positions: LabeledPositions | None = None,
         axes: dict[str, np.ndarray] = {},
         tolerance: float = 1e-6,
-        override: Union[None, str, list, np.ndarray] = None,
+        override: None | str | list | np.ndarray = None,
     ) -> None:
         """Determine space group from `lattice` and `ions`.
 
@@ -123,7 +121,7 @@ class Symmetries(TreeNode):
     @staticmethod
     def detect(
         lattice: Lattice,
-        labeled_positions: Optional[LabeledPositions],
+        labeled_positions: LabeledPositions | None,
         axes: dict[str, np.ndarray],
         tolerance: float,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -196,7 +194,7 @@ class Symmetries(TreeNode):
             log.info(f"- [{rot_str}, {fmt(trans)}]")
         log.debug("Ion map:\n" + fmt(self.position_map))
 
-    def enforce(self, lattice: Lattice, positions: Optional[torch.Tensor]) -> None:
+    def enforce(self, lattice: Lattice, positions: torch.Tensor | None) -> None:
         """Enforce symmetries exactly on lattice and ions."""
         log.info("Enforcing symmetries:")
         lattice.update(

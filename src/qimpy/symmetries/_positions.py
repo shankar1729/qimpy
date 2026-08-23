@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 import torch
 
@@ -12,8 +12,8 @@ class LabeledPositions(NamedTuple):
 
     positions: torch.Tensor  #: fractional coordinates of points (N x 3)
     scalars: torch.Tensor  #: scalar labels (Ns x N)
-    vectors: Optional[torch.Tensor] = None  #: vector labels (Nv x N x 3)
-    pseudovectors: Optional[torch.Tensor] = None  #: pseudovector labels (Npv x N x 3)
+    vectors: torch.Tensor | None = None  #: vector labels (Nv x N x 3)
+    pseudovectors: torch.Tensor | None = None  #: pseudovector labels (Npv x N x 3)
 
 
 def get_space_group(

@@ -1,7 +1,6 @@
 from __future__ import annotations
-from typing import Generic, Union, TypeVar
+from typing import Generic, TypeVar
 from dataclasses import dataclass
-
 
 T = TypeVar("T")
 
@@ -20,7 +19,7 @@ class Default(Generic[T]):
         return f"Default({self.value})"
 
 
-WithDefault = Union[T, Default[T]]  #: Type alias for a type or its default value
+WithDefault = T | Default[T]  #: Type alias for a type or its default value
 
 
 def cast_default(item: WithDefault[T]) -> T:

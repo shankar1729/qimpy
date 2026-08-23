@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Union, Optional
 import os
 
 import torch
@@ -21,7 +20,7 @@ class Relax(Minimize[Gradient]):
 
     latticeK: float  #: Preconditioning factor of lattice relative to ions
     drag_wavefunctions: bool  #: Whether to drag atomic components of wavefunctions
-    history: Optional[History]  #: Utility to save trajectory data
+    history: History | None  #: Utility to save trajectory data
     stepper: Stepper  #: Interface to move ions/lattice and compute forces/stress
 
     def __init__(
@@ -39,7 +38,7 @@ class Relax(Minimize[Gradient]):
         cg_type: str = "polak-ribiere",
         line_minimize: str = "auto",
         n_history: int = 15,
-        converge_on: Union[str, int] = "all",
+        converge_on: str | int = "all",
         drag_wavefunctions: bool = True,
         save_history: bool = True,
         checkpoint_in: CheckpointPath = CheckpointPath(),

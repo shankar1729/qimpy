@@ -3,13 +3,7 @@ from sphinx.application import Sphinx
 from sphinx.util.docutils import SphinxDirective
 from docutils.statemachine import ViewList
 from docutils import nodes
-from typing import (
-    get_type_hints,
-    get_args,
-    get_origin,
-    Optional,
-    NamedTuple,
-)
+from typing import get_type_hints, get_args, get_origin, NamedTuple
 from collections.abc import Sequence
 from functools import lru_cache
 import importlib
@@ -26,7 +20,7 @@ class Parameter(NamedTuple):
     default: str  #: String representing default value, if any
     summary: str  #: One-line summary
     doc: str  #: Full doc-string.
-    classdoc: Optional[ClassInputDoc] = None  #: Documentation of this class
+    classdoc: ClassInputDoc | None = None  #: Documentation of this class
     typename: str = ""  # Name of type (used only if no `classdoc`)
 
 
@@ -70,7 +64,7 @@ class ClassInputDoc:
                     param_doc, param_summary = yaml_remove_split(param_doc)
                     typenames = []
                     # Recur down on compound objects:
-                    param_class: Optional[ClassInputDoc] = None
+                    param_class: ClassInputDoc | None = None
                     for cls_option in get_args(param_type):
                         if inspect.isclass(cls_option) and issubclass(
                             cls_option, constructable
@@ -105,6 +99,7 @@ class ClassInputDoc:
 
     def write_rest_file(self, fname: str) -> None:
         """Write ReST file containing input documentation of this class."""
+
         # Helper to write a title:
         def write_title(file, title: str, underline: str) -> None:
             file.write(f"{title}\n{underline * len(title)}\n\n")
@@ -287,7 +282,7 @@ def get_path_from_class(cls: type) -> str:
     return ".".join(module_elems)
 
 
-def get_parameters(docstr: Optional[str]) -> tuple[str, dict[str, str]]:
+def get_parameters(docstr: str | None) -> tuple[str, dict[str, str]]:
     """Parse constructor docstring `docstr` into parameter descriptions.
     Returns header of constructor documentation, and for each parameter."""
     result: dict[str, str] = {}

@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Union
 from dataclasses import dataclass
 
 import numpy as np
@@ -24,7 +23,7 @@ class TimeEvolution(TreeNode):
     save_interval: int  #: Save results every so many steps
     n_collate: int  #: Collect these many save steps into a single checkpoint
     integrator: str  #: Time-step style used for integration
-    steady_state: dict[str, Union[str, float]]
+    steady_state: dict[str, str | float]
 
     def __init__(
         self,
@@ -36,7 +35,7 @@ class TimeEvolution(TreeNode):
         t_max: float = 0.0,
         n_collate: int = 0,
         integrator: str = "RK2",
-        steady_state: dict[str, Union[str, float]] = None,
+        steady_state: dict[str, str | float] = None,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         dt_max_sources: list,
     ) -> None:
@@ -96,16 +95,16 @@ class TimeEvolution(TreeNode):
                         "Specify dt explicitly, because dt_max is not available"
                     )
                 dt = dt_max
-                log.info(f"Setting time step dt = {dt_max = :.4g}")
+                log.info(f"Setting time step dt={dt_max=:.4g}")
             elif dt > dt_max:
-                raise InvalidInputException(f"{dt = } must be smaller than {dt_max = }")
+                raise InvalidInputException(f"{dt=} must be smaller than {dt_max=}")
             self.dt = float(dt)
             self.n_steps = max(1, int(np.round(t_max / self.dt)))
             self.save_interval = max(1, int(np.round(dt_save / self.dt)))
             self.n_collate = int(n_collate)
             self.integrator = integrator
             if integrator not in {"RK2", "RK4"}:
-                raise InvalidInputException(f"Unrecognized {integrator = }")
+                raise InvalidInputException(f"Unrecognized {integrator=}")
 
     def time_step(self, geometry: Geometry) -> None:
         """Second-order correct time step."""
@@ -175,7 +174,7 @@ class TimeEvolution(TreeNode):
             options={"disp": True, "nit": self.nit},
         )
         log.info(optimizer)
-        log.info(f"{steady_state_root_fn.n_calls = }")
+        log.info(f"{steady_state_root_fn.n_calls=}")
         geometry.rho = TensorList(
             v.view(rho_shape)
             for v in [torch.from_numpy(optimizer.x * RHO_SCALE).to(rc.device)]

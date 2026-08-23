@@ -1,6 +1,7 @@
 """Internal interface for XC functionals."""
+
 from __future__ import annotations
-from typing import Set, Callable, Optional
+from typing import Set, Callable
 from dataclasses import dataclass
 import functools
 
@@ -43,10 +44,8 @@ class Functional:
     has_energy: bool = True  #: Whether functional has meaningful total energy
     scale_factor: float = 1.0  #: Scale factor in energy and potential
     name: str = ""  #: Optional name of functional used for reporting initialization
-    _apply: Optional[FunctionalApply] = None  #: Internal callable to evaluate XC
-    _apply_spin: Optional[
-        FunctionalApply
-    ] = None  #: If provided, override _apply for spin-polarized case
+    _apply: FunctionalApply | None = None  #: Internal callable to evaluate XC
+    _apply_spin: FunctionalApply | None = None  #: Override _apply when spin-polarized
 
     def __post_init__(self) -> None:
         if self.name:

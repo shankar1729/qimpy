@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Union, Sequence, Optional
+from typing import Sequence
 
 import numpy as np
 import torch
@@ -24,8 +24,8 @@ class Kpoints(TreeNode):
         self,
         *,
         process_grid: ProcessGrid,
-        k: Optional[torch.Tensor] = None,
-        wk: Optional[torch.Tensor] = None,
+        k: torch.Tensor | None = None,
+        wk: torch.Tensor | None = None,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """Initialize from list of k-points and weights. Typically, this should
@@ -74,8 +74,8 @@ class Kmesh(Kpoints):
         symmetries: qimpy.symmetries.Symmetries,
         lattice: Lattice,
         checkpoint_in: CheckpointPath = CheckpointPath(),
-        offset: Union[Sequence[float], np.ndarray] = (0.0, 0.0, 0.0),
-        size: Union[float, Sequence[int], np.ndarray] = (1, 1, 1),
+        offset: Sequence[float] | np.ndarray = (0.0, 0.0, 0.0),
+        size: float | Sequence[int, np.ndarray] = (1, 1, 1),
         use_inversion: bool = True,
     ) -> None:
         """Construct k-mesh of specified `size` and `offset`.
@@ -245,7 +245,7 @@ class Kpath(Kpoints):
         process_grid: ProcessGrid,
         lattice: Lattice,
         dk: float = 0.0,
-        points: Optional[list] = None,
+        points: list | None = None,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """Initialize k-path with spacing `dk` connecting `points`.

@@ -1,5 +1,6 @@
 """Isodensity-cavity solvation model variants."""
-from typing import Optional, NamedTuple
+
+from typing import NamedTuple
 
 import torch
 import numpy as np
@@ -25,8 +26,8 @@ class LA12(TreeNode):
     def __init__(
         self,
         *,
-        nc: Optional[float] = None,
-        sigma: Optional[float] = None,
+        nc: float | None = None,
+        sigma: float | None = None,
         solvent: str = "",
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
@@ -79,9 +80,9 @@ class GLSSA13(TreeNode):
     def __init__(
         self,
         *,
-        nc: Optional[float] = None,
-        sigma: Optional[float] = None,
-        cavity_tension: Optional[float] = None,
+        nc: float | None = None,
+        sigma: float | None = None,
+        cavity_tension: float | None = None,
         solvent: str = "",
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):

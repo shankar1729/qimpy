@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Sequence
+from typing import Sequence
 import argparse
 
 import torch
@@ -48,7 +48,7 @@ def run(
     r_c: float,
     svg_file: str,
     save_frames: bool = False,
-    process_grid_shape: Optional[Sequence[int]],
+    process_grid_shape: Sequence[int] | None,
 ) -> float:
     """Run simulation and report error in final density."""
 
@@ -117,7 +117,7 @@ def run(
 
 def detect_lattice_vectors(
     displacements: torch.Tensor, tol=1e-3
-) -> Optional[torch.Tensor]:
+) -> torch.Tensor | None:
     """Detect periodicity from edge-equivalence displacements."""
     displacements = displacements[torch.where(displacements.norm(dim=-1) > tol)[0]]
     if not len(displacements):

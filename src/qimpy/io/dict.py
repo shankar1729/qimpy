@@ -1,7 +1,8 @@
 """Utilities to manipulate dictionaries used as input to constructors."""
+
 __all__ = ["key_cleanup", "flatten", "unflatten", "merge", "remove_units"]
 
-from typing import Callable, Union
+from typing import Callable
 
 from . import Unit
 
@@ -66,7 +67,7 @@ def remove_units(d: dict) -> dict:
     }
 
 
-LT = Union[list, tuple]
+LT = list | tuple
 
 
 def remove_units_list(lt: LT) -> LT:

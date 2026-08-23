@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Protocol, Optional, Union
+from typing import Protocol
 
 from qimpy import TreeNode, Energy
 from qimpy.io import CheckpointPath
@@ -34,7 +34,7 @@ class Fluid(TreeNode):
         coulomb: Coulomb,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         solvent: str = "",
-        linear: Optional[Union[dict, Linear]] = None,
+        linear: dict | Linear | None = None,
     ) -> None:
         """Specify one of the supported fluid models.
         Defaults to the Null model (no solvation) if none specified.

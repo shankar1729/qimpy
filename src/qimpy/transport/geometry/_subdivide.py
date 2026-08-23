@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Optional
 from dataclasses import dataclass
 
 import numpy as np
@@ -39,7 +38,7 @@ def select_division(quad_set: QuadSet, n_processes: int) -> int:
     grid_size_max_list = np.unique(quad_set.grid_size)
 
     # Expand list with smaller entries if needed
-    n_max = divided_count(quad_set, grid_size_max_list[0])[0]  # type:ignore
+    n_max = divided_count(quad_set, grid_size_max_list[0])[0]  # type: ignore
     needed_expansion = 4 * n_processes / n_max  # check quad counts till 4 n_processes
     if needed_expansion > 1.0:
         log_spacing = 0.2
@@ -90,7 +89,7 @@ def select_division(quad_set: QuadSet, n_processes: int) -> int:
 def subdivide(quad_set: QuadSet, grid_size_max: int) -> SubQuadSet:
     """Subdividide `quad_set` till all grid dimensions are below `grid_size_max`."""
     # Divide edges and propagate using adjacency:
-    divisions: list[list[Optional[np.ndarray]]] = [
+    divisions: list[list[np.ndarray | None]] = [
         [None, None] for _ in range(len(quad_set.quads))
     ]
 

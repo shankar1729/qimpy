@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Optional
 import operator
 
 import torch
@@ -31,7 +30,7 @@ class PatchSet(Geometry):
         svg_file: str,
         svg_unit: float = 1.0,
         grid_spacing: float,
-        contacts: dict[str, Optional[dict]],
+        contacts: dict[str, dict | None],
         grid_size_max: int = 0,
         save_rho: bool = False,
         cent_diff_deriv: bool = False,
@@ -202,7 +201,7 @@ class PatchSet(Geometry):
 
     def edge_exchange(
         self, edge_list_in: list[list[torch.Tensor]], velocity_mode: bool = False
-    ) -> list[list[Optional[torch.Tensor]]]:
+    ) -> list[list[torch.Tensor | None]]:
         """Exchange data across edges based on patch adjacency, handling
         communication between patches on different processes, as necessary.
         If `velocity_mode` is True, the edge data is vectorial along the short axis

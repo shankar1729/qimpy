@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Optional
 import pathlib
 
 import numpy as np
@@ -32,15 +31,15 @@ class Pseudopotential:
     beta: RadialFunction  #: Nonlocal projectors
     psi: RadialFunction  #: Atomic orbitals
     is_relativistic: bool  #: Whether this is a relativistic pseudopotential
-    j_beta: Optional[torch.Tensor]  #: l+s of projectors (if relativistic)
-    j_psi: Optional[torch.Tensor]  #: l+s of atomic orbitals (if relativistic)
+    j_beta: torch.Tensor | None  #: l+s of projectors (if relativistic)
+    j_psi: torch.Tensor | None  #: l+s of atomic orbitals (if relativistic)
     eig_psi: np.ndarray  #: Energy eigenvalue of each atomic orbital
     D: torch.Tensor  #: Descreened nonlocal pseudopotential matrix
 
     Gmax: float  #: Current reciprocal space extent of radial functions
     pqn_beta: PseudoQuantumNumbers  #: quantum numbers for projectors
     pqn_psi: PseudoQuantumNumbers  #: quantum numbers for orbitals
-    pulay_data: Optional[np.ndarray]  #: Pulay correction data for finite ke cutoff
+    pulay_data: np.ndarray | None  #: Pulay correction data for finite ke cutoff
 
     def __init__(self, filename: str) -> None:
         """Read pseudopotential from file.

@@ -1,4 +1,4 @@
-from typing import Sequence, Optional
+from typing import Sequence
 
 import numpy as np
 import torch
@@ -18,7 +18,7 @@ class SparseMatrixRight:
     iCol_mine: torch.Tensor
     value_mine: torch.Tensor
     M_mine: torch.Tensor
-    group: Optional[dist.ProcessGroup]  #: Process group to split matrix over
+    group: dist.ProcessGroup | None  #: Process group to split matrix over
     n_procs: int  #: Size of comm
     i_proc: int  #: Rank within comm
 
@@ -27,7 +27,7 @@ class SparseMatrixRight:
         indices: Sequence[int],
         values: torch.Tensor,
         *,
-        group: Optional[dist.ProcessGroup],
+        group: dist.ProcessGroup | None,
     ) -> None:
         self.indices = indices
         self.values = values

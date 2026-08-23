@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Union, Optional
 
 import numpy as np
 import torch
@@ -37,7 +36,7 @@ class Electrons(TreeNode):
     _n_bands_done: int  #: Number of bands in C that have been initialized
     fixed_H: str  #: If given, fix Hamiltonian to checkpoint file of this name
     save_wavefunction: bool  #: Whether to save wavefunction in checkpoint
-    lcao: Optional[LCAO]  #: If present, use LCAO initialization
+    lcao: LCAO | None  #: If present, use LCAO initialization
     eig: torch.Tensor  #: Electronic orbital eigenvalues
     deig_max: float  #: Estimate of accuracy of current `eig`
     n_tilde: FieldH  #: Electron density (and magnetization, if `spin_polarized`)
@@ -53,19 +52,19 @@ class Electrons(TreeNode):
         ions: Ions,
         symmetries: Symmetries,
         checkpoint_in: CheckpointPath = CheckpointPath(),
-        k_mesh: Optional[Union[dict, Kmesh]] = None,
-        k_path: Optional[Union[dict, Kpath]] = None,
+        k_mesh: dict | Kmesh | None = None,
+        k_path: dict | Kpath | None = None,
         spin_polarized: bool = False,
         spinorial: bool = False,
-        fillings: Optional[Union[dict, Fillings]] = None,
-        basis: Optional[Union[dict, Basis]] = None,
-        xc: Optional[Union[dict, XC]] = None,
+        fillings: dict | Fillings | None = None,
+        basis: dict | Basis | None = None,
+        xc: dict | XC | None = None,
         fixed_H: str = "",
         save_wavefunction: bool = True,
-        lcao: Optional[Union[dict, bool, LCAO]] = None,
-        davidson: Optional[Union[dict, Davidson]] = None,
-        chefsi: Optional[Union[dict, CheFSI]] = None,
-        scf: Optional[Union[dict, SCF]] = None,
+        lcao: dict | bool | LCAO | None = None,
+        davidson: dict | Davidson | None = None,
+        chefsi: dict | CheFSI | None = None,
+        scf: dict | SCF | None = None,
     ) -> None:
         """Initialize from components and/or dictionary of options.
 

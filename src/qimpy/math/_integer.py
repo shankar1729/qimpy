@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import overload, Union
+from typing import overload
 
 import numpy as np
 
@@ -31,18 +31,15 @@ def fft_suitable(N: int) -> bool:
 
 
 @overload
-def ceildiv(num: int, den: int) -> int:
-    ...
+def ceildiv(num: int, den: int) -> int: ...
 
 
 @overload
-def ceildiv(num: np.ndarray, den: Union[int, np.ndarray]) -> np.ndarray:
-    ...
+def ceildiv(num: np.ndarray, den: int | np.ndarray) -> np.ndarray: ...
 
 
 @overload
-def ceildiv(num: Union[int, np.ndarray], den: np.ndarray) -> np.ndarray:
-    ...
+def ceildiv(num: int | np.ndarray, den: np.ndarray) -> np.ndarray: ...
 
 
 def ceildiv(num, den):

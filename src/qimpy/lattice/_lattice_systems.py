@@ -1,5 +1,3 @@
-from typing import Optional
-
 import torch
 import numpy as np
 
@@ -19,7 +17,7 @@ def get_Rbasis(*, name: str, **kwargs) -> torch.Tensor:
     )  # type: ignore
 
 
-def _get_Rbasis_cubic(*, a: float, modification: Optional[str] = None) -> torch.Tensor:
+def _get_Rbasis_cubic(*, a: float, modification: str | None = None) -> torch.Tensor:
     Rbasis = _get_Rbasis_lengths_angles(a, a, a)
     if modification is None:
         return Rbasis
@@ -32,7 +30,7 @@ def _get_Rbasis_cubic(*, a: float, modification: Optional[str] = None) -> torch.
 
 
 def _get_Rbasis_tetragonal(
-    *, a: float, c: float, modification: Optional[str] = None
+    *, a: float, c: float, modification: str | None = None
 ) -> torch.Tensor:
     Rbasis = _get_Rbasis_lengths_angles(a, a, c)
     if modification is None:
@@ -44,7 +42,7 @@ def _get_Rbasis_tetragonal(
 
 
 def _get_Rbasis_orthorhombic(
-    *, a: float, b: float, c: float, modification: Optional[str] = None
+    *, a: float, b: float, c: float, modification: str | None = None
 ) -> torch.Tensor:
     Rbasis = _get_Rbasis_lengths_angles(a, b, c)
     if modification is None:
@@ -67,7 +65,7 @@ def _get_Rbasis_rhombohedral(*, a: float, alpha: float) -> torch.Tensor:
 
 
 def _get_Rbasis_monoclinic(
-    *, a: float, b: float, c: float, beta: float, modification: Optional[str] = None
+    *, a: float, b: float, c: float, beta: float, modification: str | None = None
 ) -> torch.Tensor:
     Rbasis = _get_Rbasis_lengths_angles(a, b, c, beta=beta)
     if modification is None:

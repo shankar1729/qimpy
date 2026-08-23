@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Protocol, Optional, Union
+from typing import Protocol
 
 import torch.distributed as dist
 
@@ -28,9 +28,9 @@ class Geometry(TreeNode):
         group: dist.ProcessGroup,
         lattice: Lattice,
         checkpoint_in: CheckpointPath = CheckpointPath(),
-        fixed: Optional[Union[dict, Fixed]] = None,
-        relax: Optional[Union[dict, Relax]] = None,
-        dynamics: Optional[Union[dict, Dynamics]] = None,
+        fixed: dict | Fixed | None = None,
+        relax: dict | Relax | None = None,
+        dynamics: dict | Dynamics | None = None,
     ) -> None:
         """Specify one of the supported geometry actions.
         Defaults to `Fixed` if none specified.

@@ -1,6 +1,5 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 import torch
@@ -147,7 +146,7 @@ class Davidson(TreeNode):
         return deig_max, n_eigs_done
 
     def __call__(
-        self, n_iterations: Optional[int] = None, eig_threshold: Optional[float] = None
+        self, n_iterations: int | None = None, eig_threshold: float | None = None
     ) -> None:
         """Diagonalize Kohn-Sham Hamiltonian in electrons.
         Also available as :meth:`__call__` to make `Davidson` callable.

@@ -1,4 +1,4 @@
-from typing import Optional, ClassVar
+from typing import ClassVar
 from dataclasses import dataclass
 
 import torch
@@ -9,9 +9,9 @@ class Gradient:
     """Geometry gradient used for relaxation / dynamics."""
 
     ions: torch.Tensor  #: ionic gradient (forces)
-    lattice: Optional[torch.Tensor] = None  #: lattice gradient (stress)
-    thermostat: Optional[torch.Tensor] = None  #: thermostat gradient (e.g. Nose-Hoover)
-    barostat: Optional[torch.Tensor] = None  #: barostat gradient (e.g. Nose-Hoover)
+    lattice: torch.Tensor | None = None  #: lattice gradient (stress)
+    thermostat: torch.Tensor | None = None  #: thermostat gradient (e.g. Nose-Hoover)
+    barostat: torch.Tensor | None = None  #: barostat gradient (e.g. Nose-Hoover)
     OPTIONAL_ATTRIBUTE_NAMES: ClassVar[set[str]] = {"lattice", "thermostat", "barostat"}
 
     def clone(self) -> "Gradient":

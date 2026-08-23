@@ -9,7 +9,7 @@ variables MASTER_ADDR and MASTER_PORT. None of these environment variables are r
 `init` uses MPI to determine a consistent address/port for the backend set-up.
 """
 
-from typing import Optional, NamedTuple
+from typing import NamedTuple
 from itertools import groupby
 from operator import itemgetter
 import socket
@@ -70,7 +70,7 @@ np_type: dict[torch.dtype, type] = {
 
 
 def init(
-    *, comm_override: Optional[MPI.Comm] = None, cores_override: Optional[int] = None
+    *, comm_override: MPI.Comm | None = None, cores_override: int | None = None
 ) -> None:
     """Initialize overall hardware resources to be used by QimPy.
     Initializes GPU resources

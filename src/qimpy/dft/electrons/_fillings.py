@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Union, NamedTuple, Callable, Sequence
+from typing import NamedTuple, Callable, Sequence
 from numbers import Integral
 
 import numpy as np
@@ -20,9 +20,7 @@ class SmearingResults(NamedTuple):
     S: torch.Tensor  #: Entropy contribution
 
 
-SmearingFunc = Callable[
-    [torch.Tensor, Union[float, torch.Tensor], float], SmearingResults
-]
+SmearingFunc = Callable[[torch.Tensor, float | torch.Tensor, float], SmearingResults]
 
 
 class Fillings(TreeNode):
@@ -34,8 +32,8 @@ class Fillings(TreeNode):
     n_bands_min: int  #: Minimum number of bands to accomodate `n_electrons`
     n_bands: int  #: Number of bands to calculate
     n_bands_extra: int  #: Number of extra bands during diagonalization
-    smearing: Optional[str]  #: Smearing method name
-    sigma: Optional[float]  #: Gaussian width (:math:`2k_BT` for Fermi)
+    smearing: str | None  #: Smearing method name
+    sigma: float | None  #: Gaussian width (:math:`2k_BT` for Fermi)
     mu: float  #: Electron chemical potential
     mu_constrain: bool  #: Whether to constrain chemical potential
     B: torch.Tensor  #: Magnetic field (vector in spinorial mode)
@@ -43,7 +41,7 @@ class Fillings(TreeNode):
     M_constrain: bool  #: Whether to constrain magnetization
     f: torch.Tensor  #: Electronic occupations
     f_eig: torch.Tensor  #: Derivative of `f` with electronic eigenvalues
-    _smearing_func: Optional[SmearingFunc]  #: Smearing function calculator
+    _smearing_func: SmearingFunc | None  #: Smearing function calculator
 
     def __init__(
         self,
@@ -54,14 +52,14 @@ class Fillings(TreeNode):
         charge: float = 0.0,
         smearing: str = "gauss",
         sigma: float = 0.002,
-        kT: Optional[float] = None,
+        kT: float | None = None,
         mu: float = np.nan,
         mu_constrain: bool = False,
-        B: Union[float, Sequence[float]] = 0.0,
-        M: Union[float, Sequence[float]] = 0.0,
+        B: float | Sequence[float] = 0.0,
+        M: float | Sequence[float] = 0.0,
         M_constrain: bool = False,
-        n_bands: Union[int, str, Default[str]] = Default("atomic"),
-        n_bands_extra: Union[int, str, Default[str]] = Default("x0.1"),
+        n_bands: int | str | Default[str] = Default("atomic"),
+        n_bands_extra: int | str | Default[str] = Default("x0.1"),
     ) -> None:
         r"""Initialize occupation factor (smearing) scheme.
 
@@ -128,9 +126,7 @@ class Fillings(TreeNode):
         self.electrons = electrons
 
         # Magnetic field and magnetization mode:
-        def check_magnetic(
-            x: Union[float, Sequence[float]], x_name: str
-        ) -> torch.Tensor:
+        def check_magnetic(x: float | Sequence[float], x_name: str) -> torch.Tensor:
             """Ensure that x = M or B is appropriate for spin mode."""
             x_len = (3 if electrons.spinorial else 1) if electrons.spin_polarized else 0
             if x:
@@ -203,8 +199,8 @@ class Fillings(TreeNode):
     def _initialize_n_bands(
         self,
         ions: Ions,
-        n_bands: Union[int, str, Default[str]],
-        n_bands_extra: Union[int, str, Default[str]],
+        n_bands: int | str | Default[str],
+        n_bands_extra: int | str | Default[str],
     ) -> None:
         # Determine number of bands:
         if isinstance(n_bands, Integral):
@@ -495,7 +491,7 @@ class Fillings(TreeNode):
 
 
 def _smearing_fermi(
-    eig: torch.Tensor, mu: Union[float, torch.Tensor], sigma: float
+    eig: torch.Tensor, mu: float | torch.Tensor, sigma: float
 ) -> SmearingResults:
     """Compute Fermi-Dirac occupations, its energy derivative and entropy.
     Note that sigma is taken as 2 kT to keep width consistent."""
@@ -506,7 +502,7 @@ def _smearing_fermi(
 
 
 def _smearing_gauss(
-    eig: torch.Tensor, mu: Union[float, torch.Tensor], sigma: float
+    eig: torch.Tensor, mu: float | torch.Tensor, sigma: float
 ) -> SmearingResults:
     """Compute Gaussian (erfc) occupations, energy derivative and entropy."""
     x = (eig - mu) / sigma
@@ -517,7 +513,7 @@ def _smearing_gauss(
 
 
 def _smearing_mp1(
-    eig: torch.Tensor, mu: Union[float, torch.Tensor], sigma: float
+    eig: torch.Tensor, mu: float | torch.Tensor, sigma: float
 ) -> SmearingResults:
     """Compute first-order Methfessel-Paxton occupations, energy derivative
     and entropy."""
@@ -530,7 +526,7 @@ def _smearing_mp1(
 
 
 def _smearing_cold(
-    eig: torch.Tensor, mu: Union[float, torch.Tensor], sigma: float
+    eig: torch.Tensor, mu: float | torch.Tensor, sigma: float
 ) -> SmearingResults:
     """Compute Cold smearing occupations, energy derivative and entropy."""
     x = (eig - mu) / sigma + np.sqrt(0.5)  # note: not centered at mu

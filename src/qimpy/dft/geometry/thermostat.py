@@ -1,7 +1,7 @@
 """Geometry actions: relaxation and dynamics."""
 
 from __future__ import annotations
-from typing import Union, Protocol, Callable, Optional
+from typing import Protocol, Callable
 
 import torch
 import torch.distributed as dist
@@ -32,10 +32,10 @@ class Thermostat(TreeNode):
         *,
         dynamics: geometry.Dynamics,
         checkpoint_in: CheckpointPath = CheckpointPath(),
-        nve: Union[dict, NVE, None] = None,
-        nose_hoover: Union[dict, NoseHoover, None] = None,
-        berendsen: Union[dict, Berendsen, None] = None,
-        langevin: Union[dict, Langevin, None] = None,
+        nve: dict | NVE | None = None,
+        nose_hoover: dict | NoseHoover | None = None,
+        berendsen: dict | Berendsen | None = None,
+        langevin: dict | Langevin | None = None,
     ) -> None:
         """Specify one of the supported thermostat methods.
         Defaults to `NVE` if none specified.
@@ -115,7 +115,7 @@ class NoseHoover(TreeNode):
     chain_length_T: int  #: Nose-Hoover chain length for thermostat
     chain_length_P: int  #: Nose-Hoover chain length for barostat
     thermostat_velocity: torch.Tensor  #: Velocity of extra thermostat DOFs
-    barostat_velocity: Optional[torch.Tensor]  #: Velocity of extra barostat DOFs
+    barostat_velocity: torch.Tensor | None  #: Velocity of extra barostat DOFs
 
     def __init__(
         self,

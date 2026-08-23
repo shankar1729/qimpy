@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Union
 
 import numpy as np
 import torch
@@ -92,7 +91,7 @@ class Lindblad(TreeNode):
                 ab_initio.group,
             )
 
-        def get_mine(ik) -> Union[torch.Tensor, slice, None]:
+        def get_mine(ik) -> torch.Tensor | slice | None:
             """Utility to fetch efficient slices of relevant k-points."""
             if ab_initio.k_division.n_procs == 1:
                 return slice(None)  # no split, so bypass search

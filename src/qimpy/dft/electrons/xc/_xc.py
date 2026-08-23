@@ -1,5 +1,3 @@
-from typing import Union, Optional
-
 import numpy as np
 import torch
 
@@ -19,7 +17,7 @@ class XC(TreeNode):
 
     _functional_name: str  #: Internal name of functional for checkpoint
     _functionals: list[Functional]  #: list of functionals that add up to XC
-    plus_U: Optional[PlusU]  #: optional DFT+U correction
+    plus_U: PlusU | None  #: optional DFT+U correction
     need_sigma: bool  #: whether overall functional needs gradient
     need_lap: bool  #: whether overall functional needs laplacian
     need_tau: bool  #: whether overall functional needs KE density
@@ -29,8 +27,8 @@ class XC(TreeNode):
         *,
         spin_polarized: bool,
         checkpoint_in: CheckpointPath = CheckpointPath(),
-        functional: Union[str, list[str]] = "gga-pbe",
-        plus_U: Optional[Union[dict, PlusU]] = None,
+        functional: str | list[str] = "gga-pbe",
+        plus_U: dict | PlusU | None = None,
     ):
         """Initialize exchange-correlation functional.
 
@@ -290,7 +288,7 @@ if XC.__init__.__doc__:
     )
 
 
-def _get_functionals(name: str, scale_factor: float) -> list[Union[Functional, str]]:
+def _get_functionals(name: str, scale_factor: float) -> list[Functional | str]:
     """Get list of Functional objects associated with a functional `name`.
     For Libxc functionals, a validated list of strings is returned so that
     all the Libxc evaluations can be consolidated in a single wrapper.

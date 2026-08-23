@@ -1,5 +1,3 @@
-from typing import Optional, Union
-
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -30,8 +28,8 @@ class RadialFunction:
         self,
         r: torch.Tensor,
         dr: torch.Tensor,
-        f: Optional[Union[np.ndarray, torch.Tensor]] = None,
-        l: Optional[Union[np.ndarray, torch.Tensor]] = None,
+        f: np.ndarray | torch.Tensor | None = None,
+        l: np.ndarray | torch.Tensor | None = None,
     ) -> None:
         """Initialize real-space portion of radial function.
         Note that f should have a factor of r^l removed for correct

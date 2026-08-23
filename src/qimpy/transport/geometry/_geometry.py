@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Optional
 from abc import abstractmethod
 
 import torch
@@ -27,7 +26,7 @@ class Geometry(TreeNode):
     group: dist.ProcessGroup  #: Process group for real-space split over patches
     material: Material  #: Corresponding material
     grid_spacing: float  #: Grid spacing used for discretization
-    contacts: dict[str, Optional[dict]]  #: SVG contact names to material parameters
+    contacts: dict[str, dict | None]  #: SVG contact names to material parameters
     quad_set: QuadSet  #: Original geometry specification from SVG
     sub_quad_set: SubQuadSet  #: Division into smaller quads for tuning parallelization
     patches: list[Patch]  #: Advection for each quad patch local to this process
@@ -43,7 +42,7 @@ class Geometry(TreeNode):
         material: Material,
         quad_set: QuadSet,
         grid_spacing: float,
-        contacts: dict[str, Optional[dict]],
+        contacts: dict[str, dict | None],
         grid_size_max: int,
         save_rho: bool = False,
         cent_diff_deriv: bool = False,

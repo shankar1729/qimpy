@@ -1,4 +1,4 @@
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 from qimpy.io import Unit, InvalidInputException
 
@@ -35,7 +35,7 @@ ION_PROPERTIES: dict[str, IonProperty] = {
 def set_solvent_properties(
     solvent: str,
     property_map: dict[str, NamedTuple],
-    specified_values: dict[str, Optional[float]],
+    specified_values: dict[str, float | None],
     model,
 ) -> None:
     """Merge default and specified solvent properties/parameters.
@@ -46,7 +46,7 @@ def set_solvent_properties(
     if solvent:
         if solvent not in property_map:
             raise InvalidInputException(
-                f"{solvent = } not parameterized for {model.__class__.__name__}."
+                f"{solvent=} not parameterized for {model.__class__.__name__}."
                 f" Available options: {', '.join(property_map.keys())}"
             )
         defaults = property_map[solvent]

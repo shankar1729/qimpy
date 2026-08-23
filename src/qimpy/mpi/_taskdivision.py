@@ -1,5 +1,3 @@
-from typing import Optional
-
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -23,7 +21,7 @@ class TaskDivision:
     n_mine: int  #: Number of tasks on current process
 
     def __init__(
-        self, *, n_tot: int, n_procs: int, i_proc: int, name: Optional[str] = None
+        self, *, n_tot: int, n_procs: int, i_proc: int, name: str | None = None
     ) -> None:
         """Divide `n_tot` tasks among `n_procs` processes.
         Report division and load balance if `name` is not None."""
@@ -63,7 +61,7 @@ class TaskDivisionCustom(TaskDivision):
 
     n_each_custom: np.ndarray  #: Custom number of tasks on each process
 
-    def __init__(self, *, n_mine: int, group: Optional[dist.ProcessGroup]) -> None:
+    def __init__(self, *, n_mine: int, group: dist.ProcessGroup | None) -> None:
         """Initialize given local number of tasks on each processes."""
         # Collect n_mine on each process and initialize process parameters:
         if group is None:

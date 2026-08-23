@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Sequence
+from typing import Sequence
 from functools import cache
 
 import numpy as np
@@ -23,8 +23,8 @@ class Grid(TreeNode):
 
     lattice: Lattice
     symmetries: Symmetries
-    _field_symmetrizer: Optional[grid.FieldSymmetrizer]
-    group: Optional[dist.ProcessGroup]  #: Process group to split grid and FFTs over
+    _field_symmetrizer: grid.FieldSymmetrizer | None
+    group: dist.ProcessGroup | None  #: Process group to split grid and FFTs over
     n_procs: int  #: Size of proces group
     i_proc: int  #: Rank within process group
     is_split: bool  #: Whether the grid is split over MPI
@@ -45,11 +45,11 @@ class Grid(TreeNode):
         *,
         lattice: Lattice,
         symmetries: Symmetries,
-        group: Optional[dist.ProcessGroup],
+        group: dist.ProcessGroup | None,
         checkpoint_in: CheckpointPath = CheckpointPath(),
-        ke_cutoff_wavefunction: Optional[float] = None,
-        ke_cutoff: Optional[float] = None,
-        shape: Optional[Sequence[int]] = None,
+        ke_cutoff_wavefunction: float | None = None,
+        ke_cutoff: float | None = None,
+        shape: Sequence[int | None] = None,
     ) -> None:
         """Create local or distributed grid for `lattice`.
 

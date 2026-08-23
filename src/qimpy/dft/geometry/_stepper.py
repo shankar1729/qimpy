@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Optional
 
 import torch
 
@@ -16,7 +15,7 @@ class Stepper:
     invRbasis0: torch.Tensor  #: Initial lattice vectors inverse (used to define strain)
     drag_wavefunctions: bool  #: Whether to drag atomic components of wavefunctions
     isotropic: bool  #: Whether to force lattice changes to be isotropic (NPT mode)
-    _lowdin: Optional[Lowdin]  #: Lowdin and wavefunction drag shared data
+    _lowdin: Lowdin | None  #: Lowdin and wavefunction drag shared data
 
     def __init__(
         self,
@@ -54,7 +53,7 @@ class Stepper:
             self._lowdin.restore_atomic_projections(delta_positions)
             self._lowdin = None
 
-    def compute(self, require_grad: bool) -> tuple[Energy, Optional[Gradient]]:
+    def compute(self, require_grad: bool) -> tuple[Energy, Gradient] | None:
         """Compute energy and optionally ionic/lattice gradient."""
         system = self.system
         lattice = system.lattice
@@ -76,7 +75,7 @@ class Stepper:
         else:
             return system.energy, None
 
-    def report(self, total_stress: Optional[torch.Tensor] = None) -> None:
+    def report(self, total_stress: torch.Tensor | None = None) -> None:
         system = self.system
         ions = system.ions
         electrons = system.electrons

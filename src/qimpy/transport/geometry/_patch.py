@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Callable, Optional, NamedTuple
+from typing import Callable, NamedTuple
 
 import numpy as np
 import torch
@@ -38,9 +38,9 @@ class Patch:
     cent_diff_deriv: bool  # using simple central difference operator
 
     material: Material
-    aperture_selections: list[Optional[torch.Tensor]]  #: Aperture indices for each edge
+    aperture_selections: list[torch.Tensor | None]  #: Aperture indices for each edge
     reflectors: list[
-        Optional[Callable[[torch.Tensor], torch.Tensor]]
+        Callable[[torch.Tensor], torch.Tensor] | None
     ]  #: Material-dependent reflector for each edge that needs one
     contacts: list[list[Contact]]  #: Contact calculators (multiple possibly) by edge
     edge_masks: tuple[list[Mask], list[Mask]]  #: Masks for zeroing edge flux by axis

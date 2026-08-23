@@ -1,4 +1,3 @@
-from typing import Optional
 import functools
 
 import torch
@@ -38,7 +37,7 @@ def make_system(real: bool, spinorial: bool, polarized: bool) -> dft.System:
 
 @functools.cache
 def get_Cg(
-    system: dft.System, n_bands: int, b_start: int = 0, b_stop: Optional[int] = None
+    system: dft.System, n_bands: int, b_start: int = 0, b_stop: int | None = None
 ) -> Wavefunction:
     """Create basis-split wavefunction, selectively randomized."""
     Cg = Wavefunction(system.electrons.basis, n_bands=n_bands)
@@ -48,7 +47,7 @@ def get_Cg(
 
 @functools.cache
 def get_Cb(
-    system: dft.System, n_bands: int, b_start: int = 0, b_stop: Optional[int] = None
+    system: dft.System, n_bands: int, b_start: int = 0, b_stop: int | None = None
 ) -> Wavefunction:
     """Create band-split wavefunction, selectively randomized."""
     div = system.electrons.basis.division

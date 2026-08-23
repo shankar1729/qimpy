@@ -1,4 +1,4 @@
-from typing import Optional, Sequence, Union
+from typing import Sequence
 
 from qimpy import log, TreeNode
 from qimpy.io import CheckpointPath, Checkpoint, CheckpointContext
@@ -19,15 +19,15 @@ class Transport(TreeNode):
     def __init__(
         self,
         *,
-        ab_initio: Optional[Union[AbInitio, dict]] = None,
-        fermi_circle: Optional[Union[FermiCircle, dict]] = None,
-        single_band: Optional[Union[SingleBand, dict]] = None,
-        patch_set: Optional[Union[PatchSet, dict]] = None,
-        parameter_grid: Optional[Union[ParameterGrid, dict]] = None,
-        time_evolution: Optional[Union[TimeEvolution, dict]] = None,
-        checkpoint: Optional[str] = None,
-        checkpoint_out: Optional[str] = None,
-        process_grid_shape: Optional[Sequence[int]] = None,
+        ab_initio: AbInitio | dict | None = None,
+        fermi_circle: FermiCircle | dict | None = None,
+        single_band: SingleBand | dict | None = None,
+        patch_set: PatchSet | dict | None = None,
+        parameter_grid: ParameterGrid | dict | None = None,
+        time_evolution: TimeEvolution | dict | None = None,
+        checkpoint: str | None = None,
+        checkpoint_out: str | None = None,
+        process_grid_shape: Sequence[int] | None = None,
     ):
         """Compose a System to calculate from its pieces. Each piece
         could be provided as an object or a dictionary of parameters

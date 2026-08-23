@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Union, ClassVar
+from typing import ClassVar
 from dataclasses import dataclass
 import math
 import yaml
@@ -43,11 +43,11 @@ class Unit:
     MAP: ClassVar[dict[str, float]] = {}  #: Mapping from unit names to values
 
 
-UnitOrFloat = Union[Unit, float]
+UnitOrFloat = Unit | float
 
 
 def unit_representer(
-    dumper: Union[yaml.Dumper, yaml.SafeDumper], unit: Unit
+    dumper: yaml.Dumper | yaml.SafeDumper, unit: Unit
 ) -> yaml.ScalarNode:
     return dumper.represent_scalar("!unit", repr(unit))
 

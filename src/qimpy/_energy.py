@@ -1,9 +1,7 @@
-from typing import Union, Optional
-
 import torch
 
 
-class Energy(dict[str, Union[float, torch.Tensor]]):
+class Energy(dict[str, float | torch.Tensor]):
     """Energy of system with access to components"""
 
     name: str  #: standard label for (free) energy type, e.g., E, A, Phi etc.
@@ -26,7 +24,7 @@ class Energy(dict[str, Union[float, torch.Tensor]]):
         terms[0].append(f"{self.name:>9s} = {float(self):25.16f}")  # total
         return "\n".join(terms[0])
 
-    def sum_tensor(self) -> Optional[torch.Tensor]:
+    def sum_tensor(self) -> torch.Tensor | None:
         result = None
         for value in self.values():
             assert isinstance(value, torch.Tensor)

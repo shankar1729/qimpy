@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional, NamedTuple, TypeVar, Sequence
+from typing import Any, NamedTuple, TypeVar, Sequence
 import os
 
 import h5py
@@ -128,7 +128,7 @@ class CheckpointPath(NamedTuple):
     Useful as construction parameter for objects, to load data from
     checkpoint when available."""
 
-    checkpoint: Optional[Checkpoint] = None  #: Checkpoint, if available.
+    checkpoint: Checkpoint | None = None  #: Checkpoint, if available.
     path: str = ""  #: Path within checkpoint
 
     def relative(self, relative_path: str) -> CheckpointPath:
@@ -211,7 +211,7 @@ class CheckpointPath(NamedTuple):
         dset = checkpoint[path]
         return torch.from_numpy(dset[...]).to(rc.device)
 
-    def read_optional(self, name: str, report: bool = True) -> Optional[torch.Tensor]:
+    def read_optional(self, name: str, report: bool = True) -> torch.Tensor | None:
         """Handle optional dataset with `read`, returning None if not found."""
         try:
             return self.read(name, report)

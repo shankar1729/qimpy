@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from typing import Optional, Union
 import pathlib
 import re
 
@@ -29,17 +28,17 @@ class Ions(TreeNode):
     slices: list[slice]  #: slice to get each ion type
     pseudopotentials: list[Pseudopotential]  #: pseudopotential for each type
     positions: torch.Tensor  #: fractional positions of each ion (n_ions x 3)
-    velocities: Optional[torch.Tensor]  #: Cartesian velocities of each ion (n_ions x 3)
+    velocities: torch.Tensor | None  #: Cartesian velocities of each ion (n_ions x 3)
     types: torch.Tensor  #: type of each ion (n_ions, int)
-    Q: Optional[torch.Tensor]  #: initial / Lowdin charge (oxidation state) for each ion
-    M: Optional[torch.Tensor]  #: initial / Lowdin magnetic moment for each ion
+    Q: torch.Tensor | None  #: initial / Lowdin charge (oxidation state) for each ion
+    M: torch.Tensor | None  #: initial / Lowdin magnetic moment for each ion
     Z: torch.Tensor  #: charge of each ion type (n_types, float)
     Z_tot: float  #: total ionic charge
     rho_tilde: FieldH  #: ionic charge density (uses coulomb.ion_width)
     Vloc_tilde: FieldH  #: local potential due to ions (including from rho)
     n_core_tilde: FieldH  #: partial core electronic density (for XC)
     beta: dft.electrons.Wavefunction  #: pseudopotential projectors (split-basis only)
-    beta_full: Optional[dft.electrons.Wavefunction]  #: full-basis version of `beta`
+    beta_full: dft.electrons.Wavefunction | None  #: full-basis version of `beta`
     beta_version: int  #: version of `beta` to invalidate cached projections
     D_all: torch.Tensor  #: nonlocal pseudopotential matrix (all atoms)
     dEtot_drho_basis: float  #: dE/d(basis function density) for Pulay correction
@@ -59,8 +58,8 @@ class Ions(TreeNode):
         checkpoint_in: CheckpointPath = CheckpointPath(),
         lattice: Lattice,
         fractional: bool = True,
-        coordinates: Optional[list] = None,
-        pseudopotentials: Optional[Union[str, list[str]]] = None,
+        coordinates: list | None = None,
+        pseudopotentials: str | list[str | None] = None,
     ) -> None:
         """Initialize geometry and pseudopotentials.
 
@@ -134,7 +133,7 @@ class Ions(TreeNode):
         """Number of replicas used in future NEB / phonons support."""
         return 1
 
-    def _process_coordinates(self, coordinates: Optional[list]) -> None:
+    def _process_coordinates(self, coordinates: list | None) -> None:
         if coordinates is None:
             coordinates = []
         assert isinstance(coordinates, list)
@@ -184,7 +183,7 @@ class Ions(TreeNode):
         self.Q = self._process_Q_initial(Q_initial)
         self.M = self._process_M_initial(M_initial)
 
-    def _process_velocities(self, velocities: list) -> Optional[torch.Tensor]:
+    def _process_velocities(self, velocities: list) -> torch.Tensor | None:
         """Fill in missing velocities (if any specified)."""
         if velocities.count(None) == self.n_ions:
             return None  # no velocities specified
@@ -195,7 +194,7 @@ class Ions(TreeNode):
             dtype=torch.double,
         )
 
-    def _process_Q_initial(self, Q_initial: list) -> Optional[torch.Tensor]:
+    def _process_Q_initial(self, Q_initial: list) -> torch.Tensor | None:
         """Fill in missing oxidation states (if any specified)."""
         if Q_initial.count(None) == self.n_ions:
             return None  # no charge specified
@@ -205,7 +204,7 @@ class Ions(TreeNode):
             dtype=torch.double,
         )
 
-    def _process_M_initial(self, M_initial: list) -> Optional[torch.Tensor]:
+    def _process_M_initial(self, M_initial: list) -> torch.Tensor | None:
         """Fill in missing magnetizations (if any specified)."""
         M_lengths = set(
             [(len(M) if isinstance(M, list) else 1) for M in M_initial if M]
@@ -390,12 +389,12 @@ class Ions(TreeNode):
         ]
 
     @property
-    def labeled_positions(self) -> Optional[LabeledPositions]:
+    def labeled_positions(self) -> LabeledPositions | None:
         """Labeled positions for symmetry detection."""
         if not self.n_ions:
             return None
         scalars = [self.types.to(torch.double)]  # atom type always a label
-        pseudovectors: Optional[torch.Tensor] = None  # only if vector magnetization
+        pseudovectors: torch.Tensor | None = None  # only if vector magnetization
         if self.Q is not None:
             scalars.append(self.Q)
         if self.M is not None:

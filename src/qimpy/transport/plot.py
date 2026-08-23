@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Any, Union
+from typing import Any
 import argparse
 import glob
 import logging
@@ -35,11 +35,11 @@ def run(
     *,
     checkpoints: str,
     output: str,
-    density: Optional[dict] = None,
-    streamlines: Optional[dict] = None,
+    density: dict | None = None,
+    streamlines: dict | None = None,
     density_prefix: str = "",
     current_prefix: str = "",
-    apertures: Optional[dict] = None,
+    apertures: dict | None = None,
     dpi: int = 200,
 ) -> None:
     if density is None:
@@ -261,7 +261,7 @@ class PlotGeometry:
                 circle_names = contact_names if is_exterior else aperture_names
                 within_each = within_circles_np(circles, points_mid)
                 within_any = np.any(within_each, axis=0)
-                triangle_selection: Union[slice, np.ndarray] = slice(None)
+                triangle_selection: slice | np.ndarray = slice(None)
                 if np.count_nonzero(within_any):
                     # Draw partial boundary due to contacts or apertures:
                     sel_blocked = np.where(np.logical_not(within_any))[0]

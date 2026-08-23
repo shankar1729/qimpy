@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Sequence
+from typing import Sequence
 
 import numpy as np
 import torch
@@ -28,8 +28,8 @@ class ParameterGrid(Geometry):
         *,
         material: Material,
         shape: Sequence[int],
-        dimension1: Optional[dict[str, dict[str, TensorCompatible]]] = None,
-        dimension2: Optional[dict[str, dict[str, TensorCompatible]]] = None,
+        dimension1: dict[str, dict[str, TensorCompatible]] | None = None,
+        dimension2: dict[str, dict[str, TensorCompatible]] | None = None,
         save_rho: bool = False,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
@@ -130,8 +130,8 @@ class ParameterGrid(Geometry):
         self,
         i_dim: int,
         *,
-        loop: Optional[list] = None,
-        sweep: Optional[list] = None,
+        loop: list | None = None,
+        sweep: list | None = None,
     ) -> torch.Tensor:
         if (loop is None) == (sweep is None):
             raise InvalidInputException(
@@ -139,7 +139,7 @@ class ParameterGrid(Geometry):
             )
 
         # Prepare scan of values based on loop or sweep:
-        values: Optional[torch.Tensor] = None
+        values: torch.Tensor | None = None
         if loop is not None:
             values = cast_tensor(loop)
             if len(values) != self.shape[i_dim]:

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 import numpy as np
 import torch
@@ -12,7 +12,7 @@ from qimpy.math import ortho_matrix, cis, abs_squared
 
 class LowdinResults(NamedTuple):
     Q: torch.Tensor  #: Lowdin charges
-    M: Optional[torch.Tensor] = None  #: Lowdin magnetizations in spin-polarized cases
+    M: torch.Tensor | None = None  #: Lowdin magnetizations in spin-polarized cases
 
 
 class Lowdin:
@@ -22,7 +22,7 @@ class Lowdin:
     psi: dft.electrons.Wavefunction  #: Atomic orbitals
     psi_Opsi: torch.Tensor  #: Self-overlap of atomic orbitals
     psi_OC: torch.Tensor  #: Overlap of atomic orbitals with current wavefunction `C`
-    coeff: Optional[torch.Tensor]  #: Best-fit coefficents of C on psi used for dragging
+    coeff: torch.Tensor | None  #: Best-fit coefficents of C on psi used for dragging
 
     def __init__(self, C: dft.electrons.Wavefunction) -> None:
         """Prepare to analyze / manipulate wavefunction `C`."""

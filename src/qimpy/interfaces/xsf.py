@@ -18,7 +18,8 @@ Options:
 
 
 """
-from typing import Optional, TextIO
+
+from typing import TextIO
 import argparse
 
 import h5py
@@ -28,7 +29,7 @@ from qimpy.io import Unit
 
 
 def print_header(
-    f: TextIO, animated: bool = False, animsteps: Optional[int] = None
+    f: TextIO, animated: bool = False, animsteps: int | None = None
 ) -> None:
     if animated:
         f.write(f"ANIMSTEPS {animsteps}\n")
@@ -75,7 +76,7 @@ def write_xsf(
     checkpoint: str,
     xsf_file: str,
     animated: bool = False,
-    dataset_symbol: Optional[str] = None,
+    dataset_symbol: str | None = None,
 ) -> None:
     """Write XSF file from HDF5 checkpoint file.
 
@@ -113,8 +114,8 @@ def write_xsf(
                     "ijk,ilk->ilj", lattice_vecs, fractional_positions
                 )
                 for n, vec_n, pos_n in zip(range(animsteps), lattice_vecs, positions):
-                    print_lattice_vecs(f, vec_n, f"{n+1}")
-                    print_positions(f, symbols, pos_n, f"{n+1}")
+                    print_lattice_vecs(f, vec_n, f"{n + 1}")
+                    print_positions(f, symbols, pos_n, f"{n + 1}")
 
             else:
                 lattice_vecs = lattice["Rbasis"][:] * to_ang
@@ -122,7 +123,7 @@ def write_xsf(
                 print_lattice_vecs(f, lattice_vecs, "")
 
                 for n, pos_n in enumerate(positions):
-                    print_positions(f, symbols, pos_n, f"{n+1}")
+                    print_positions(f, symbols, pos_n, f"{n + 1}")
 
         else:
             lattice_vecs = lattice["Rbasis"][:] * to_ang

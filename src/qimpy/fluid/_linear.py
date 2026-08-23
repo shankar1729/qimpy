@@ -1,4 +1,4 @@
-from typing import Protocol, Optional, Union
+from typing import Protocol
 
 import numpy as np
 import torch
@@ -50,10 +50,10 @@ class Linear(LinearSolve[FieldH]):
         checkpoint_in: CheckpointPath = CheckpointPath(),
         n_iterations: int = 100,
         gradient_threshold: float = 1e-8,
-        epsilon_0: Optional[float] = None,
+        epsilon_0: float | None = None,
         solvent: str = "",
-        GLSSA13: Optional[Union[dict, variants.GLSSA13]] = None,
-        LA12: Optional[Union[dict, variants.LA12]] = None,
+        GLSSA13: dict | variants.GLSSA13 | None = None,
+        LA12: dict | variants.LA12 | None = None,
     ):
         super().__init__(
             checkpoint_in=checkpoint_in,

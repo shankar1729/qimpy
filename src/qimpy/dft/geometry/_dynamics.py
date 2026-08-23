@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Union, Optional, Callable
+from typing import Callable
 
 import numpy as np
 import torch
@@ -36,12 +36,12 @@ class Dynamics(TreeNode):
     B0: float  #: Characteristic bulk modulus for Berendsen barostat
     langevin_gamma: float  #: Damping rate for Langevin thermostat
     drag_wavefunctions: bool  #: Whether to drag atomic components of wavefunctions
-    P: Optional[float]  #: Current pressure (available if `lattice.compute_stress`)
+    P: float | None  #: Current pressure (available if `lattice.compute_stress`)
     T: float  #: Current temperature
     KE: float  #: Current kinetic energy
-    stress: Optional[torch.Tensor]  #: Current stress including kinetic contributions
-    history: Optional[History]  #: Utility to save trajectory data
-    report_callback: Optional[Callable[[Dynamics, int], None]]  #: Callback from report
+    stress: torch.Tensor | None  #: Current stress including kinetic contributions
+    history: History | None  #: Utility to save trajectory data
+    report_callback: Callable[[Dynamics, int], None] | None  #: Callback from report
     i_iter_start: int  #: Starting iteration number (when continuing from checkpoint)
 
     def __init__(
@@ -50,16 +50,16 @@ class Dynamics(TreeNode):
         group: dist.ProcessGroup,
         dt: float,
         n_steps: int,
-        thermostat: Union[Thermostat, dict, str, None] = None,
+        thermostat: Thermostat | dict | str | None = None,
         seed: int = 1234,
         T0: UnitOrFloat = Unit(298.0, "K"),
         P0: UnitOrFloat = Unit(1.0, "bar"),
-        stress0: Optional[Union[np.ndarray, torch.Tensor]] = None,
+        stress0: np.ndarray | torch.Tensor | None = None,
         t_damp_T: UnitOrFloat = Unit(50.0, "fs"),
         t_damp_P: UnitOrFloat = Unit(100.0, "fs"),
         drag_wavefunctions: bool = True,
         save_history: bool = True,
-        report_callback: Optional[Callable[[Dynamics, int], None]] = None,
+        report_callback: Callable[[Dynamics, int], None] | None = None,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """
@@ -246,7 +246,7 @@ class Dynamics(TreeNode):
         amu = float(Unit(1.0, "amu"))
         return torch.tensor(atomic_weights, device=rc.device).unsqueeze(1) * amu
 
-    def get_stress(self, velocity: torch.Tensor) -> Optional[torch.Tensor]:
+    def get_stress(self, velocity: torch.Tensor) -> torch.Tensor | None:
         """Compute total stress tensor including ion `velocity` contributions."""
         lattice = self.system.lattice
         if not lattice.compute_stress:
@@ -257,7 +257,7 @@ class Dynamics(TreeNode):
         return kinetic_stress + self.system.lattice.stress.detach()
 
     @staticmethod
-    def get_pressure(stress: Optional[torch.Tensor]) -> Optional[float]:
+    def get_pressure(stress: torch.Tensor | None) -> float | None:
         if stress is None:
             return None
         return (-1.0 / 3) * torch.trace(stress).item()

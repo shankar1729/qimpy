@@ -15,7 +15,7 @@ Options:
   -o FILE, --output-file FILE
                         output plot in matplotlib supported format (based on extension)
 """
-from typing import Optional
+
 import argparse
 
 import numpy as np
@@ -28,7 +28,7 @@ from qimpy.io import Unit, Checkpoint, CheckpointPath
 def plot(
     checkpoint_files: list[str],
     output_file: str,
-    plot_labels: Optional[list[str]],
+    plot_labels: list[str] | None,
     units: str,
 ) -> None:
     """Plot band structure from HDF5 checkpoint name `checkpoint_file`.

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, TypeVar
+from typing import TypeVar
 
 import numpy as np
 import torch
@@ -71,9 +71,9 @@ def redistribute(
 def fix_split(
     v: torch.Tensor,
     split_in: TaskDivision,
-    group_in: Optional[dist.ProcessGroup],
+    group_in: dist.ProcessGroup | None,
     split_out: TaskDivision,
-    group_out: Optional[dist.ProcessGroup],
+    group_out: dist.ProcessGroup | None,
     dim: int,
 ) -> torch.Tensor:
     """Fix how v is split along dimension dim, from split_in on group_in

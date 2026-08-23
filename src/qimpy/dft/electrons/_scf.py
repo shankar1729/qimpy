@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Sequence
+from typing import Sequence
 
 import torch
 import torch.distributed as dist
@@ -17,7 +17,7 @@ class SCF(Pulay[FieldH]):
     mix_fraction_mag: float  #: Mix-fraction for magnetization
     q_kerker: float  #: Kerker-mixing wavevector
     q_metric: float  #: Wavevector controlling reciprocal-space metric
-    q_kappa: Optional[float]  #: Debye wavevector (automatic if None)
+    q_kappa: float | None  #: Debye wavevector (automatic if None)
     n_eig_steps: int  #: Number of eigenvalue steps per cycle
     eig_threshold: float  #: Eigenvalue convergence threshold
     mix_density: bool  #: Mix density if True, else mix potential
@@ -39,7 +39,7 @@ class SCF(Pulay[FieldH]):
         mix_fraction_mag: float = 1.5,
         q_kerker: float = 0.8,
         q_metric: float = 0.8,
-        q_kappa: Optional[float] = None,
+        q_kappa: float | None = None,
         n_eig_steps: int = 2,
         eig_threshold: float = 1e-8,
         mix_density: bool = True,

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Union, Sequence
+from typing import Sequence
 
 import numpy as np
 import torch
@@ -42,8 +42,8 @@ class RelaxationTime(TreeNode):
         ab_initio: material.ab_initio.AbInitio,
         tau_e: float = np.inf,
         tau_h: float = np.inf,
-        tau_s_e: Union[float, Sequence[float]] = np.inf,
-        tau_s_h: Union[float, Sequence[float]] = np.inf,
+        tau_s_e: float | Sequence[float] = np.inf,
+        tau_s_h: float | Sequence[float] = np.inf,
         tau_eh: float = np.inf,
         max_dmu: float = 1e-3,
         tau_recomb: float = np.inf,

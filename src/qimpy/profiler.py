@@ -1,6 +1,6 @@
 """High-level profiling utilities."""
 
-from typing import ClassVar, Union
+from typing import ClassVar
 from functools import wraps
 import time
 
@@ -22,7 +22,7 @@ class StopWatch:
     of each named code block or function."""
 
     name: str  #: name of code block
-    t_start: Union[float, torch.Event]  #: start time of current event
+    t_start: float | torch.Event  #: start time of current event
 
     #: timing statistics: list of durations by name
     _stats: ClassVar[dict[str, list[float]]] = {}

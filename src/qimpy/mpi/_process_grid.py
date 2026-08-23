@@ -1,4 +1,4 @@
-from typing import Optional, Sequence
+from typing import Sequence
 import functools
 
 import numpy as np
@@ -23,7 +23,7 @@ class ProcessGrid:
     is_resolved: bool  #: Whether all dimensions have been resolved
     device_mesh: dist.DeviceMesh  #: Corresponding device mesh
 
-    def __init__(self, dim_names: str, shape: Optional[Sequence[int]] = None) -> None:
+    def __init__(self, dim_names: str, shape: Sequence[int] | None = None) -> None:
         self.dim_names = dim_names
         assert len(set(dim_names)) == len(dim_names)  # characters must be unique
         if shape:

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Generic, Sequence, NamedTuple, Optional, Union
+from typing import Generic, Sequence, NamedTuple
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -66,7 +66,7 @@ class Minimize(Generic[Vector], ABC, TreeNode):
     step_size: StepSize  #: Step size options
     n_history: int  #: Maximum history size (only used for L-BFGS)
     wolfe: Wolfe  #: Wolfe line minimize stopping conditions
-    converge_on: Union[str, int]  #: Converge on 'any', 'all' or a number of thresholds
+    converge_on: str | int  #: Converge on 'any', 'all' or a number of thresholds
     n_converge: int  #: Number of thresholds that `converge_on` corresponds to
 
     #: Names and thresholds for any additional convergence quantities. These
@@ -88,11 +88,11 @@ class Minimize(Generic[Vector], ABC, TreeNode):
         method: str,
         cg_type: str = "polak-ribiere",
         line_minimize: str = "auto",
-        step_size: Optional[dict] = None,
+        step_size: dict | None = None,
         i_iter_start: int = 0,
         n_history: int = 15,
-        wolfe: Optional[dict] = None,
-        converge_on: Union[str, int] = "any",
+        wolfe: dict | None = None,
+        converge_on: str | int = "any",
     ) -> None:
         """Initialize minimization algorithm parameters."""
         super().__init__()
@@ -170,7 +170,7 @@ class Minimize(Generic[Vector], ABC, TreeNode):
         return lbfgs(self) if (self.method == "l-bfgs") else cg(self)
 
     def finite_difference_test(
-        self, direction: Vector, step_sizes: Optional[Sequence[float]] = None
+        self, direction: Vector, step_sizes: Sequence[float] | None = None
     ) -> None:
         """Check gradient implementation by taking steps along `direction`.
         This will print ratio of actual energy differences along steps of
@@ -218,7 +218,7 @@ class Minimize(Generic[Vector], ABC, TreeNode):
         return self._sync(float(state.energy))
 
 
-def _get_nconverge(converge_on: Union[str, int], n_thresholds: int) -> int:
+def _get_nconverge(converge_on: str | int, n_thresholds: int) -> int:
     """Convert `converge_on` to number of convergence thresholds."""
     if isinstance(converge_on, str):
         converge_key = converge_on.lower()  # don't enforce case

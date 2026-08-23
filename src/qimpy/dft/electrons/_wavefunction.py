@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -29,19 +28,19 @@ class Wavefunction(Gradable["Wavefunction"]):
     #: (n_spins x nk x (n_spinor*n_projectors) x n_bands)
     #: Access this using property `proj` instead, which takes care of
     #: automatically calculating and invalidating this when necessary.
-    _proj: Optional[torch.Tensor]
+    _proj: torch.Tensor | None
     _proj_version: int  #: `Ions.beta_version` for which `_proj` is valid
 
     #: If present, wavefunctions are split along bands instead of
     #: along the 'home position' of split along basis.
-    band_division: Optional[TaskDivision]
+    band_division: TaskDivision | None
 
     def __init__(
         self,
         basis: Basis,
         *,
-        coeff: Optional[torch.Tensor] = None,
-        band_division: Optional[TaskDivision] = None,
+        coeff: torch.Tensor | None = None,
+        band_division: TaskDivision | None = None,
         n_bands: int = 0,
         n_spins: int = 0,
         n_spinor: int = 0,

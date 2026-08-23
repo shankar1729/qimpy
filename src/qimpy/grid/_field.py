@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import TypeVar, Any, Union, Optional, Sequence
+from typing import TypeVar, Any, Sequence
 from abc import abstractmethod
 
 import numpy as np
@@ -70,7 +70,7 @@ class Field(Gradable[FieldType]):
         grid: Grid,
         *,
         shape_batch: Sequence[int] = tuple(),
-        data: Optional[torch.Tensor] = None,
+        data: torch.Tensor | None = None,
     ) -> None:
         """Initialize to zeros or specified `data`.
 
@@ -104,7 +104,7 @@ class Field(Gradable[FieldType]):
         return self.__class__(self.grid, data=self.data.clone())
 
     def add_(
-        self: FieldType, other: Union[FieldType, float], *, alpha: float = 1.0
+        self: FieldType, other: FieldType | float, *, alpha: float = 1.0
     ) -> FieldType:
         """Add in-place with optional scale factor (Mirroring torch.Tensor.add_)."""
         if isinstance(other, float):
@@ -120,32 +120,32 @@ class Field(Gradable[FieldType]):
             return NotImplemented
         return self
 
-    def __add__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+    def __add__(self: FieldType, other: FieldType | float) -> FieldType:
         return self.clone().add_(other)
 
     __radd__ = __add__
 
-    def __iadd__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+    def __iadd__(self: FieldType, other: FieldType | float) -> FieldType:
         return self.add_(other)
 
-    def __sub__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+    def __sub__(self: FieldType, other: FieldType | float) -> FieldType:
         return self.clone().add_(other, alpha=-1.0)
 
-    def __rsub__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+    def __rsub__(self: FieldType, other: FieldType | float) -> FieldType:
         return (-self).add_(other)
 
-    def __isub__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+    def __isub__(self: FieldType, other: FieldType | float) -> FieldType:
         return self.add_(other, alpha=-1.0)
 
     def __neg__(self: FieldType) -> FieldType:
         return self.__class__(self.grid, data=(-self.data))
 
-    def __mul__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+    def __mul__(self: FieldType, other: FieldType | float) -> FieldType:
         return self.clone().__imul__(other)
 
     __rmul__ = __mul__
 
-    def __imul__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+    def __imul__(self: FieldType, other: FieldType | float) -> FieldType:
         if isinstance(other, float):
             self.data *= other
         elif isinstance(other, type(self)):
@@ -154,13 +154,13 @@ class Field(Gradable[FieldType]):
             return NotImplemented
         return self
 
-    def __truediv__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+    def __truediv__(self: FieldType, other: FieldType | float) -> FieldType:
         return self.clone().__itruediv__(other)
 
     def __rtruediv__(self: FieldType, other: float) -> FieldType:
         return self.__class__(self.grid, data=(other / self.data))
 
-    def __itruediv__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+    def __itruediv__(self: FieldType, other: FieldType | float) -> FieldType:
         if isinstance(other, float):
             self.data /= other
         elif isinstance(other, type(self)):

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Sequence, Callable, Optional, Union, Protocol
+from typing import Sequence, Callable, Protocol
 import re
 
 import torch
@@ -41,13 +41,13 @@ class AbInitio(Material):
 
     T: float
     mu: float
-    rotation: Optional[torch.Tensor]
+    rotation: torch.Tensor | None
     P: torch.Tensor  #: Momentum matrix elements
-    S: Optional[torch.Tensor]  #: Spin matrix elements
-    L: Optional[torch.Tensor]  #: Angular momentum matrix elements
-    R: Optional[torch.Tensor]  #: Position matrix elements (TODO: yet to be added)
-    B: Optional[torch.Tensor]  #: Constant applied external field
-    evecs: Optional[torch.Tensor]  #: Unitary rotations w.r.t data due to B, if any
+    S: torch.Tensor | None  #: Spin matrix elements
+    L: torch.Tensor | None  #: Angular momentum matrix elements
+    R: torch.Tensor | None  #: Position matrix elements (TODO: yet to be added)
+    B: torch.Tensor | None  #: Constant applied external field
+    evecs: torch.Tensor | None  #: Unitary rotations w.r.t data due to B, if any
     lindblad: Lindblad  #: ab-initio Lindblad scattering
     relaxation_time: RelaxationTime  #: semi-empirical relaxation time scattering
     light: Light  #: light-matter interactions
@@ -62,15 +62,15 @@ class AbInitio(Material):
         file: str,
         T: float,
         mu: float = 0.0,
-        rotation: Optional[TensorCompatible] = None,
-        orbital_zeeman: Optional[bool] = None,
-        B: Optional[TensorCompatible] = None,
-        observable_names: Union[str, list[str]] = "n",
-        relaxation_time: Optional[Union[RelaxationTime, dict]] = None,
-        lindblad: Optional[Union[Lindblad, dict]] = None,
-        light: Optional[Union[Light, dict]] = None,
-        emField: Optional[Union[EMField, dict]] = None,
-        pulseB: Optional[Union[PulseB, dict]] = None,
+        rotation: TensorCompatible | None = None,
+        orbital_zeeman: bool | None = None,
+        B: TensorCompatible | None = None,
+        observable_names: str | list[str] = "n",
+        relaxation_time: RelaxationTime | dict | None = None,
+        lindblad: Lindblad | dict | None = None,
+        light: Light | dict | None = None,
+        emField: EMField | dict | None = None,
+        pulseB: PulseB | dict | None = None,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
@@ -291,7 +291,7 @@ class AbInitio(Material):
         rho: torch.Tensor,
         patch_id: int,
         *,
-        pumpB: Optional[torch.Tensor] = None,
+        pumpB: torch.Tensor | None = None,
         **kwargs,
     ) -> None:
         if pumpB is not None:
@@ -341,7 +341,7 @@ class AbInitio(Material):
             )
         return result
 
-    def apply_evecs(self, M: Optional[torch.Tensor]) -> None:
+    def apply_evecs(self, M: torch.Tensor | None) -> None:
         """Apply transformation by `evecs` to final two band dimensions.
         For convenience, handles optional tensors = None correctly."""
         if M is not None:

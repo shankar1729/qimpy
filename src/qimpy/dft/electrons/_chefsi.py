@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Optional
 
 import numpy as np
 import torch
@@ -80,14 +79,14 @@ class CheFSI(Davidson):
         )
 
     def __call__(
-        self, n_iterations: Optional[int] = None, eig_threshold: Optional[float] = None
+        self, n_iterations: int | None = None, eig_threshold: float | None = None
     ) -> None:
         """Diagonalize Kohn-Sham Hamiltonian in electrons.
         Also available as :meth:`__call__` to make `CheFSI` callable.
         """
         el = self.electrons
         n_bands = el.fillings.n_bands
-        helper = type(self) != CheFSI
+        helper = type(self) is not CheFSI
         inner_loop = not (
             helper or ((n_iterations is None) and (eig_threshold is None))
         )

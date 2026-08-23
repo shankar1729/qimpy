@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Optional
 
 import numpy as np
 import torch
@@ -74,7 +73,7 @@ def _apply_potential(
 
         # Prepare first input block ('g' indicates G-vectors of basis together):
         Cg = C[:, :, mpi_block_slices[0]].split_bands().wait()
-        VCg: Optional[electrons.Wavefunction] = None  # created in first iteration below
+        VCg: electrons.Wavefunction | None = None  # created in first iteration below
 
         for mpi_block_slice_prev, mpi_block_slice_next in zip(
             (None, *mpi_block_slices[:-1]), (*mpi_block_slices[1:], None)
@@ -282,7 +281,7 @@ class _CollectDensityKernel(_KernelCommon):
         self,
         C_tot: electrons.Wavefunction,
         rho_diag: torch.Tensor,
-        rho_dn_up: Optional[torch.Tensor],
+        rho_dn_up: torch.Tensor | None,
     ) -> None:
         """Initialize parameters given overall wavefunction `C_tot` to be worked with.
         C_tot is used only for determining sizes and is not stored.

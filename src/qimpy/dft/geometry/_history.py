@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Union
 
 import torch
 import torch.distributed as dist
@@ -51,7 +50,7 @@ class History(TreeNode):
                     data[:n_in] = dset[i_start:i_stop]
                 self.save_map[name] = data
 
-    def add(self, name: str, value: Union[float, torch.Tensor]) -> None:
+    def add(self, name: str, value: float | torch.Tensor) -> None:
         """Add current `value` for variable `name` to history."""
         data = np.array(value) if isinstance(value, float) else value.to(rc.cpu).numpy()
         if name not in self.save_map:

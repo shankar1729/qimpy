@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Optional
 
 import numpy as np
 import torch
@@ -28,7 +27,7 @@ class Lattice(TreeNode):
     compute_stress: bool  #: Whether to compute and report stress
     grad: torch.Tensor  #: Lattice gradient of energy := dE/dRbasis @ Rbasis.T
     _requires_grad: bool  #: Internal flag to control collection of lattice gradients
-    strain_rate: Optional[torch.Tensor]  #: Strain rate (for lattice-movable dynamics)
+    strain_rate: torch.Tensor | None  #: Strain rate (for lattice-movable dynamics)
 
     movable: bool  #: Whether lattice can be moved in geometry relaxation / dynamics
     move_scale: torch.Tensor  #: Scale factors to precondition / constrain lattice move
@@ -40,9 +39,9 @@ class Lattice(TreeNode):
         self,
         *,
         checkpoint_in: CheckpointPath = CheckpointPath(),
-        system: Optional[dict] = None,
-        vectors: Optional[TensorCompatible] = None,
-        Rbasis: Optional[TensorCompatible] = None,
+        system: dict | None = None,
+        vectors: TensorCompatible | None = None,
+        Rbasis: TensorCompatible | None = None,
         scale: TensorCompatible = 1.0,
         compute_stress: bool = False,
         movable: bool = False,
@@ -211,7 +210,7 @@ class Lattice(TreeNode):
         self,
         Rbasis: torch.Tensor,
         report_change: bool = True,
-        center: Optional[torch.Tensor] = None,
+        center: torch.Tensor | None = None,
     ) -> None:
         """Update lattice vectors and dependent quantities.
         If `report_change` is True, report the relative change of lattice and volume.

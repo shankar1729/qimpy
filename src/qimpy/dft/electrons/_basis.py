@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Optional, Union
 import math
 
 import numpy as np
@@ -70,7 +69,7 @@ class Basis(TreeNode):
         checkpoint_in: CheckpointPath = CheckpointPath(),
         ke_cutoff: float = 20.0,
         real_wavefunctions: bool = False,
-        grid: Optional[Union[Grid, dict]] = None,
+        grid: Grid | dict | None = None,
         fft_block_size: int = 0,
         mpi_block_size: int = 0,
     ) -> None:
