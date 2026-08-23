@@ -3,13 +3,10 @@ communicators to be used by the current QimPy instance. The import-time configur
 selects a single CPU core for each MPI process in `mpi4py.MPI.COMM_WORLD`.
 
 Call `init` to select the number of cores or a GPU device, as available and based
-on environment variables including SLURM_CPUS_PER_TASK and CUDA_VISIBLE_DEVICES.
-
-Note that `init` must be called before any torch CUDA calls, so that a single CUDA
-context is associated with this process. Otherwise, on multi-GPU systems, any CUDA MPI
-will subsequently fail. To mitigate this potential issue whenever possible, this module
-uses SLURM_LOCALID or OMPI_COMM_WORLD_LOCAL_RANK to pick a specific GPU and alter
-CUDA_VISIBLE_DEVICES before any torch or MPI calls.
+on environment variables such as SLURM_CPUS_PER_TASK, as well as to initialize
+`torch.distributed` communication controlled by BACKEND and its standard environment
+variables MASTER_ADDR and MASTER_PORT. None of these environment variables are required;
+`init` uses MPI to determine a consistent address/port for the backend set-up.
 """
 
 from typing import Optional, NamedTuple
@@ -36,7 +33,7 @@ __all__ = (
     "is_head",
     "cpu",
     "device",
-    "use_cuda",
+    "use_accelerator",
     "init",
     "free",
     "clock",
@@ -49,7 +46,7 @@ n_procs: int = comm.size  #: Size of `comm`
 is_head: bool = i_proc == 0  #: Whether head of `comm`
 cpu: torch.device = torch.device("cpu")  #: CPU torch device
 device: torch.device = cpu  #: Preferred torch device for calculation (CPU / GPU)
-use_cuda: bool = False  #: Whether `device` is a CUDA GPU
+use_accelerator: bool = False  #: Whether `device` is an accelerator (GPU-like)
 t_start: float = time.time()  #: Start time used for `clock` (set by `init`)
 
 # Set reasonable pre-init defaults for torch:
@@ -123,13 +120,13 @@ def init(
 
     # Initialize torch:
     gpu_id = -1
-    global device, use_cuda
-    if torch.cuda.is_available():
+    global device, use_accelerator
+    if torch.accelerator.is_available():
         # Select GPU based on local rank:
-        gpu_id = i_proc_node % torch.cuda.device_count()
-        device = torch.device(f"cuda:{gpu_id}")
-        torch.cuda.device(device)  # set as default CUDA device
-        use_cuda = True
+        gpu_id = i_proc_node % torch.accelerator.device_count()
+        torch.accelerator.set_device_index(gpu_id)
+        device = torch.device(gpu_id)
+        use_accelerator = True
     # --- count unique GPUs on node using IDs (average over processes on same node)
     gpu_ids_mine = np.array([gpu_id], dtype=int)
     gpu_ids_local = np.zeros(n_procs_node, dtype=int)
@@ -145,7 +142,9 @@ def init(
     os.environ["LOCAL_RANK"] = str(i_proc_node)
     os.environ["RANK"] = str(i_proc)
     os.environ["WORLD_SIZE"] = str(n_procs)
-    dist.init_process_group(backend=backend, device_id=(device if use_cuda else None))
+    dist.init_process_group(
+        backend=backend, device_id=(device if use_accelerator else None)
+    )
     dist.barrier()  # Force lazy backend intialization to complete
 
     # Threads:

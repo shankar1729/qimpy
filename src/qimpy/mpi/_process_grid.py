@@ -98,7 +98,7 @@ class ProcessGrid:
         self.is_resolved = n_unknown == 0
         if self.is_resolved:
             self.device_mesh = dist.init_device_mesh(
-                "cuda" if rc.use_cuda else "cpu",
+                rc.device.type,
                 self.shape.tolist(),
                 mesh_dim_names=tuple(self.dim_names),
             )

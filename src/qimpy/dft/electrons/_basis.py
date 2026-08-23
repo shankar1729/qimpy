@@ -113,7 +113,7 @@ class Basis(TreeNode):
             :yaml:`Number of wavefunction bands to MPI transfer simultaneously.`
             Lower numbers may allow better overlap between computation and transfers,
             which is beneficial if MPI implementation supports asynchronous progress
-            and/or CUDA streams are used to compute asynrchronously.
+            and/or with accelerators that compute asynchronously in separate streams.
             Higher numbers mitigate MPI latency, but may require more memory.
             This number is automatically rounded up to nearest multiple of
             `fft_block_size * group.size()`. The default of 0 selects the block size
@@ -254,7 +254,7 @@ class Basis(TreeNode):
             if not (n_batch and n_bands):
                 return 1  # Irrelevant since no FFTs to perform anyway
             # TODO: better heuristics on how much data to FFT at once
-            min_data = 16_000_000 if rc.use_cuda else 100_000
+            min_data = 16_000_000 if rc.use_accelerator else 100_000
             min_block = ceildiv(min_data, n_batch * math.prod(self.grid.shape))
             max_block = ceildiv(n_bands, 16)  # based on memory limit
             block_size = min(min_block, max_block)

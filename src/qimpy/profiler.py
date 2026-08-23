@@ -1,4 +1,5 @@
 """High-level profiling utilities."""
+
 from typing import ClassVar, Union
 from functools import wraps
 import time
@@ -21,20 +22,20 @@ class StopWatch:
     of each named code block or function."""
 
     name: str  #: name of code block
-    t_start: Union[float, torch.cuda.Event]  #: start time of current event
+    t_start: Union[float, torch.Event]  #: start time of current event
 
     #: timing statistics: list of durations by name
     _stats: ClassVar[dict[str, list[float]]] = {}
 
-    #: CUDA events for asynchronous timing on GPUs
-    _cuda_events: ClassVar[list[tuple[str, torch.cuda.Event, torch.cuda.Event]]] = []
+    #: Events for asynchronous timing on accelerators
+    _events: ClassVar[list[tuple[str, torch.Event, torch.Event]]] = []
 
     def __init__(self, name: str):
         """Start profiling a block of code named `name`."""
         self.name = name
-        if rc.use_cuda:
+        if rc.use_accelerator:
             torch.cuda.nvtx.range_push(name)
-            self.t_start = torch.cuda.Event(enable_timing=True)
+            self.t_start = torch.Event(enable_timing=True)
             self.t_start.record()
         else:
             self.t_start = time.time()
@@ -42,13 +43,13 @@ class StopWatch:
     def stop(self):
         """Stop this watch and collect statistics on it."""
         if self.t_start:
-            if rc.use_cuda:
-                t_stop = torch.cuda.Event(enable_timing=True)
+            if rc.use_accelerator:
+                t_stop = torch.Event(enable_timing=True)
                 t_stop.record()
                 torch.cuda.nvtx.range_pop()
-                self._cuda_events.append([self.name, self.t_start, t_stop])
-                if len(self._cuda_events) > 100:
-                    self._process_cuda_events()
+                self._events.append([self.name, self.t_start, t_stop])
+                if len(self._events) > 100:
+                    self._process_events()
             else:
                 duration = time.time() - self.t_start
                 self._add_stat(self.name, duration)
@@ -64,18 +65,18 @@ class StopWatch:
             cls._stats[name] = [duration]
 
     @classmethod
-    def _process_cuda_events(cls):
-        """Process pending cuda events"""
-        if cls._cuda_events:
-            torch.cuda.synchronize()
-            for name, t_start, t_stop in cls._cuda_events:
+    def _process_events(cls):
+        """Process pending asynchronous accelerator events"""
+        if cls._events:
+            torch.accelerator.synchronize()
+            for name, t_start, t_stop in cls._events:
                 cls._add_stat(name, t_start.elapsed_time(t_stop) * 1e-3)
-            cls._cuda_events = []
+            cls._events = []
 
     @classmethod
     def print_stats(cls):
         """Print statistics of all timings measured using class StopWatch."""
-        cls._process_cuda_events()
+        cls._process_events()
         log.info("")
         t_total = 0.0
         n_calls_total = 0
@@ -90,7 +91,7 @@ class StopWatch:
                 f" s, {len(t):4d} calls, {t.sum():10.6f} s total"
             )
         log.info(
-            f'StopWatch: {"Total":30s}    {"-"*25} {n_calls_total:5d}'
+            f'StopWatch: {"Total":30s}    {"-" * 25} {n_calls_total:5d}'
             f" calls, {t_total:10.6f} s total"
         )
 

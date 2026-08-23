@@ -183,7 +183,7 @@ class FieldSymmetrizer:
 
 def _bmm(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     """Bacth matrix multiply / dot product for integer tensors.
-    This is not yet supported by torch.cuda"""
+    These operations are typically not supported for integers on accelerators."""
     if len(B.shape) >= 2:  # matrix multiply
         return (A[..., None] * B[..., None, :, :]).sum(dim=-2)
     else:  # len(B.shape) == 1:  # dot product
