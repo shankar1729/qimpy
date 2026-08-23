@@ -357,7 +357,7 @@ class Electrons(TreeNode):
         # Exchange-correlation contributions:
         n_xc_tilde = self.n_tilde + system.ions.n_core_tilde
         n_xc_tilde.requires_grad_(requires_grad, clear=True)
-        system.energy["Exc"] = self.xc(n_xc_tilde, self.tau_tilde)
+        system.energy["Exc"] = self.xc(n_xc_tilde, self.tau_tilde).item()
 
         # Hartree and local contributions:
         rho_tilde = self.n_tilde[0]  # total charge density

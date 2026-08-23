@@ -1,10 +1,10 @@
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import log, TreeNode, MPI
+from qimpy import log, TreeNode
 from qimpy.profiler import StopWatch
 from qimpy.io import CheckpointPath, CheckpointContext
-from qimpy.mpi import get_comm
 from qimpy.grid import FieldH, FieldR
 from .functional import Functional, get_libxc_functional_names, FunctionalsLibxc
 from . import lda, gga, mgga, PlusU
@@ -99,7 +99,7 @@ class XC(TreeNode):
         attrs["functional"] = self._functional_name
         return list(attrs.keys())
 
-    def __call__(self, n_tilde: FieldH, tau_tilde: FieldH) -> float:
+    def __call__(self, n_tilde: FieldH, tau_tilde: FieldH) -> torch.Tensor:
         """Compute exchange-correlation energy and potential.
         Here, `n_tilde` and `tau_tilde` are the electron density and KE density
         (used if `need_tau` is True) in reciprocal space.
@@ -183,7 +183,7 @@ class XC(TreeNode):
             tau.grad = torch.zeros_like(tau)
         E = 0.0
         for functional in self._functionals:
-            E += functional(n, sigma, lap, tau, requires_grad) * grid.dV
+            E += functional(n, sigma, lap, tau, requires_grad).detach() * grid.dV
         watch.stop()
 
         # Gradient propagation for potential:
@@ -263,7 +263,7 @@ class XC(TreeNode):
 
         # Collect energy
         if grid.group is not None:
-            E = get_comm(grid.group).allreduce(E, MPI.SUM)
+            dist.all_reduce(E, group=grid.group)
         return E
 
 

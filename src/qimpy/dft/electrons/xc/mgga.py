@@ -1,4 +1,5 @@
 """Internal MGGA TPSS implementations."""
+
 # List exported symbols for doc generation
 __all__ = ["x_tpss", "c_tpss"]
 
@@ -52,7 +53,7 @@ class SpinScaled(torch.nn.Module):
         tau: torch.Tensor,
         requires_grad: bool,
         scale_factor: float,
-    ) -> float:
+    ) -> torch.Tensor:
         n_spins = n.shape[0]
         n.requires_grad_(requires_grad)
         sigma.requires_grad_(requires_grad)
@@ -66,7 +67,7 @@ class SpinScaled(torch.nn.Module):
         E = (e * n).sum() * scale_factor
         if requires_grad:
             E.backward()  # updates n.grad, sigma.grad and tau.grad
-        return E.item()
+        return E
 
 
 def get_e_slater(rs: torch.Tensor) -> torch.Tensor:
@@ -149,7 +150,7 @@ class SpinUnpolarized(torch.nn.Module):
         tau: torch.Tensor,
         requires_grad: bool,
         scale_factor: float,
-    ) -> float:
+    ) -> torch.Tensor:
         n.requires_grad_(requires_grad)
         sigma.requires_grad_(requires_grad)
         tau.requires_grad_(requires_grad)
@@ -171,7 +172,7 @@ class SpinUnpolarized(torch.nn.Module):
         E = (n_tot * ec).sum() * scale_factor
         if requires_grad:
             E.backward()  # updates n.grad, sigma.grad and tau.grad
-        return E.item()
+        return E
 
 
 class SpinPolarized(torch.nn.Module):
@@ -189,7 +190,7 @@ class SpinPolarized(torch.nn.Module):
         tau: torch.Tensor,
         requires_grad: bool,
         scale_factor: float,
-    ) -> float:
+    ) -> torch.Tensor:
         n.requires_grad_(requires_grad)
         sigma.requires_grad_(requires_grad)
         tau.requires_grad_(requires_grad)
@@ -218,7 +219,7 @@ class SpinPolarized(torch.nn.Module):
         E = (n_tot * ec).sum() * scale_factor
         if requires_grad:
             E.backward()  # updates n.grad, sigma.grad and tau.grad
-        return E.item()
+        return E
 
 
 def PW91_H0(

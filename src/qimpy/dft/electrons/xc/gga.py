@@ -1,4 +1,5 @@
 """Internal GGA implementations."""
+
 # List exported symbols for doc generation
 __all__ = ["x_pbe", "c_pbe"]
 
@@ -50,7 +51,7 @@ class SpinScaled(torch.nn.Module):
         tau: torch.Tensor,
         requires_grad: bool,
         scale_factor: float,
-    ) -> float:
+    ) -> torch.Tensor:
         n_spins = n.shape[0]
         n.requires_grad_(requires_grad)
         sigma.requires_grad_(requires_grad)
@@ -60,7 +61,7 @@ class SpinScaled(torch.nn.Module):
         E = (e * n).sum() * scale_factor
         if requires_grad:
             E.backward()  # updates n.grad and sigma.grad
-        return E.item()
+        return E
 
 
 def get_e_slater(rs: torch.Tensor) -> torch.Tensor:
@@ -101,7 +102,7 @@ class SpinUnpolarized(torch.nn.Module):
         tau: torch.Tensor,
         requires_grad: bool,
         scale_factor: float,
-    ) -> float:
+    ) -> torch.Tensor:
         n.requires_grad_(requires_grad)
         sigma.requires_grad_(requires_grad)
         # Compute dimensionless parameters of correlation functionals:
@@ -115,7 +116,7 @@ class SpinUnpolarized(torch.nn.Module):
         E = (n_tot * self.get_ec(rs, zeta, g, t2)).sum() * scale_factor
         if requires_grad:
             E.backward()  # updates n.grad and sigma.grad
-        return E.item()
+        return E
 
 
 class SpinPolarized(torch.nn.Module):
@@ -133,7 +134,7 @@ class SpinPolarized(torch.nn.Module):
         tau: torch.Tensor,
         requires_grad: bool,
         scale_factor: float,
-    ) -> float:
+    ) -> torch.Tensor:
         n.requires_grad_(requires_grad)
         sigma.requires_grad_(requires_grad)
         # Compute dimensionless parameters of correlation functionals:
@@ -147,7 +148,7 @@ class SpinPolarized(torch.nn.Module):
         E = (n_tot * self.get_ec(rs, zeta, g, t2)).sum() * scale_factor
         if requires_grad:
             E.backward()  # updates n.grad and sigma.grad
-        return E.item()
+        return E
 
 
 def PW91_H0(

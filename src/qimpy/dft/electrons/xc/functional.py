@@ -27,7 +27,7 @@ except ImportError:
 
 
 FunctionalApply = Callable[
-    [torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, bool, float], float
+    [torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, bool, float], torch.Tensor
 ]
 
 
@@ -63,7 +63,7 @@ class Functional:
         lap: torch.Tensor,
         tau: torch.Tensor,
         requires_grad: bool,
-    ) -> float:
+    ) -> torch.Tensor:
         """Compute exchange/correlation/kinetic functional for several points.
         The first dimension of each tensor corresponds to spin channels,
         and all subsequent dimenions are grid points.
@@ -259,7 +259,7 @@ class FunctionalsLibxc(Functional):
         lap: torch.Tensor,
         tau: torch.Tensor,
         requires_grad: bool,
-    ) -> float:
+    ) -> torch.Tensor:
         # Prepare inputs and empty outputs in LibXC expected form:
         inputs = {"rho": self.to_xc(n)}
         if self.needs_sigma:
@@ -289,4 +289,4 @@ class FunctionalsLibxc(Functional):
                 lap.grad += self.from_xc(outputs["vlapl"], lap)
             if self.needs_tau:
                 tau.grad += self.from_xc(outputs["vtau"], tau)
-        return (n * e).sum().item()
+        return (n * e).sum()

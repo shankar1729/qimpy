@@ -1,4 +1,5 @@
 """Internal LDA implementations."""
+
 # List exported symbols for doc generation
 __all__ = ["ke_tf", "x_slater", "c_pz", "c_pw", "c_vwn", "xc_teter"]
 
@@ -95,7 +96,7 @@ def _ke_tf(
     tau: torch.Tensor,
     requires_grad: bool,
     scale_factor: float,
-) -> float:
+) -> torch.Tensor:
     """Internal JIT-friendly implementation of Thomas-Fermi kinetic energy"""
     n_spins = n.shape[0]
     prefactor = 0.3 * ((3 * (np.pi**2) * n_spins) ** (2.0 / 3.0)) * scale_factor
@@ -103,7 +104,7 @@ def _ke_tf(
     E = prefactor * (n ** (5.0 / 3)).sum()
     if requires_grad:
         E.backward()  # updates n.grad
-    return E.item()
+    return E
 
 
 def _x_slater(
@@ -113,7 +114,7 @@ def _x_slater(
     tau: torch.Tensor,
     requires_grad: bool,
     scale_factor: float,
-) -> float:
+) -> torch.Tensor:
     """Internal JIT-friendly implementation of Slater exchange"""
     n_spins = n.shape[0]
     prefactor = -0.75 * ((3 * n_spins / np.pi) ** (1.0 / 3.0)) * scale_factor
@@ -121,7 +122,7 @@ def _x_slater(
     E = prefactor * (n ** (4.0 / 3)).sum()
     if requires_grad:
         E.backward()  # updates n.grad
-    return E.item()
+    return E
 
 
 def get_rs(n_tot: torch.Tensor) -> torch.Tensor:
@@ -154,7 +155,7 @@ class SpinUnpolarized(torch.nn.Module):
         tau: torch.Tensor,
         requires_grad: bool,
         scale_factor: float,
-    ) -> float:
+    ) -> torch.Tensor:
         n.requires_grad_(requires_grad)
         # Compute rs:
         n_tot = n[0]
@@ -163,7 +164,7 @@ class SpinUnpolarized(torch.nn.Module):
         E = (n_tot * self.get_ec(rs, rs)).sum() * scale_factor
         if requires_grad:
             E.backward()  # updates n.grad
-        return E.item()
+        return E
 
 
 class SpinPolarized(torch.nn.Module):
@@ -181,7 +182,7 @@ class SpinPolarized(torch.nn.Module):
         tau: torch.Tensor,
         requires_grad: bool,
         scale_factor: float,
-    ) -> float:
+    ) -> torch.Tensor:
         n.requires_grad_(requires_grad)
         # Compute rs and zeta:
         n_tot = n[0] + n[1]
@@ -191,7 +192,7 @@ class SpinPolarized(torch.nn.Module):
         E = (n_tot * self.get_ec(rs, zeta)).sum() * scale_factor
         if requires_grad:
             E.backward()  # updates n.grad
-        return E.item()
+        return E
 
 
 class SpinInterpolate1(torch.nn.Module):
