@@ -49,14 +49,14 @@ def lbfgs(self: algorithms.Minimize[Vector]) -> Energy:
         direction = (-1.0) * state.K_gradient
         alpha: Deque[float] = deque()  # scale factors to each history entry
         for h in reversed(history):
-            alpha_i = h.rho * self._sync(h.s.vdot(direction))
+            alpha_i = h.rho * self._sync(h.s.vdot(direction)).item()
             direction -= alpha_i * h.Ky
             alpha.append(alpha_i)
         if gamma:
             direction *= gamma  # scaling to keep reasonable step size ~ 1
         for h in history:
             alpha_i = alpha.pop()
-            beta = h.rho * self._sync(h.Ky.vdot(direction))
+            beta = h.rho * self._sync(h.Ky.vdot(direction)).item()
             direction += (alpha_i - beta) * h.s
         direction = self.constrain(direction)
         if len(history) == self.n_history:
@@ -89,8 +89,8 @@ def lbfgs(self: algorithms.Minimize[Vector]) -> Energy:
         Ky = state.K_gradient - Kg_prev
         del g_prev, Kg_prev  # minimize # of gradient-like objects in memory
         direction *= step_size  # Now equal to s, the change of state in step
-        y_s = self._sync(y.vdot(direction))
-        gamma = y_s / self._sync(y.vdot(Ky))
+        y_s = self._sync(y.vdot(direction)).item()
+        gamma = y_s / self._sync(y.vdot(Ky)).item()
         history.append(HistoryEntry(s=direction, Ky=Ky, rho=1.0 / y_s))
         del y, Ky, direction  # minimize # of gradient-like objects in memory
 

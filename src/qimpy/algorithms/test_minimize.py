@@ -1,6 +1,5 @@
 from typing import Sequence
 
-import numpy as np
 import torch
 import torch.distributed as dist
 import pytest
@@ -84,7 +83,7 @@ class RandomFunction(Minimize[FieldR]):  # type: ignore
             with torch.no_grad():
                 dist.all_reduce(v, group=self.group)
             E += (v**2).sum() ** (i_M + 1) * grid.dV
-        state.energy["E"] = E.item()
+        state.energy["E"] = E
 
         if not energy_only:
             E.backward()
@@ -97,7 +96,7 @@ class RandomFunction(Minimize[FieldR]):  # type: ignore
             # Convert to fields:
             state.gradient = FieldR(grid, data=E_x)
             state.K_gradient = FieldR(grid, data=K_E_x)
-            state.extra = [np.sqrt(state.gradient.vdot(state.K_gradient))]
+            state.extra = state.gradient.vdot(state.K_gradient).sqrt()[None]
             self.x.data.requires_grad = False
 
     def random_direction(self) -> FieldR:

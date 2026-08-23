@@ -145,4 +145,4 @@ class LCAO(Minimize[MatrixArray]):
         # Store gradients:
         state.gradient = MatrixArray(M=E_H_aux, group=el.kpoints.group)
         state.K_gradient = MatrixArray(M=K_E_H_aux, group=el.kpoints.group)
-        state.extra = [np.sqrt(state.gradient.vdot(state.gradient))]
+        state.extra = state.gradient.vdot(state.gradient).sqrt()[None]

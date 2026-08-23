@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import TypeVar, Generic, Sequence, Deque
+from typing import TypeVar, Generic, Deque
 from abc import ABC, abstractmethod
 from collections import deque
 
@@ -69,7 +69,7 @@ class Pulay(Generic[Variable], ABC, TreeNode):
         self._overlaps = np.zeros((0, 0), dtype=float)
 
     @abstractmethod
-    def cycle(self, dEprev: float) -> Sequence[float]:
+    def cycle(self, dEprev: float) -> torch.Tensor:
         """Single cycle of the Pulay-mixed self-consistent iteration.
         In each subsequent cycle, Pulay will try to zero the difference
         between get_variable() before and after the cycle. The implementation
@@ -127,7 +127,7 @@ class Pulay(Generic[Variable], ABC, TreeNode):
 
         # Initial energy and difference:
         energy = self.energy
-        E = self._sync(float(energy))
+        E = self._sync(energy.total).item()
         Eprev = 0.0
         dE = E - Eprev
 
@@ -148,18 +148,18 @@ class Pulay(Generic[Variable], ABC, TreeNode):
             extra_values = self.cycle(dE)
             energy = self.energy
             Eprev = E
-            E = self._sync(float(energy))
+            E = self._sync(energy.total).item()
             dE = E - Eprev
 
             # Cache residual:
             residual = self.residual
             Mresidual = self.metric(residual)
-            res_norm = self._sync(np.sqrt(residual.vdot(Mresidual)))
+            res_norm = self._sync(residual.vdot(Mresidual).sqrt()).item()
             self._residuals.append(residual)
 
             # Check and report convergence:
             line = f"{self.name}: {i_iter}  {Ename}: {E:+.11f}  "
-            values = [dE, res_norm] + [self._sync(v) for v in extra_values]
+            values = [dE, res_norm] + self._sync(extra_values).tolist()
             converged = []
             for i_check, (check_name, check) in enumerate(checks.items()):
                 value = values[i_check]
@@ -185,7 +185,7 @@ class Pulay(Generic[Variable], ABC, TreeNode):
 
             # Pulay mixing / DIIS step:
             # --- update the overlap matrix
-            new_overlaps = np.array([r.vdot(Mresidual) for r in self._residuals])
+            new_overlaps = np.array([r.vdot(Mresidual).item() for r in self._residuals])
             N = len(new_overlaps)
             self._overlaps = np.vstack(
                 (
@@ -212,8 +212,8 @@ class Pulay(Generic[Variable], ABC, TreeNode):
                 )
             self.variable = v  # type: ignore
 
-    def _sync(self, v: float) -> float:
+    def _sync(self, v: torch.Tensor) -> torch.Tensor:
         """Ensure `v` is consistent on `comm`."""
-        buf = torch.tensor(v, device=rc.device)
-        dist.broadcast(buf, group=self.group, group_src=0)
-        return buf.item()  # TODO: maybe keep energy as scalar tensors
+        if self.group.size() > 1:
+            dist.broadcast(v, group=self.group, group_src=0)
+        return v

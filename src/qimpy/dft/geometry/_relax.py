@@ -4,7 +4,7 @@ import os
 import torch
 import torch.distributed as dist
 
-from qimpy import log, dft
+from qimpy import rc, log, dft
 from qimpy.lattice import Lattice
 from qimpy.io import Checkpoint, CheckpointPath, CheckpointContext
 from qimpy.algorithms import Minimize, MinimizeState
@@ -158,15 +158,11 @@ class Relax(Minimize[Gradient]):
                 state.K_gradient.lattice *= self.latticeK
             # Extra convergence checks:
             system = self.stepper.system
-            state.extra = [
-                (
-                    system.ions.forces.norm(dim=1).max().item()
-                    if system.ions.n_ions
-                    else 0.0
-                )
-            ]  # fmax
+            state.extra = torch.zeros(len(self.extra_thresholds), device=rc.device)
+            if system.ions.n_ions:
+                state.extra[0] = system.ions.forces.norm(dim=1).max()
             if system.lattice.movable:
-                state.extra.append(system.lattice.stress.norm().item())  # |stress|
+                state.extra[1] = system.lattice.stress.norm()  # |stress|
 
     def report(self, i_iter: int) -> bool:
         system = self.stepper.system

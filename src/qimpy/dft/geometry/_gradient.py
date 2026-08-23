@@ -73,11 +73,11 @@ class Gradient:
                 self_attribute *= other
         return self
 
-    def vdot(self, other: "Gradient") -> float:
+    def vdot(self, other: "Gradient") -> torch.Tensor:
         result = self.ions.flatten() @ other.ions.flatten()
         for attribute_name in Gradient.OPTIONAL_ATTRIBUTE_NAMES:
             if (self_attribute := getattr(self, attribute_name)) is not None:
                 other_attribute = getattr(other, attribute_name)
                 assert other_attribute is not None
                 result += self_attribute.flatten() @ other_attribute.flatten()
-        return float(result.item())
+        return result

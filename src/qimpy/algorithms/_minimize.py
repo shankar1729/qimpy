@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 
-from qimpy import rc, log, Energy, TreeNode
+from qimpy import log, Energy, TreeNode
 from qimpy.io import CheckpointPath
 from qimpy.io.dict import key_cleanup
 from ._minimize_lbfgs import lbfgs
@@ -18,7 +18,7 @@ class MinimizeState(Generic[Vector]):
     """Current energies and gradients of `Minimize` algorithm."""
 
     energy: Energy  #: Current energy (objective function)
-    extra: Sequence[float]  #: Extra convergence quantities
+    extra: torch.Tensor  #: Extra convergence quantities
     gradient: Vector  #: Gradient of energy w.r.t. parameters
     K_gradient: Vector  #: Preconditioned version of `gradient`
 
@@ -27,8 +27,7 @@ class MinimizeState(Generic[Vector]):
 
     def clear(self) -> None:
         self.energy = Energy()
-        self.extra = []
-        for attr_name in ("gradient", "K_gradient"):
+        for attr_name in ("extra", "gradient", "K_gradient"):
             if hasattr(self, attr_name):
                 delattr(self, attr_name)
 
@@ -187,7 +186,7 @@ class Minimize(Generic[Vector], ABC, TreeNode):
         E0 = self._compute(state, energy_only=False)
         dE_step = self._sync(
             state.gradient.vdot(direction)
-        )  # directional derivative along step direction
+        ).item()  # directional derivative along step direction
         # Finite difference derivatives:
         step_size_prev = 0.0  # cumulative progress along step:
         for step_size in sorted(step_sizes):
@@ -204,18 +203,18 @@ class Minimize(Generic[Vector], ABC, TreeNode):
         # Restore original position:
         self.step(direction, -step_size_prev)
 
-    def _sync(self, v: float) -> float:
+    def _sync(self, v: torch.Tensor) -> torch.Tensor:
         """Ensure `v` is consistent on `comm`."""
-        buf = torch.tensor(v, device=rc.device)
-        dist.broadcast(buf, group=self.group, group_src=0)
-        return buf.item()  # TODO: maybe keep energy as scalar tensors
+        if self.group.size() > 1:
+            dist.broadcast(v, group=self.group, group_src=0)
+        return v
 
     def _compute(self, state: MinimizeState[Vector], energy_only: bool) -> float:
         """Internal helper to prepare `state`, call `compute`
         and return `_sync`'d energy."""
         state.clear()  # prevent use of old results
         self.compute(state, energy_only)
-        return self._sync(float(state.energy))
+        return self._sync(state.energy.total).item()
 
 
 def _get_nconverge(converge_on: str | int, n_thresholds: int) -> int:

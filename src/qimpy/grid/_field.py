@@ -218,7 +218,7 @@ class Field(Gradable[FieldType]):
 
     __xor__ = dot
 
-    def vdot(self: FieldType, other: FieldType) -> float:
+    def vdot(self: FieldType, other: FieldType) -> torch.Tensor:
         """Vector-space dot product of data summed over all dimensions.
         (Scalar contraction needed for the `Pulay` or `Minimizer` algorithm templates.)
         """
@@ -226,7 +226,7 @@ class Field(Gradable[FieldType]):
         if self.grid.group is not None:
             result = result.contiguous()
             dist.all_reduce(result, group=self.grid.group)
-        return result.item()
+        return result
 
     def norm(self: FieldType) -> torch.Tensor:
         r"""Norm of a field, defined by :math:`\sqrt{\int |a|^2}`.

@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Sequence
 
 import torch
 import torch.distributed as dist
@@ -156,7 +155,7 @@ class SCF(Pulay[FieldH]):
         # Initialize electronic energy for current state:
         system.electrons.update(system)
 
-    def cycle(self, dEprev: float) -> Sequence[float]:
+    def cycle(self, dEprev: float) -> torch.Tensor:
         electrons = self.system.electrons
         eig_prev = electrons.eig[..., : electrons.fillings.n_bands]
         eig_threshold_inner = min(1e-6, 0.1 * abs(dEprev))
@@ -167,8 +166,8 @@ class SCF(Pulay[FieldH]):
         # Compute eigenvalue difference for extra convergence threshold:
         eig_cur = electrons.eig[..., : electrons.fillings.n_bands]
         deig = (eig_cur - eig_prev).abs()
-        deig_max = globalreduce.max(deig, electrons.group).item()
-        return [deig_max]
+        deig_max = globalreduce.max(deig, electrons.group)
+        return deig_max[None]
 
     @property
     def energy(self) -> Energy:

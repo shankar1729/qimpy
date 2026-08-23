@@ -25,7 +25,7 @@ class Optimizable(Protocol):
 
     def __imul__(self: T, other: float) -> T: ...
 
-    def vdot(self: T, other: T) -> float: ...
+    def vdot(self: T, other: T) -> torch.Tensor: ...
 
 
 class ConvergenceCheck(Deque[bool]):
@@ -81,8 +81,8 @@ class MatrixArray:
         self.M *= other
         return self
 
-    def vdot(self, other: "MatrixArray") -> float:
+    def vdot(self, other: "MatrixArray") -> torch.Tensor:
         """Global vector-space dot product collected over process group."""
         result = torch.vdot(self.M.flatten(), other.M.flatten()).real
         dist.all_reduce(result, group=self.group)
-        return result.item()
+        return result

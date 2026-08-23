@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
 from qimpy import rc, log, TreeNode
 from qimpy.io import (
@@ -10,7 +11,7 @@ from qimpy.io import (
     InvalidInputException,
     CheckpointContext,
 )
-from qimpy.mpi import all_gather_padded, get_comm
+from qimpy.mpi import all_gather_padded
 from qimpy.math import ceildiv
 from qimpy.profiler import stopwatch
 from qimpy.transport import material
@@ -169,10 +170,10 @@ class Lindblad(TreeNode):
         self.P_eye = apply_batched(
             self.P, torch.tile(ab_initio.eye_bands[None], (nk, 1, 1))[..., None]
         )
-        comm = get_comm(ab_initio.group)
-        nnzP = comm.allreduce(torch.count_nonzero(self.P).item())
-        ntotP = comm.allreduce(int(np.prod(self.P.shape)))
-        fill_percent_P = 100.0 * nnzP / ntotP
+        ntotP = 2 * (nk * n_bands_sq) ** 2
+        nnzP = torch.count_nonzero(self.P)
+        dist.all_reduce(nnzP, ab_initio.group)
+        fill_percent_P = 100.0 * nnzP.item() / ntotP
         log.info(f"P tensor fill fraction: {fill_percent_P:.1f}%")
 
         if detailed_balance in ["none", "emission"]:
