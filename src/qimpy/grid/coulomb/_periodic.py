@@ -89,7 +89,7 @@ class EwaldPeriodic:
             f"  nR: {self.iR.shape[0]}  nG: {self.iG.shape[0]}"
         )
 
-    def __call__(self, positions: torch.Tensor, Z: torch.Tensor) -> float:
+    def __call__(self, positions: torch.Tensor, Z: torch.Tensor) -> torch.Tensor:
         sigma = self.sigma
         sigmaSq = sigma**2
         eta = np.sqrt(0.5) / sigma

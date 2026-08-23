@@ -357,13 +357,13 @@ class Electrons(TreeNode):
         # Exchange-correlation contributions:
         n_xc_tilde = self.n_tilde + system.ions.n_core_tilde
         n_xc_tilde.requires_grad_(requires_grad, clear=True)
-        system.energy["Exc"] = self.xc(n_xc_tilde, self.tau_tilde).item()
+        system.energy["Exc"] = self.xc(n_xc_tilde, self.tau_tilde)
 
         # Hartree and local contributions:
         rho_tilde = self.n_tilde[0]  # total charge density
         VH_tilde = system.coulomb.kernel(rho_tilde)  # Hartree potential
-        system.energy["Ehartree"] = 0.5 * (rho_tilde ^ VH_tilde).item()
-        system.energy["Eloc"] = (rho_tilde ^ system.ions.Vloc_tilde).item()
+        system.energy["Ehartree"] = 0.5 * (rho_tilde ^ VH_tilde).detach()
+        system.energy["Eloc"] = (rho_tilde ^ system.ions.Vloc_tilde).detach()
         if requires_grad:
             self.n_tilde.grad[0] += system.ions.Vloc_tilde + VH_tilde
 
@@ -372,7 +372,7 @@ class Electrons(TreeNode):
             rho_tilde = self.n_tilde[0] + system.ions.rho_tilde  # total solute charge
             rho_tilde.requires_grad_(requires_grad, clear=True)
             system.fluid.model.update(n_xc_tilde, rho_tilde)
-            system.energy["Afluid"] = float(system.fluid.model.energy)
+            system.energy["Afluid"] = system.fluid.model.energy.total
             if requires_grad:
                 self.n_tilde.grad[0] += rho_tilde.grad
 
@@ -391,7 +391,7 @@ class Electrons(TreeNode):
         system.energy["KE"] = globalreduce.sum(
             self.C.band_ke()[:, :, : f.shape[2]] * self.basis.w_sk * f,
             self.kpoints.group,
-        ).item()
+        ).detach()
         # Nonlocal projector:
         beta_C = self.C.proj[..., : self.fillings.n_bands]
         system.energy["Enl"] = globalreduce.sum(
@@ -401,7 +401,7 @@ class Electrons(TreeNode):
                 * f
             ).real,
             self.kpoints.group,
-        ).item()
+        ).detach()
 
     def accumulate_geometry_grad(self, system: dft.System) -> None:
         """Accumulate geometry gradient contributions of electronic energy.

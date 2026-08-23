@@ -421,7 +421,7 @@ class Fillings(TreeNode):
         # Update fillings and entropy accordingly:
         energy["-TS"] = (-0.5 * self.sigma) * globalreduce.sum(
             w_sk * results["S"], el.kpoints.group
-        ).item()
+        ).detach()
         # --- update n_electrons or mu, depending on which is free
         n_electrons = results["NM"][0].item()
         if self.mu_constrain:

@@ -84,7 +84,7 @@ class EwaldIsolated:
     def __init__(self, lattice: Lattice) -> None:
         self.lattice = lattice
 
-    def __call__(self, positions: torch.Tensor, Z: torch.Tensor) -> float:
+    def __call__(self, positions: torch.Tensor, Z: torch.Tensor) -> torch.Tensor:
         lattice = self.lattice
         Zprod = Z.view(-1, 1) * Z.view(1, -1)
         x = positions.view(-1, 1, 3) - positions.view(1, -1, 3)
@@ -109,4 +109,4 @@ class EwaldIsolated:
             )
             log.info(f"Stresses in Coulomb_Isolted.ewald: {real_sum_stress}")
             lattice.grad -= real_sum_stress
-        return E.item()
+        return E.detach()

@@ -32,7 +32,7 @@ class Kernel(Protocol):
 class Ewald(Protocol):
     """Specification for Ewald sum."""
 
-    def __call__(self, positions: torch.Tensor, Z: torch.Tensor) -> float:
+    def __call__(self, positions: torch.Tensor, Z: torch.Tensor) -> torch.Tensor:
         """Compute Ewald energy, and optionally accumulate gradients.
         Each gradient contribution is accumulated to a `grad` attribute,
         only if the corresponding `requires_grad` is enabled.

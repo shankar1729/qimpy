@@ -62,5 +62,5 @@ class EwaldWire:
         self.i_dir = i_dir
         raise NotImplementedError
 
-    def __call__(self, positions: torch.Tensor, Z: torch.Tensor) -> float:
+    def __call__(self, positions: torch.Tensor, Z: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError

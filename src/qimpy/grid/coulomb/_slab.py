@@ -130,7 +130,7 @@ class EwaldSlab:
             f"  nR: {self.iR.shape[0]}  nG: {self.iG.shape[0]}"
         )
 
-    def __call__(self, positions: torch.Tensor, Z: torch.Tensor) -> float:
+    def __call__(self, positions: torch.Tensor, Z: torch.Tensor) -> torch.Tensor:
         lattice = self.lattice
         Lz = lattice.volume / self.area
         sigma = self.sigma
@@ -247,10 +247,7 @@ class EwaldSlab:
             )
             minus_zTerm_G_by_G_3 = torch.einsum(
                 "l, ij -> ijl",
-                sigma
-                * np.sqrt(2 / np.pi)
-                * torch.exp(-0.5 * sigmaSq * G**2)
-                / G**2,
+                sigma * np.sqrt(2 / np.pi) * torch.exp(-0.5 * sigmaSq * G**2) / G**2,
                 torch.exp(-etaSq * z12**2),
             )
             minus_zTerm_G_by_G = (

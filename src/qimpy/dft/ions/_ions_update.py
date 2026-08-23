@@ -245,14 +245,15 @@ def collect_ps_matrix(self: ions.Ions, n_spinor: int) -> None:
             i_proj_start = i_proj_stop
 
 
-def _update_pulay(ions: ions.Ions, basis: dft.electrons.Basis) -> float:
+def _update_pulay(ions: ions.Ions, basis: dft.electrons.Basis) -> torch.Tensor:
     "Update `ions.dEtot_drho_basis` and return Pulay correction."
     ions.dEtot_drho_basis = sum(
         n_ions_i * ps.dE_drho_basis(basis.ke_cutoff)
         for n_ions_i, ps in zip(ions.n_ions_type, ions.pseudopotentials)
     )
-    return (
+    return torch.tensor(
         ions.dEtot_drho_basis
         * (basis.n_ideal - basis.n_avg_weighted)
-        / basis.lattice.volume
+        / basis.lattice.volume,
+        device=rc.device,
     )
