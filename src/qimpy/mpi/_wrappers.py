@@ -39,10 +39,11 @@ def all_gather_padded(
 
 def all_gather_scalars(send: float | int, group: dist.ProcessGroup) -> np.ndarray:
     """Gather scalars `send` along `group` into an array."""
+    if group.size() == 1:
+        return np.array([send])
     send_buf = torch.tensor(send, device=rc.device)
     recv = torch.empty(group.size(), dtype=send_buf.dtype, device=rc.device)
-    recv_views = list(recv.split([1] * group.size()))
-    dist.all_gather(recv_views, send_buf, group=group)
+    dist.all_gather(list(recv), send_buf, group=group)
     return recv.to(rc.cpu).numpy()
 
 
