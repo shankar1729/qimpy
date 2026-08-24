@@ -5,10 +5,10 @@ import numpy as np
 import torch
 import torch.distributed as dist
 
-from qimpy import rc, log, TreeNode, dft, MPI
+from qimpy import rc, log, TreeNode, dft
 from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext
-from qimpy.mpi import Waitable, globalreduce, get_comm
+from qimpy.mpi import Waitable, globalreduce
 from qimpy.math import eighg, dagger
 from . import Wavefunction
 
@@ -140,8 +140,8 @@ class Davidson(TreeNode):
         pending = torch.where(
             (deig[..., :n_bands] > eig_threshold).flatten(0, 1).any(dim=0)
         )[0]
-        n_eigs_done = get_comm(self.electrons.group).allreduce(
-            pending[0].item() if len(pending) else n_bands, MPI.MIN
+        n_eigs_done = min(
+            int(globalreduce.min(pending, self.electrons.group).item()), n_bands
         )
         return deig_max, n_eigs_done
 

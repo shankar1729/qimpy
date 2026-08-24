@@ -5,9 +5,9 @@ import torch
 import torch.distributed as dist
 import numpy as np
 
-from qimpy import log, rc, TreeNode, MPI
+from qimpy import log, rc, TreeNode
 from qimpy.io import CheckpointPath, CheckpointContext
-from qimpy.mpi import ProcessGrid, TaskDivision, get_comm
+from qimpy.mpi import ProcessGrid, TaskDivision, all_reduce_scalars
 from ..material import Material
 from . import (
     TensorList,
@@ -139,8 +139,10 @@ class Geometry(TreeNode):
                     checkpoint_in=checkpoint_in.relative(f"quad{i_quad}"),
                 )
             )
-        self.dt_max = get_comm(self.group).allreduce(
-            min((patch.dt_max for patch in self.patches), default=np.inf), op=MPI.MIN
+        self.dt_max = all_reduce_scalars(
+            min((patch.dt_max for patch in self.patches), default=np.inf),
+            dist.ReduceOp.MIN,
+            self.group,
         )
         self.stash = ResultStash(len(self.patches))
         self.save_rho = save_rho

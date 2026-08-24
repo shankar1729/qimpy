@@ -3,7 +3,7 @@ import numpy as np
 import torch
 
 from qimpy import rc, log
-from qimpy.mpi import get_comm, all_gather_padded
+from qimpy.mpi import all_gather_padded, all_gather_scalars
 from qimpy.dft import electrons
 
 
@@ -55,7 +55,7 @@ class BasisReal:
         )[0]
         self.iz0_mine_local = self.iz0[mine] - div.i_start
         self.iz0_mine_conj = self.iz0_conj[mine]
-        self.nz0_each = np.array(get_comm(basis.group).allgather(len(mine)))
+        self.nz0_each = all_gather_scalars(len(mine), basis.group)
         self.nz0_prev = np.cumsum(np.concatenate(([0], self.nz0_each)))
 
         # Weight by element for overlaps:

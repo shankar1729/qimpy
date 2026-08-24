@@ -8,7 +8,6 @@ from qimpy.dft.electrons import Wavefunction
 from qimpy.grid import Grid, FieldC
 from qimpy.io import Checkpoint, CheckpointPath, log_config
 from qimpy.dft import System
-from qimpy.mpi import get_comm
 
 
 def band_ifft(grid: Grid, coeff: torch.Tensor, fftq_index: torch.Tensor):
@@ -25,9 +24,8 @@ def band_ifft(grid: Grid, coeff: torch.Tensor, fftq_index: torch.Tensor):
 
 @stopwatch
 def ExactExchangeEval(system: System):
-    EXX = 0.0
+    EXX = torch.tensor(0.0, device=rc.device)
     e = system.electrons
-    comm = get_comm(e.group)  # MPI communicator for scalar exchanges
     log.info("\nSetting up exact exchange:")
     kpoints = e.basis.kpoints
     k_div = kpoints.division
@@ -43,13 +41,16 @@ def ExactExchangeEval(system: System):
     C = e.C.split_bands().wait()
     b_start = 0 if C.band_division is None else C.band_division.i_start
     n_spin, Nk_mine, n_bands_mine, n_spinor, n_basis = C.coeff.shape
+    i_sizes = torch.tensor(
+        [k_div.i_start, k_div.i_stop, b_start, n_bands_mine, n_basis], device=rc.device
+    )
     for j_process in range(e.group.size()):
-        k_other_start = comm.bcast(k_div.i_start, j_process)
-        k_other_stop = comm.bcast(k_div.i_stop, j_process)
+        j_sizes = i_sizes if j_process == e.group.rank() else torch.empty_like(i_sizes)
+        dist.broadcast(j_sizes, group=e.group, group_src=j_process)
+        k_other_start, k_other_stop, b_other_start, n_bands_other, n_basis_other = (
+            j_sizes.tolist()
+        )
         nk_other = k_other_stop - k_other_start
-        b_other_start = comm.bcast(b_start, j_process)
-        n_bands_other = comm.bcast(n_bands_mine, j_process)
-        n_basis_other = comm.bcast(n_basis, j_process)
         if e.group.rank() == j_process:
             fft_index_other = fft_index
             C_other = C.coeff
@@ -96,7 +97,7 @@ def ExactExchangeEval(system: System):
                         Kn = n_pair.convolve(kernel)
                         EXX += (
                             prefac * fbk1 * f2[:, ik2_other, bk2_other] * (n_pair ^ Kn)
-                        ).item()
+                        ).real.detach()
                         grad_Ipsi_k = (
                             ~FieldC(
                                 grid,
@@ -110,12 +111,12 @@ def ExactExchangeEval(system: System):
                         HC.coeff[:, ik1_mine, bk1] += grad_Ipsi_k[
                             :, :, fft_index[ik1_mine]
                         ]
-    EXX = comm.allreduce(EXX)
+    dist.all_reduce(EXX)
     HC = HC.split_basis().wait()
-    print(f"Exchange energy: {EXX}, {torch.real(EXX[0])}")
+    print(f"Exchange energy: {EXX.item()}")
     exx_jdftx = -2.1883797529475943  # Si
     # exx_jdftx = -3.8845413033404732 # Water
-    print(f"EXX Ratio: {torch.real(EXX[0]) / exx_jdftx}")
+    print(f"EXX Ratio: {EXX.item() / exx_jdftx}")
     cp = Checkpoint(filename="eig-check.h5", writable=True)
     cp_path = CheckpointPath(cp)
     eig, _ = torch.linalg.eigh((e.C ^ HC).wait())

@@ -2,6 +2,8 @@ import numpy as np
 import torch
 import torch.distributed as dist
 
+from qimpy import rc
+
 
 def all_gather_padded(
     send: torch.Tensor, sizes: np.ndarray, group: dist.ProcessGroup
@@ -33,3 +35,20 @@ def all_gather_padded(
         # Remove padding from outputs:
         recv = torch.cat([buf[:size] for buf, size in zip(recvs, sizes)], dim=0)
     return recv
+
+
+def all_gather_scalars(send: float | int, group: dist.ProcessGroup) -> np.ndarray:
+    """Gather scalars `send` along `group` into an array."""
+    send_buf = torch.tensor(send, device=rc.device)
+    recv = torch.empty(group.size(), dtype=send_buf.dtype, device=rc.device)
+    recv_views = list(recv.split([1] * group.size()))
+    dist.all_gather(recv_views, send_buf, group=group)
+    return recv.to(rc.cpu).numpy()
+
+
+def all_reduce_scalars(
+    value: float | int, op: dist.ReduceOp.RedOpType, group: dist.ProcessGroup
+) -> float | int:
+    buf = torch.tensor(value, device=rc.device)
+    dist.all_reduce(buf, op=op, group=group)
+    return buf.item()

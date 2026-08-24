@@ -4,6 +4,7 @@ import torch.distributed as dist
 
 import qimpy
 from qimpy import log
+from qimpy.mpi import all_gather_scalars
 
 
 class TaskDivision:
@@ -68,8 +69,7 @@ class TaskDivisionCustom(TaskDivision):
             self.n_each_custom = np.full(1, n_mine)
             super().__init__(n_tot=0, n_procs=1, i_proc=0)
         else:
-            comm = qimpy.mpi.get_comm(group)
-            self.n_each_custom = np.array(comm.allgather(n_mine))
+            self.n_each_custom = all_gather_scalars(n_mine, group)
             super().__init__(n_tot=0, n_procs=group.size(), i_proc=group.rank())
         # Override base-class settings:
         self.n_mine = n_mine
