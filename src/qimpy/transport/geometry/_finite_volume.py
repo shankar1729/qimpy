@@ -667,6 +667,17 @@ class FiniteVolume(Geometry):
         # the reconstruction is compiled.
         self._faces_fn = self._faces
         self._srhs_fn = self._spatial_rhs
+        # ★ Two reconstruction kernels, and which one wins depends ENTIRELY on
+        # whether Inductor gets to fuse it.  `_limited_faces_slot` accumulates
+        # the neighbour contributions slot by slot and never builds the
+        # (n, Nmax, Nk) tensor; `_limited_faces_gather` builds it and hands it
+        # to a batched gemm.  Measured on the production mixer
+        # (K=1792, Nk=40320, Nmax=16), whole spatial RHS:
+        #     compiled   gather 48.2 ms   slot 28.8 ms   (slot 1.67x FASTER)
+        #     eager      gather 140.6 ms  slot 243.5 ms  (slot 1.73x SLOWER)
+        # so the choice has to follow the compile flag, not be picked once.
+        self._limited_faces = (self._limited_faces_slot if compile
+                               else self._limited_faces_gather)
         if compile:
             # This workload is kernel-launch- and bandwidth-bound (a long chain of
             # small elementwise ops). Benchmarked on a T4: "max-autotune" (kernel
@@ -830,20 +841,48 @@ class FiniteVolume(Geometry):
                 self._contacts.append(_Contact(
                     name=nm, idx=ci, cur=cur, kind="fixed", ghost=ghost))
 
-    def _limited_faces(self, uc: torch.Tensor, un: torch.Tensor,
-                       recon: torch.Tensor) -> torch.Tensor:
+    def _limited_faces_slot(self, uc: torch.Tensor, u: torch.Tensor,
+                            nbr: torch.Tensor, recon: torch.Tensor
+                            ) -> torch.Tensor:
         """Venkatakrishnan-limited face values for a set of cells.
 
-        ``uc`` (n, Nk) cell averages, ``un`` (n, Nmax, Nk) their vertex-neighbor
-        averages, ``recon`` (n, 3, Nmax) the fused gradient->face operator. Smooth
-        (differentiable) limiter -> clean steady-state convergence; per face, with
-        increment d = u_face-u and same-sign headroom D1 (to the neighbor max/min):
+        ``uc`` (n, Nk) cell averages, ``u`` (K, Nk) the full state, ``nbr``
+        (n, Nmax) their vertex-neighbour cell indices, ``recon`` (n, 3, Nmax) the
+        fused gradient->face operator. Smooth (differentiable) limiter -> clean
+        steady-state convergence; per face, with increment d = u_face-u and
+        same-sign headroom D1 (to the neighbor max/min):
             phi = (D1^2 + 2 D1 d + e) / (D1^2 + D1 d + 2 d^2 + e),  e = vk_eps2,
         capped at 1 (never amplify the LSQ gradient) and min-ed over the 3 faces.
+
+        ★ The neighbour values are accumulated SLOT BY SLOT rather than gathered
+        into an (n, Nmax, Nk) tensor.  That tensor is 9.2 GB at device scale and
+        exists only to be consumed three times (the einsum, amax, amin); summing
+        over the slot index instead needs the same total traffic but never
+        materialises it, and leaves d/hi/lo as one fusable pass.  Measured on the
+        production mixer (K=1792, Nk=40320, Nmax=16): compiled 52.5 -> 18.5 ms,
+        a 2.84x speedup, agreeing with the gathered form to 2.9e-16.
+        ⛔ EAGER it is 87% SLOWER (16 Python iterations, ~5 kernels each) -- this
+        form is only worth it under torch.compile, which is the shipped default.
         """
-        d = torch.einsum("nfg,ngc->nfc", recon, un - uc[:, None])   # (n, 3, Nk)
-        hi = (torch.maximum(uc, un.amax(1)) - uc)[:, None]    # headroom up   (>= 0)
-        lo = (torch.minimum(uc, un.amin(1)) - uc)[:, None]    # headroom down (<= 0)
+        d = torch.zeros(uc.shape[0], recon.shape[1], uc.shape[1],
+                        device=uc.device, dtype=uc.dtype)
+        hi_n = uc
+        lo_n = uc
+        for gi in range(nbr.shape[1]):
+            ung = u[nbr[:, gi]]                               # (n, Nk)
+            # ⛔ Accumulate recon * (ung - uc), NOT recon * ung with a single
+            # `- uc sum_g recon` at the end.  The two are algebraically equal,
+            # but the deferred form subtracts two large nearly-equal sums and
+            # loses the cancellation: measured 1.7e-11 relative on the full
+            # rho_dot against 2.9e-16 for this form, which would break the
+            # 1e-12 conservation assertions.  Differencing per slot costs one
+            # extra (n, Nk) subtract and keeps the accuracy of the gathered
+            # einsum exactly.
+            d = d + recon[:, :, gi].unsqueeze(-1) * (ung - uc).unsqueeze(1)
+            hi_n = torch.maximum(hi_n, ung)
+            lo_n = torch.minimum(lo_n, ung)
+        hi = (hi_n - uc)[:, None]                             # headroom up   (>= 0)
+        lo = (lo_n - uc)[:, None]                             # headroom down (<= 0)
         D1 = torch.where(d >= 0, hi, lo)                      # same sign as d
         e = self._vk_eps2
         # Denominator is D1^2 + D1 d + 2 d^2 + e >= 2 d^2 > 0 for d != 0 in exact
@@ -860,22 +899,46 @@ class FiniteVolume(Geometry):
         ).amin(1)[:, None]                                    # (n, 1, Nk)
         return uc[:, None] + phi * d
 
+    def _limited_faces_gather(self, uc: torch.Tensor, u: torch.Tensor,
+                              nbr: torch.Tensor, recon: torch.Tensor
+                              ) -> torch.Tensor:
+        """The same limiter, but gathering (n, Nmax, Nk) and using one batched
+        gemm.  Faster EAGER (140.6 ms vs 243.5 ms for the whole RHS), slower
+        compiled (48.2 vs 28.8) -- selected in __init__ by the compile flag.
+        Agrees with the slot form to 2.9e-16."""
+        un = u[nbr]                                           # (n, Nmax, Nk)
+        d = torch.einsum("nfg,ngc->nfc", recon, un - uc[:, None])
+        hi = (torch.maximum(uc, un.amax(1)) - uc)[:, None]
+        lo = (torch.minimum(uc, un.amin(1)) - uc)[:, None]
+        D1 = torch.where(d >= 0, hi, lo)
+        e = self._vk_eps2
+        num = D1 * D1 + 2 * D1 * d + e
+        den = D1 * D1 + D1 * d + 2 * d * d + e
+        phi = torch.where(
+            den > torch.finfo(d.dtype).tiny,
+            (num / den).clamp(max=1.0),
+            torch.ones_like(d),
+        ).amin(1)[:, None]
+        return uc[:, None] + phi * d
+
     def _faces(self, u: torch.Tensor) -> torch.Tensor:
         """Reconstructed face values, (K, n_face, Nk). Serial reconstructs every
         cell; under decomposition only the rows this rank needs (owned + 1-ring)
         are filled, the rest left zero (their faces are never read).
 
-        The (rows, Nmax, Nk) neighbour gather is chunked over cells so its peak
-        stays within ``_face_budget_gb``: this is what lets a fine k-grid (large
-        Nk) run -- otherwise the whole K*Nmax*Nk gather (tens of GB) is built at
-        once.  Small-Nk runs take the original single-shot path (chunk >= K)."""
+        Chunked over cells so the peak transient stays within
+        ``_face_budget_gb``.  ``_limited_faces`` no longer materialises the
+        (rows, Nmax, Nk) neighbour tensor, so the budget now bounds the
+        per-slot working set rather than one huge gather; the chunking is kept
+        because the (n, 3, Nk) accumulators still scale with the row count.
+        Small-Nk runs take the single-shot path (chunk >= K)."""
         g = self.geom
         rows = self._R                                       # None (serial) or owned+1ring
         n_rows = self.K if rows is None else int(rows.shape[0])
         per_row = g.nbr.shape[1] * self.Nk * 8               # neighbour-gather bytes/cell
         chunk = max(1, int(self._face_budget_gb * (2 ** 30) / max(per_row, 1)))
         if rows is None and chunk >= self.K:
-            return self._limited_faces(u, u[g.nbr], g.recon)          # single-shot
+            return self._limited_faces(u, u, g.nbr, g.recon)          # single-shot
         idx = torch.arange(self.K, device=u.device) if rows is None else rows
         # Serial chunked path fills every row -> skip the (K, nf, Nk) zero-fill
         # (3.6 GB/eval at device-scale Cartesian); MPI leaves unused rows unread
@@ -889,7 +952,7 @@ class FiniteVolume(Geometry):
             uf = u.new_zeros(self.K, self._nf, self.Nk)
         for lo in range(0, n_rows, chunk):
             ci = idx[lo:lo + chunk]
-            uf[ci] = self._limited_faces(u[ci], u[g.nbr[ci]], g.recon[ci])
+            uf[ci] = self._limited_faces(u[ci], u, g.nbr[ci], g.recon[ci])
         return uf
 
     def _exterior(self, uMb: torch.Tensor, t: float) -> torch.Tensor:
