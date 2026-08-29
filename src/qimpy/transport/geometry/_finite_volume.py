@@ -676,8 +676,13 @@ class FiniteVolume(Geometry):
         #     compiled   gather 48.2 ms   slot 28.8 ms   (slot 1.67x FASTER)
         #     eager      gather 140.6 ms  slot 243.5 ms  (slot 1.73x SLOWER)
         # so the choice has to follow the compile flag, not be picked once.
-        self._limited_faces = (self._limited_faces_slot if compile
-                               else self._limited_faces_gather)
+        # QIMPY_LIMITER=gather|slot forces one path, for A/B timing.
+        _lim = os.environ.get("QIMPY_LIMITER", "")
+        self._limited_faces = (
+            self._limited_faces_slot if _lim == "slot"
+            else self._limited_faces_gather if _lim == "gather"
+            else (self._limited_faces_slot if compile
+                  else self._limited_faces_gather))
         if compile:
             # This workload is kernel-launch- and bandwidth-bound (a long chain of
             # small elementwise ops). Benchmarked on a T4: "max-autotune" (kernel
