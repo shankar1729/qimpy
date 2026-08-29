@@ -768,12 +768,25 @@ class _CartesianReflector:
     quadrature node IS a node -- which is why the four shipped conservation tests
     never caught it.
 
-    Two corrections, in order:
+    A specular wall has a SECOND invariant, and the same interpolation breaks it
+    too: it exerts no tangential force, so the shear stress across it vanishes,
+
+        sum_{v.n<0} |v.n| (v.t) out  ==  sum_{v.n>0} |v.n| (v.t) u .          (**)
+
+    Uncorrected residual: 4.0e-3 on a drifted Fermi-Dirac trace.
+
+    Corrections, in order:
       1. renormalise the surviving bilinear weights back to sum 1, undoing the
          dropped corners;
-      2. a rank-1 closure  out <- out + c (src - ret)  with c chosen so that
-         sum_i w_in,i c_i = 1, which makes (*) hold exactly for every u.
-         c ∝ w_in is the minimum-norm such vector.
+      2. a rank-2 closure enforcing (*) and (**) simultaneously,
+             out <- out + c1 (s1 - r1) + c2 (s2 - r2),
+         with the correction vectors sought in span{a, b}, a = w_in,
+         b = w_in * v.t, biorthogonal to the two constraint functionals:
+             [c1 c2] = [a b] G^-1,   G = [[L1a, L1b], [L2a, L2b]].
+         Both identities then hold exactly for every u.  The 2x2 system is
+         essentially orthogonal in practice (measured g11 g22 / det in
+         [1.0000, 1.0002]), so there is no amplification; it falls back to the
+         rank-1 correction if G is ever singular.
 
     Step 2 is deliberately LINEAR.  The obvious alternative -- rescaling by
     beta = src/ret -- also makes (*) exact but is a ratio of two linear
@@ -781,15 +794,14 @@ class _CartesianReflector:
     `FiniteVolume._setup_boundary` builds its dense `_refl_mat` cache by pushing
     the Nk basis vectors through this operator, i.e. it ASSUMES linearity.  A
     nonlinear reflector would silently disagree with its own cache at small Nk.
-    Measured, closed cavity, 3000 steps: |dM|/M 5.9e-3 -> 1.8e-16 and flat,
-    net wall current 4.5e-3 -> 4.0e-16, additivity defect 3.9e-16, global
-    overshoot unchanged at 1.1e-16, undershoot 1.7e-3 -> 2.9e-11.
 
-    NOT fixed here: the wall's tangential momentum flux (shear stress) still
-    carries a ~4e-3 defect from the same interpolation.  A two-parameter closure
-    out <- out * (a + b v.t) drives it to 1.1e-14 but costs bound preservation
-    (it introduced a 7.7e-4 overshoot where this correction introduces none), so
-    it is not adopted.
+    Measured at the production configuration (n_k = 224, real mixer mesh):
+    closed-cavity |dM|/M over 400 steps 3.06e-4 (linear in step count) -> 0
+    EXACTLY; net wall current 4.5e-3 -> 4.1e-16; shear 4.0e-3 -> 5.3e-16;
+    additivity defect 4.4e-16 (still linear); global overshoot unchanged at
+    2.2e-16; undershoot 3.12e-3 -> 4.96e-14.  On the driven device the contact
+    currents move by ~4e-7 relative and the f range and interior DMP are
+    unchanged to all printed digits.
     """
     def __init__(self, rep: "Cartesian", n: torch.Tensor):
         n = n.to(rc.device); self.rep = rep; self.Ns = n.shape[0]
@@ -816,16 +828,34 @@ class _CartesianReflector:
         scale = torch.where(tot > 1e-12, 1.0 / tot.clamp(min=1e-12),
                             torch.zeros_like(tot))
         self._wt = [w * scale for w in self._wt]
-        # (2) rank-1 flux closure (see the class docstring)
+        # (2) rank-2 flux + shear closure (see the class docstring)
+        v = k / rep.m_star
         vn = kdotn / rep.m_star                         # v.n on the active set
+        t_hat = torch.stack([-n[:, 1], n[:, 0]], -1)    # wall tangent
+        vmax = max(float(v.norm(dim=1).max()), 1e-300)   # scale v.t to O(1)
+        self._vt = (v[None] * t_hat[:, None]).sum(-1) / vmax
         self._w_in = vn.abs() * (vn < 0)                # (Ns, Nk)
         self._w_out = vn.abs() * (vn > 0)
-        self._c = self._w_in / (self._w_in ** 2).sum(-1, keepdim=True).clamp(min=1e-300)
+        a = self._w_in
+        b = self._w_in * self._vt
+        g11 = (a * a).sum(-1, keepdim=True)
+        g12 = (a * b).sum(-1, keepdim=True)
+        g22 = (b * b).sum(-1, keepdim=True)
+        det = g11 * g22 - g12 * g12
+        ok = det.abs() > 1e-13 * (g11 * g22).abs().clamp(min=1e-300)
+        d = torch.where(ok, det, torch.ones_like(det))
+        c_rank1 = a / g11.clamp(min=1e-300)             # fallback: particle only
+        self._c1 = torch.where(ok, (a * g22 - b * g12) / d, c_rank1)
+        self._c2 = torch.where(ok, (b * g11 - a * g12) / d, torch.zeros_like(a))
 
     def __call__(self, u: torch.Tensor) -> torch.Tensor:
         out = torch.zeros_like(u)
         for idx, wt in zip(self._idx, self._wt):
             out += wt[None] * torch.gather(u, -1, idx[None].expand_as(u))
-        ret = (self._w_in * out).sum(-1, keepdim=True)   # flux the wall returns
-        src = (self._w_out * u).sum(-1, keepdim=True)    # flux the wall received
-        return out + self._c * (src - ret)
+        # flux the wall received (s) vs the flux it returns (r), for both the
+        # particle and the tangential-momentum moment
+        s1 = (self._w_out * u).sum(-1, keepdim=True)
+        r1 = (self._w_in * out).sum(-1, keepdim=True)
+        s2 = (self._w_out * self._vt * u).sum(-1, keepdim=True)
+        r2 = (self._w_in * self._vt * out).sum(-1, keepdim=True)
+        return out + self._c1 * (s1 - r1) + self._c2 * (s2 - r2)

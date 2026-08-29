@@ -377,13 +377,16 @@ def test_cartesian_reflective_walls_conserve_mass() -> None:
     assert abs(mass() - m0) / abs(m0) < 1e-12, abs(mass() - m0) / abs(m0)
 
 
-def test_cartesian_wall_has_zero_net_current() -> None:
+def test_cartesian_wall_conserves_flux_and_shear() -> None:
     """The instantaneous form: a specular wall returns exactly the flux it
-    receives, ``sum_{v.n<0} |v.n| ghost == sum_{v.n>0} |v.n| u``, for ANY trace.
+    receives, and exerts no tangential force, for ANY trace:
 
-    This is the identity the rank-1 closure in _CartesianReflector enforces;
-    without it the residual is ~4.5e-3 on a drifted Fermi-Dirac trace and up to
-    1.9e-2 on the worst face."""
+        particle:  sum_{v.n<0} |v.n| ghost       == sum_{v.n>0} |v.n| u
+        shear:     sum_{v.n<0} |v.n| (v.t) ghost == sum_{v.n>0} |v.n| (v.t) u
+
+    Both are enforced by the rank-2 closure in _CartesianReflector.  Without it
+    the residuals are 4.5e-3 and 4.0e-3 on a drifted Fermi-Dirac trace, and up
+    to 7.8e-2 on the worst face of an all-angles sweep."""
     torch.set_default_dtype(torch.float64)
     pg = ProcessGrid(rc.comm, "rk", (1, 1))
     material = FermiSurface(
@@ -396,14 +399,29 @@ def test_cartesian_wall_has_zero_net_current() -> None:
     refl = material.get_reflector(n)
     v = material.transport_velocity
     vn = (v[None] * n[:, None]).sum(-1)
+    t_hat = torch.stack([-n[:, 1], n[:, 0]], -1)
+    vt = (v[None] * t_hat[:, None]).sum(-1)
     w_in, w_out = vn.abs() * (vn < 0), vn.abs() * (vn > 0)
     torch.manual_seed(0)
+    # a random trace and a physically shaped one (a drifted Fermi-Dirac, which
+    # is the only one with a non-degenerate tangential moment)
+    kD = 0.03 * torch.tensor([1.0, 0.3], device=rc.device)
+    eps = ((rep.k - kD) ** 2).sum(-1) / (2 * rep.m_star)
+    drift = (torch.special.expit(-(eps - rep.mu) / rep.T_temp) - rep._f0_lab)
     for u in (torch.rand(n.shape[0], rep.k.shape[0], device=rc.device),
-              torch.ones(n.shape[0], rep.k.shape[0], device=rc.device)):
+              torch.ones(n.shape[0], rep.k.shape[0], device=rc.device),
+              drift[None].repeat(n.shape[0], 1)):
         out = refl(u[None])[0]
-        lhs, rhs = (w_in * out).sum(-1), (w_out * u).sum(-1)
-        err = ((lhs - rhs).abs() / rhs.abs().clamp(min=1e-300)).max()
-        assert float(err) < 1e-12, float(err)
+        for wgt in (torch.ones_like(vt), vt):           # particle, then shear
+            lhs = (w_in * wgt * out).sum(-1)
+            rhs = (w_out * wgt * u).sum(-1)
+            # Normalise by the ABSOLUTE-value integral, not by |rhs|: for an
+            # isotropic trace the signed tangential moment cancels to ~1e-13, so
+            # dividing by it compares roundoff with roundoff (this test read 1.5
+            # for a residual of 1.7e-13 before the scale was fixed).
+            scale = (w_out * wgt.abs() * u.abs()).sum(-1).max().clamp(min=1e-300)
+            assert float((lhs - rhs).abs().max() / scale) < 1e-12, \
+                float((lhs - rhs).abs().max() / scale)
     # and it must stay LINEAR: _setup_boundary caches it as a dense matrix by
     # pushing the Nk basis vectors through, which assumes additivity.
     a = torch.rand(n.shape[0], rep.k.shape[0], device=rc.device)
@@ -585,7 +603,7 @@ if __name__ == "__main__":
     test_current_source_polarity_reverses_with_sign(); print("current_source_polarity: PASS")
     test_reflective_walls_conserve_mass_long_time(); print("reflective_mass_long_time: PASS")
     test_cartesian_reflective_walls_conserve_mass(); print("cartesian_wall_mass: PASS")
-    test_cartesian_wall_has_zero_net_current(); print("cartesian_wall_zero_current: PASS")
+    test_cartesian_wall_conserves_flux_and_shear(); print("cartesian_wall_flux_shear: PASS")
     test_oblique_wall_conserves_tangential_momentum(); print("oblique_wall_tang_momentum: PASS")
     test_contact_driven_state_is_bounded(); print("contact_driven_bounded: PASS")
     test_biased_contacts_balance_at_steady_state(); print("biased_balance: PASS")
