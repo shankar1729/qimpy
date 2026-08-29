@@ -788,16 +788,34 @@ class _CartesianReflector:
     Corrections, in order:
       1. renormalise the surviving bilinear weights back to sum 1, undoing the
          dropped corners;
-      2. a rank-2 closure enforcing (*) and (**) simultaneously,
-             out <- out + c1 (s1 - r1) + c2 (s*s2 - r2),
-         with the correction vectors sought in span{a, b}, a = 1_I (the inflow
-         INDICATOR), b = (v.t) 1_I, biorthogonal to the two constraint
-         functionals:
-             [c1 c2] = [a b] G^-1,   G = [[L1a, L1b], [L2a, L2b]].
-         Both identities then hold exactly for every u.  The 2x2 system is
-         essentially orthogonal in practice (measured g11 g22 / det = 1.00000),
-         so there is no amplification; it falls back to the rank-1 correction if
-         G is ever singular.
+      2. a TWO-STAGE closure, separating the numerics from the physics.  Both
+         stages use correction vectors biorthogonal to the constraint
+         functionals L_a(x) = sum_I |v.n| mu_a x, with mu = (1, v.t, eps, |v.n|)
+         and basis b_a = mu_a 1_I: [c_1..c_r] = [b_1..b_r] G^-1, G_ab = L_a(b_b).
+
+         STAGE 1 (rank 4, NUMERICS).  The exact specular map preserves |k| and
+         |v.n| and flips only sign(v.n), so it conserves the particle flux, the
+         tangential momentum flux, the ENERGY flux and the NORMAL PRESSURE --
+         all four targets are simply the outflow-side sums, and none depends on
+         s.  Correcting the interpolated operator to hit all four removes the
+         interpolation error itself.
+
+         STAGE 2 (rank 2, PHYSICS).  The diffuse refill supplies the flux the
+         specular part did not return, constraining MASS and TANGENTIAL
+         MOMENTUM only -- exactly what the modal _DeltaKReflector does.
+
+         ⛔ The energy row must be CENTRED on mu.  eps ~ mu across the active
+         shell, so a raw energy row is nearly parallel to the constant row and
+         the 4x4 Gram goes singular; (eps - mu)/(xi_max T) keeps cond(G4) at
+         ~217, and the stage-2 Gram at 5.07.  Falls back to the particle-only
+         correction if a solve fails.
+
+         ⛔ Do NOT extend stage 2.  Applying the rank-4 closure to the WHOLE
+         ghost pins all four moments at s = 1 but over-constrains the diffuse
+         limit -- at s < 1 a diffuse wall's pressure is DETERMINED by isotropy
+         plus the mass flux, not free.  Measured s = 0 refill: 63% angular
+         structure with the pressure row, 2.2% with an energy row, against
+         1.4e-16 deviation from constant (the Maxwell law) with two rows.
 
     ⛔ The basis must be the inflow INDICATOR, not the flux weight w_in = |v.n|.
     At s = 1 the correction is a ~0.4% residual and the basis is immaterial, but
@@ -809,10 +827,21 @@ class _CartesianReflector:
     absorbs the asymmetry of the DISCRETE inflow set so the refill carries
     exactly zero tangential momentum rather than approximately zero.
 
-    Measured across s = 0, 0.25, 0.5, 0.75, 1: mass residual <= 3.2e-16, shear
-    residual <= 3.0e-16, and the per-face drag ratio
+    Measured.  At s = 1 (fully specular, the production setting) all four
+    moments are exact: particle 1.6e-16, tangential 1.8e-16, energy 4.8e-16,
+    pressure 2.4e-16.  The energy and pressure residuals no longer converge with
+    dk -- they are flat at ~1.5e-16 across a 4x refinement, where the earlier
+    two-moment closure left them at order 2 (energy 1.40e-2 -> 7.77e-4).
+    Across s = 0, 0.25, 0.5, 0.75, 1 the particle, tangential and pressure
+    residuals stay <= 4.1e-14 and the per-face drag ratio
     (returned j_t)/(incident j_t) equals s to every printed digit, matching the
-    modal reflector exactly at each s.
+    modal reflector exactly at each s.  At s = 0 the refill is constant over
+    each face's inflow set to 1.4e-16 -- the Maxwell law.
+
+    ⚠ The ENERGY flux is exact only at s = 1.  At s < 1 the refill carries
+    whatever energy the two-row diffuse model gives it, which is the same status
+    as the modal reflector -- neither imposes an energy condition on the diffuse
+    part.  Adding one restores exactness at the cost of the isotropy above.
 
     Step 2 is deliberately LINEAR.  The obvious alternative -- rescaling by
     beta = src/ret -- also makes (*) exact but is a ratio of two linear
@@ -864,28 +893,59 @@ class _CartesianReflector:
         self._vt = (v[None] * t_hat[:, None]).sum(-1) / vmax
         self._w_in = vn.abs() * (vn < 0)                # (Ns, Nk)
         self._w_out = vn.abs() * (vn > 0)
-        a = (vn < 0).to(v.dtype)                        # inflow INDICATOR
-        b = a * self._vt
-        g11 = (self._w_in * a).sum(-1, keepdim=True)
-        g12 = (self._w_in * b).sum(-1, keepdim=True)
-        g22 = (self._w_in * self._vt * b).sum(-1, keepdim=True)
-        det = g11 * g22 - g12 * g12
-        ok = det.abs() > 1e-13 * (g11 * g22).abs().clamp(min=1e-300)
-        d = torch.where(ok, det, torch.ones_like(det))
-        c_rank1 = a / g11.clamp(min=1e-300)             # fallback: particle only
-        self._c1 = torch.where(ok, (a * g22 - b * g12) / d, c_rank1)
-        self._c2 = torch.where(ok, (b * g11 - a * g12) / d, torch.zeros_like(a))
+        eps = k.square().sum(-1) / (2 * rep.m_star)
+        self._vna = vn.abs() / vmax                     # |v.n|, scaled
+        self._eps = ((eps - rep.mu) / (rep.xi_max * rep.T_temp))[None].expand_as(
+            self._vt)                                   # CENTRED: eps ~ mu on
+        #   the shell, so the raw energy row is nearly parallel to the constant
+        #   row and the Gram becomes singular.  Centring on mu fixes that.
+        self._mu_rows = (torch.ones_like(self._vt), self._vt, self._eps,
+                         self._vna)
+        infl = (vn < 0).to(v.dtype)
+
+        def biorth(rows):
+            """[c_1..c_r] with L_a(c_b) = delta_ab; falls back to the
+            particle-only correction if the Gram is singular."""
+            Bm = torch.stack([m * infl for m in rows], dim=1)    # (Ns, r, Nk)
+            Mm = torch.stack(list(rows), dim=1)
+            Gm = torch.einsum("sak,sbk->sab", Mm * self._w_in[:, None, :], Bm)
+            try:
+                return torch.linalg.solve(Gm, Bm)
+            except Exception:
+                C = torch.zeros_like(Bm)
+                C[:, 0, :] = infl / (self._w_in * infl).sum(
+                    -1, keepdim=True).clamp(min=1e-300)
+                return C
+
+        self._C4 = biorth(self._mu_rows)                # stage 1: numerics
+        self._C2 = biorth(self._mu_rows[:2])            # stage 2: diffuse model
 
     def __call__(self, u: torch.Tensor) -> torch.Tensor:
         spec = torch.zeros_like(u)
         for idx, wt in zip(self._idx, self._wt):
             spec += wt[None] * torch.gather(u, -1, idx[None].expand_as(u))
+        # Targets: the EXACT specular reflection returns, on the inflow side,
+        # exactly the outflow-side sum of each of these four moments.  None of
+        # them depends on s.
+        T = [(self._w_out * m * u).sum(-1, keepdim=True) for m in self._mu_rows]
+        # ---- stage 1: NUMERICS.  Remove the interpolation error, so the
+        # specular operator reproduces the exact specular map in all four.
+        for a in range(4):
+            got = (self._w_in * self._mu_rows[a] * spec).sum(-1, keepdim=True)
+            spec = spec + self._C4[:, a, :] * (T[a] - got)
+        # ---- stage 2: PHYSICS.  The diffuse refill supplies the flux the
+        # specular part did not return.  It constrains MASS and TANGENTIAL
+        # MOMENTUM only -- exactly what the modal _DeltaKReflector does.
+        # ⛔ Do NOT add the energy or pressure rows here: at s < 1 a diffuse
+        # wall's pressure is DETERMINED by isotropy plus the mass flux, not
+        # free, and imposing it forces the right number with the wrong shape --
+        # measured 63% (with the pressure row) or 2.2% (with an energy row) of
+        # angular structure in the s = 0 refill, which is not the Maxwell law
+        # and not any physical wall.  With two rows the s = 0 refill is constant
+        # over the inflow set to 1.4e-16.
         out = self.s * spec
-        # flux the wall received (s_) vs the flux it returns (r_), for both the
-        # particle and the tangential-momentum moment.  The tangential TARGET
-        # carries the specularity: s = 1 conserves it, s = 0 destroys it.
-        s1 = (self._w_out * u).sum(-1, keepdim=True)
-        r1 = (self._w_in * out).sum(-1, keepdim=True)
-        s2 = (self._w_out * self._vt * u).sum(-1, keepdim=True)
-        r2 = (self._w_in * self._vt * out).sum(-1, keepdim=True)
-        return out + self._c1 * (s1 - r1) + self._c2 * (self.s * s2 - r2)
+        want = (T[0], self.s * T[1])
+        for b in range(2):
+            got = (self._w_in * self._mu_rows[b] * out).sum(-1, keepdim=True)
+            out = out + self._C2[:, b, :] * (want[b] - got)
+        return out

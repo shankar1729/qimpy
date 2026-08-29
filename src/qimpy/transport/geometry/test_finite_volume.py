@@ -377,6 +377,56 @@ def test_cartesian_reflective_walls_conserve_mass() -> None:
     assert abs(mass() - m0) / abs(m0) < 1e-12, abs(mass() - m0) / abs(m0)
 
 
+def test_cartesian_wall_energy_and_pressure() -> None:
+    """A specular wall is elastic and reverses only the normal velocity, so it
+    conserves FOUR flux moments, not two:
+
+        particle   sum_I |v.n| g        ==  sum_O |v.n| u
+        tangential sum_I |v.n|(v.t) g   ==  sum_O |v.n|(v.t) u
+        energy     sum_I |v.n| eps g    ==  sum_O |v.n| eps u
+        pressure   sum_I |v.n||v.n| g   ==  sum_O |v.n||v.n| u
+
+    The first two are pinned by the diffuse-refill closure; the last two were
+    left free and carried the whole bilinear-interpolation error -- 1.76e-4 and
+    9.19e-5 at production dk, converging only at order 2. The stage-1 rank-4
+    correction removes them.
+
+    ⛔ The energy moment must be CENTRED on mu before it is used as either a
+    constraint row or a test weight: eps ~ mu across the active shell, so the
+    raw moment is dominated by a constant and both the Gram and this assertion
+    lose their resolving power."""
+    torch.set_default_dtype(torch.float64)
+    pg = ProcessGrid(rc.comm, "rk", (1, 1))
+    material = FermiSurface(
+        process_grid=pg, kF=7.5e-3, vF=0.11194, M_theta=32, Nr=6, T=1.3301e-5,
+        xi_max=6.0, tau_p=np.inf, tau_ee=np.inf, specularity=1.0,
+        cartesian=dict(annulus_xi=0.0, te_fac_max=2.0))
+    rep = material.representation
+    th = torch.linspace(0.0, 2 * np.pi, 17, device=rc.device)[:-1]
+    n = torch.stack([th.cos(), th.sin()], -1)
+    refl = material.get_reflector(n)
+    v = rep.k / rep.m_star
+    vmax = float(v.norm(dim=1).max())
+    vn = (v[None] * n[:, None]).sum(-1)
+    t_hat = torch.stack([-n[:, 1], n[:, 0]], -1)
+    vt = (v[None] * t_hat[:, None]).sum(-1) / vmax
+    e_c = (((rep.k ** 2).sum(-1) / (2 * rep.m_star) - rep.mu)
+           / (rep.xi_max * rep.T_temp))[None].expand_as(vt)
+    w_in, w_out = vn.abs() * (vn < 0), vn.abs() * (vn > 0)
+    kD = 0.03 * torch.tensor([1.0, 0.3], device=rc.device)
+    eps = ((rep.k - kD) ** 2).sum(-1) / (2 * rep.m_star)
+    u = (torch.special.expit(-(eps - rep.mu) / rep.T_temp)
+         - rep._f0_lab)[None].repeat(n.shape[0], 1)
+    out = refl(u[None])[0]
+    for name, wgt in (("particle", torch.ones_like(vt)), ("tangential", vt),
+                      ("energy", e_c), ("pressure", vn.abs() / vmax)):
+        lhs = (w_in * wgt * out).sum(-1)
+        rhs = (w_out * wgt * u).sum(-1)
+        scale = (w_out * wgt.abs() * u.abs()).sum(-1).clamp(min=1e-300)
+        err = float(((lhs - rhs).abs() / scale).max())
+        assert err < 1e-12, (name, err)
+
+
 def test_cartesian_wall_specularity() -> None:
     """The Cartesian wall at arbitrary specularity s.
 
@@ -665,6 +715,7 @@ if __name__ == "__main__":
     test_cartesian_reflective_walls_conserve_mass(); print("cartesian_wall_mass: PASS")
     test_cartesian_wall_conserves_flux_and_shear(); print("cartesian_wall_flux_shear: PASS")
     test_cartesian_wall_specularity(); print("cartesian_wall_specularity: PASS")
+    test_cartesian_wall_energy_and_pressure(); print("cartesian_wall_energy_pressure: PASS")
     test_oblique_wall_conserves_tangential_momentum(); print("oblique_wall_tang_momentum: PASS")
     test_contact_driven_state_is_bounded(); print("contact_driven_bounded: PASS")
     test_biased_contacts_balance_at_steady_state(); print("biased_balance: PASS")
