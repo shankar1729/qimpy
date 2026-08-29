@@ -715,7 +715,7 @@ class Cartesian(KRepresentation):
         return _CartesianContactor(self, n, **kwargs)
 
     def get_reflector(self, n: torch.Tensor) -> Callable:
-        return _CartesianReflector(self, n)
+        return _CartesianReflector(self, n, self.fs.specularity)
 
 
 class _CartesianContactor:
@@ -768,25 +768,51 @@ class _CartesianReflector:
     quadrature node IS a node -- which is why the four shipped conservation tests
     never caught it.
 
-    A specular wall has a SECOND invariant, and the same interpolation breaks it
-    too: it exerts no tangential force, so the shear stress across it vanishes,
+    A wall has a SECOND invariant, and the same interpolation breaks it too --
+    the tangential momentum flux, i.e. the shear stress it exerts:
 
-        sum_{v.n<0} |v.n| (v.t) out  ==  sum_{v.n>0} |v.n| (v.t) u .          (**)
+        sum_{v.n<0} |v.n| (v.t) out  ==  s * sum_{v.n>0} |v.n| (v.t) u .      (**)
 
-    Uncorrected residual: 4.0e-3 on a drifted Fermi-Dirac trace.
+    Uncorrected residual at s = 1: 4.0e-3 on a drifted Fermi-Dirac trace.
+
+    ARBITRARY SPECULARITY.  (*) is s-INDEPENDENT -- a wall passes zero net
+    current whatever it does to momentum -- and (**) carries the entire s
+    dependence: at s = 1 tangential momentum is conserved (a specular wall
+    exerts no drag), at s = 0 the target is zero (a diffuse wall exerts full
+    drag).  So the ghost is
+
+        out = s * (interpolated specular)  +  (diffuse refill)
+
+    with the refill fixed by (*) and (**).
 
     Corrections, in order:
       1. renormalise the surviving bilinear weights back to sum 1, undoing the
          dropped corners;
       2. a rank-2 closure enforcing (*) and (**) simultaneously,
-             out <- out + c1 (s1 - r1) + c2 (s2 - r2),
-         with the correction vectors sought in span{a, b}, a = w_in,
-         b = w_in * v.t, biorthogonal to the two constraint functionals:
+             out <- out + c1 (s1 - r1) + c2 (s*s2 - r2),
+         with the correction vectors sought in span{a, b}, a = 1_I (the inflow
+         INDICATOR), b = (v.t) 1_I, biorthogonal to the two constraint
+         functionals:
              [c1 c2] = [a b] G^-1,   G = [[L1a, L1b], [L2a, L2b]].
          Both identities then hold exactly for every u.  The 2x2 system is
-         essentially orthogonal in practice (measured g11 g22 / det in
-         [1.0000, 1.0002]), so there is no amplification; it falls back to the
-         rank-1 correction if G is ever singular.
+         essentially orthogonal in practice (measured g11 g22 / det = 1.00000),
+         so there is no amplification; it falls back to the rank-1 correction if
+         G is ever singular.
+
+    ⛔ The basis must be the inflow INDICATOR, not the flux weight w_in = |v.n|.
+    At s = 1 the correction is a ~0.4% residual and the basis is immaterial, but
+    at s = 0 the refill IS the entire ghost, and a refill proportional to |v.n|
+    is not the Maxwell law -- a diffuse wall re-emits ISOTROPICALLY, f = const,
+    whose FLUX then goes like |v.n|.  With the indicator basis the s = 0 ghost
+    is constant over each face's inflow set to 7.5e-16.  This is the same span
+    the modal _DeltaKReflector uses ({1, sin(theta-phi)}); the (v.t) admixture
+    absorbs the asymmetry of the DISCRETE inflow set so the refill carries
+    exactly zero tangential momentum rather than approximately zero.
+
+    Measured across s = 0, 0.25, 0.5, 0.75, 1: mass residual <= 3.2e-16, shear
+    residual <= 3.0e-16, and the per-face drag ratio
+    (returned j_t)/(incident j_t) equals s to every printed digit, matching the
+    modal reflector exactly at each s.
 
     Step 2 is deliberately LINEAR.  The obvious alternative -- rescaling by
     beta = src/ret -- also makes (*) exact but is a ratio of two linear
@@ -803,8 +829,10 @@ class _CartesianReflector:
     currents move by ~4e-7 relative and the f range and interior DMP are
     unchanged to all printed digits.
     """
-    def __init__(self, rep: "Cartesian", n: torch.Tensor):
+    def __init__(self, rep: "Cartesian", n: torch.Tensor,
+                 specularity: float = 1.0):
         n = n.to(rc.device); self.rep = rep; self.Ns = n.shape[0]
+        self.s = float(specularity)
         k = rep.k                                       # active points
         kdotn = (k[None] * n[:, None]).sum(-1)
         k_ref = k[None] - 2.0 * kdotn.unsqueeze(-1) * n[:, None]
@@ -836,11 +864,11 @@ class _CartesianReflector:
         self._vt = (v[None] * t_hat[:, None]).sum(-1) / vmax
         self._w_in = vn.abs() * (vn < 0)                # (Ns, Nk)
         self._w_out = vn.abs() * (vn > 0)
-        a = self._w_in
-        b = self._w_in * self._vt
-        g11 = (a * a).sum(-1, keepdim=True)
-        g12 = (a * b).sum(-1, keepdim=True)
-        g22 = (b * b).sum(-1, keepdim=True)
+        a = (vn < 0).to(v.dtype)                        # inflow INDICATOR
+        b = a * self._vt
+        g11 = (self._w_in * a).sum(-1, keepdim=True)
+        g12 = (self._w_in * b).sum(-1, keepdim=True)
+        g22 = (self._w_in * self._vt * b).sum(-1, keepdim=True)
         det = g11 * g22 - g12 * g12
         ok = det.abs() > 1e-13 * (g11 * g22).abs().clamp(min=1e-300)
         d = torch.where(ok, det, torch.ones_like(det))
@@ -849,13 +877,15 @@ class _CartesianReflector:
         self._c2 = torch.where(ok, (b * g11 - a * g12) / d, torch.zeros_like(a))
 
     def __call__(self, u: torch.Tensor) -> torch.Tensor:
-        out = torch.zeros_like(u)
+        spec = torch.zeros_like(u)
         for idx, wt in zip(self._idx, self._wt):
-            out += wt[None] * torch.gather(u, -1, idx[None].expand_as(u))
-        # flux the wall received (s) vs the flux it returns (r), for both the
-        # particle and the tangential-momentum moment
+            spec += wt[None] * torch.gather(u, -1, idx[None].expand_as(u))
+        out = self.s * spec
+        # flux the wall received (s_) vs the flux it returns (r_), for both the
+        # particle and the tangential-momentum moment.  The tangential TARGET
+        # carries the specularity: s = 1 conserves it, s = 0 destroys it.
         s1 = (self._w_out * u).sum(-1, keepdim=True)
         r1 = (self._w_in * out).sum(-1, keepdim=True)
         s2 = (self._w_out * self._vt * u).sum(-1, keepdim=True)
         r2 = (self._w_in * self._vt * out).sum(-1, keepdim=True)
-        return out + self._c1 * (s1 - r1) + self._c2 * (s2 - r2)
+        return out + self._c1 * (s1 - r1) + self._c2 * (self.s * s2 - r2)

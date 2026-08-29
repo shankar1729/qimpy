@@ -377,6 +377,66 @@ def test_cartesian_reflective_walls_conserve_mass() -> None:
     assert abs(mass() - m0) / abs(m0) < 1e-12, abs(mass() - m0) / abs(m0)
 
 
+def test_cartesian_wall_specularity() -> None:
+    """The Cartesian wall at arbitrary specularity s.
+
+    Two invariants, flux-weighted over the respective half-spaces:
+        particle:  sum_{v.n<0} |v.n| ghost       ==     sum_{v.n>0} |v.n| u
+        shear:     sum_{v.n<0} |v.n|(v.t) ghost  ==  s* sum_{v.n>0} |v.n|(v.t) u
+    The first is s-independent (a wall passes zero net current whatever it does
+    to momentum); the second carries the whole s dependence, so the DRAG ratio
+    (returned tangential flux)/(incident) must come out exactly s.
+
+    ⛔ Both must be checked PER FACE. Summing across faces mixes incompatible
+    tangent directions and lets the denominator cross zero -- the same trap that
+    made the old antisymmetry gate unusable.
+
+    At s = 0 the refill is the whole ghost and must be the Maxwell law, i.e.
+    CONSTANT over each face's inflow set. That is what forces the correction
+    basis to be the inflow indicator rather than the flux weight |v.n|."""
+    torch.set_default_dtype(torch.float64)
+    pg = ProcessGrid(rc.comm, "rk", (1, 1))
+    th = torch.linspace(0.0, 2 * np.pi, 17, device=rc.device)[:-1]
+    n = torch.stack([th.cos(), th.sin()], -1)
+    for s in (0.0, 0.5, 1.0):
+        material = FermiSurface(
+            process_grid=pg, kF=1.0, vF=1.5, M_theta=8, Nr=1, T=1.0,
+            tau_p=np.inf, tau_ee=np.inf, specularity=s,
+            cartesian=dict(annulus_xi=0.0, te_fac_max=2.0, n_k=32))
+        rep = material.representation
+        refl = material.get_reflector(n)
+        v = material.transport_velocity
+        vn = (v[None] * n[:, None]).sum(-1)
+        t_hat = torch.stack([-n[:, 1], n[:, 0]], -1)
+        vt = (v[None] * t_hat[:, None]).sum(-1)
+        w_in, w_out = vn.abs() * (vn < 0), vn.abs() * (vn > 0)
+        kD = 0.03 * torch.tensor([1.0, 0.3], device=rc.device)
+        eps = ((rep.k - kD) ** 2).sum(-1) / (2 * rep.m_star)
+        u = (torch.special.expit(-(eps - rep.mu) / rep.T_temp)
+             - rep._f0_lab)[None].repeat(n.shape[0], 1)
+        out = refl(u[None])[0]
+        for wgt, tgt in ((torch.ones_like(vt), 1.0), (vt, s)):
+            lhs = (w_in * wgt * out).sum(-1)
+            rhs = tgt * (w_out * wgt * u).sum(-1)
+            scale = (w_out * wgt.abs() * u.abs()).sum(-1).clamp(min=1e-300)
+            err = float(((lhs - rhs).abs() / scale).max())
+            assert err < 1e-12, (s, tgt, err)
+        # drag ratio, per face, on the faces that carry real tangential momentum
+        s2 = (w_out * vt * u).sum(-1)
+        r2 = (w_in * vt * out).sum(-1)
+        sc = (w_out * vt.abs() * u.abs()).sum(-1)
+        good = s2.abs() > 1e-6 * sc
+        if bool(good.any()):
+            ratio = r2[good] / s2[good]
+            assert float((ratio - s).abs().max()) < 1e-10, (s, float(ratio.max()))
+        if s == 0.0:                       # the refill must be the Maxwell law
+            for e in range(n.shape[0]):
+                sel = out[e][w_in[e] > 0]
+                m = sel.mean()
+                dev = float((sel - m).abs().max() / m.abs().clamp(min=1e-300))
+                assert dev < 1e-12, dev
+
+
 def test_cartesian_wall_conserves_flux_and_shear() -> None:
     """The instantaneous form: a specular wall returns exactly the flux it
     receives, and exerts no tangential force, for ANY trace:
@@ -604,6 +664,7 @@ if __name__ == "__main__":
     test_reflective_walls_conserve_mass_long_time(); print("reflective_mass_long_time: PASS")
     test_cartesian_reflective_walls_conserve_mass(); print("cartesian_wall_mass: PASS")
     test_cartesian_wall_conserves_flux_and_shear(); print("cartesian_wall_flux_shear: PASS")
+    test_cartesian_wall_specularity(); print("cartesian_wall_specularity: PASS")
     test_oblique_wall_conserves_tangential_momentum(); print("oblique_wall_tang_momentum: PASS")
     test_contact_driven_state_is_bounded(); print("contact_driven_bounded: PASS")
     test_biased_contacts_balance_at_steady_state(); print("biased_balance: PASS")
