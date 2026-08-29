@@ -747,10 +747,50 @@ class _CartesianContactor:
 class _CartesianReflector:
     """Specular wall: delta-f(k) <- delta-f(k - 2(k.n)n) via bilinear interp on the
     underlying uniform grid (exact for axis-aligned walls).  With a circular
-    active set, stencil indices are translated full-grid -> active; the rare
-    stencil corner beyond the guard ring (occupancy < e^-7) is dropped (weight
-    zeroed) -- reflection preserves |k|, so every reflected ACTIVE point itself
-    lies inside the active radius."""
+    active set, stencil indices are translated full-grid -> active; a stencil
+    corner beyond the guard ring is dropped (weight zeroed) -- reflection
+    preserves |k|, so every reflected ACTIVE point itself lies inside the active
+    radius, but the four GRID CORNERS around it need not be.
+
+    EXACT PARTICLE-FLUX CONSERVATION.  Bilinear interpolation makes the rows sum
+    to 1, which conserves OCCUPANCY per output node.  What a wall must conserve
+    is the particle FLUX -- the net normal current through the face is zero:
+
+        sum_{v.n<0} |v.n| out  ==  sum_{v.n>0} |v.n| u                       (*)
+
+    (`wk` is a scalar, so (*) involves only |v.n|.)  That is a condition on the
+    |v.n|-weighted COLUMNS, which bilinear weights do not satisfy: the four
+    corners carry different |v.n| from the point being interpolated, and dropped
+    corners remove weight outright.  Left uncorrected the wall is ~0.4% ABSORBING
+    per bounce (1.9% worst face), and a closed cavity leaks 2.0e-6 of its
+    deviation mass per step, linearly: 5.9e-3 over 3000 steps.  The modal
+    (_DeltaKReflector) path does not have this problem -- the mirror image of a
+    quadrature node IS a node -- which is why the four shipped conservation tests
+    never caught it.
+
+    Two corrections, in order:
+      1. renormalise the surviving bilinear weights back to sum 1, undoing the
+         dropped corners;
+      2. a rank-1 closure  out <- out + c (src - ret)  with c chosen so that
+         sum_i w_in,i c_i = 1, which makes (*) hold exactly for every u.
+         c ∝ w_in is the minimum-norm such vector.
+
+    Step 2 is deliberately LINEAR.  The obvious alternative -- rescaling by
+    beta = src/ret -- also makes (*) exact but is a ratio of two linear
+    functionals, hence nonlinear in u (measured additivity defect 4.8e-3), and
+    `FiniteVolume._setup_boundary` builds its dense `_refl_mat` cache by pushing
+    the Nk basis vectors through this operator, i.e. it ASSUMES linearity.  A
+    nonlinear reflector would silently disagree with its own cache at small Nk.
+    Measured, closed cavity, 3000 steps: |dM|/M 5.9e-3 -> 1.8e-16 and flat,
+    net wall current 4.5e-3 -> 4.0e-16, additivity defect 3.9e-16, global
+    overshoot unchanged at 1.1e-16, undershoot 1.7e-3 -> 2.9e-11.
+
+    NOT fixed here: the wall's tangential momentum flux (shear stress) still
+    carries a ~4e-3 defect from the same interpolation.  A two-parameter closure
+    out <- out * (a + b v.t) drives it to 1.1e-14 but costs bound preservation
+    (it introduced a 7.7e-4 overshoot where this correction introduces none), so
+    it is not adopted.
+    """
     def __init__(self, rep: "Cartesian", n: torch.Tensor):
         n = n.to(rc.device); self.rep = rep; self.Ns = n.shape[0]
         k = rep.k                                       # active points
@@ -771,9 +811,21 @@ class _CartesianReflector:
                 idx = a.clamp(min=0)
             self._idx.append(idx)
             self._wt.append(wt)
+        # (1) undo the dropped corners: the surviving weights must still sum to 1
+        tot = sum(self._wt)
+        scale = torch.where(tot > 1e-12, 1.0 / tot.clamp(min=1e-12),
+                            torch.zeros_like(tot))
+        self._wt = [w * scale for w in self._wt]
+        # (2) rank-1 flux closure (see the class docstring)
+        vn = kdotn / rep.m_star                         # v.n on the active set
+        self._w_in = vn.abs() * (vn < 0)                # (Ns, Nk)
+        self._w_out = vn.abs() * (vn > 0)
+        self._c = self._w_in / (self._w_in ** 2).sum(-1, keepdim=True).clamp(min=1e-300)
 
     def __call__(self, u: torch.Tensor) -> torch.Tensor:
         out = torch.zeros_like(u)
         for idx, wt in zip(self._idx, self._wt):
             out += wt[None] * torch.gather(u, -1, idx[None].expand_as(u))
-        return out
+        ret = (self._w_in * out).sum(-1, keepdim=True)   # flux the wall returns
+        src = (self._w_out * u).sum(-1, keepdim=True)    # flux the wall received
+        return out + self._c * (src - ret)

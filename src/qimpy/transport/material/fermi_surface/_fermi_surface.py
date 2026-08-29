@@ -513,6 +513,17 @@ class FermiSurface(Material):
         return self.representation.get_contactor(n, **kwargs)
 
     def get_reflector(self, n: torch.Tensor) -> Callable:
+        # `specularity` is honoured by the modal (_DeltaKReflector) path only --
+        # Cartesian.get_reflector takes no specularity argument and always builds
+        # a fully specular wall.  Silently ignoring a user-facing knob is worse
+        # than refusing, so refuse: a run configured with specularity < 1 on the
+        # Cartesian grid would otherwise report diffuse-wall physics it never ran.
+        if self.specularity != 1.0 and isinstance(self.representation, Cartesian):
+            raise InvalidInputException(
+                f"specularity = {self.specularity} is not implemented for the "
+                "Cartesian k-representation (only for the modal / delta_k one); "
+                "it would be silently ignored. Use specularity = 1, or the modal "
+                "representation.")
         return self.representation.get_reflector(n)
 
     def initialize_fields(self, rho, params, patch_id) -> None:

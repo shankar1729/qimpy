@@ -339,6 +339,79 @@ def test_reflective_walls_conserve_mass_long_time() -> None:
     assert abs(_integral(geom, mat, 0) - m0) / abs(m0) < 1e-10
 
 
+def test_cartesian_reflective_walls_conserve_mass() -> None:
+    """The same closed cavity on the CARTESIAN k-representation.
+
+    ⛔ THIS IS NOT REDUNDANT WITH THE TEST ABOVE.  Every conservation test in
+    this file uses the MODAL FermiSurface, where the mirror image of a
+    quadrature node IS a node, so specular reflection is an exact permutation
+    and the wall conserves flux for free.  On the Cartesian grid the mirrored
+    point generally lands between nodes and is bilinearly interpolated: the
+    weights sum to 1, so OCCUPANCY is conserved, but the four corners carry
+    different |v.n| so the particle FLUX moment is not -- and corners outside
+    the active set are dropped outright.  Measured before the rank-1 closure was
+    added to _CartesianReflector: the wall was ~0.4% absorbing per bounce and a
+    closed cavity lost 5.9e-3 of its deviation mass over 3000 steps, LINEARLY in
+    step count, while all four modal conservation tests passed.
+
+    The bound below is 1e-12 over 400 steps; the uncorrected code gives ~8e-4.
+    """
+    torch.set_default_dtype(torch.float64)
+    tmp = tempfile.mkdtemp()
+    path = _make_rect_mesh(10.0, os.path.join(tmp, "rect.npz"), all_walls=True)
+    pg = ProcessGrid(rc.comm, "rk", (1, 1))
+    material = FermiSurface(
+        process_grid=pg, kF=1.0, vF=1.5, M_theta=8, Nr=1, T=1.0,
+        tau_p=np.inf, tau_ee=np.inf, specularity=1.0,
+        cartesian=dict(annulus_xi=0.0, te_fac_max=2.0, n_k=32))
+    geom = FiniteVolume(material=material, mesh_file=path, contacts={},
+                        process_grid=pg)
+    cen = torch.from_numpy(geom.geom.centroid_np).to(rc.device)
+    q0 = torch.tensor([55.0, 30.0], dtype=torch.float64, device=rc.device)
+    blob = torch.exp(-((cen - q0) ** 2).sum(-1) / (2 * 6.0 ** 2))
+    geom._u = blob[:, None].repeat(1, geom.Nk)
+    w = material.representation.get_density_weight()
+    mass = lambda: float((geom.geom.area[:, None] * geom._u * w[None]).sum())
+    m0 = mass()
+    _step(geom, 400)
+    assert abs(mass() - m0) / abs(m0) < 1e-12, abs(mass() - m0) / abs(m0)
+
+
+def test_cartesian_wall_has_zero_net_current() -> None:
+    """The instantaneous form: a specular wall returns exactly the flux it
+    receives, ``sum_{v.n<0} |v.n| ghost == sum_{v.n>0} |v.n| u``, for ANY trace.
+
+    This is the identity the rank-1 closure in _CartesianReflector enforces;
+    without it the residual is ~4.5e-3 on a drifted Fermi-Dirac trace and up to
+    1.9e-2 on the worst face."""
+    torch.set_default_dtype(torch.float64)
+    pg = ProcessGrid(rc.comm, "rk", (1, 1))
+    material = FermiSurface(
+        process_grid=pg, kF=1.0, vF=1.5, M_theta=8, Nr=1, T=1.0,
+        tau_p=np.inf, tau_ee=np.inf, specularity=1.0,
+        cartesian=dict(annulus_xi=0.0, te_fac_max=2.0, n_k=32))
+    rep = material.representation
+    th = torch.linspace(0.0, 2 * np.pi, 17, device=rc.device)[:-1]  # all angles
+    n = torch.stack([th.cos(), th.sin()], -1)
+    refl = material.get_reflector(n)
+    v = material.transport_velocity
+    vn = (v[None] * n[:, None]).sum(-1)
+    w_in, w_out = vn.abs() * (vn < 0), vn.abs() * (vn > 0)
+    torch.manual_seed(0)
+    for u in (torch.rand(n.shape[0], rep.k.shape[0], device=rc.device),
+              torch.ones(n.shape[0], rep.k.shape[0], device=rc.device)):
+        out = refl(u[None])[0]
+        lhs, rhs = (w_in * out).sum(-1), (w_out * u).sum(-1)
+        err = ((lhs - rhs).abs() / rhs.abs().clamp(min=1e-300)).max()
+        assert float(err) < 1e-12, float(err)
+    # and it must stay LINEAR: _setup_boundary caches it as a dense matrix by
+    # pushing the Nk basis vectors through, which assumes additivity.
+    a = torch.rand(n.shape[0], rep.k.shape[0], device=rc.device)
+    b = torch.rand(n.shape[0], rep.k.shape[0], device=rc.device)
+    d = (refl((a + b)[None]) - refl(a[None]) - refl(b[None])).abs().max()
+    assert float(d) < 1e-12 * float(refl((a + b)[None]).abs().max()), float(d)
+
+
 def test_oblique_wall_conserves_tangential_momentum() -> None:
     """On a tilted strip (oblique specular walls + periodic along the slant) the
     wall-tangent current J_tang = cos(a) jx + sin(a) jy is a global invariant of
@@ -511,6 +584,8 @@ if __name__ == "__main__":
     test_current_source_delivers_prescribed_current(); print("current_source_delivers: PASS")
     test_current_source_polarity_reverses_with_sign(); print("current_source_polarity: PASS")
     test_reflective_walls_conserve_mass_long_time(); print("reflective_mass_long_time: PASS")
+    test_cartesian_reflective_walls_conserve_mass(); print("cartesian_wall_mass: PASS")
+    test_cartesian_wall_has_zero_net_current(); print("cartesian_wall_zero_current: PASS")
     test_oblique_wall_conserves_tangential_momentum(); print("oblique_wall_tang_momentum: PASS")
     test_contact_driven_state_is_bounded(); print("contact_driven_bounded: PASS")
     test_biased_contacts_balance_at_steady_state(); print("biased_balance: PASS")
