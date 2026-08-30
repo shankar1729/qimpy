@@ -18,6 +18,7 @@ from qimpy.mpi import ProcessGrid
 from ..material import FermiSurface
 from ._mesh import load_mesh, save_mesh
 from ._finite_volume import FiniteVolume, build_fv_geom
+from . import TensorList
 
 
 # --------------------------------------------------------------------------- #
@@ -863,3 +864,57 @@ def test_diffuse_wall_alpha_threshold() -> None:
     for te_fac in (1.0, 5.6):
         f, alpha = reflect(1.0, te_fac)
         assert float(f.max()) < 1.0 + 1e-14, (te_fac, float(f.max()))
+
+
+def test_limit_positivity_restores_bounds_and_conserves() -> None:
+    """The guarantee itself: bounds restored, per-channel particle number exact.
+
+    TimeEvolution._rk_step has always had the right shape -- SSPRK3 in
+    Shu-Osher form, so every stage is a convex combination of forward-Euler
+    steps, with a limiter hook applied after each one -- but the hook resolved
+    through getattr(geometry, "limit_positivity", None) and no geometry defined
+    it, so positivity=True was a no-op.  This covers the implementation.
+
+    Three things have to hold, and only the first is obvious:
+      1. after limiting, f = f0 + rho is inside [0, 1];
+      2. every k-channel's area-weighted spatial integral is UNCHANGED to
+         roundoff -- that is the quantity per-channel advection conserves, and
+         it is what the contact currents are computed from, so a limiter that
+         moved it would corrupt the answer while making the plot look nicer;
+      3. on a state already inside [0, 1] the limiter is the IDENTITY, so a
+         healthy run pays nothing and smooth regions are untouched.
+    """
+    torch.set_default_dtype(torch.float64)
+    # ⛔ _build_fv defaults to the MODAL material, where rho is a set of mode
+    # coefficients and not an occupancy, so limit_positivity returns unchanged
+    # and this whole test passes vacuously in 0.9 s with nothing asserted. The
+    # limiter is a statement about occupancy, so it needs the Cartesian
+    # representation -- which is also the one the mixer actually runs.
+    geom, material = _build_fv(
+        {"source": {"dmu": 2.0e-4}, "drain": {"dmu": -2.0e-4}},
+        kF=7.5e-3, vF=0.11194, M=16, T=1.3301e-5, xi_max=6.0,
+        cartesian=dict(annulus_xi=0.0, te_fac_max=2.0, dk=6.0e-4))
+    f0 = material.representation._f0_lab
+    assert f0 is not None, "expected the Cartesian (occupancy) representation"
+    area = geom.geom.area[:, None]
+    rho = TensorList([geom.rho[0].clone()])
+
+    # 3. identity on an in-bounds state
+    f = f0[None] + rho[0]
+    if float(f.min()) >= 0.0 and float(f.max()) <= 1.0:
+        out = geom.limit_positivity(rho)[0]
+        assert float((out - rho[0]).abs().max()) == 0.0
+
+    # push a few cells out of bounds on both sides, then limit
+    bad = rho[0].clone()
+    bad[0] = -0.5 - f0
+    bad[1] = 1.5 - f0
+    n_before = (area * (f0[None] + bad)).sum(0)
+    out = geom.limit_positivity(TensorList([bad]))[0]
+    f_out = f0[None] + out
+    assert float(f_out.min()) > -1e-13, float(f_out.min())
+    assert float(f_out.max()) < 1.0 + 1e-13, float(f_out.max())
+    n_after = (area * f_out).sum(0)
+    rel = float((n_after - n_before).abs().max()
+                / n_before.abs().max().clamp(min=1e-300))
+    assert rel < 1e-13, rel
