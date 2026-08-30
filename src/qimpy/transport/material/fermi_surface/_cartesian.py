@@ -901,7 +901,41 @@ class _CartesianReflector:
         #   row and the Gram becomes singular.  Centring on mu fixes that.
         self._mu_rows = (torch.ones_like(self._vt), self._vt, self._eps,
                          self._vna)
-        infl = (vn < 0).to(v.dtype)
+        # BOUND PRESERVATION.  The closure adds c_a * (T_a - got), where T_a is
+        # a moment of the WHOLE outflow trace -- dominated by the O(1) values at
+        # the Fermi surface.  Built on the bare inflow indicator, c_a is O(1)
+        # across the ENTIRE inflow set, so that Fermi-scale residual is sprayed
+        # uniformly onto k-space, including the tail at |k| >> kF where the
+        # occupancy is e^-69.  Measured on a drifted-FD trace whose tail holds
+        # f = 1.5e-17, the reflector returned f = -2.04e-6 there: eleven orders
+        # of magnitude too big, and the origin of the negative occupancies in
+        # the ballistic run.  (Ablation: renormalised bilinear alone gives
+        # -9.9e-30, i.e. exactly bound-preserving; stage 1 alone gives the full
+        # -2.04e-6.)
+        #
+        # The cure is to deposit the correction where the distribution actually
+        # lives, by weighting the BASIS with the Fermi shell envelope f0(1-f0).
+        # This is also the physically correct shape: a thermal wall re-emits
+        # delta-f proportional to f0(1-f0), so a refill that was flat in |k| was
+        # re-emitting particles far above the Fermi surface with equal weight.
+        #
+        # ⛔ THE ENVELOPE GOES ON THE BASIS ONLY, NEVER ON THE FUNCTIONAL L_a.
+        # L_a is the physical flux moment the wall has to conserve; reweighting
+        # it would change WHAT is imposed rather than where it lands.
+        # Biorthogonality is untouched, so all four moments stay exact.
+        #
+        # ⛔ THE WIDTH IS NOT FREE, and the threshold is sharp.  The correction
+        # is bounded by the occupancy only if the envelope decays at least as
+        # fast as f does, i.e. T_w <= T.  Measured min f against width:
+        #     T_w/T   none      1         2         4         6        12
+        #     min f  -2.3e-6  -1.3e-29  -4.2e-7  -4.4e-6  -5.0e-6  -2.8e-6
+        # T_w = T is the largest width that works, and it also conditions
+        # BETTER than the flat basis (cond G4 91.8 vs 1696), contrary to the
+        # worry that a one-cell-wide shell would make eps degenerate with 1.
+        fw = torch.special.expit(-(eps - rep.mu) / rep.T_temp)
+        env = (fw * (1.0 - fw))[None].expand_as(self._vt)
+        env = env / env.max().clamp(min=1e-300)
+        infl = (vn < 0).to(v.dtype) * env
 
         def biorth(rows):
             """[c_1..c_r] with L_a(c_b) = delta_ab; falls back to the

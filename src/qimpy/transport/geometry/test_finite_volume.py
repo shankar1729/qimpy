@@ -480,11 +480,40 @@ def test_cartesian_wall_specularity() -> None:
             ratio = r2[good] / s2[good]
             assert float((ratio - s).abs().max()) < 1e-10, (s, float(ratio.max()))
         if s == 0.0:                       # the refill must be the Maxwell law
+            # ⛔ The Maxwell law for a DEGENERATE gas is not "flat in k".
+            # A diffuse wall re-emits electrons thermalised to the wall, at a
+            # mu_w fixed by particle-flux balance, so what it returns is
+            #     delta-f = FD(eps; mu_w, T) - FD(eps; mu, T)
+            #             = (mu_w - mu) f0 (1 - f0) / T + O(dmu^2),
+            # proportional to the Fermi shell envelope -- the same weight
+            # qimpy's own linear contactor already uses
+            # (df_contact = (dmu - vD k.n) f0 (1 - f0) / T).
+            #
+            # This assertion used to demand that `out` ITSELF be constant over
+            # the inflow set, which is the classical non-degenerate law and
+            # implies the wall re-emits at |k| >> kF with the same weight as at
+            # the Fermi surface.  That is unphysical, and it was also the
+            # mechanism driving the ballistic run's occupancies negative: the
+            # closure deposited a Fermi-scale correction on an empty tail,
+            # reaching f = -2.04e-6 where the physical occupancy is 1.5e-17.
+            # What is constant is the RATIO to the envelope.
+            fw = torch.special.expit(
+                -((rep.k ** 2).sum(-1) / (2 * rep.m_star) - rep.mu)
+                / rep.T_temp)
+            envelope = fw * (1.0 - fw)
+            envelope = envelope / envelope.max()
             for e in range(n.shape[0]):
-                sel = out[e][w_in[e] > 0]
+                live = (w_in[e] > 0) & (envelope > 1e-8)
+                sel = out[e][live] / envelope[live]
                 m = sel.mean()
                 dev = float((sel - m).abs().max() / m.abs().clamp(min=1e-300))
-                assert dev < 1e-12, dev
+                assert dev < 1e-10, dev
+            # and nothing may survive outside the shell at all
+            for e in range(n.shape[0]):
+                far = (w_in[e] > 0) & (envelope < 1e-20)
+                if bool(far.any()):
+                    assert float(out[e][far].abs().max()) < 1e-20, \
+                        float(out[e][far].abs().max())
 
 
 def test_cartesian_wall_conserves_flux_and_shear() -> None:
@@ -722,3 +751,56 @@ if __name__ == "__main__":
     test_curved_mass_conservation(); print("curved_mass_conservation: PASS")
     test_decomp_matches_serial(); print("decomp_matches_serial: PASS")
     print("ALL PASS")
+
+
+def test_cartesian_wall_preserves_occupancy_bounds() -> None:
+    """The wall may not put electrons where there are none.
+
+    The four moment tests above pin what the wall CONSERVES; none of them
+    constrains WHERE in k the closure deposits its correction.  Built on the
+    bare inflow indicator, the biorthogonal vectors c_a are O(1) across the
+    whole inflow set, so the correction c_a * (T_a - got) -- whose size is set
+    by the O(1) trace at the Fermi surface -- lands with equal weight on the
+    tail at |k| >> kF, where the occupancy is e^-69.  Measured before the fix:
+    the reflected f reached -2.04e-6 in a region physically holding 1.5e-17,
+    and that is where the ballistic run's negative occupancies came from.
+
+    Weighting the closure basis with the Fermi shell envelope f0(1-f0) confines
+    the correction to the shell.  This test is the one that fails without it;
+    every moment test above passes either way, which is exactly why this was
+    missed.
+
+    ⛔ Checks f = f0 + delta-f, not delta-f: the bound being asserted is Pauli
+    occupancy in [0, 1], and delta-f is legitimately negative on its own.
+    ⛔ Includes a HOT trace.  The envelope has width T while te_fac_max lets the
+    physical distribution be several T wide, so the correction is concentrated
+    on a shell thinner than the data -- safe in principle (it decays faster
+    than f) but it has to be measured, not argued.
+    """
+    torch.set_default_dtype(torch.float64)
+    pg = ProcessGrid(rc.comm, "rk", (1, 1))
+    material = FermiSurface(
+        process_grid=pg, kF=7.5e-3, vF=0.11194, M_theta=32, Nr=6, T=1.3301e-5,
+        xi_max=6.0, tau_p=np.inf, tau_ee=np.inf, specularity=1.0,
+        cartesian=dict(annulus_xi=0.0, te_fac_max=6.0))
+    rep = material.representation
+    f0 = rep._f0_lab
+    th = torch.linspace(0.0, 2 * np.pi, 17, device=rc.device)[:-1]
+    n = torch.stack([th.cos(), th.sin()], -1)
+    kD = torch.tensor([6.0e-5, 0.0], device=rc.device)
+    eps = ((rep.k - kD) ** 2).sum(-1) / (2 * rep.m_star)
+    # ⛔ specularity must be set on EVERY iteration.  Setting it only in the
+    # s != 1 branch left it at 0.0 from the previous temperature, so the "s = 1"
+    # arms after the first silently ran fully diffuse and reported a specular
+    # failure (max f = 1.0095) that did not exist.
+    for te_fac in (1.0, 2.0, 5.6):
+        f_tr = torch.special.expit(-(eps - rep.mu) / (te_fac * rep.T_temp))
+        u = (f_tr - f0)[None].repeat(n.shape[0], 1)
+        for s in (1.0, 0.5, 0.0):
+            rep.fs.specularity = s
+            refl = rep.get_reflector(n)
+            f = f0[None] + refl(u[None])[0]
+            assert float(f.min()) > -1e-14, (te_fac, s, float(f.min()))
+            if s == 1.0:
+                assert float(f.max()) < 1.0 + 1e-14, (te_fac, s, float(f.max()))
+    rep.fs.specularity = 1.0
