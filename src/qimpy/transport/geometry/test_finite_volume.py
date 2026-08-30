@@ -804,3 +804,62 @@ def test_cartesian_wall_preserves_occupancy_bounds() -> None:
             if s == 1.0:
                 assert float(f.max()) < 1.0 + 1e-14, (te_fac, s, float(f.max()))
     rep.fs.specularity = 1.0
+
+
+def test_diffuse_wall_alpha_threshold() -> None:
+    """A diffuse wall is Pauli-bounded exactly while alpha <= 1, and not after.
+
+    The refill rides on the shell envelope, out = alpha * f0 (1 - f0), so
+    f = f0 + alpha f0 (1 - f0) <= 1 iff alpha f0 <= 1, and f0 <= 1 makes
+    |alpha| <= 1 sufficient for both bounds.  So the wall has one and only one
+    failure mode, and it is a LINEARISATION limit, not a numerical one: the
+    emission (mu_w - mu) f0(1-f0)/T is a first-order expansion, and a hot
+    enough incident beam needs mu_w - mu >~ T to balance the flux.  The exact
+    emission FD(eps; mu_w, T) is bounded for any mu_w.
+
+    Measured, shipped class, s = 0:
+        Te/T    1.0    2.0    4.0    5.6
+        alpha   0.40   0.48   0.80   1.21
+        max f   1.000  1.000  1.000  1.0095
+    so the crossing is near Te/T = 4.7.  ⛔ Not an artifact of a test trace
+    that adds density: solving mu to hold the density fixed gives alpha = 1.20
+    and max f = 1.0082.
+
+    This test pins BOTH sides -- bounded below the threshold, and detected
+    above it -- so the boundary cannot move silently.  A specular wall has
+    alpha == 0 identically, which is why production (s = 1) is unaffected.
+    """
+    torch.set_default_dtype(torch.float64)
+    pg = ProcessGrid(rc.comm, "rk", (1, 1))
+
+    def reflect(s, te_fac):
+        material = FermiSurface(
+            process_grid=pg, kF=7.5e-3, vF=0.11194, M_theta=32, Nr=6,
+            T=1.3301e-5, xi_max=6.0, tau_p=np.inf, tau_ee=np.inf,
+            specularity=s, cartesian=dict(annulus_xi=0.0, te_fac_max=6.0))
+        rep = material.representation
+        f0 = rep._f0_lab
+        th = torch.linspace(0.0, 2 * np.pi, 17, device=rc.device)[:-1]
+        n = torch.stack([th.cos(), th.sin()], -1)
+        kD = torch.tensor([6.0e-5, 0.0], device=rc.device)
+        eps = ((rep.k - kD) ** 2).sum(-1) / (2 * rep.m_star)
+        f_tr = torch.special.expit(-(eps - rep.mu) / (te_fac * rep.T_temp))
+        u = (f_tr - f0)[None].repeat(n.shape[0], 1)
+        out = material.get_reflector(n)(u[None])[0]
+        shell = f0 * (1.0 - f0)
+        sel = shell > 1e-8 * shell.max()
+        alpha = float((out[:, sel] / shell[sel]).abs().max())
+        return f0[None] + out, alpha
+
+    for te_fac in (1.0, 2.0, 4.0):                 # below the threshold
+        f, alpha = reflect(0.0, te_fac)
+        assert alpha < 1.0, (te_fac, alpha)
+        assert float(f.min()) > -1e-14, (te_fac, float(f.min()))
+        assert float(f.max()) < 1.0 + 1e-12, (te_fac, float(f.max()))
+    f, alpha = reflect(0.0, 5.6)                   # above it
+    assert alpha > 1.0, alpha
+    assert float(f.max()) > 1.0, float(f.max())
+    # a specular wall never engages the refill at all
+    for te_fac in (1.0, 5.6):
+        f, alpha = reflect(1.0, te_fac)
+        assert float(f.max()) < 1.0 + 1e-14, (te_fac, float(f.max()))

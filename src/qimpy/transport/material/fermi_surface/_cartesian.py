@@ -858,6 +858,8 @@ class _CartesianReflector:
     currents move by ~4e-7 relative and the f range and interior DMP are
     unchanged to all printed digits.
     """
+    _alpha_warned = False
+
     def __init__(self, rep: "Cartesian", n: torch.Tensor,
                  specularity: float = 1.0):
         n = n.to(rc.device); self.rep = rep; self.Ns = n.shape[0]
@@ -953,6 +955,13 @@ class _CartesianReflector:
 
         self._C4 = biorth(self._mu_rows)                # stage 1: numerics
         self._C2 = biorth(self._mu_rows[:2])            # stage 2: diffuse model
+        # alpha only exists for a partially diffuse wall; a specular wall has
+        # alpha == 0 identically, so production (s = 1) pays nothing for this.
+        self._alpha_check = float(self.s) < 1.0
+        if self._alpha_check:
+            f0r = rep._f0_lab
+            self._shell = (f0r * (1.0 - f0r))[None]
+            self._shell_sel = (self._shell[0] > 1e-8 * self._shell.max())
 
     def __call__(self, u: torch.Tensor) -> torch.Tensor:
         spec = torch.zeros_like(u)
@@ -981,5 +990,55 @@ class _CartesianReflector:
         want = (T[0], self.s * T[1])
         for b in range(2):
             got = (self._w_in * self._mu_rows[b] * out).sum(-1, keepdim=True)
-            out = out + self._C2[:, b, :] * (want[b] - got)
+            corr = self._C2[:, b, :] * (want[b] - got)
+            if b == 0 and self._alpha_check:
+                self._check_alpha(corr)
+            out = out + corr
         return out
+
+    def _check_alpha(self, corr: torch.Tensor) -> None:
+        """Warn when the diffuse refill is asked for more than a wall can emit.
+
+        The refill rides on the shell envelope, out = alpha * f0 (1 - f0), so
+
+            f = f0 + alpha f0 (1 - f0)  <=  1   <=>   alpha f0 <= 1,
+
+        and since f0 <= 1, |alpha| <= 1 is sufficient for BOTH bounds -- the
+        shell is dominated by each headroom in turn (b/f0 = 1-f0 <= 1 and
+        b/(1-f0) = f0 <= 1), which is why it beat every other envelope width.
+
+        So an occupancy violation from this wall means exactly one thing:
+        alpha > 1, i.e. the LINEARISED thermal emission (mu_w - mu) f0(1-f0)/T
+        is being asked to carry a flux that needs mu_w - mu >~ T, where the
+        expansion it comes from no longer holds.  The exact emission
+        FD(eps; mu_w, T) is Pauli-bounded for any mu_w; only the linearisation
+        overshoots.  Fixing that properly means solving for mu_w, which makes
+        the reflector NONLINEAR, and _setup_boundary caches it as a dense
+        (nw, Nk, Nk) matrix by pushing identity basis vectors through it -- so a
+        nonlinear refill would be silently wrong wherever that cache is taken.
+
+        Measured (shipped class, two grids, fully diffuse s = 0):
+            Te/T    1.0    2.0    4.0    5.6
+            alpha   0.40   0.48   0.80   1.21
+            max f   1.000  1.000  1.000  1.0095
+        The threshold is exactly alpha = 1, i.e. Te/T ~ 4.7 here.  ⛔ It is NOT
+        an artifact of a density-adding test trace: repeating with mu solved to
+        hold the density fixed gives alpha = 1.20 and max f = 1.0082.
+        The modal _DeltaKReflector uses the same two-row diffuse model and has
+        the same limit.  Specular walls (s = 1) have alpha == 0 identically.
+        """
+        # ⛔ index the LAST axis: corr is (Ns, Nk) on the per-step path but
+        # (Nk, Ns, Nk) when _setup_boundary pushes the identity basis through
+        # to build the dense cache, and `corr[:, sel]` silently masked the
+        # wrong axis there.
+        sel = self._shell_sel
+        alpha = float((corr[..., sel] / self._shell[0, sel]).abs().max())
+        if alpha > 1.0 and not _CartesianReflector._alpha_warned:
+            _CartesianReflector._alpha_warned = True
+            log.warning(
+                f"Diffuse wall refill alpha = {alpha:.3f} > 1: the linearised "
+                "thermal emission cannot carry this flux within the Pauli "
+                "bound, so the reflected occupancy will exceed [0, 1] (by "
+                f"~{alpha - 1.0:.1%} of the local headroom). The incident "
+                "distribution is hotter than the two-row diffuse model "
+                "supports at this specularity.")
