@@ -425,6 +425,9 @@ class _Contact:
 class FiniteVolume(Geometry):
     """Cell-centered finite-volume geometry on an external triangle mesh."""
 
+    _theta_low = 1.0
+    _theta_min = 1.0
+
     def __init__(
         self,
         *,
@@ -1133,6 +1136,24 @@ class FiniteVolume(Geometry):
             fbar - lo > tiny, fbar / (fbar - lo).clamp(min=tiny),
             torch.ones_like(fbar)))
         theta = theta.clamp(0.0, 1.0)
+        # How hard the limiter is working, exposed so a run can report it.
+        # theta == 1 means inactive; a theta far below 1 means the limiter is
+        # cutting into the solution rather than absorbing roundoff, which is
+        # the signal to reduce dt rather than lean harder on the limiter.
+        self._theta_min = float(theta.min())
+        # ⛔ Log on every NEW LOW rather than once.  A single warning cannot
+        # distinguish a startup transient -- from rho = 0 the contact ghost is a
+        # step against a uniform f0, so the first steps legitimately clip -- from
+        # a limiter that is quietly eating the solution for the rest of the run.
+        # New-low-only keeps this to a handful of lines even over 1e6 steps.
+        if self._theta_min < FiniteVolume._theta_low - 1e-4:
+            FiniteVolume._theta_low = self._theta_min
+            (log.warning if self._theta_min < 0.99 else log.info)(
+                f"limit_positivity: theta new low {self._theta_min:.6f} "
+                f"({100 * (1 - self._theta_min):.3f}% of a channel's spatial "
+                "variation removed). Sustained values below 0.99 mean the "
+                "limiter is no longer just absorbing roundoff -- reduce dt or "
+                "the CFL number rather than leaning on it to hold the bound.")
         if bool((fbar < 0.0).any() or (fbar > 1.0).any()):
             log.warning(
                 "limit_positivity: the CONSERVED per-channel mean has left "
