@@ -346,8 +346,7 @@ class Electrons(TreeNode):
                 )
             self.tau_tilde.symmetrize()
         else:
-            self.tau_tilde = FieldH(system.grid, shape_batch=(0,))
-        
+            self.tau_tilde = FieldH(system.grid, shape_batch=(0,))        
                 
     def update_potential(self, system: dft.System, requires_grad: bool = True) -> None:
         """Update density-dependent energy terms and electron potential.
