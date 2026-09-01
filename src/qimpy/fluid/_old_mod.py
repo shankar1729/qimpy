@@ -53,7 +53,7 @@ class Linear(LinearSolve[FieldH]):
         checkpoint_in: CheckpointPath = CheckpointPath(),
         n_iterations: int = 100,
         gradient_threshold: float = 1e-8,
-        epsilon_0: Optional[float] = 78.4,
+        epsilon_0: Optional[float] = None,
         screening_length: Optional[float] = None,
         solvent: str = "",
         GLSSA13: Optional[Union[dict, variants.GLSSA13]] = None,
@@ -92,7 +92,7 @@ class Linear(LinearSolve[FieldH]):
 
         # Initialize preconditioner (WITH SCREENING!!!!!!):
         iG = grid.get_mesh("H").to(torch.double)
-        Gsq = (iG @ grid.lattice.Gbasis.T).square().sum(dim=-1) + self.kappa_sq / self.epsilon_0
+        Gsq = (iG @ grid.lattice.Gbasis.T).square().sum(dim=-1) + self.kappa_sq
         GSQ_CUT = 1e-12  # regularization
         self.Kkernel = torch.clamp(Gsq, min=GSQ_CUT).reciprocal() / self.epsilon_0
         self.Kkernel[Gsq < GSQ_CUT] = 0.0  # project out null-space
@@ -142,5 +142,4 @@ class Linear(LinearSolve[FieldH]):
         if n_tilde.requires_grad:
             self.variant.propagate_shape_grad(n_tilde)
         if rho_tilde.requires_grad:
-            phi_fluid = self.phi_tilde - phi_ext_tilde  # fluid potential feedback
-            rho_tilde.grad += phi_fluid
+            rho_tilde.grad += self.phi_tilde - phi_ext_tilde
