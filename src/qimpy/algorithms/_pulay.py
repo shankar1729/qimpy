@@ -9,6 +9,7 @@ import torch.distributed as dist
 
 from qimpy import log, rc, TreeNode, Energy
 from qimpy.io import CheckpointPath
+from qimpy.profiler import StopWatch
 from ._optimizable import Optimizable, ConvergenceCheck
 
 Variable = TypeVar("Variable", bound=Optimizable)
@@ -184,6 +185,7 @@ class Pulay(Generic[Variable], ABC, TreeNode):
                 break
 
             # Pulay mixing / DIIS step:
+            watch = StopWatch("Pulay.optimize")
             # --- update the overlap matrix
             new_overlaps = np.array([r.vdot(Mresidual).item() for r in self._residuals])
             N = len(new_overlaps)
@@ -210,6 +212,7 @@ class Pulay(Generic[Variable], ABC, TreeNode):
                     self._variables[i_hist]
                     + self.mix_fraction * self.precondition(self._residuals[i_hist])
                 )
+            watch.stop()
             self.variable = v  # type: ignore
 
     def _sync(self, v: torch.Tensor) -> torch.Tensor:
