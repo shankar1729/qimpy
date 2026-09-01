@@ -120,8 +120,8 @@ class Coulomb(TreeNode):
         log.info(f"Ionic width for embedding / fluids: {self.ion_width:f}")
 
         # For simplicity, just recreate kernel and ewald with new lattice
-        if self.embed:
-            raise NotImplementedError  # TODO
+        #if self.embed:
+        #    raise NotImplementedError  # TODO
 
         i_periodic = [i for (i, x) in enumerate(lattice.periodic) if x]
         n_periodic = len(i_periodic)
