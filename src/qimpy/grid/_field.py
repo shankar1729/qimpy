@@ -425,8 +425,8 @@ class FieldR(Field["FieldR"]):
     def to(self, grid: Grid) -> FieldR:
         """Switch field to another `grid` with same `shape`.
         The new grid can only differ in the MPI split."""
-        if grid is self.grid:
-            return self
+        if grid.is_equivalent_to(self.grid):
+            return FieldR(grid, data=self.data)
         return _change_real(self, grid)
 
     def log(self) -> FieldR:
@@ -466,8 +466,8 @@ class FieldC(Field["FieldC"]):
     def to(self, grid: Grid) -> FieldC:
         """Switch field to another `grid` with same `shape`.
         The new grid can only differ in the MPI split."""
-        if grid is self.grid:
-            return self
+        if grid.is_equivalent_to(self.grid):
+            return FieldC(grid, data=self.data)
         return _change_real(self, grid)
 
 
@@ -504,8 +504,8 @@ class FieldH(Field["FieldH"]):
         """Switch field to another `grid` with possibly different `shape`.
         This routine will perform Fourier resampling and MPI rearrangements,
         as necessary."""
-        if grid is self.grid:
-            return self
+        if grid.is_equivalent_to(self.grid):
+            return FieldH(grid, data=self.data)
         return _change_recip(self, grid)
 
     def symmetrize(self) -> None:
@@ -544,6 +544,6 @@ class FieldG(Field["FieldG"]):
         """Switch field to another `grid` with possibly different `shape`.
         This routine will perform Fourier resampling and MPI rearrangements,
         as necessary."""
-        if grid is self.grid:
-            return self
+        if grid.is_equivalent_to(self.grid):
+            return FieldG(grid, data=self.data)
         return _change_recip(self, grid)

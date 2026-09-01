@@ -46,6 +46,7 @@ class Grid(TreeNode):
         lattice: Lattice,
         symmetries: Symmetries,
         group: dist.ProcessGroup | None,
+        allow_parallel: bool = True,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         ke_cutoff_wavefunction: float | None = None,
         ke_cutoff: float | None = None,
@@ -63,6 +64,12 @@ class Grid(TreeNode):
             symmetrization of :class:`Field`'s associated with this grid.
         group
             Process group to split grid (and its FFTs) over, if provided.
+            This is only used if `allow_parallel` is set to `True`.
+        allow_parallel
+            :yaml:`Whether to allow splitting the grid over a process group.`
+            If set to `False`, the grid is not split regardless of whether
+            a process group is provided. This may be useful to avoid overhead
+            from parallel FFTs in large GPU jobs.
         ke_cutoff_wavefunction
             Plane-wave kinetic-energy cutoff in :math:`E_h` for any electronic
             wavefunctions to be used with this grid. This is an internally set
@@ -84,6 +91,9 @@ class Grid(TreeNode):
         self._field_symmetrizer = None
 
         # Process group settings (identify local or split):
+        self.allow_parallel = allow_parallel
+        if not allow_parallel:
+            group = None
         self.group = group
         self.n_procs, self.i_proc = (
             (1, 0) if (group is None) else (group.size(), group.rank())
@@ -144,9 +154,14 @@ class Grid(TreeNode):
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
         attrs = cp_path.attrs
+        attrs["allow_parallel"] = self.allow_parallel
         attrs["shape"] = self.shape
         attrs["ke_cutoff"] = self.ke_cutoff
         return list(attrs.keys())
+
+    def is_equivalent_to(self, grid: Grid) -> bool:
+        """Whether this grid is equivalent to `grid`."""
+        return (self.is_split == grid.is_split) and (self.shape == grid.shape)
 
     @property
     def dV(self) -> float:
