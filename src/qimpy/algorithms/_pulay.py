@@ -85,6 +85,14 @@ class Pulay(Generic[Variable], ABC, TreeNode):
 
     def report(self, i_iter: int) -> None:
         """Override to perform optional reporting."""
+        # HACK: discard stopwatch timings before SCF: 0 line
+        if i_iter == 0:
+            StopWatch._process_events()
+            StopWatch._stats.clear()
+        if i_iter == 10:
+            torch.cuda.nvtx.range_push("SCFn")
+        if i_iter == 11:
+            torch.cuda.nvtx.range_pop()
 
     @property  # type: ignore
     @abstractmethod
