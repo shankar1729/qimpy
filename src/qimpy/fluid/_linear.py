@@ -1,3 +1,4 @@
+# TODO: DEBUG INCONSISTENT MU
 from typing import Protocol, Optional, Union
 
 import numpy as np
@@ -35,11 +36,13 @@ class Linear(LinearSolve[FieldH]):
     grid: Grid
     coulomb: Coulomb
     epsilon_0: float  #: bulk static dielectric constant
+    screening_length: Optional[float]  #: fluid (Debye) screening length; None => no screening
     variant: Variant  #: variant of cavity shape and cavitation model
 
     energy: Energy  #: energy components
     phi_tilde: FieldH  #: net electrostatic potential
     epsilon: FieldR  #: spatially varying dielectric constant
+    kappa_sq: float  #: screening strength (0 => disabled)
     Kkernel: torch.Tensor  #: preconditioner kernel
 
     def __init__(
@@ -50,7 +53,8 @@ class Linear(LinearSolve[FieldH]):
         checkpoint_in: CheckpointPath = CheckpointPath(),
         n_iterations: int = 100,
         gradient_threshold: float = 1e-8,
-        epsilon_0: Optional[float] = None,
+        epsilon_0: Optional[float] = 78.4,
+        screening_length: Optional[float] = None,
         solvent: str = "",
         GLSSA13: Optional[Union[dict, variants.GLSSA13]] = None,
         LA12: Optional[Union[dict, variants.LA12]] = None,
@@ -63,8 +67,15 @@ class Linear(LinearSolve[FieldH]):
         )
         self.grid = grid
         self.coulomb = coulomb
+        self.screening_length = screening_length
         set_solvent_properties(
             solvent, DIELECTRIC_PROPERTIES, dict(epsilon_0=epsilon_0), self
+        )
+
+        self.kappa_sq = (
+            self.epsilon_0 / screening_length**2
+            if screening_length is not None
+            else 0.0
         )
         self.add_child_one_of(
             "variant",
@@ -79,15 +90,19 @@ class Linear(LinearSolve[FieldH]):
         self.energy = Energy(name="Afluid")
         self.phi_tilde = FieldH(self.grid)
 
-        # Initialize preconditioner:
+        # Initialize preconditioner (WITH SCREENING!!!!!!):
         iG = grid.get_mesh("H").to(torch.double)
-        Gsq = (iG @ grid.lattice.Gbasis.T).square().sum(dim=-1)
+        Gsq = (iG @ grid.lattice.Gbasis.T).square().sum(dim=-1) + self.kappa_sq / self.epsilon_0
         GSQ_CUT = 1e-12  # regularization
         self.Kkernel = torch.clamp(Gsq, min=GSQ_CUT).reciprocal() / self.epsilon_0
         self.Kkernel[Gsq < GSQ_CUT] = 0.0  # project out null-space
 
     def hessian(self, phi_tilde: FieldH) -> FieldH:
         result = (~(~phi_tilde.gradient() * self.epsilon[None])).divergence()
+        if self.kappa_sq:
+            # Screening (ionic) term, per fluid screening length:
+            kappa_sq_r = self.kappa_sq * self.variant.shape  # fieldR
+            result -= ~(kappa_sq_r * (~phi_tilde))
         return (-1 / (4 * np.pi)) * result
 
     def precondition(self, vector: FieldH) -> FieldH:
@@ -101,6 +116,8 @@ class Linear(LinearSolve[FieldH]):
 
         n_iter = self.solve(rho_tilde, self.phi_tilde)
         log.info(f"  Fluid: solve completed in {n_iter} iterations")
+        #phi_real = (~self.phi_tilde).data.cpu().numpy() #debug
+        #np.save("phi_fluid_after_solvation.npy", phi_real) #debug
 
         # Electrostatic contributions:
         phi_ext_tilde = self.coulomb.kernel(rho_tilde)
@@ -113,6 +130,10 @@ class Linear(LinearSolve[FieldH]):
             shape.grad = FieldR(
                 self.grid, data=(-(self.epsilon_0 - 1) / (8 * np.pi)) * grad_phi_sq
             )
+            if self.kappa_sq:
+                # Ionic contribution to the shape gradient (backprop):
+                phi_sq = (~self.phi_tilde).data.square()
+                shape.grad.data -= (self.kappa_sq / (8 * np.pi)) * phi_sq
 
         # Cavitation terms:
         self.variant.update_energy(self.energy)
