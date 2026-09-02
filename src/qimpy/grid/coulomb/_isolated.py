@@ -6,6 +6,7 @@ import torch
 from qimpy import log
 from qimpy.lattice import Lattice
 from qimpy.grid import Grid, FieldH, coulomb
+from qimpy.grid._embed import CoulombEmbedder
 
 
 class KernelIsolated:
@@ -35,7 +36,12 @@ class KernelSpherical:
 
     def __init__(self, coul: coulomb.Coulomb) -> None:
         """Initialize truncated coulomb calculation"""
-        self.grid = grid = coul.grid
+        self.grid = coul.grid
+        self.embedder = CoulombEmbedder(self.grid)
+        self.gridEmbed = self.embedder.gridEmbed
+        self.embed = coul.embed
+        grid = self.gridEmbed if self.embed else self.grid
+
         if coul.radius:
             self.radius = coul.radius
         else:
@@ -49,6 +55,14 @@ class KernelSpherical:
         )
 
     def __call__(self, rho: FieldH, correct_G0_width: bool = False) -> FieldH:
+        if self.embed:  # TODO: centralize embed logic in a KernelEmbed wrapper
+            k_space_expanded_rho = ~self.embedder.embedExpand(~rho)
+            assert self.grid is rho.grid
+            result = FieldH(
+                self.gridEmbed, data=self._kernel * k_space_expanded_rho.data
+            )
+            return ~self.embedder.embedShrink(~result)
+
         assert self.grid is rho.grid
         result = FieldH(self.grid, data=(self._kernel * rho.data))
         return result

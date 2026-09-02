@@ -367,6 +367,12 @@ class Electrons(TreeNode):
         if requires_grad:
             self.n_tilde.grad[0] += system.ions.Vloc_tilde + VH_tilde
 
+        # +U contributions:
+        if self.xc.plus_U:
+            system.energy["U"] = self.xc.plus_U.rhoAtom_computeU(
+                system.electrons.C, system.electrons.fillings
+            )
+
         # Fluid contributions
         if system.fluid.enabled:
             rho_tilde = self.n_tilde[0] + system.ions.rho_tilde  # total solute charge
