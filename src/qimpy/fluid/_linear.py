@@ -1,4 +1,4 @@
-#TODO: DEBUG INCONSISTENT MU
+# TODO: DEBUG INCONSISTENT MU
 from typing import Protocol, Optional, Union
 
 import numpy as np
@@ -142,5 +142,4 @@ class Linear(LinearSolve[FieldH]):
         if n_tilde.requires_grad:
             self.variant.propagate_shape_grad(n_tilde)
         if rho_tilde.requires_grad:
-            phi_fluid = self.phi_tilde - phi_ext_tilde  # fluid potential feedback
-            rho_tilde.grad += phi_fluid
+            rho_tilde.grad = self.phi_tilde - phi_ext_tilde
