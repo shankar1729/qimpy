@@ -890,6 +890,7 @@ def test_limit_positivity_restores_bounds_and_conserves() -> None:
     # and this whole test passes vacuously in 0.9 s with nothing asserted. The
     # limiter is a statement about occupancy, so it needs the Cartesian
     # representation -- which is also the one the mixer actually runs.
+    os.environ["QIMPY_ALLOW_NONLOCAL_LIMITER"] = "1"   # testing the defect on purpose
     geom, material = _build_fv(
         {"source": {"dmu": 2.0e-4}, "drain": {"dmu": -2.0e-4}},
         kF=7.5e-3, vF=0.11194, M=16, T=1.3301e-5, xi_max=6.0,

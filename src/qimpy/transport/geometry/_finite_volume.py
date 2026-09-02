@@ -1117,6 +1117,28 @@ class FiniteVolume(Geometry):
         conserved mean has left the bounds no rescaling can help, and that is
         reported rather than silently ignored.
         """
+        if not os.environ.get("QIMPY_ALLOW_NONLOCAL_LIMITER"):
+            raise InvalidInputException(
+                "limit_positivity is DISABLED: it is non-local and it changes "
+                "the answer. fbar/hi/lo/theta below are all reduced over dim 0 "
+                "-- CELLS -- so one out-of-bounds cell rescales the whole "
+                "device for that k-channel, which propagates information at "
+                "infinite speed inside an explicit hyperbolic scheme and pins "
+                "a spurious steady state. Measured on the ballistic mixer, "
+                "identical configs apart from this flag: without it the "
+                "startup transient decays 119.7 -> 68.0 -> 10.13 uA by "
+                "tr = 1.33 and stays; with it the decay STALLS at 45.7 uA and "
+                "settles to 43.4 uA -- a 4.3x error in the delivered current. "
+                "Zhang-Shu limiting is local by construction (within a cell, "
+                "against that cell's own average); the global spatial mean was "
+                "chosen here because that is what per-channel advection "
+                "conserves, trading locality for conservation. Use "
+                "integrator: SSPRK3 with positivity: false and a CFL small "
+                "enough that the scheme is bound-preserving on its own, or "
+                "implement flux-corrected transport, which limits the "
+                "antidiffusive FLUX per face and is both local and "
+                "conservative. Set QIMPY_ALLOW_NONLOCAL_LIMITER=1 only to "
+                "reproduce the defect.")
         u = rho[0]
         f0 = getattr(self.material.representation, "_f0_lab", None)
         if f0 is None:                      # modal materials: rho is not an occupancy
