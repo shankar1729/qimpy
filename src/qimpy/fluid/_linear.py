@@ -142,4 +142,4 @@ class Linear(LinearSolve[FieldH]):
         if n_tilde.requires_grad:
             self.variant.propagate_shape_grad(n_tilde)
         if rho_tilde.requires_grad:
-            rho_tilde.grad = self.phi_tilde - phi_ext_tilde
+            rho_tilde.grad += self.phi_tilde - phi_ext_tilde
