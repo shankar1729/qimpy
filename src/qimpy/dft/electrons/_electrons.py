@@ -13,7 +13,7 @@ from qimpy.symmetries import Symmetries
 from qimpy.grid import FieldH, FieldR
 from qimpy.dft.ions import Ions
 from . import Fillings, Basis, Davidson, CheFSI, SCF, LCAO, Wavefunction
-from .xc import XC
+from .xc import XC, PlusU
 from ._hamiltonian import _hamiltonian
 
 
@@ -366,6 +366,10 @@ class Electrons(TreeNode):
         system.energy["Eloc"] = (rho_tilde ^ system.ions.Vloc_tilde).item()
         if requires_grad:
             self.n_tilde.grad[0] += system.ions.Vloc_tilde + VH_tilde
+        
+        # +U contributions:
+        if self.xc.plus_U:
+            system.energy["U"] = PlusU.rhoAtom_computeU(self.xc.plus_U, system.electrons.C, system.electrons.fillings)
 
         # Fluid contributions
         if system.fluid.enabled:

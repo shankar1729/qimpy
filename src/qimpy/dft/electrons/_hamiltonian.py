@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from qimpy import dft
+from .xc import PlusU
 from . import Wavefunction
 
 
@@ -25,5 +26,5 @@ def _hamiltonian(self: dft.electrons.Electrons, C: Wavefunction) -> Wavefunction
 
     # DFT+U:
     if self.xc.plus_U:
-        HC += self.xc.plus_U(C)  # TODO
+        HC += PlusU.rhoAtom_grad(self.xc.plus_U, C)
     return HC
