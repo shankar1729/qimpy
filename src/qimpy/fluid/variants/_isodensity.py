@@ -76,6 +76,7 @@ class GLSSA13(TreeNode):
     nc: float  #: threshold electron density
     sigma: float  #: transition width in log(n)
     cavity_tension: float  #: Cavitation energy per unit area
+    zero_nyquist: bool  #: Whether to zero nyquist frequencies in cavitation calculation
 
     def __init__(
         self,
@@ -83,6 +84,7 @@ class GLSSA13(TreeNode):
         nc: float | None = None,
         sigma: float | None = None,
         cavity_tension: float | None = None,
+        zero_nyquist: bool = True,
         solvent: str = "",
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
@@ -93,6 +95,7 @@ class GLSSA13(TreeNode):
             dict(nc=nc, sigma=sigma, cavity_tension=cavity_tension),
             self,
         )
+        self.zero_nyquist = zero_nyquist
 
     # Share cavity definition with LA12 (only differs in fit nc values):
     update_shape = LA12.update_shape
@@ -100,14 +103,14 @@ class GLSSA13(TreeNode):
 
     def update_energy(self, energy: Energy) -> None:
         """Surface-area based cavitation energy."""
-        Dshape = self.shape.gradient()
+        Dshape = self.shape.gradient(zero_nyquist=self.zero_nyquist)
         surface_density = FieldR(Dshape.grid, data=Dshape.data.norm(dim=0))
         surface_area = surface_density.integral().detach()
         energy["Acavity"] = self.cavity_tension * surface_area
         if self.shape.requires_grad:
-            self.shape.grad -= (
-                self.cavity_tension * (Dshape / surface_density).divergence()
-            )
+            self.shape.grad -= self.cavity_tension * (
+                Dshape / surface_density
+            ).divergence(zero_nyquist=self.zero_nyquist)
 
 
 class GLSSA13_Params(NamedTuple):

@@ -204,7 +204,7 @@ class Grid(TreeNode):
         return torch.stack(torch.meshgrid(*mesh1D, indexing="ij")).permute(1, 2, 3, 0)
 
     @cache
-    def get_gradient_operator(self, space: str) -> torch.Tensor:
+    def get_gradient_operator(self, space: str, zero_nyquist: bool) -> torch.Tensor:
         """Get gradient operator in reciprocal space.
 
         Parameters
@@ -212,6 +212,9 @@ class Grid(TreeNode):
         space : {'G', 'H'}
             Which space to compute mesh coordinates for: 'G' = full reciprocal
             space and 'H' = half or Hermitian-symmetric recipocal space.
+
+        zero_nyquist
+            Whether to zero out Nyquist frequency components
 
         Returns
         -------
@@ -221,6 +224,11 @@ class Grid(TreeNode):
         """
         mesh1D = self._mesh1D_mine[space]
         iG = torch.stack(torch.meshgrid(*mesh1D, indexing="ij")).to(torch.double)
+        if zero_nyquist:
+            prev_dims = []
+            for i_dir, (mesh1D_i, shape_i) in enumerate(zip(mesh1D, self.shape)):
+                prev_dims.append(slice(None))
+                iG[*prev_dims, mesh1D_i * 2 == shape_i] = 0.0
         return 1j * torch.tensordot(self.lattice.Gbasis, iG, dims=1)
 
     def get_Gmax(self) -> float:

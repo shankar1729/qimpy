@@ -262,12 +262,16 @@ class Field(Gradable[FieldType]):
         """Assign to slice on batch dimensions"""
         self.data[index] = value.data
 
-    def gradient(self: FieldType, dim: int = 0) -> FieldType:
+    def gradient(
+        self: FieldType, dim: int = 0, zero_nyquist: bool = False
+    ) -> FieldType:
         """Gradient of field. A new batch dimension of length 3 is inserted
         at the location specified by `dim`, by default at the beginning."""
         if not self.is_tilde:  # apply in reciprocal space
-            return ~((~self).gradient(dim=dim))  # type: ignore
-        op = self.grid.get_gradient_operator("G" if self.is_complex else "H")
+            return ~((~self).gradient(dim, zero_nyquist))  # type: ignore
+        op = self.grid.get_gradient_operator(
+            "G" if self.is_complex else "H", zero_nyquist
+        )
         shape_in = self.data.shape
         n_batch_dims = len(shape_in) - 3
         shape_data = shape_in[:dim] + (1,) + shape_in[dim:]
@@ -276,12 +280,16 @@ class Field(Gradable[FieldType]):
             self.grid, data=(op.view(shape_op) * self.data.view(shape_data))
         )
 
-    def divergence(self: FieldType, dim: int = 0) -> FieldType:
+    def divergence(
+        self: FieldType, dim: int = 0, zero_nyquist: bool = False
+    ) -> FieldType:
         """Divergence of field. A dimension of length 3 at `dim`, by default
         at the beginning, is contracted against the gradient operator."""
         if not self.is_tilde:  # apply in reciprocal space
-            return ~((~self).divergence(dim=dim))  # type: ignore
-        op = self.grid.get_gradient_operator("G" if self.is_complex else "H")
+            return ~((~self).divergence(dim, zero_nyquist))  # type: ignore
+        op = self.grid.get_gradient_operator(
+            "G" if self.is_complex else "H", zero_nyquist
+        )
         n_batch_dims = len(self.data.shape) - 4  # other than contracted one
         shape_op = (1,) * dim + (3,) + (1,) * (n_batch_dims - dim) + op.shape[1:]
         return self.__class__(
