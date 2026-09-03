@@ -296,6 +296,10 @@ class Field(Gradable[FieldType]):
             self.grid, data=(op.view(shape_op) * self.data).sum(dim=dim)
         )
 
+    def zero_nyquist(self) -> None:
+        assert self.is_tilde
+        self.grid.zero_nyquist(self.data, "G" if self.is_complex else "H")
+
     def laplacian(self: FieldType) -> FieldType:
         """Laplacian of field."""
         if not self.is_tilde:  # apply in reciprocal space

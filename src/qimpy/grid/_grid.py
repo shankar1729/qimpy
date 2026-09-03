@@ -225,11 +225,24 @@ class Grid(TreeNode):
         mesh1D = self._mesh1D_mine[space]
         iG = torch.stack(torch.meshgrid(*mesh1D, indexing="ij")).to(torch.double)
         if zero_nyquist:
-            prev_dims = []
-            for i_dir, (mesh1D_i, shape_i) in enumerate(zip(mesh1D, self.shape)):
-                prev_dims.append(slice(None))
-                iG[*prev_dims, mesh1D_i * 2 == shape_i] = 0.0
+            self.zero_nyquist(iG, space)
         return 1j * torch.tensordot(self.lattice.Gbasis, iG, dims=1)
+
+    @cache
+    def get_nyquist_indices(self, space: str) -> list[tuple(int, int)]:
+        """List of dimensions and corresponding indices of Nyquist frequencies."""
+        result = []
+        mesh1D = self._mesh1D_mine[space]
+        for i_dir, (mesh1D_i, shape_i) in enumerate(zip(mesh1D, self.shape)):
+            sel = torch.where(mesh1D_i * 2 == shape_i)[0]
+            if len(sel) == 1:
+                result.append((i_dir - 3, int(sel.item())))
+        return result
+
+    def zero_nyquist(self, x: torch.Tensor, space: str) -> None:
+        """Set Nyquist components of `x` corresponding to `space` 'G' or 'H' to zero."""
+        for dim, index in self.get_nyquist_indices(space):
+            x.select(dim, index).zero_()
 
     def get_Gmax(self) -> float:
         """Get maximum wave-vector magnitude of the FFT grid."""

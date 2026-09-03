@@ -38,6 +38,7 @@ class Linear(LinearSolve[FieldH]):
     epsilon_0: float  #: bulk static dielectric constant
     screening_length: float  #: fluid (Debye) screening length; None => no screening
     variant: Variant  #: variant of cavity shape and cavitation model
+    zero_nyquist: bool  #: whether to zero Nyquist frequencies in Poisson equation
 
     energy: Energy  #: energy components
     phi_tilde: FieldH  #: net electrostatic potential
@@ -58,6 +59,7 @@ class Linear(LinearSolve[FieldH]):
         solvent: str = "",
         GLSSA13: dict | variants.GLSSA13 | None = None,
         LA12: dict | variants.LA12 | None = None,
+        zero_nyquist: bool = True,
     ):
         super().__init__(
             checkpoint_in=checkpoint_in,
@@ -85,6 +87,7 @@ class Linear(LinearSolve[FieldH]):
             TreeNode.ChildOptions("LA12", variants.LA12, LA12, solvent=solvent),
             have_default=True,
         )
+        self.zero_nyquist = zero_nyquist
 
         self.energy = Energy(name="Afluid")
         self.phi_tilde = FieldH(self.grid)
@@ -99,7 +102,9 @@ class Linear(LinearSolve[FieldH]):
         self.Kkernel[Gsq < GSQ_CUT] = 0.0  # project out null-space
 
     def hessian(self, phi_tilde: FieldH) -> FieldH:
-        result = (~(~phi_tilde.gradient() * self.epsilon[None])).divergence()
+        result = (
+            ~(~phi_tilde.gradient(zero_nyquist=self.zero_nyquist) * self.epsilon[None])
+        ).divergence(zero_nyquist=self.zero_nyquist)
         if self.kappa_sq:
             # Screening (ionic) term, per fluid screening length:
             kappa_sq_r = self.kappa_sq * self.variant.shape  # fieldR
@@ -115,6 +120,8 @@ class Linear(LinearSolve[FieldH]):
         shape = self.variant.shape
         self.epsilon = 1.0 + (self.epsilon_0 - 1.0) * shape
 
+        if self.zero_nyquist:
+            rho_tilde.zero_nyquist()
         n_iter = self.solve(rho_tilde, self.phi_tilde)
         log.info(f"  Fluid: solve completed in {n_iter} iterations")
 
@@ -124,7 +131,11 @@ class Linear(LinearSolve[FieldH]):
             self.phi_tilde ^ self.hessian(self.phi_tilde)
         ) + ((self.phi_tilde - 0.5 * phi_ext_tilde) ^ rho_tilde)
         if n_tilde.requires_grad:
-            grad_phi_sq = (~self.phi_tilde.gradient()).data.square().sum(dim=0)
+            grad_phi_sq = (
+                (~self.phi_tilde.gradient(zero_nyquist=self.zero_nyquist))
+                .data.square()
+                .sum(dim=0)
+            )
             shape.requires_grad_(True)
             shape.grad = FieldR(
                 self.grid, data=(-(self.epsilon_0 - 1) / (8 * np.pi)) * grad_phi_sq
