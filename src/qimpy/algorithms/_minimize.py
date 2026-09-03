@@ -53,7 +53,7 @@ class Minimize(Generic[Vector], ABC, TreeNode):
         energy: float = 1e-4  #: Dimensionless minimum energy reduction in step
         gradient: float = 0.9  #: Required reduction of projected gradient
 
-    group: dist.ProcessGroup  #: Process group over which algorithm operates in unison
+    group: dist.ProcessGroup | None  #: Process group over which to operate in unison
     name: str  #: Name of algorithm instance used in reporting eg. 'Ionic'
     i_iter_start: int  #: Starting iteration number (eg. if continuing from checkpoint)
     n_iterations: int  #: Maximum number of iterations
@@ -78,7 +78,7 @@ class Minimize(Generic[Vector], ABC, TreeNode):
         self,
         *,
         checkpoint_in: CheckpointPath,
-        group: dist.ProcessGroup,
+        group: dist.ProcessGroup | None,
         name: str,
         n_iterations: int,
         energy_threshold: float,
@@ -204,8 +204,8 @@ class Minimize(Generic[Vector], ABC, TreeNode):
         self.step(direction, -step_size_prev)
 
     def _sync(self, v: torch.Tensor) -> torch.Tensor:
-        """Ensure `v` is consistent on `comm`."""
-        if self.group.size() > 1:
+        """Ensure `v` is consistent on `group`."""
+        if (self.group is not None) and (self.group.size() > 1):
             dist.broadcast(v, group=self.group, group_src=0)
         return v
 

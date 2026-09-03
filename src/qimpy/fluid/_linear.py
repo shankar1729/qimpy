@@ -61,7 +61,7 @@ class Linear(LinearSolve[FieldH]):
     ):
         super().__init__(
             checkpoint_in=checkpoint_in,
-            comm=grid.comm,
+            group=grid.group,
             n_iterations=n_iterations,
             gradient_threshold=gradient_threshold,
         )

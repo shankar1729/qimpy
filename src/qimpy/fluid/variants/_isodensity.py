@@ -102,7 +102,7 @@ class GLSSA13(TreeNode):
         """Surface-area based cavitation energy."""
         Dshape = self.shape.gradient()
         surface_density = FieldR(Dshape.grid, data=Dshape.data.norm(dim=0))
-        surface_area = surface_density.integral().item()
+        surface_area = surface_density.integral().detach()
         energy["Acavity"] = self.cavity_tension * surface_area
         if self.shape.requires_grad:
             self.shape.grad -= (

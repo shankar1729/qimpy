@@ -3,13 +3,16 @@ from typing import Generic
 from abc import ABC, abstractmethod
 
 import numpy as np
+import torch
+import torch.distributed as dist
 
-from qimpy import log, Energy, TreeNode, MPI
+from qimpy import log, rc, TreeNode
+from qimpy.io import CheckpointPath
 from ._minimize_line import Vector
 
 
 class LinearSolve(Generic[Vector], ABC, TreeNode):
-    comm: MPI.Comm  #: Communicator over which algorithm operates in unison
+    group: dist.ProcessGroup | None  #: Process group over which to operate in unison
     n_iterations: int  #: Maximum number of iterations
     gradient_threshold: float  #: Convergence threshold on preconditioned residual norm
     name: str  #: Line prefix in log for convergence progress; don't log if empty
@@ -18,14 +21,14 @@ class LinearSolve(Generic[Vector], ABC, TreeNode):
         self,
         *,
         checkpoint_in: CheckpointPath,
-        comm: MPI.Comm,
+        group: dist.ProcessGroup | None,
         n_iterations: int,
         gradient_threshold: float,
         name: str = "",
     ) -> None:
         """Initialize minimization algorithm parameters."""
         super().__init__()
-        self.comm = comm
+        self.group = group
         self.n_iterations = n_iterations
         self.gradient_threshold = gradient_threshold
         self.name = name
@@ -41,7 +44,7 @@ class LinearSolve(Generic[Vector], ABC, TreeNode):
         """
         return v
 
-    def solve(self, rhs: FieldH, x: FieldH) -> int:
+    def solve(self, rhs: Vector, x: Vector) -> int:
         """Solve `hessian`(`x`) = `rhs` by the conjugate-gradients method.
         Start from initial guess in `x` and return the result in place.
         Return the number of iterations taken to converge."""
@@ -50,7 +53,7 @@ class LinearSolve(Generic[Vector], ABC, TreeNode):
         r = rhs - self.hessian(x)  # residual
         z = self.precondition(r)  # preconditioned residual
         d = z  # search direction
-        r_dot_z = self.comm.bcast(r.vdot(z))
+        r_dot_z = self._sync(r.vdot(z)).item()
         r_dot_z_prev = 0.0
         rz_norm = np.sqrt(abs(r_dot_z))
         if self.name:
@@ -67,12 +70,12 @@ class LinearSolve(Generic[Vector], ABC, TreeNode):
 
             # Step:
             w = self.hessian(d)
-            alpha = r_dot_z / self.comm.bcast(w.vdot(d))
+            alpha = r_dot_z / self._sync(w.vdot(d)).item()
             x += alpha * d
             r -= alpha * w
             z = self.precondition(r)
             r_dot_z_prev = r_dot_z
-            r_dot_z = self.comm.bcast(r.vdot(z))
+            r_dot_z = self._sync(r.vdot(z)).item()
 
             # Report and check convergence:
             rz_norm = np.sqrt(abs(r_dot_z))
@@ -92,3 +95,9 @@ class LinearSolve(Generic[Vector], ABC, TreeNode):
         if self.name:
             log.info(f"{self.name}: Not converged in {self.n_iterations} iterations.")
         return self.n_iterations
+
+    def _sync(self, v: torch.Tensor) -> torch.Tensor:
+        """Ensure `v` is consistent on `group`."""
+        if (self.group is not None) and (self.group.size() > 1):
+            dist.broadcast(v, group=self.group, group_src=0)
+        return v
