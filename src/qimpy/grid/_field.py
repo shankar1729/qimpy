@@ -222,11 +222,7 @@ class Field(Gradable[FieldType]):
         """Vector-space dot product of data summed over all dimensions.
         (Scalar contraction needed for the `Pulay` or `Minimizer` algorithm templates.)
         """
-        result = torch.vdot(self.data.flatten(), other.data.flatten()).real
-        if self.grid.group is not None:
-            result = result.contiguous()
-            dist.all_reduce(result, group=self.grid.group)
-        return result
+        return (self ^ other).sum()
 
     def norm(self: FieldType) -> torch.Tensor:
         r"""Norm of a field, defined by :math:`\sqrt{\int |a|^2}`.

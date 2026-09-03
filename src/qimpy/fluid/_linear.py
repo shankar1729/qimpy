@@ -93,13 +93,11 @@ class Linear(LinearSolve[FieldH]):
         self.phi_tilde = FieldH(self.grid)
 
         # Initialize preconditioner:
-        iG = grid.get_mesh("H").to(torch.double)
-        Gsq = (iG @ grid.lattice.Gbasis.T).square().sum(
-            dim=-1
-        ) + self.kappa_sq / self.epsilon_0
-        GSQ_CUT = 1e-12  # regularization
-        self.Kkernel = torch.clamp(Gsq, min=GSQ_CUT).reciprocal() / self.epsilon_0
-        self.Kkernel[Gsq < GSQ_CUT] = 0.0  # project out null-space
+        Gsq = grid.get_gradient_operator("H", zero_nyquist).imag.square().sum(dim=0)
+        Kinv = (self.epsilon_0 * Gsq + self.kappa_sq) * grid.lattice.volume
+        KINV_CUT = 1e-12  # regularization
+        self.Kkernel = torch.clamp(Kinv, min=KINV_CUT).reciprocal()
+        self.Kkernel[Kinv < KINV_CUT] = 0.0  # project out null-space
 
     def hessian(self, phi_tilde: FieldH) -> FieldH:
         result = (
