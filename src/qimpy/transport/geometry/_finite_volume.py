@@ -425,8 +425,6 @@ class _Contact:
 class FiniteVolume(Geometry):
     """Cell-centered finite-volume geometry on an external triangle mesh."""
 
-    _theta_low = 1.0
-    _theta_min = 1.0
 
     def __init__(
         self,
@@ -1072,118 +1070,6 @@ class FiniteVolume(Geometry):
             return u
         return u - (u @ self._dl_A) @ self._dl_B.T
 
-    def limit_positivity(self, rho: TensorList) -> TensorList:
-        """Zhang-Shu rescaling that puts the occupancy back inside [0, 1].
-
-        TimeEvolution._rk_step calls this after EVERY SSPRK3 stage, via
-        `getattr(geometry, "limit_positivity", None)`.  Until now no geometry
-        defined it, so the hook resolved to the identity and `positivity=True`
-        did nothing -- the SSPRK3 branch, the Shu-Osher convex-combination
-        comment and the CFL note were all in place around a limiter that was
-        never there.
-
-        WHY A LIMITER IS NEEDED AT ALL.  Bound preservation for a scalar FV
-        scheme is a theorem with three preconditions: the reconstruction must
-        stay inside its neighbourhood range (the Venkatakrishnan limiter gives
-        this, measured monotone to 0.000e+00), the update must be a convex
-        combination of forward-Euler steps, and dt must satisfy the matching
-        CFL.  Explicit midpoint RK2 is NOT SSP, so the second has never held
-        here; and the wall reflector is an extra operator the theorem says
-        nothing about.  This restores the guarantee unconditionally.
-
-        WHAT IS RESCALED, AND ABOUT WHAT.  Streaming is per-channel scalar
-        advection -- channels never mix -- so each k-channel separately
-        conserves its own spatial integral sum_i A_i f_c,i.  Rescaling a
-        channel about ITS OWN area-weighted spatial mean therefore preserves
-        exactly the quantity that channel's dynamics conserves:
-
-            f_c,i  <-  fbar_c + theta_c (f_c,i - fbar_c),
-            theta_c = min(1, (1 - fbar_c)/(max_i f_c,i - fbar_c),
-                             fbar_c /(fbar_c - min_i f_c,i)),
-
-        which lands every cell in [0, 1] whenever fbar_c is, and is the
-        identity (theta = 1) wherever the state is already bounded, so it costs
-        nothing on a healthy run and does not touch smooth regions.
-
-        ⛔ NOT a pointwise clamp: clamping changes the per-channel particle
-        number and would show up directly in the contact currents.
-        ⛔ NOT rescaled about the k-space mean within a cell.  That grouping
-        conserves the local DENSITY instead, and because f sweeps 0 -> 1 across
-        the Fermi surface the deviation from the k-mean is O(1), so removing a
-        1e-2 violation would need theta ~ 0.86 -- a 14% cut into the physics.
-        About the SPATIAL mean the deviation is what the drive produces, so
-        theta stays within roundoff of 1.
-        ⛔ fbar itself must be in [0, 1] for this to be able to succeed; if the
-        conserved mean has left the bounds no rescaling can help, and that is
-        reported rather than silently ignored.
-        """
-        if not os.environ.get("QIMPY_ALLOW_NONLOCAL_LIMITER"):
-            raise InvalidInputException(
-                "limit_positivity is DISABLED: it is non-local and it changes "
-                "the answer. fbar/hi/lo/theta below are all reduced over dim 0 "
-                "-- CELLS -- so one out-of-bounds cell rescales the whole "
-                "device for that k-channel, which propagates information at "
-                "infinite speed inside an explicit hyperbolic scheme and pins "
-                "a spurious steady state. Measured on the ballistic mixer, "
-                "identical configs apart from this flag: without it the "
-                "startup transient decays 119.7 -> 68.0 -> 10.13 uA by "
-                "tr = 1.33 and stays; with it the decay STALLS at 45.7 uA and "
-                "settles to 43.4 uA -- a 4.3x error in the delivered current. "
-                "Zhang-Shu limiting is local by construction (within a cell, "
-                "against that cell's own average); the global spatial mean was "
-                "chosen here because that is what per-channel advection "
-                "conserves, trading locality for conservation. Use "
-                "integrator: SSPRK3 with positivity: false and a CFL small "
-                "enough that the scheme is bound-preserving on its own, or "
-                "implement flux-corrected transport, which limits the "
-                "antidiffusive FLUX per face and is both local and "
-                "conservative. Set QIMPY_ALLOW_NONLOCAL_LIMITER=1 only to "
-                "reproduce the defect.")
-        u = rho[0]
-        f0 = getattr(self.material.representation, "_f0_lab", None)
-        if f0 is None:                      # modal materials: rho is not an occupancy
-            return rho
-        area = self.geom.area[:, None]
-        wsum = area.sum()
-        f = f0[None] + u
-        fbar = (area * f).sum(0, keepdim=True) / wsum          # (1, Nk)
-        hi = f.amax(0, keepdim=True)
-        lo = f.amin(0, keepdim=True)
-        tiny = torch.finfo(f.dtype).tiny
-        theta = torch.ones_like(fbar)
-        theta = torch.minimum(theta, torch.where(
-            hi - fbar > tiny, (1.0 - fbar) / (hi - fbar).clamp(min=tiny),
-            torch.ones_like(fbar)))
-        theta = torch.minimum(theta, torch.where(
-            fbar - lo > tiny, fbar / (fbar - lo).clamp(min=tiny),
-            torch.ones_like(fbar)))
-        theta = theta.clamp(0.0, 1.0)
-        # How hard the limiter is working, exposed so a run can report it.
-        # theta == 1 means inactive; a theta far below 1 means the limiter is
-        # cutting into the solution rather than absorbing roundoff, which is
-        # the signal to reduce dt rather than lean harder on the limiter.
-        self._theta_min = float(theta.min())
-        # ⛔ Log on every NEW LOW rather than once.  A single warning cannot
-        # distinguish a startup transient -- from rho = 0 the contact ghost is a
-        # step against a uniform f0, so the first steps legitimately clip -- from
-        # a limiter that is quietly eating the solution for the rest of the run.
-        # New-low-only keeps this to a handful of lines even over 1e6 steps.
-        if self._theta_min < FiniteVolume._theta_low - 1e-4:
-            FiniteVolume._theta_low = self._theta_min
-            (log.warning if self._theta_min < 0.99 else log.info)(
-                f"limit_positivity: theta new low {self._theta_min:.6f} "
-                f"({100 * (1 - self._theta_min):.3f}% of a channel's spatial "
-                "variation removed). Sustained values below 0.99 mean the "
-                "limiter is no longer just absorbing roundoff -- reduce dt or "
-                "the CFL number rather than leaning on it to hold the bound.")
-        if bool((fbar < 0.0).any() or (fbar > 1.0).any()):
-            log.warning(
-                "limit_positivity: the CONSERVED per-channel mean has left "
-                "[0, 1]; no rescaling can restore the bound. This is a "
-                "conservation failure upstream, not a limiter shortfall.")
-        return TensorList([fbar + theta * (f - fbar) - f0[None]])
-
-    # ---- qimpy Geometry contract ----
     def rho_dot(self, rho: TensorList, t: float) -> TensorList:
         u = rho[0]
         if self._decomp is not None:
