@@ -81,7 +81,6 @@ class TimeEvolution(TreeNode):
         collision_fuse: bool = True,
         collision_s_max: float = 0.0,
         collision_rho_max: float = 0.0,
-        positivity: bool = False,
         steady_state: dict[str, Union[str, float]] = None,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         dt_max_sources: list,
@@ -112,8 +111,8 @@ class TimeEvolution(TreeNode):
             corresponding to the number of collated steps.
         integrator
             :yaml:`Integrator for time-stepping: RK2, RK4 or SSPRK3.`
-            SSPRK3 is the 3-stage strong-stability-preserving Runge-Kutta scheme
-            required for the positivity guarantee below.
+            SSPRK3 is the 3-stage strong-stability-preserving Runge-Kutta
+            scheme, in Shu-Osher form.
         collision_fuse
             :yaml:`Merge adjacent half-kicks across Strang windows.`
             Halves the number of collision applies per window. Note the merged
@@ -145,13 +144,6 @@ class TimeEvolution(TreeNode):
             to ~1 turns a slow numerical divergence into an immediate, located
             failure instead of an overflow thousands of steps later. Zero
             (default) disables the check. NaN also trips it.
-        positivity
-            :yaml:`Enforce a non-negative density via a Zhang-Shu scaling limiter.`
-            Applied to the m=0 (density) channel after each stage; conservative
-            (preserves cell averages) and order-preserving. The rigorous
-            maximum-principle guarantee holds with integrator SSPRK3 and a
-            positivity-preserving CFL; with RK2/RK4 it is applied best-effort to
-            the end-of-step state only.
         steady_state
             :yaml:`Steady state options.`
             EXPERIMENTAL: works only with a single process and geometry domain for now.
@@ -180,7 +172,6 @@ class TimeEvolution(TreeNode):
             self.collision_fuse = False
             self.collision_s_max = 0.0
             self.collision_rho_max = float(collision_rho_max)
-            self.positivity = False
             self.dt = 0.0
             self.t = 0.0
             log.info("Steady state mode")
@@ -245,11 +236,6 @@ class TimeEvolution(TreeNode):
             if self.collision_rho_max > 0.0:
                 log.info(f"Collision validity gate: max|rho| <= "
                          f"{self.collision_rho_max:g}")
-            self.positivity = bool(positivity)
-            if self.positivity and integrator != "SSPRK3":
-                log.info("positivity=True is only rigorously guaranteed with "
-                         "integrator=SSPRK3; applying the limiter best-effort to "
-                         f"the end-of-step state with {integrator}.")
 
     def time_step(self, geometry: Geometry) -> None:
         """Advance one step of dt.
@@ -520,36 +506,27 @@ class TimeEvolution(TreeNode):
         return path
 
     def _rk_step(self, geometry: Geometry) -> None:
-        """Advance one step (RK2/RK4, or SSPRK3 for positivity preservation)."""
+        """Advance one step (RK2, RK4 or SSPRK3)."""
         t = self.t
         dt = self.dt
         rho0 = geometry.rho
-        _limit = getattr(geometry, "limit_positivity", None)
-        if not getattr(self, "positivity", False):
-            _limit = None
-
-        def lim(rho):
-            return _limit(rho) if _limit is not None else rho
-
         if self.integrator == "RK2":
             rho_half = rho0 + (0.5 * dt) * geometry.rho_dot(rho0, t)
-            geometry.rho = lim(rho0 + dt * geometry.rho_dot(rho_half, t + 0.5 * dt))
+            geometry.rho = rho0 + dt * geometry.rho_dot(rho_half, t + 0.5 * dt)
         elif self.integrator == "RK4":
             k1 = geometry.rho_dot(rho0, t)
             k2 = geometry.rho_dot(rho0 + (0.5 * dt) * k1, t + 0.5 * dt)
             k3 = geometry.rho_dot(rho0 + (0.5 * dt) * k2, t + 0.5 * dt)
             k4 = geometry.rho_dot(rho0 + dt * k3, t + dt)
-            geometry.rho = lim(rho0 + (dt / 6.0) * (k1 + 2 * (k2 + k3) + k4))
+            geometry.rho = rho0 + (dt / 6.0) * (k1 + 2 * (k2 + k3) + k4)
         elif self.integrator == "SSPRK3":
-            # Shu-Osher SSPRK3: each stage is a convex combination of forward-Euler
-            # steps, so applying the (convexity-based) limiter after every stage
-            # preserves the maximum-principle guarantee.
-            rho1 = lim(rho0 + dt * geometry.rho_dot(rho0, t))
-            rho2 = lim(0.75 * rho0
-                       + 0.25 * (rho1 + dt * geometry.rho_dot(rho1, t + dt)))
-            geometry.rho = lim((1.0 / 3.0) * rho0
-                               + (2.0 / 3.0) * (rho2 + dt * geometry.rho_dot(
-                                   rho2, t + 0.5 * dt)))
+            # Shu-Osher form: every stage is a convex combination of
+            # forward-Euler steps.
+            rho1 = rho0 + dt * geometry.rho_dot(rho0, t)
+            rho2 = 0.75 * rho0 + 0.25 * (rho1 + dt * geometry.rho_dot(rho1, t + dt))
+            geometry.rho = ((1.0 / 3.0) * rho0
+                            + (2.0 / 3.0) * (rho2 + dt * geometry.rho_dot(
+                                rho2, t + 0.5 * dt)))
         else:
             raise KeyError(f"Unrecognized integrator = {self.integrator}")
 

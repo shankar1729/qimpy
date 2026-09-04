@@ -11,7 +11,6 @@ Covers:
 - _DeltaKReflector: specular at axis-aligned wall; mass conservation at
   arbitrary normals and specularities (the discrete-quadrature leak is folded
   into D so the net mass flux at the wall is zero to roundoff).
-- realizability_floor: defaults to None (no-op limiter for delta-f).
 """
 from __future__ import annotations
 import numpy as np
@@ -284,17 +283,6 @@ def test_reflector_energy_conservation(phi_deg: float, s: float) -> None:
 
 # ----------------------------------------------------------------------------
 # Realizability floor: default None -> limiter is a no-op (delta-f safe)
-# ----------------------------------------------------------------------------
-def test_realizability_floor_default_is_none() -> None:
-    fs = _make(M_theta=4, Nr=1)
-    assert fs.realizability_floor() is None
-
-
-# ----------------------------------------------------------------------------
-# Cartesian representation: projection contract, round-trip, local-T_e rates
-# (the 2026-07 audit found the projection returned G_band@c/T instead of the
-# operator contract's c, and the reconstruction was a factor T too large --
-# invisible at Nr=1 linear where the two nearly cancel, catastrophic elsewhere)
 # ----------------------------------------------------------------------------
 def _make_cart(Nr: int, T: float = 0.05, *, local_te_rates: bool = True,
                ee=None) -> FermiSurface:

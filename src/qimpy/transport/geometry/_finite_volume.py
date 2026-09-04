@@ -6,7 +6,7 @@ scalar per-channel upwind flux ``F_c = (v_c.n) u_upwind`` -- each delta-k channe
 streams with its own Fermi velocity, so the upwind side of each edge is fixed by
 sign(v_c.n). Walls/contacts supply the exterior trace via the (reused)
 FermiSurface reflector/contactor; collisions come from the material. Time
-stepping is plain RK2 (see _time_evolution); no positivity limiter.
+stepping is plain RK2 (see _time_evolution).
 
 Boundary conditions: reflective walls, fixed-voltage/drift contacts, floating
 (zero-current) probes and current sources (per-step scalar level solve), and
