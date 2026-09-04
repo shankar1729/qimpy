@@ -16,6 +16,7 @@ class KernelSlab:
     i_dir: int  # Truncated direction (zero-based indexing)
     radius: float  # Range of truncation
     _kernel: torch.Tensor  # Coulomb kernel
+    G0_correction: float  #: G=0 correction to kernel for ion width
 
     def __init__(self, coul: coulomb.Coulomb, i_dir: int) -> None:
         """Initialize truncated coulomb calculation"""
@@ -41,12 +42,10 @@ class KernelSlab:
             * (1 - torch.exp(-Gplane * self.radius) * torch.cos(np.pi * iG[..., i_dir]))
             / Gsq,
         )
+        self.G0_correction = 0.0
 
-    def __call__(self, rho: FieldH, correct_G0_width: bool = False) -> FieldH:
-        """Apply coulomb operator on charge density `rho`.
-        If correct_G0_width = True, rho is a point charge distribution
-        widened by `ion_width` and needs a corresponding G=0 correction.
-        """
+    def __call__(self, rho: FieldH) -> FieldH:
+        """Apply coulomb operator on charge density `rho`."""
         if self.embed:  # TODO: centralize embed logic in a KernelEmbed wrapper
             k_space_expanded_rho = ~self.embedder.embedExpand(~rho)
             assert self.grid is rho.grid

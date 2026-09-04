@@ -113,7 +113,7 @@ class Linear(LinearSolve[FieldH]):
         return vector.convolve(self.Kkernel)
 
     @stopwatch(name="Linear.calculate")
-    def update(self, n_tilde: FieldH, rho_tilde: FieldH) -> None:
+    def update(self, n_tilde: FieldH, rho_tilde: FieldH, phi_o_offset: float) -> None:
         self.variant.update_shape(n_tilde)
         shape = self.variant.shape
         self.epsilon = 1.0 + (self.epsilon_0 - 1.0) * shape
@@ -125,6 +125,7 @@ class Linear(LinearSolve[FieldH]):
 
         # Electrostatic contributions:
         phi_ext_tilde = self.coulomb.kernel(rho_tilde)
+        phi_ext_tilde.o += phi_o_offset
         self.energy["Acoulomb"] = -0.5 * (
             self.phi_tilde ^ self.hessian(self.phi_tilde)
         ) + ((self.phi_tilde - 0.5 * phi_ext_tilde) ^ rho_tilde)

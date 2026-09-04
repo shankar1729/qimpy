@@ -14,12 +14,14 @@ class KernelIsolated:
 
     grid: Grid
     _kernel: torch.Tensor  # Coulomb kernel
+    G0_correction: float  #: G=0 correction to kernel for ion width
 
     def __init__(self, coul: coulomb.Coulomb) -> None:
         self.grid = coul.grid
+        self.G0_correction = 0.0
         raise NotImplementedError
 
-    def __call__(self, rho: FieldH, correct_G0_width: bool = False) -> FieldH:
+    def __call__(self, rho: FieldH) -> FieldH:
         assert self.grid is rho.grid
         raise NotImplementedError
 
@@ -33,6 +35,7 @@ class KernelSpherical:
     grid: Grid
     radius: float
     _kernel: torch.Tensor  # Coulomb kernel
+    G0_correction: float  #: G=0 correction to kernel for ion width
 
     def __init__(self, coul: coulomb.Coulomb) -> None:
         """Initialize truncated coulomb calculation"""
@@ -53,8 +56,9 @@ class KernelSpherical:
             2 * np.pi * (self.radius**2),
             (4 * np.pi) * (1 - torch.cos(self.radius * torch.sqrt(Gsq))) / Gsq,
         )
+        self.G0_correction = 0.0
 
-    def __call__(self, rho: FieldH, correct_G0_width: bool = False) -> FieldH:
+    def __call__(self, rho: FieldH) -> FieldH:
         if self.embed:  # TODO: centralize embed logic in a KernelEmbed wrapper
             k_space_expanded_rho = ~self.embedder.embedExpand(~rho)
             assert self.grid is rho.grid

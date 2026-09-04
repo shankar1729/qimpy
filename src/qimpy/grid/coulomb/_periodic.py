@@ -13,25 +13,19 @@ class KernelPeriodic:
 
     grid: Grid  #: Grid associated with fields for coulomb interaction
     _kernel: torch.Tensor  #: Cached coulomb kernel
-    _G0_correction: float  #: G=0 correction to kernel for ion width
+    G0_correction: float  #: G=0 correction to kernel for ion width
 
     def __init__(self, coul: coulomb.Coulomb) -> None:
         self.grid = grid = coul.grid
         iG = grid.get_mesh("H").to(torch.double)  # half-space
         Gsq = (iG @ grid.lattice.Gbasis.T).square().sum(dim=-1)
         self._kernel = torch.where(Gsq == 0.0, 0.0, (4 * np.pi) / Gsq)
-        self._G0_correction = 4 * np.pi * (-0.5 * (coul.ion_width**2))
+        self.G0_correction = 4 * np.pi * (-0.5 * (coul.ion_width**2))
 
-    def __call__(self, rho: FieldH, correct_G0_width: bool = False) -> FieldH:
-        """Apply coulomb operator on charge density `rho`.
-        If correct_G0_width = True, rho is a point charge distribution
-        widened by `ion_width` and needs a corresponding G=0 correction.
-        """
+    def __call__(self, rho: FieldH) -> FieldH:
+        """Apply coulomb operator on charge density `rho`."""
         assert self.grid is rho.grid
-        result = FieldH(self.grid, data=(self._kernel * rho.data))
-        if correct_G0_width:
-            result.o += rho.o * self._G0_correction
-        return result
+        return FieldH(self.grid, data=(self._kernel * rho.data))
 
     def stress(self, rho1: FieldH, rho2: FieldH) -> torch.Tensor:
         """Return stress due to Coulomb interaction between `rho1` and `rho2`.

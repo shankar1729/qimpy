@@ -13,9 +13,11 @@ class Model(Protocol):
 
     energy: Energy  #: energy components
 
-    def update(self, n_tilde: FieldH, rho_tilde: FieldH) -> None:
+    def update(self, n_tilde: FieldH, rho_tilde: FieldH, phi_o_offset: float) -> None:
         """Update fluid given electron density `n_tilde` to determine
         cavity and total solute charge density `rho_tilde`.
+        Use offset `phi_G0_correction` when calculating solute potential
+        to account for the finite ionic width used in `rho_tilde`.
         Update `energy` and accumulate gradients to `n_tilde.grad`
         and `rho_tilde.grad` if corresponding requires_grad is set."""
         ...

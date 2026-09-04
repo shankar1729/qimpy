@@ -35,6 +35,7 @@ class Ions(TreeNode):
     Z: torch.Tensor  #: charge of each ion type (n_types, float)
     Z_tot: float  #: total ionic charge
     rho_tilde: FieldH  #: ionic charge density (uses coulomb.ion_width)
+    phi_o_offset: float  #: ion potential offset due to ion width
     Vloc_tilde: FieldH  #: local potential due to ions (including from rho)
     n_core_tilde: FieldH  #: partial core electronic density (for XC)
     beta: dft.electrons.Wavefunction  #: pseudopotential projectors (split-basis only)

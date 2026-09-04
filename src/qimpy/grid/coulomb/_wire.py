@@ -12,13 +12,15 @@ class KernelWire:
     grid: Grid
     i_dir: int  #: Periodic direction (wire axis)
     _kernel: torch.Tensor  # Coulomb kernel
+    G0_correction: float  #: G=0 correction to kernel for ion width
 
     def __init__(self, coul: coulomb.Coulomb, i_dir: int) -> None:
         self.grid = coul.grid
         self.i_dir = i_dir
+        self.G0_correction = 0.0
         raise NotImplementedError
 
-    def __call__(self, rho: FieldH, correct_G0_width: bool = False) -> FieldH:
+    def __call__(self, rho: FieldH) -> FieldH:
         assert self.grid is rho.grid
         raise NotImplementedError
 
@@ -33,17 +35,19 @@ class KernelCylindrical:
     i_dir: int  #: Periodic direction (cylinder axis)
     radius: float  #: Cylinder radius
     _kernel: torch.Tensor  #: Coulomb kernel
+    G0_correction: float  #: G=0 correction to kernel for ion width
 
     def __init__(self, coul: coulomb.Coulomb, i_dir: int) -> None:
         self.grid = coul.grid
         self.i_dir = i_dir
+        self.G0_correction = 0.0
         if coul.radius:
             self.radius = coul.radius
         else:
             raise NotImplementedError  # TODO: determine in-radius
         raise NotImplementedError
 
-    def __call__(self, rho: FieldH, correct_G0_width: bool = False) -> FieldH:
+    def __call__(self, rho: FieldH) -> FieldH:
         assert self.grid is rho.grid
         raise NotImplementedError
 

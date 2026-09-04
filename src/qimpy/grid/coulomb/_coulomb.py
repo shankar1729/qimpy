@@ -15,12 +15,10 @@ from ._isolated import KernelSpherical, KernelIsolated, EwaldIsolated
 class Kernel(Protocol):
     """Specification for Coulomb kernel."""
 
-    def __call__(self, rho: FieldH, correct_G0_width: bool = False) -> FieldH:
-        """
-        Apply coulomb operator on charge density `rho`.
-        If correct_G0_width = True, rho is a point charge distribution
-        widened by `ion_width` and needs a corresponding G=0 correction.
-        """
+    G0_correction: float  #: G=0 correction to kernel for ion width
+
+    def __call__(self, rho: FieldH) -> FieldH:
+        """Apply coulomb operator on charge density `rho`."""
 
     def stress(self, rho1: FieldH, rho2: FieldH) -> torch.Tensor:
         """

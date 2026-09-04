@@ -377,7 +377,7 @@ class Electrons(TreeNode):
         if system.fluid.enabled:
             rho_tilde = self.n_tilde[0] + system.ions.rho_tilde  # total solute charge
             rho_tilde.requires_grad_(requires_grad, clear=True)
-            system.fluid.model.update(n_xc_tilde, rho_tilde)
+            system.fluid.model.update(n_xc_tilde, rho_tilde, system.ions.phi_o_offset)
             system.energy["Afluid"] = system.fluid.model.energy.total
             if requires_grad:
                 self.n_tilde.grad[0] += rho_tilde.grad
@@ -438,7 +438,7 @@ class Electrons(TreeNode):
         if system.fluid.enabled:
             rho_tilde = self.n_tilde[0] + system.ions.rho_tilde  # total solute charge
             rho_tilde.requires_grad_(True, clear=True)
-            system.fluid.model.update(n_xc_tilde, rho_tilde)
+            system.fluid.model.update(n_xc_tilde, rho_tilde, system.ions.phi_o_offset)
             if system.ions.rho_tilde.requires_grad:
                 system.ions.rho_tilde.grad += rho_tilde.grad
 
