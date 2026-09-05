@@ -6,7 +6,6 @@ import numpy as np
 from qimpy import log, algorithms
 from ._optimizable import Optimizable
 
-
 Vector = TypeVar("Vector", bound=Optimizable)
 
 
@@ -45,9 +44,9 @@ def quadratic(
 
     # Check initial point:
     step_size_prev = 0.0  # cumulative progress along direction
-    E = self._sync(float(state.energy))
+    E = self._sync(state.energy.total).item()
     E_orig = E
-    g_d = self._sync(state.gradient.vdot(direction))
+    g_d = self._sync(state.gradient.vdot(direction)).item()
     if g_d >= 0.0:
         log.info(f"{self.name}: Bad step direction with positive gradient component")
         return E_orig, step_size_prev, False
@@ -159,8 +158,8 @@ def wolfe(
 
     # Check initial point:
     step_size_prev = 0.0  # cumulative progress along direction
-    E = self._sync(float(state.energy))
-    g_d = self._sync(state.gradient.vdot(direction))
+    E = self._sync(state.energy.total).item()
+    g_d = self._sync(state.gradient.vdot(direction)).item()
     if g_d >= 0.0:
         log.info(f"{self.name}: Bad step direction with positive" " gradient component")
         return E, step_size_prev, False
@@ -176,7 +175,7 @@ def wolfe(
         self.step(direction, step_size - step_size_state)
         step_size_state = step_size
         E = self._compute(state, energy_only=False)
-        g_d = self._sync(state.gradient.vdot(direction))
+        g_d = self._sync(state.gradient.vdot(direction)).item()
         if i_step == self.step_size.n_adjust:
             break  # Reached step limit of line minimize
         # Make sure within domain:

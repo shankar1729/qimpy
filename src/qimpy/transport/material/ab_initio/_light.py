@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Optional
 
 import torch
 import numpy as np
@@ -34,8 +33,8 @@ class Light(TreeNode):
         ab_initio: material.ab_initio.AbInitio,
         coherent: bool = True,
         gauge: str = "velocity",
-        A0: Optional[list[complex]] = None,
-        E0: Optional[list[complex]] = None,
+        A0: list[complex] | None = None,
+        E0: list[complex] | None = None,
         omega: float = 0.0,
         t0: float = 0.0,
         sigma: float = 0.0,

@@ -3,9 +3,9 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import rc, MPI
-from qimpy.mpi import Waitable, Waitless, TaskDivision, BufferView
+from qimpy.mpi import Waitable, Waitless, TaskDivision
 from qimpy.dft import electrons
 
 
@@ -23,7 +23,6 @@ def _split_bands(
     # Bring band-dimension to outermost (so that send chunks are contiguous):
     # --- after this, dim order is (band, spin, k, spinor, basis)
     send_coeff = self.coeff.permute(2, 0, 1, 3, 4).contiguous()
-    n_per_band = np.prod(send_coeff.shape[1:])
 
     # All-to-all MPI rearrangement:
     band_division = TaskDivision(
@@ -31,20 +30,14 @@ def _split_bands(
         n_procs=basis.division.n_procs,
         i_proc=basis.division.i_proc,
     )
-    send_counts = np.diff(band_division.n_prev) * n_per_band
-    send_offset = band_division.n_prev[:-1] * n_per_band
-    recv_counts = band_division.n_mine * n_per_band
-    recv_offset = np.arange(band_division.n_procs) * recv_counts
-    mpi_type = rc.mpi_type[send_coeff.dtype]
+    send_counts = np.diff(band_division.n_prev)
     recv_coeff = torch.zeros(
         (band_division.n_procs, band_division.n_mine) + send_coeff.shape[1:],
         dtype=send_coeff.dtype,
         device=send_coeff.device,
     )
-    rc.current_stream_synchronize()
-    request = basis.comm.Ialltoallv(
-        (BufferView(send_coeff), send_counts, send_offset, mpi_type),
-        (BufferView(recv_coeff), recv_counts, recv_offset, mpi_type),
+    request = dist.all_to_all_single(
+        recv_coeff, send_coeff, None, send_counts, group=basis.group, async_op=True
     )
     return SplitBandsWait(request, send_coeff, recv_coeff, basis, band_division)
 
@@ -53,7 +46,7 @@ def _split_bands(
 class SplitBandsWait:
     """`Waitable` object for the result of `Wavefunction.split_bands`."""
 
-    request: MPI.Request
+    request: dist.Work
     send_coeff: torch.Tensor
     recv_coeff: torch.Tensor
     basis: electrons.Basis
@@ -62,7 +55,7 @@ class SplitBandsWait:
     def wait(self) -> electrons.Wavefunction:
         """Complete `Wavefunction.split_bands` after waiting on MPI transfers."""
         # Wait for MPI completion:
-        self.request.Wait()
+        self.request.wait()
         del self.send_coeff
         # Unscramble data to bring all basis for each band together:
         # --- before this data order is (proc, band, spin, k, spinor, basis)
@@ -96,24 +89,17 @@ def _split_basis(
         .permute(4, 2, 0, 1, 3, 5)
         .contiguous()
     )
-    n_per_band = np.prod(send_coeff.shape[2:])
 
     # All-to-all MPI rearrangement:
     band_division = self.band_division
-    send_counts = band_division.n_mine * n_per_band
-    send_offset = np.arange(band_division.n_procs) * send_counts
-    recv_counts = np.diff(band_division.n_prev) * n_per_band
-    recv_offset = band_division.n_prev[:-1] * n_per_band
-    mpi_type = rc.mpi_type[send_coeff.dtype]
+    recv_counts = np.diff(band_division.n_prev)
     recv_coeff = torch.zeros(
         (band_division.n_tot,) + send_coeff.shape[2:],
         dtype=send_coeff.dtype,
         device=send_coeff.device,
     )
-    rc.current_stream_synchronize()
-    request = basis.comm.Ialltoallv(
-        (BufferView(send_coeff), send_counts, send_offset, mpi_type),
-        (BufferView(recv_coeff), recv_counts, recv_offset, mpi_type),
+    request = dist.all_to_all_single(
+        recv_coeff, send_coeff, recv_counts, None, group=basis.group, async_op=True
     )
     return SplitBasisWait(request, send_coeff, recv_coeff, basis)
 
@@ -122,7 +108,7 @@ def _split_basis(
 class SplitBasisWait:
     """`Waitable` object for the result of `Wavefunction.split_basis`."""
 
-    request: MPI.Request
+    request: dist.Work
     send_coeff: torch.Tensor
     recv_coeff: torch.Tensor
     basis: electrons.Basis
@@ -130,7 +116,7 @@ class SplitBasisWait:
     def wait(self) -> electrons.Wavefunction:
         """Complete `Wavefunction.split_basis` after waiting on MPI transfers."""
         # Wait for MPI completion:
-        self.request.Wait()
+        self.request.wait()
         del self.send_coeff
         # Move band index into correct position (already together):
         # --- before this data order is (band, spin, k, spinor, basis)

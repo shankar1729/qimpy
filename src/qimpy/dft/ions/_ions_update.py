@@ -134,7 +134,7 @@ class _LocalTerms:
         Gmax = grid.get_Gmax()
         ion_width = system.coulomb.ion_width
         for i_type, ps in enumerate(ions.pseudopotentials):
-            ps.update(Gmax, ion_width, system.electrons.comm)
+            ps.update(Gmax, ion_width, system.electrons.group)
             Vloc_coeff.append(ps.Vloc.f_tilde_coeff)
             n_core_coeff.append(ps.n_core.f_tilde_coeff)
         self.Vloc_coeff = torch.hstack(Vloc_coeff)
@@ -164,18 +164,22 @@ class _LocalTerms:
         ions.n_core_tilde.data[0] = (SF * self.Ginterp(self.n_core_coeff)).sum(dim=0)
         ions.rho_tilde.data = (SF * self.rho_kernel).sum(dim=0)
         # Add long-range part of local potential from ionic charge:
-        ions.Vloc_tilde += self.system.coulomb.kernel(
-            ions.rho_tilde, correct_G0_width=True
-        )
+        coulomb_kernel = self.system.coulomb.kernel
+        lattice = self.system.lattice
+        ions.phi_o_offset = (
+            -ions.Z_tot / lattice.volume
+        ) * coulomb_kernel.G0_correction
+        ions.Vloc_tilde += coulomb_kernel(ions.rho_tilde)
+        ions.Vloc_tilde.o += ions.phi_o_offset
 
     @stopwatch(name="Ions.LocalTerms.update_grad")
     def update_grad(self) -> None:
         """Accumulate local-pseudopotential force / stress contributions."""
         # Propagate long-range local-potential gradient to ionic charge gradient:
         ions = self.ions
-        ions.rho_tilde.grad += self.system.coulomb.kernel(
-            ions.Vloc_tilde.grad, correct_G0_width=True
-        )
+        coulomb_kernel = self.system.coulomb.kernel
+        ions.rho_tilde.grad += coulomb_kernel(ions.Vloc_tilde.grad)
+        ions.rho_tilde.grad.o += ions.Vloc_tilde.grad.o * coulomb_kernel.G0_correction
         if ions.lattice.requires_grad:
             ions.lattice.grad += self.system.coulomb.kernel.stress(
                 ions.Vloc_tilde.grad, ions.rho_tilde
@@ -245,14 +249,15 @@ def collect_ps_matrix(self: ions.Ions, n_spinor: int) -> None:
             i_proj_start = i_proj_stop
 
 
-def _update_pulay(ions: ions.Ions, basis: dft.electrons.Basis) -> float:
+def _update_pulay(ions: ions.Ions, basis: dft.electrons.Basis) -> torch.Tensor:
     "Update `ions.dEtot_drho_basis` and return Pulay correction."
     ions.dEtot_drho_basis = sum(
         n_ions_i * ps.dE_drho_basis(basis.ke_cutoff)
         for n_ions_i, ps in zip(ions.n_ions_type, ions.pseudopotentials)
     )
-    return (
+    return torch.tensor(
         ions.dEtot_drho_basis
         * (basis.n_ideal - basis.n_avg_weighted)
-        / basis.lattice.volume
+        / basis.lattice.volume,
+        device=rc.device,
     )

@@ -3,17 +3,16 @@ communicators to be used by the current QimPy instance. The import-time configur
 selects a single CPU core for each MPI process in `mpi4py.MPI.COMM_WORLD`.
 
 Call `init` to select the number of cores or a GPU device, as available and based
-on environment variables including SLURM_CPUS_PER_TASK and CUDA_VISIBLE_DEVICES.
-
-Note that `init` must be called before any torch CUDA calls, so that a single CUDA
-context is associated with this process. Otherwise, on multi-GPU systems, any CUDA MPI
-will subsequently fail. To mitigate this potential issue whenever possible, this module
-uses SLURM_LOCALID or OMPI_COMM_WORLD_LOCAL_RANK to pick a specific GPU and alter
-CUDA_VISIBLE_DEVICES before any torch or MPI calls.
+on environment variables such as SLURM_CPUS_PER_TASK, as well as to initialize
+`torch.distributed` communication controlled by BACKEND and its standard environment
+variables MASTER_ADDR and MASTER_PORT. None of these environment variables are required;
+`init` uses MPI to determine a consistent address/port for the backend set-up.
 """
 
-from typing import Optional
-import contextlib
+from typing import NamedTuple
+from itertools import groupby
+from operator import itemgetter
+import socket
 import datetime
 import time
 import os
@@ -21,8 +20,10 @@ import os
 import torch
 import numpy as np
 from psutil import cpu_count
+import torch.distributed as dist
+from torch.distributed.elastic.utils.distributed import get_free_port
 
-from . import log, set_gpu_visibility, MPI
+from . import log, MPI
 
 # List exported symbols for doc generation
 __all__ = (
@@ -32,12 +33,9 @@ __all__ = (
     "is_head",
     "cpu",
     "device",
-    "use_cuda",
-    "compute_stream",
-    "compute_stream_context",
-    "compute_stream_wait_current",
-    "current_stream_wait_compute",
-    "current_stream_synchronize",
+    "use_accelerator",
+    "init",
+    "free",
     "clock",
     "report_end",
 )
@@ -48,24 +46,14 @@ n_procs: int = comm.size  #: Size of `comm`
 is_head: bool = i_proc == 0  #: Whether head of `comm`
 cpu: torch.device = torch.device("cpu")  #: CPU torch device
 device: torch.device = cpu  #: Preferred torch device for calculation (CPU / GPU)
-use_cuda: bool = False  #: Whether `device` is a CUDA GPU
-compute_stream: Optional[torch.cuda.Stream] = None  #: Asynchronous CUDA compute stream
+use_accelerator: bool = False  #: Whether `device` is an accelerator (GPU-like)
 t_start: float = time.time()  #: Start time used for `clock` (set by `init`)
 
 # Set reasonable pre-init defaults for torch:
 torch.set_default_dtype(torch.double)
 torch.set_num_threads(1)  # to prevent overcommit between MPI processes
 
-# Declare type mappings from torch to MPI and numpy:
-mpi_type: dict[torch.dtype, MPI.Datatype] = {
-    torch.int32: MPI.INT,
-    torch.int64: MPI.LONG,
-    torch.float32: MPI.FLOAT,
-    torch.float64: MPI.DOUBLE,
-    torch.complex64: MPI.COMPLEX,
-    torch.complex128: MPI.DOUBLE_COMPLEX,
-}  #: Mapping from torch to MPI datatypes
-
+# Declare type mappings from torch to numpy:
 np_type: dict[torch.dtype, type] = {
     torch.bool: np.bool_,
     torch.uint8: np.uint8,
@@ -82,9 +70,10 @@ np_type: dict[torch.dtype, type] = {
 
 
 def init(
-    *, comm_override: Optional[MPI.Comm] = None, cores_override: Optional[int] = None
+    *, comm_override: MPI.Comm | None = None, cores_override: int | None = None
 ) -> None:
     """Initialize overall hardware resources to be used by QimPy.
+    Initializes GPU resources
 
     Parameters
     ----------
@@ -110,31 +99,53 @@ def init(
         n_procs = comm.size
         is_head = i_proc == 0
 
-    # Select GPU before initializing torch:
+    # Determine nodes and process distribution:
     comm_node = comm.Split_type(MPI.COMM_TYPE_SHARED)  # on-node communicator
     i_proc_node = comm_node.Get_rank()
     n_procs_node = comm_node.Get_size()
-    gpu_id = set_gpu_visibility(i_proc_node)
+    # --- collect processes running on each host at head of comm_node
+    is_node_head = i_proc_node == 0
+    node_proc_list = comm_node.gather(i_proc)
+    # --- collect above and hostname across heads of each node
+    comm_node_inter = comm.Split(i_proc_node)  # inter-node communicator
+    host_proc_lists: list[HostProcessList] = []
+    if is_node_head:
+        host_proc_lists = comm_node_inter.allgather(
+            HostProcessList(socket.gethostname(), node_proc_list)
+        )
+    # --- distribute to all processes and report
+    host_proc_lists = comm_node.bcast(host_proc_lists)
+    host_proc_str = " ".join(str(host_proc_list) for host_proc_list in host_proc_lists)
+    log.info(f"Hosts(processes): {host_proc_str}")
 
     # Initialize torch:
-    global device, use_cuda, compute_stream
-    if torch.cuda.is_available():
-        device = torch.device("cuda:0")
-        use_cuda = True
-        torch.cuda.device(device)  # set as default CUDA device
-        # Enable compute stream based on environment (default on):
-        if os.environ.get("QIMPY_COMPUTE_STREAM", "1") in {"1", "yes"}:
-            compute_stream = torch.cuda.Stream(device=device)
-            log.info("Async compute stream enabled for GPU operations.")
-        else:
-            log.info("Async compute stream disabled for GPU operations.")
-    else:
-        gpu_id = -1
+    gpu_id = -1
+    global device, use_accelerator
+    if torch.accelerator.is_available():
+        # Select GPU based on local rank:
+        gpu_id = i_proc_node % torch.accelerator.device_count()
+        torch.accelerator.set_device_index(gpu_id)
+        device = torch.device(gpu_id)
+        use_accelerator = True
     # --- count unique GPUs on node using IDs (average over processes on same node)
     gpu_ids_mine = np.array([gpu_id], dtype=int)
     gpu_ids_local = np.zeros(n_procs_node, dtype=int)
     comm_node.Allgather(gpu_ids_mine, gpu_ids_local)
     n_gpus = np.count_nonzero(np.unique(gpu_ids_local) >= 0) / n_procs_node
+
+    # Initialize torch distributed:
+    backend = os.environ.get("BACKEND", dist.get_default_backend_for_device(device))
+    if "MASTER_ADDR" not in os.environ:
+        os.environ["MASTER_ADDR"] = host_proc_lists[0].hostname
+    if "MASTER_PORT" not in os.environ:
+        os.environ["MASTER_PORT"] = str(comm.bcast(get_free_port() if is_head else 0))
+    os.environ["LOCAL_RANK"] = str(i_proc_node)
+    os.environ["RANK"] = str(i_proc)
+    os.environ["WORLD_SIZE"] = str(n_procs)
+    dist.init_process_group(
+        backend=backend, device_id=(device if use_accelerator else None)
+    )
+    dist.barrier()  # Force lazy backend intialization to complete
 
     # Threads:
     # --- First priority: override argument
@@ -163,32 +174,9 @@ def init(
     )
 
 
-def compute_stream_context():
-    """Context manager to enter compute stream.
-    Equivalent to calling `torch.cuda.stream(rc.compute_stream)`, but also
-    works correctly when cuda is not supported (and `compute_stream` is None)."""
-    if compute_stream is None:
-        return contextlib.nullcontext()
-    else:
-        return torch.cuda.StreamContext(compute_stream)
-
-
-def compute_stream_wait_current():
-    """Make `compute_stream` (if used) wait on current stream."""
-    if compute_stream is not None:
-        compute_stream.wait_stream(torch.cuda.current_stream())
-
-
-def current_stream_wait_compute():
-    """Make current stream wait on `compute_stream` (if used)."""
-    if compute_stream is not None:
-        torch.cuda.current_stream().wait_stream(compute_stream)
-
-
-def current_stream_synchronize():
-    """Wait for all tasks in current CUDA stream to complete."""
-    if use_cuda:
-        torch.cuda.current_stream().synchronize()
+def free():
+    """Cleanup any resources initialized in `init`."""
+    dist.destroy_process_group()
 
 
 def clock():
@@ -201,3 +189,23 @@ def report_end():
     t_stop = time.time()
     duration = datetime.timedelta(seconds=(t_stop - t_start))
     log.info(f"\nEnd time: {time.ctime(t_stop)} (Duration: {duration})")
+
+
+class HostProcessList(NamedTuple):
+    """List of processes running on each hostname"""
+
+    hostname: str
+    process_list: list[int]
+
+    def __str__(self) -> str:
+        """Format as, e.g., `hostname(0,3-5,8-10)`."""
+        proc_ranges = []
+        for _, index_proc_pair in groupby(
+            enumerate(self.process_list), lambda i_pair: i_pair[0] - i_pair[1]
+        ):
+            procs = list(map(itemgetter(1), index_proc_pair))
+            if len(procs) == 1:
+                proc_ranges.append(str(procs[0]))
+            else:
+                proc_ranges.append(f"{procs[0]}-{procs[-1]}")
+        return f"{self.hostname}({','.join(proc_ranges)})"

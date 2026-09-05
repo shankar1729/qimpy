@@ -1,4 +1,4 @@
-from typing import Protocol, Optional, Union
+from typing import Protocol
 
 import numpy as np
 import torch
@@ -35,11 +35,14 @@ class Linear(LinearSolve[FieldH]):
     grid: Grid
     coulomb: Coulomb
     epsilon_0: float  #: bulk static dielectric constant
+    screening_length: float  #: fluid (Debye) screening length; None => no screening
     variant: Variant  #: variant of cavity shape and cavitation model
+    zero_nyquist: bool  #: whether to zero Nyquist frequencies in Poisson equation
 
     energy: Energy  #: energy components
     phi_tilde: FieldH  #: net electrostatic potential
     epsilon: FieldR  #: spatially varying dielectric constant
+    kappa_sq: float  #: screening strength (0 => disabled)
     Kkernel: torch.Tensor  #: preconditioner kernel
 
     def __init__(
@@ -49,22 +52,32 @@ class Linear(LinearSolve[FieldH]):
         coulomb: Coulomb,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         n_iterations: int = 100,
-        gradient_threshold: float = 1e-8,
-        epsilon_0: Optional[float] = None,
+        threshold: float = 1e-8,
+        epsilon_0: float | None = None,
+        screening_length: float | None = None,
         solvent: str = "",
-        GLSSA13: Optional[Union[dict, variants.GLSSA13]] = None,
-        LA12: Optional[Union[dict, variants.LA12]] = None,
+        GLSSA13: dict | variants.GLSSA13 | None = None,
+        LA12: dict | variants.LA12 | None = None,
+        zero_nyquist: bool = True,
+        verbose: bool = False,
     ):
         super().__init__(
             checkpoint_in=checkpoint_in,
-            comm=grid.comm,
+            group=grid.group,
             n_iterations=n_iterations,
-            gradient_threshold=gradient_threshold,
+            threshold=threshold,
+            name=("  Fluid" if verbose else ""),
         )
         self.grid = grid
         self.coulomb = coulomb
+        self.screening_length = screening_length
         set_solvent_properties(
             solvent, DIELECTRIC_PROPERTIES, dict(epsilon_0=epsilon_0), self
+        )
+        self.kappa_sq = (
+            self.epsilon_0 / screening_length**2
+            if screening_length is not None
+            else 0.0
         )
         self.add_child_one_of(
             "variant",
@@ -75,30 +88,39 @@ class Linear(LinearSolve[FieldH]):
             TreeNode.ChildOptions("LA12", variants.LA12, LA12, solvent=solvent),
             have_default=True,
         )
+        self.zero_nyquist = zero_nyquist
 
         self.energy = Energy(name="Afluid")
         self.phi_tilde = FieldH(self.grid)
 
         # Initialize preconditioner:
-        iG = grid.get_mesh("H").to(torch.double)
-        Gsq = (iG @ grid.lattice.Gbasis.T).square().sum(dim=-1)
-        GSQ_CUT = 1e-12  # regularization
-        self.Kkernel = torch.clamp(Gsq, min=GSQ_CUT).reciprocal() / self.epsilon_0
-        self.Kkernel[Gsq < GSQ_CUT] = 0.0  # project out null-space
+        Gsq = grid.get_gradient_operator("H", zero_nyquist).imag.square().sum(dim=0)
+        Kinv = (self.epsilon_0 * Gsq + self.kappa_sq) / (4 * np.pi)
+        KINV_CUT = 1e-12  # regularization
+        self.Kkernel = torch.clamp(Kinv, min=KINV_CUT).reciprocal()
+        self.Kkernel[Kinv < KINV_CUT] = 0.0  # project out null-space
 
     def hessian(self, phi_tilde: FieldH) -> FieldH:
-        result = (~(~phi_tilde.gradient() * self.epsilon[None])).divergence()
+        result = (
+            ~(~phi_tilde.gradient(zero_nyquist=self.zero_nyquist) * self.epsilon[None])
+        ).divergence(zero_nyquist=self.zero_nyquist)
+        if self.kappa_sq:
+            # Screening (ionic) term, per fluid screening length:
+            kappa_sq_r = self.kappa_sq * self.variant.shape  # fieldR
+            result -= ~(kappa_sq_r * (~phi_tilde))
         return (-1 / (4 * np.pi)) * result
 
     def precondition(self, vector: FieldH) -> FieldH:
         return vector.convolve(self.Kkernel)
 
     @stopwatch(name="Linear.calculate")
-    def update(self, n_tilde: FieldH, rho_tilde: FieldH) -> None:
+    def update(self, n_tilde: FieldH, rho_tilde: FieldH, phi_o_offset: float) -> None:
         self.variant.update_shape(n_tilde)
         shape = self.variant.shape
         self.epsilon = 1.0 + (self.epsilon_0 - 1.0) * shape
 
+        if self.zero_nyquist:
+            rho_tilde.zero_nyquist()
         n_iter = self.solve(rho_tilde, self.phi_tilde)
         log.info(f"  Fluid: solve completed in {n_iter} iterations")
 
@@ -108,14 +130,26 @@ class Linear(LinearSolve[FieldH]):
             self.phi_tilde ^ self.hessian(self.phi_tilde)
         ) + ((self.phi_tilde - 0.5 * phi_ext_tilde) ^ rho_tilde)
         if n_tilde.requires_grad:
-            grad_phi_sq = (~self.phi_tilde.gradient()).data.square().sum(dim=0)
+            grad_phi_sq = (
+                (~self.phi_tilde.gradient(zero_nyquist=self.zero_nyquist))
+                .data.square()
+                .sum(dim=0)
+            )
             shape.requires_grad_(True)
             shape.grad = FieldR(
                 self.grid, data=(-(self.epsilon_0 - 1) / (8 * np.pi)) * grad_phi_sq
             )
+            if self.kappa_sq:
+                # Ionic contribution to the shape gradient (backprop):
+                phi_sq = (~self.phi_tilde).data.square()
+                shape.grad.data -= (self.kappa_sq / (8 * np.pi)) * phi_sq
 
         # Cavitation terms:
         self.variant.update_energy(self.energy)
+
+        # Corrections due to ion width:
+        phi_ext_tilde.o += phi_o_offset
+        self.energy["muShift"] = -phi_o_offset * rho_tilde.integral()
 
         # Propagate gradients as needed:
         if n_tilde.requires_grad:

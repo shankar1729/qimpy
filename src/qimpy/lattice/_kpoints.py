@@ -1,11 +1,12 @@
 from __future__ import annotations
-from typing import Union, Sequence, Optional
+from typing import Sequence
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
 import qimpy
-from qimpy import log, rc, TreeNode, MPI
+from qimpy import log, rc, TreeNode
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import ProcessGrid, TaskDivision
 from . import Lattice
@@ -14,7 +15,7 @@ from . import Lattice
 class Kpoints(TreeNode):
     """Set of k-points in Brillouin zone."""
 
-    comm: MPI.Comm  #: Communicator for k-point division
+    group: dist.ProcessGroup  #: Process group for k-point division
     k: torch.Tensor  #: Array of k-points (N x 3)
     wk: torch.Tensor  #: Integration weights for each k (adds to 1)
     division: TaskDivision  #: Division of k-points across `comm`
@@ -23,8 +24,8 @@ class Kpoints(TreeNode):
         self,
         *,
         process_grid: ProcessGrid,
-        k: Optional[torch.Tensor] = None,
-        wk: Optional[torch.Tensor] = None,
+        k: torch.Tensor | None = None,
+        wk: torch.Tensor | None = None,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """Initialize from list of k-points and weights. Typically, this should
@@ -42,11 +43,11 @@ class Kpoints(TreeNode):
 
         # Initialize process grid dimension (if -1) and split k-points:
         process_grid.provide_n_tasks("k", k.shape[0])
-        self.comm = process_grid.get_comm("k")
+        self.group = process_grid.get_group("k")
         self.division = TaskDivision(
             n_tot=k.shape[0],
-            n_procs=self.comm.size,
-            i_proc=self.comm.rank,
+            n_procs=self.group.size(),
+            i_proc=self.group.rank(),
             name="k-point",
         )
 
@@ -73,8 +74,8 @@ class Kmesh(Kpoints):
         symmetries: qimpy.symmetries.Symmetries,
         lattice: Lattice,
         checkpoint_in: CheckpointPath = CheckpointPath(),
-        offset: Union[Sequence[float], np.ndarray] = (0.0, 0.0, 0.0),
-        size: Union[float, Sequence[int], np.ndarray] = (1, 1, 1),
+        offset: Sequence[float] | np.ndarray = (0.0, 0.0, 0.0),
+        size: float | Sequence[int, np.ndarray] = (1, 1, 1),
         use_inversion: bool = True,
     ) -> None:
         """Construct k-mesh of specified `size` and `offset`.
@@ -244,7 +245,7 @@ class Kpath(Kpoints):
         process_grid: ProcessGrid,
         lattice: Lattice,
         dk: float = 0.0,
-        points: Optional[list] = None,
+        points: list | None = None,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """Initialize k-path with spacing `dk` connecting `points`.

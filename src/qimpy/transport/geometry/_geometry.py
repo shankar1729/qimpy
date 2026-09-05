@@ -2,7 +2,9 @@ from __future__ import annotations
 from typing import Optional
 from abc import abstractmethod
 
-from qimpy import TreeNode, MPI
+import torch.distributed as dist
+
+from qimpy import TreeNode
 from ..material import Material
 from ._tensor_list import TensorList
 
@@ -18,7 +20,7 @@ class Geometry(TreeNode):
     :class:`FiniteVolume` (cell-centered finite volume on triangle / line meshes).
     """
 
-    comm: MPI.Comm  #: Communicator for the real-space (cell) split
+    group: dist.ProcessGroup  #: Process group for the real-space (cell) split
     material: Material  #: Corresponding material
     contacts: dict[str, Optional[dict]]  #: contact names -> material parameters
     dt_max: float  #: Maximum stable time step

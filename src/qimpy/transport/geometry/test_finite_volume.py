@@ -19,6 +19,22 @@ from ..material import FermiSurface
 from ._mesh import load_mesh, save_mesh
 from ._finite_volume import FiniteVolume, build_fv_geom
 
+# ⛔ CACHE THE PROCESS GRID.  Under MPI, ProcessGrid.get_comm was a free
+# communicator split.  Upstream's torch.distributed get_group splits a real
+# NCCL communicator, which allocates ~512 MB of device memory that is never
+# released, so creating one grid per test exhausted a 40 GB card after ~50
+# tests: 86 failures, every one "Failed to CUDA calloc 536870912 bytes", none
+# of them a logic error.  One grid per process is all any of these tests need.
+_PG_CACHE: dict[tuple, ProcessGrid] = {}
+
+
+def _cached_pg(dim_names: str, shape) -> ProcessGrid:
+    key = (dim_names, tuple(shape) if shape else None)
+    if key not in _PG_CACHE:
+        _PG_CACHE[key] = ProcessGrid(dim_names, shape)
+    return _PG_CACHE[key]
+
+
 
 # --------------------------------------------------------------------------- #
 #  mesh generators (self-contained; qimpy does not mesh -- `triangle` is used
@@ -148,7 +164,7 @@ def _build_fv(contacts, *, mesh_path=None, gs=12.0, vF=1.5, M=8, **mat_kw):
     """FermiSurface(Nr=1) device on a triangle mesh, wrapped in a FiniteVolume geometry."""
     tmp = tempfile.mkdtemp()
     path = mesh_path or _make_rect_mesh(gs, os.path.join(tmp, "rect.npz"))
-    pg = ProcessGrid(rc.comm, "rk", (1, 1))
+    pg = _cached_pg("rk", (1, 1))
     kw = dict(kF=1.0, vF=vF, M_theta=M, Nr=1, T=1.0,
               tau_p=np.inf, tau_ee=np.inf, r_c=np.inf, specularity=1.0)
     kw.update(mat_kw)
@@ -359,7 +375,7 @@ def test_cartesian_reflective_walls_conserve_mass() -> None:
     torch.set_default_dtype(torch.float64)
     tmp = tempfile.mkdtemp()
     path = _make_rect_mesh(10.0, os.path.join(tmp, "rect.npz"), all_walls=True)
-    pg = ProcessGrid(rc.comm, "rk", (1, 1))
+    pg = _cached_pg("rk", (1, 1))
     material = FermiSurface(
         process_grid=pg, kF=1.0, vF=1.5, M_theta=8, Nr=1, T=1.0,
         tau_p=np.inf, tau_ee=np.inf, specularity=1.0,
@@ -396,7 +412,7 @@ def test_cartesian_wall_energy_and_pressure() -> None:
     raw moment is dominated by a constant and both the Gram and this assertion
     lose their resolving power."""
     torch.set_default_dtype(torch.float64)
-    pg = ProcessGrid(rc.comm, "rk", (1, 1))
+    pg = _cached_pg("rk", (1, 1))
     material = FermiSurface(
         process_grid=pg, kF=7.5e-3, vF=0.11194, M_theta=32, Nr=6, T=1.3301e-5,
         xi_max=6.0, tau_p=np.inf, tau_ee=np.inf, specularity=1.0,
@@ -445,7 +461,7 @@ def test_cartesian_wall_specularity() -> None:
     CONSTANT over each face's inflow set. That is what forces the correction
     basis to be the inflow indicator rather than the flux weight |v.n|."""
     torch.set_default_dtype(torch.float64)
-    pg = ProcessGrid(rc.comm, "rk", (1, 1))
+    pg = _cached_pg("rk", (1, 1))
     th = torch.linspace(0.0, 2 * np.pi, 17, device=rc.device)[:-1]
     n = torch.stack([th.cos(), th.sin()], -1)
     for s in (0.0, 0.5, 1.0):
@@ -527,7 +543,7 @@ def test_cartesian_wall_conserves_flux_and_shear() -> None:
     the residuals are 4.5e-3 and 4.0e-3 on a drifted Fermi-Dirac trace, and up
     to 7.8e-2 on the worst face of an all-angles sweep."""
     torch.set_default_dtype(torch.float64)
-    pg = ProcessGrid(rc.comm, "rk", (1, 1))
+    pg = _cached_pg("rk", (1, 1))
     material = FermiSurface(
         process_grid=pg, kF=1.0, vF=1.5, M_theta=8, Nr=1, T=1.0,
         tau_p=np.inf, tau_ee=np.inf, specularity=1.0,
@@ -657,7 +673,7 @@ def _decomp_worker() -> None:
     count, unlike the fixed (1,1) grid the serial-test builder uses."""
     rc.init()
     torch.set_default_dtype(torch.float64)
-    pg = ProcessGrid(rc.comm, "rk", None)
+    pg = _cached_pg("rk", None)
     pg.provide_n_tasks("k", 1)
     mat = FermiSurface(kF=1.0, vF=1.5, M_theta=8, Nr=1, T=1.0,
                        tau_p=15.0, tau_ee=8.0, r_c=np.inf, specularity=1.0,
@@ -778,7 +794,7 @@ def test_cartesian_wall_preserves_occupancy_bounds() -> None:
     than f) but it has to be measured, not argued.
     """
     torch.set_default_dtype(torch.float64)
-    pg = ProcessGrid(rc.comm, "rk", (1, 1))
+    pg = _cached_pg("rk", (1, 1))
     material = FermiSurface(
         process_grid=pg, kF=7.5e-3, vF=0.11194, M_theta=32, Nr=6, T=1.3301e-5,
         xi_max=6.0, tau_p=np.inf, tau_ee=np.inf, specularity=1.0,
@@ -830,7 +846,7 @@ def test_diffuse_wall_alpha_threshold() -> None:
     alpha == 0 identically, which is why production (s = 1) is unaffected.
     """
     torch.set_default_dtype(torch.float64)
-    pg = ProcessGrid(rc.comm, "rk", (1, 1))
+    pg = _cached_pg("rk", (1, 1))
 
     def reflect(s, te_fac):
         material = FermiSurface(

@@ -1,18 +1,17 @@
 from __future__ import annotations
-from typing import TypeVar, Any, Union, Optional, Sequence
+from typing import TypeVar, Any, Sequence
 from abc import abstractmethod
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import rc, MPI
+from qimpy import rc
 from qimpy.algorithms import Gradable
 from qimpy.math import random
-from qimpy.mpi import BufferView
 from qimpy.io import CheckpointPath
 from . import Grid
 from ._change import _change_real, _change_recip
-
 
 FieldType = TypeVar("FieldType", bound="Field")  #: Type for field ops.
 
@@ -71,7 +70,7 @@ class Field(Gradable[FieldType]):
         grid: Grid,
         *,
         shape_batch: Sequence[int] = tuple(),
-        data: Optional[torch.Tensor] = None,
+        data: torch.Tensor | None = None,
     ) -> None:
         """Initialize to zeros or specified `data`.
 
@@ -105,7 +104,7 @@ class Field(Gradable[FieldType]):
         return self.__class__(self.grid, data=self.data.clone())
 
     def add_(
-        self: FieldType, other: Union[FieldType, float], *, alpha: float = 1.0
+        self: FieldType, other: FieldType | float, *, alpha: float = 1.0
     ) -> FieldType:
         """Add in-place with optional scale factor (Mirroring torch.Tensor.add_)."""
         if isinstance(other, float):
@@ -121,32 +120,32 @@ class Field(Gradable[FieldType]):
             return NotImplemented
         return self
 
-    def __add__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+    def __add__(self: FieldType, other: FieldType | float) -> FieldType:
         return self.clone().add_(other)
 
     __radd__ = __add__
 
-    def __iadd__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+    def __iadd__(self: FieldType, other: FieldType | float) -> FieldType:
         return self.add_(other)
 
-    def __sub__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+    def __sub__(self: FieldType, other: FieldType | float) -> FieldType:
         return self.clone().add_(other, alpha=-1.0)
 
-    def __rsub__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+    def __rsub__(self: FieldType, other: FieldType | float) -> FieldType:
         return (-self).add_(other)
 
-    def __isub__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+    def __isub__(self: FieldType, other: FieldType | float) -> FieldType:
         return self.add_(other, alpha=-1.0)
 
     def __neg__(self: FieldType) -> FieldType:
         return self.__class__(self.grid, data=(-self.data))
 
-    def __mul__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+    def __mul__(self: FieldType, other: FieldType | float) -> FieldType:
         return self.clone().__imul__(other)
 
     __rmul__ = __mul__
 
-    def __imul__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+    def __imul__(self: FieldType, other: FieldType | float) -> FieldType:
         if isinstance(other, float):
             self.data *= other
         elif isinstance(other, type(self)):
@@ -155,13 +154,13 @@ class Field(Gradable[FieldType]):
             return NotImplemented
         return self
 
-    def __truediv__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+    def __truediv__(self: FieldType, other: FieldType | float) -> FieldType:
         return self.clone().__itruediv__(other)
 
     def __rtruediv__(self: FieldType, other: float) -> FieldType:
         return self.__class__(self.grid, data=(other / self.data))
 
-    def __itruediv__(self: FieldType, other: Union[FieldType, float]) -> FieldType:
+    def __itruediv__(self: FieldType, other: FieldType | float) -> FieldType:
         if isinstance(other, float):
             self.data /= other
         elif isinstance(other, type(self)):
@@ -185,11 +184,10 @@ class Field(Gradable[FieldType]):
                 result = result.real  # due to Hermitian symmetry
         else:
             result = data.sum(dim=(-3, -2, -1)) * grid.dV
-        # Collect over MPI if needed:
-        if self.grid.comm is not None:
+        # Collect over process group if needed:
+        if self.grid.group is not None:
             result = result.contiguous()
-            rc.current_stream_synchronize()
-            self.grid.comm.Allreduce(MPI.IN_PLACE, BufferView(result), MPI.SUM)
+            dist.all_reduce(result, group=self.grid.group)
         return result
 
     def dot(self: FieldType, other: FieldType) -> torch.Tensor:
@@ -212,23 +210,19 @@ class Field(Gradable[FieldType]):
             result *= self.grid.lattice.volume  # reciprocal space integration weight
         else:
             result *= self.grid.dV  # real space integration weight
-        # Collect over MPI if needed:
-        if self.grid.comm is not None:
+        # Collect over process group if needed:
+        if self.grid.group is not None:
             result = result.contiguous()
-            rc.current_stream_synchronize()
-            self.grid.comm.Allreduce(MPI.IN_PLACE, BufferView(result), MPI.SUM)
+            dist.all_reduce(result, group=self.grid.group)
         return result
 
     __xor__ = dot
 
-    def vdot(self: FieldType, other: FieldType) -> float:
+    def vdot(self: FieldType, other: FieldType) -> torch.Tensor:
         """Vector-space dot product of data summed over all dimensions.
         (Scalar contraction needed for the `Pulay` or `Minimizer` algorithm templates.)
         """
-        result = torch.vdot(self.data.flatten(), other.data.flatten()).real
-        if self.grid.comm is not None:
-            self.grid.comm.Allreduce(MPI.IN_PLACE, BufferView(result), MPI.SUM)
-        return result.item()
+        return (self ^ other).sum()
 
     def norm(self: FieldType) -> torch.Tensor:
         r"""Norm of a field, defined by :math:`\sqrt{\int |a|^2}`.
@@ -264,12 +258,16 @@ class Field(Gradable[FieldType]):
         """Assign to slice on batch dimensions"""
         self.data[index] = value.data
 
-    def gradient(self: FieldType, dim: int = 0) -> FieldType:
+    def gradient(
+        self: FieldType, dim: int = 0, zero_nyquist: bool = False
+    ) -> FieldType:
         """Gradient of field. A new batch dimension of length 3 is inserted
         at the location specified by `dim`, by default at the beginning."""
         if not self.is_tilde:  # apply in reciprocal space
-            return ~((~self).gradient(dim=dim))  # type: ignore
-        op = self.grid.get_gradient_operator("G" if self.is_complex else "H")
+            return ~((~self).gradient(dim, zero_nyquist))  # type: ignore
+        op = self.grid.get_gradient_operator(
+            "G" if self.is_complex else "H", zero_nyquist
+        )
         shape_in = self.data.shape
         n_batch_dims = len(shape_in) - 3
         shape_data = shape_in[:dim] + (1,) + shape_in[dim:]
@@ -278,17 +276,25 @@ class Field(Gradable[FieldType]):
             self.grid, data=(op.view(shape_op) * self.data.view(shape_data))
         )
 
-    def divergence(self: FieldType, dim: int = 0) -> FieldType:
+    def divergence(
+        self: FieldType, dim: int = 0, zero_nyquist: bool = False
+    ) -> FieldType:
         """Divergence of field. A dimension of length 3 at `dim`, by default
         at the beginning, is contracted against the gradient operator."""
         if not self.is_tilde:  # apply in reciprocal space
-            return ~((~self).divergence(dim=dim))  # type: ignore
-        op = self.grid.get_gradient_operator("G" if self.is_complex else "H")
+            return ~((~self).divergence(dim, zero_nyquist))  # type: ignore
+        op = self.grid.get_gradient_operator(
+            "G" if self.is_complex else "H", zero_nyquist
+        )
         n_batch_dims = len(self.data.shape) - 4  # other than contracted one
         shape_op = (1,) * dim + (3,) + (1,) * (n_batch_dims - dim) + op.shape[1:]
         return self.__class__(
             self.grid, data=(op.view(shape_op) * self.data).sum(dim=dim)
         )
+
+    def zero_nyquist(self) -> None:
+        assert self.is_tilde
+        self.grid.zero_nyquist(self.data, "G" if self.is_complex else "H")
 
     def laplacian(self: FieldType) -> FieldType:
         """Laplacian of field."""
@@ -427,8 +433,8 @@ class FieldR(Field["FieldR"]):
     def to(self, grid: Grid) -> FieldR:
         """Switch field to another `grid` with same `shape`.
         The new grid can only differ in the MPI split."""
-        if grid is self.grid:
-            return self
+        if grid.is_equivalent_to(self.grid):
+            return FieldR(grid, data=self.data)
         return _change_real(self, grid)
 
     def log(self) -> FieldR:
@@ -468,8 +474,8 @@ class FieldC(Field["FieldC"]):
     def to(self, grid: Grid) -> FieldC:
         """Switch field to another `grid` with same `shape`.
         The new grid can only differ in the MPI split."""
-        if grid is self.grid:
-            return self
+        if grid.is_equivalent_to(self.grid):
+            return FieldC(grid, data=self.data)
         return _change_real(self, grid)
 
 
@@ -506,8 +512,8 @@ class FieldH(Field["FieldH"]):
         """Switch field to another `grid` with possibly different `shape`.
         This routine will perform Fourier resampling and MPI rearrangements,
         as necessary."""
-        if grid is self.grid:
-            return self
+        if grid.is_equivalent_to(self.grid):
+            return FieldH(grid, data=self.data)
         return _change_recip(self, grid)
 
     def symmetrize(self) -> None:
@@ -546,6 +552,6 @@ class FieldG(Field["FieldG"]):
         """Switch field to another `grid` with possibly different `shape`.
         This routine will perform Fourier resampling and MPI rearrangements,
         as necessary."""
-        if grid is self.grid:
-            return self
+        if grid.is_equivalent_to(self.grid):
+            return FieldG(grid, data=self.data)
         return _change_recip(self, grid)

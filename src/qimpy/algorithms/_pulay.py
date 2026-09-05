@@ -1,14 +1,16 @@
 from __future__ import annotations
-from typing import TypeVar, Generic, Sequence, Deque
+from typing import TypeVar, Generic, Deque
 from abc import ABC, abstractmethod
 from collections import deque
 
 import numpy as np
+import torch
+import torch.distributed as dist
 
-from qimpy import log, rc, TreeNode, Energy, MPI
+from qimpy import log, rc, TreeNode, Energy
 from qimpy.io import CheckpointPath
+from qimpy.profiler import StopWatch
 from ._optimizable import Optimizable, ConvergenceCheck
-
 
 Variable = TypeVar("Variable", bound=Optimizable)
 
@@ -19,7 +21,7 @@ class Pulay(Generic[Variable], ABC, TreeNode):
     by the `Optimizable` abstract base class.
     """
 
-    comm: MPI.Comm  #: Communicator over which algorithm operates in unison
+    group: dist.ProcessGroup  #: Process group over which algorithm operates in unison
     name: str  #: Name of algorithm instance used in reporting eg. 'SCF'.
     n_iterations: int  #: Maximum number of iterations
     energy_threshold: float  #: Convergence threshold on energy change
@@ -42,7 +44,7 @@ class Pulay(Generic[Variable], ABC, TreeNode):
         self,
         *,
         checkpoint_in: CheckpointPath,
-        comm: MPI.Comm,
+        group: dist.ProcessGroup,
         name: str,
         n_iterations: int,
         energy_threshold: float,
@@ -54,7 +56,7 @@ class Pulay(Generic[Variable], ABC, TreeNode):
     ) -> None:
         """Initialize Pulay algorithm parameters."""
         super().__init__()
-        self.comm = comm
+        self.group = group
         self.name = name
         self.n_iterations = n_iterations
         self.energy_threshold = energy_threshold
@@ -68,7 +70,7 @@ class Pulay(Generic[Variable], ABC, TreeNode):
         self._overlaps = np.zeros((0, 0), dtype=float)
 
     @abstractmethod
-    def cycle(self, dEprev: float) -> Sequence[float]:
+    def cycle(self, dEprev: float) -> torch.Tensor:
         """Single cycle of the Pulay-mixed self-consistent iteration.
         In each subsequent cycle, Pulay will try to zero the difference
         between get_variable() before and after the cycle. The implementation
@@ -83,6 +85,14 @@ class Pulay(Generic[Variable], ABC, TreeNode):
 
     def report(self, i_iter: int) -> None:
         """Override to perform optional reporting."""
+        # HACK: discard stopwatch timings before SCF: 0 line
+        if i_iter == 0:
+            StopWatch._process_events()
+            StopWatch._stats.clear()
+        if i_iter == 10:
+            torch.cuda.nvtx.range_push("SCFn")
+        if i_iter == 11:
+            torch.cuda.nvtx.range_pop()
 
     @property  # type: ignore
     @abstractmethod
@@ -97,6 +107,7 @@ class Pulay(Generic[Variable], ABC, TreeNode):
     @variable.setter  # type: ignore
     @abstractmethod
     def variable(self, v: Variable) -> None:
+        """Set current variable in the state of the system."""
         ...
 
     @property
@@ -125,7 +136,7 @@ class Pulay(Generic[Variable], ABC, TreeNode):
 
         # Initial energy and difference:
         energy = self.energy
-        E = self._sync(float(energy))
+        E = self._sync(energy.total).item()
         Eprev = 0.0
         dE = E - Eprev
 
@@ -146,18 +157,18 @@ class Pulay(Generic[Variable], ABC, TreeNode):
             extra_values = self.cycle(dE)
             energy = self.energy
             Eprev = E
-            E = self._sync(float(energy))
+            E = self._sync(energy.total).item()
             dE = E - Eprev
 
             # Cache residual:
             residual = self.residual
             Mresidual = self.metric(residual)
-            res_norm = self._sync(np.sqrt(residual.vdot(Mresidual)))
+            res_norm = self._sync(residual.vdot(Mresidual).sqrt()).item()
             self._residuals.append(residual)
 
             # Check and report convergence:
             line = f"{self.name}: {i_iter}  {Ename}: {E:+.11f}  "
-            values = [dE, res_norm] + [self._sync(v) for v in extra_values]
+            values = [dE, res_norm] + self._sync(extra_values).tolist()
             converged = []
             for i_check, (check_name, check) in enumerate(checks.items()):
                 value = values[i_check]
@@ -182,8 +193,9 @@ class Pulay(Generic[Variable], ABC, TreeNode):
                 break
 
             # Pulay mixing / DIIS step:
+            watch = StopWatch("Pulay.optimize")
             # --- update the overlap matrix
-            new_overlaps = np.array([r.vdot(Mresidual) for r in self._residuals])
+            new_overlaps = np.array([r.vdot(Mresidual).item() for r in self._residuals])
             N = len(new_overlaps)
             self._overlaps = np.vstack(
                 (
@@ -208,8 +220,11 @@ class Pulay(Generic[Variable], ABC, TreeNode):
                     self._variables[i_hist]
                     + self.mix_fraction * self.precondition(self._residuals[i_hist])
                 )
+            watch.stop()
             self.variable = v  # type: ignore
 
-    def _sync(self, v: float) -> float:
+    def _sync(self, v: torch.Tensor) -> torch.Tensor:
         """Ensure `v` is consistent on `comm`."""
-        return self.comm.bcast(v)
+        if self.group.size() > 1:
+            dist.broadcast(v, group=self.group, group_src=0)
+        return v

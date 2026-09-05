@@ -1,31 +1,32 @@
 from __future__ import annotations
-from typing import Optional, Sequence
+from typing import Sequence
 from functools import cache
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import rc, log, TreeNode, grid, MPI
+from qimpy import rc, log, TreeNode, grid
 from qimpy.mpi import TaskDivision
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
-from ._fft import init_grid_fft, FFT, IFFT, IndicesType
+from ._fft import init_grid_fft, FFT, IFFT
 
 
 class Grid(TreeNode):
     """Real and reciprocal space grids for a unit cell.
-    The grid could either be local or distributed over an MPI communicator,
+    The grid could either be local or distributed over a process group,
     and this class provides FFT routines to switch fields on these grids,
     and routines to convert fields between grids.
     """
 
     lattice: Lattice
     symmetries: Symmetries
-    _field_symmetrizer: Optional[grid.FieldSymmetrizer]
-    comm: Optional[MPI.Comm]  #: Communicator to split grid and FFTs over
-    n_procs: int  #: Size of comm
-    i_proc: int  #: Rank within comm
+    _field_symmetrizer: grid.FieldSymmetrizer | None
+    group: dist.ProcessGroup | None  #: Process group to split grid and FFTs over
+    n_procs: int  #: Size of proces group
+    i_proc: int  #: Rank within process group
     is_split: bool  #: Whether the grid is split over MPI
     ke_cutoff: float  #: Kinetic energy of Nyquist-frequency plane-waves
     shape: tuple[int, ...]  #: Global real-space grid dimensions
@@ -38,21 +39,18 @@ class Grid(TreeNode):
     split2H: TaskDivision  #: MPI split of half-reciprocal dimension 2
     _mesh1D: dict[str, tuple[torch.Tensor, ...]]  # Global 1D meshes
     _mesh1D_mine: dict[str, tuple[torch.Tensor, ...]]  # Local 1D meshes
-    _indices_fft: IndicesType  #: All-to-all unscramble indices for `fft`
-    _indices_ifft: IndicesType  #: All-to-all unscramble indices for `ifft`
-    _indices_rfft: IndicesType  #: All-to-all unscramble indices for `rfft`
-    _indices_irfft: IndicesType  #: All-to-all unscramble indices for `irfft`
 
     def __init__(
         self,
         *,
         lattice: Lattice,
         symmetries: Symmetries,
-        comm: Optional[MPI.Comm],
+        group: dist.ProcessGroup | None,
+        allow_parallel: bool = True,
         checkpoint_in: CheckpointPath = CheckpointPath(),
-        ke_cutoff_wavefunction: Optional[float] = None,
-        ke_cutoff: Optional[float] = None,
-        shape: Optional[Sequence[int]] = None,
+        ke_cutoff_wavefunction: float | None = None,
+        ke_cutoff: float | None = None,
+        shape: Sequence[int | None] = None,
     ) -> None:
         """Create local or distributed grid for `lattice`.
 
@@ -64,8 +62,14 @@ class Grid(TreeNode):
             Symmetries with which grid dimensions will be made commensurate,
             checked if specified explicitly by shape below and used for
             symmetrization of :class:`Field`'s associated with this grid.
-        comm
-            Communicator to split grid (and its FFTs) over, if provided.
+        group
+            Process group to split grid (and its FFTs) over, if provided.
+            This is only used if `allow_parallel` is set to `True`.
+        allow_parallel
+            :yaml:`Whether to allow splitting the grid over a process group.`
+            If set to `False`, the grid is not split regardless of whether
+            a process group is provided. This may be useful to avoid overhead
+            from parallel FFTs in large GPU jobs.
         ke_cutoff_wavefunction
             Plane-wave kinetic-energy cutoff in :math:`E_h` for any electronic
             wavefunctions to be used with this grid. This is an internally set
@@ -86,10 +90,13 @@ class Grid(TreeNode):
         self.symmetries = symmetries
         self._field_symmetrizer = None
 
-        # MPI settings (identify local or split):
-        self.comm = comm
+        # Process group settings (identify local or split):
+        self.allow_parallel = allow_parallel
+        if not allow_parallel:
+            group = None
+        self.group = group
         self.n_procs, self.i_proc = (
-            (1, 0) if (comm is None) else (comm.Get_size(), comm.Get_rank())
+            (1, 0) if (group is None) else (group.size(), group.rank())
         )
         self.is_split = self.n_procs == 1
 
@@ -107,7 +114,7 @@ class Grid(TreeNode):
             elif self.ke_cutoff < 4 * ke_cutoff_wavefunction:
                 log.info(
                     f"Note: ke_cutoff (={self.ke_cutoff:g}) < 4"
-                    f"*ke_cutoff_wavefunction (={4*ke_cutoff_wavefunction:g})"
+                    f"*ke_cutoff_wavefunction (={4 * ke_cutoff_wavefunction:g})"
                     " truncates high wave vectors in density calculation"
                 )
 
@@ -125,7 +132,7 @@ class Grid(TreeNode):
             )
             # Align to multiple of 4 for FFT efficiency:
             shape_min = 4 * np.ceil(np.array(shape_min) / 4).astype(int)
-            log.info(f"minimum multiple-of-4 shape: {tuple(shape_min)}")
+            log.info(f"minimum multiple-of-4 shape: {tuple(shape_min.tolist())}")
 
         if shape is not None:
             self.shape = tuple(shape)
@@ -139,7 +146,7 @@ class Grid(TreeNode):
                     "At least one of ke-cutoff-wavefunction, "
                     "ke-cutoff or shape must be specified"
                 )
-            self.shape = tuple(symmetries.get_grid_shape(shape_min))
+            self.shape = tuple(symmetries.get_grid_shape(shape_min).tolist())
         log.info(f"selected shape: {self.shape}")
         init_grid_fft(self)
 
@@ -147,9 +154,14 @@ class Grid(TreeNode):
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
         attrs = cp_path.attrs
+        attrs["allow_parallel"] = self.allow_parallel
         attrs["shape"] = self.shape
         attrs["ke_cutoff"] = self.ke_cutoff
         return list(attrs.keys())
+
+    def is_equivalent_to(self, grid: Grid) -> bool:
+        """Whether this grid is equivalent to `grid`."""
+        return (self.is_split == grid.is_split) and (self.shape == grid.shape)
 
     @property
     def dV(self) -> float:
@@ -192,7 +204,7 @@ class Grid(TreeNode):
         return torch.stack(torch.meshgrid(*mesh1D, indexing="ij")).permute(1, 2, 3, 0)
 
     @cache
-    def get_gradient_operator(self, space: str) -> torch.Tensor:
+    def get_gradient_operator(self, space: str, zero_nyquist: bool) -> torch.Tensor:
         """Get gradient operator in reciprocal space.
 
         Parameters
@@ -200,6 +212,9 @@ class Grid(TreeNode):
         space : {'G', 'H'}
             Which space to compute mesh coordinates for: 'G' = full reciprocal
             space and 'H' = half or Hermitian-symmetric recipocal space.
+
+        zero_nyquist
+            Whether to zero out Nyquist frequency components
 
         Returns
         -------
@@ -209,7 +224,25 @@ class Grid(TreeNode):
         """
         mesh1D = self._mesh1D_mine[space]
         iG = torch.stack(torch.meshgrid(*mesh1D, indexing="ij")).to(torch.double)
+        if zero_nyquist:
+            self.zero_nyquist(iG, space)
         return 1j * torch.tensordot(self.lattice.Gbasis, iG, dims=1)
+
+    @cache
+    def get_nyquist_indices(self, space: str) -> list[tuple(int, int)]:
+        """List of dimensions and corresponding indices of Nyquist frequencies."""
+        result = []
+        mesh1D = self._mesh1D_mine[space]
+        for i_dir, (mesh1D_i, shape_i) in enumerate(zip(mesh1D, self.shape)):
+            sel = torch.where(mesh1D_i * 2 == shape_i)[0]
+            if len(sel) == 1:
+                result.append((i_dir - 3, int(sel.item())))
+        return result
+
+    def zero_nyquist(self, x: torch.Tensor, space: str) -> None:
+        """Set Nyquist components of `x` corresponding to `space` 'G' or 'H' to zero."""
+        for dim, index in self.get_nyquist_indices(space):
+            x.select(dim, index).zero_()
 
     def get_Gmax(self) -> float:
         """Get maximum wave-vector magnitude of the FFT grid."""

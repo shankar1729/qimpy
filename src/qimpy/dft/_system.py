@@ -1,9 +1,9 @@
-from typing import Union, Optional, Any, Sequence
+from typing import Any, Sequence
 
 import numpy as np
 import torch
 
-from qimpy import rc, log, TreeNode, Energy, MPI
+from qimpy import rc, log, TreeNode, Energy
 from qimpy.io import Checkpoint, CheckpointPath
 from qimpy.mpi import ProcessGrid
 from qimpy.lattice import Lattice
@@ -30,26 +30,25 @@ class System(TreeNode):
     export: Export  #: Exporters to interface with other codes
     energy: Energy  #: Energy components
     checkpoint_in: CheckpointPath  #: Input checkpoint
-    checkpoint_out: Optional[str]  #: Filename for output checkpoint
+    checkpoint_out: str | None  #: Filename for output checkpoint
     process_grid: ProcessGrid  #: Process grid for parallelization
     fluid: Fluid  #: Fluid model for solvation
 
     def __init__(
         self,
         *,
-        lattice: Union[Lattice, dict, None] = None,
-        ions: Union[Ions, dict, None] = None,
-        symmetries: Union[Symmetries, dict, None] = None,
-        electrons: Union[Electrons, dict, None] = None,
-        grid: Union[Grid, dict, None] = None,
-        coulomb: Union[Coulomb, dict, None] = None,
-        geometry: Union[Geometry, dict, str, None] = None,
-        fluid: Union[Fluid, dict, None] = None,
-        export: Union[Export, dict, None] = None,
-        checkpoint: Optional[str] = None,
-        checkpoint_out: Optional[str] = None,
-        comm: Optional[MPI.Comm] = None,
-        process_grid_shape: Optional[Sequence[int]] = None,
+        lattice: Lattice | dict | None = None,
+        ions: Ions | dict | None = None,
+        symmetries: Symmetries | dict | None = None,
+        electrons: Electrons | dict | None = None,
+        grid: Grid | dict | None = None,
+        coulomb: Coulomb | dict | None = None,
+        geometry: Geometry | dict | str | None = None,
+        fluid: Fluid | dict | None = None,
+        export: Export | dict | None = None,
+        checkpoint: str | None = None,
+        checkpoint_out: str | None = None,
+        process_grid_shape: Sequence[int] | None = None,
     ):
         """Compose a System to calculate from its pieces. Each piece
         could be provided as an object or a dictionary of parameters
@@ -82,17 +81,13 @@ class System(TreeNode):
         checkpoint_out
             :yaml:`Checkpoint file to write.`
             Defaults to `checkpoint` if unspecified.
-        comm
-            Overall communicator for system. Defaults to `qimpy.rc.comm` if unspecified.
         process_grid_shape
             Parallelization dimensions over replicas, k-points and bands/basis, used
             to initialize a `qimpy.mpi.ProcessGrid`. Dimensions that are -1 will be
             auto-determined based on number of tasks available to split along them.
             Default: all process grid dimensions are auto-determined."""
         super().__init__()
-        self.process_grid = ProcessGrid(
-            comm if comm else rc.comm, "rkb", process_grid_shape
-        )
+        self.process_grid = ProcessGrid("rkb", process_grid_shape)
         # Set in and out checkpoints:
         checkpoint_in = CheckpointPath()
         if checkpoint is not None:
@@ -139,7 +134,7 @@ class System(TreeNode):
             checkpoint_in,
             lattice=self.lattice,
             symmetries=self.symmetries,
-            comm=self.electrons.comm,  # Parallel
+            group=self.electrons.group,  # Parallel
             ke_cutoff_wavefunction=self.electrons.basis.ke_cutoff,
         )
 
@@ -157,7 +152,7 @@ class System(TreeNode):
             Geometry,
             geometry,
             checkpoint_in,
-            comm=self.electrons.comm,
+            group=self.electrons.group,
             lattice=self.lattice,
         )
         self.add_child(

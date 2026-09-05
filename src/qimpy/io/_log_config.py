@@ -1,4 +1,3 @@
-from typing import Optional, Union
 import logging
 import sys
 
@@ -10,11 +9,11 @@ from qimpy import rc, log, MPI
 
 def log_config(
     *,
-    output_file: Optional[str] = None,
-    mpi_log: Optional[str] = None,
-    mpi_comm: Optional[MPI.Comm] = None,
+    output_file: str | None = None,
+    mpi_log: str | None = None,
+    mpi_comm: MPI.Comm | None = None,
     append: bool = True,
-    verbose: bool = False
+    verbose: bool = False,
 ):
     """Configure logging globally for the qimpy library. It should typically
     only be necessary to call this once during start-up. Note that the default
@@ -70,7 +69,7 @@ def log_config(
         log.setLevel(logging.WARNING)
 
 
-def fmt(tensor: Union[torch.Tensor, np.ndarray], **kwargs) -> str:
+def fmt(tensor: torch.Tensor | np.ndarray, **kwargs) -> str:
     """Standardized conversion of torch tensors and numpy arrays for logging.
     Keyword arguments are forwarded to `numpy.array2string`."""
     # Set some defaults in formatter:
@@ -78,10 +77,12 @@ def fmt(tensor: Union[torch.Tensor, np.ndarray], **kwargs) -> str:
     kwargs.setdefault("suppress_small", True)
     kwargs.setdefault("separator", ", ")
     return np.array2string(
-        tensor.detach().to(rc.cpu).numpy()
-        if isinstance(tensor, torch.Tensor)
-        else tensor,
-        **kwargs
+        (
+            tensor.detach().to(rc.cpu).numpy()
+            if isinstance(tensor, torch.Tensor)
+            else tensor
+        ),
+        **kwargs,
     )
 
 

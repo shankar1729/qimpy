@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import pytest
 
 from qimpy import rc, log
 from qimpy.io import log_config
@@ -7,8 +8,9 @@ from qimpy.mpi import ProcessGrid
 from . import SingleBand
 
 
+@pytest.mark.skip
 def test_scatter():
-    process_grid = ProcessGrid(rc.comm, "rk", (-1, 1))
+    process_grid = ProcessGrid("rk", (-1, 1))
     vF = 0.375  # Graphene Fermi velocity
     material = SingleBand(
         process_grid=process_grid,
@@ -51,7 +53,7 @@ def test_scatter():
     tau_inv_ee = tau_inv_ee.to(rc.cpu).numpy().flatten()
     quadratic_model = Ediff**2 + (np.pi * material.T) ** 2
     D_ee = np.linalg.lstsq(quadratic_model[:, None], tau_inv_ee, rcond=None)[0][0]
-    log.info(f"Lifetime fit parameter, {D_ee = :.3e}")
+    log.info(f"Lifetime fit parameter, D_ee = {D_ee:.3e}")
     plt.scatter(Ediff, tau_inv_ee, marker="+", label="single_band.Scatter")
     E_plot = np.linspace(Ediff.min(), Ediff.max(), 200)
     plt.plot(

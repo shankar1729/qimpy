@@ -1,13 +1,13 @@
 from __future__ import annotations
-from typing import Optional, Union
 import math
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import rc, log, TreeNode, MPI
+from qimpy import rc, log, TreeNode
 from qimpy.io import CheckpointPath, CheckpointContext
-from qimpy.mpi import TaskDivision, ProcessGrid, BufferView, globalreduce
+from qimpy.mpi import TaskDivision, ProcessGrid, globalreduce
 from qimpy.math import ceildiv
 from qimpy.lattice import Lattice, Kpoints
 from qimpy.symmetries import Symmetries
@@ -18,11 +18,10 @@ from ._basis_real import BasisReal
 
 
 class Basis(TreeNode):
-    """Plane-wave basis for electronic wavefunctions. The underlying
-    :class:`qimpy.mpi.TaskDivision` splits plane waves over `rc.comm_b`"""
+    """Plane-wave basis for electronic wavefunctions."""
 
-    comm: MPI.Comm  #: Basis/bands communicator
-    comm_kb: MPI.Comm  #: Overall k-points and basis/bands communicator
+    group: dist.ProcessGroup  #: Basis/bands process group
+    group_kb: dist.ProcessGroup  #: Overall k-points and basis/bands process group
     lattice: Lattice  #: Lattice vectors of unit cell
     ions: Ions  #: Ionic system: implicit in basis for ultrasoft / PAW
     kpoints: Kpoints  #: Corresponding k-point set
@@ -48,7 +47,7 @@ class Basis(TreeNode):
     ]  #: Indexing datatype for `pad_index` and `pad_index_mine`
     pad_index: PadIndex  #: Which basis entries are padding (beyond `n`)
     pad_index_mine: PadIndex  #: Subset of `pad_index` on this process
-    division: TaskDivision  #: Division of basis across `rc.comm_b`
+    division: TaskDivision  #: Division of basis across `group`
     mine: slice  #: Slice of basis entries local to this process
     real: BasisReal  #: Extra indices for real wavefunctions
 
@@ -70,7 +69,7 @@ class Basis(TreeNode):
         checkpoint_in: CheckpointPath = CheckpointPath(),
         ke_cutoff: float = 20.0,
         real_wavefunctions: bool = False,
-        grid: Optional[Union[Grid, dict]] = None,
+        grid: Grid | dict | None = None,
         fft_block_size: int = 0,
         mpi_block_size: int = 0,
     ) -> None:
@@ -113,15 +112,15 @@ class Basis(TreeNode):
             :yaml:`Number of wavefunction bands to MPI transfer simultaneously.`
             Lower numbers may allow better overlap between computation and transfers,
             which is beneficial if MPI implementation supports asynchronous progress
-            and/or CUDA streams are used to compute asynrchronously.
+            and/or with accelerators that compute asynchronously in separate streams.
             Higher numbers mitigate MPI latency, but may require more memory.
             This number is automatically rounded up to nearest multiple of
-            `fft_block_size * comm.size`. The default of 0 selects the block size
+            `fft_block_size * group.size()`. The default of 0 selects the block size
             based on the number of bands and k-points being processed by each process.
         """
         super().__init__()
-        self.comm = process_grid.get_comm("b")
-        self.comm_kb = process_grid.get_comm("kb")
+        self.group = process_grid.get_group("b")
+        self.group_kb = process_grid.get_group("kb")
         self.lattice = lattice
         self.ions = ions
         self.kpoints = kpoints
@@ -160,7 +159,7 @@ class Basis(TreeNode):
             checkpoint_in,
             lattice=lattice,
             symmetries=symmetries,
-            comm=None,  # Never parallel
+            group=None,  # Never parallel
             ke_cutoff_wavefunction=self.ke_cutoff,
         )
 
@@ -172,11 +171,11 @@ class Basis(TreeNode):
             self._initialize_indices()
         self.pad_index = self._get_pad_index(0, self.n_tot)
 
-        # Divide basis on comm_b:
+        # Divide basis on group:
         div = TaskDivision(
             n_tot=self.n_tot,
-            n_procs=self.comm.size,
-            i_proc=self.comm.rank,
+            n_procs=self.group.size(),
+            i_proc=self.group.rank(),
             name="padded basis",
         )
         self.division = div
@@ -254,7 +253,7 @@ class Basis(TreeNode):
             if not (n_batch and n_bands):
                 return 1  # Irrelevant since no FFTs to perform anyway
             # TODO: better heuristics on how much data to FFT at once
-            min_data = 16_000_000 if rc.use_cuda else 100_000
+            min_data = 16_000_000 if rc.use_accelerator else 100_000
             min_block = ceildiv(min_data, n_batch * math.prod(self.grid.shape))
             max_block = ceildiv(n_bands, 16)  # based on memory limit
             block_size = min(min_block, max_block)
@@ -270,7 +269,7 @@ class Basis(TreeNode):
         """Number of bands to MPI transfer together for `collect_density` and
         `apply_potential`. Uses `mpi_block_size`, if that is non-zero, and uses a
         heuristic based on batch dimension and number of bands. The final number is
-        coerced to a multiple of `fft_block_size * comm.size` or rounded up to
+        coerced to a multiple of `fft_block_size * group.size()` or rounded up to
         `n_bands`, if it is already close to that limit."""
         if self.mpi_block_size:
             mpi_block_size = self.mpi_block_size
@@ -280,7 +279,7 @@ class Basis(TreeNode):
             # TODO: better heuristics on how much data to MPI-transfer at once
             min_data = 2_000_000  # TODO: incorporate MPI latency info somehow
             mpi_block_size = ceildiv(min_data, n_batch * self.n_tot)
-        # Enforce multiple of fft_block_size * comm.size:
+        # Enforce multiple of fft_block_size * group.size():
         divisor = fft_block_size * self.division.n_procs
         mpi_block_size = ceildiv(mpi_block_size, divisor) * divisor
         # Round up to n_bands if not enough blocks:
@@ -294,13 +293,6 @@ class Basis(TreeNode):
 
     _fft_block_size_reported = False  #: Make sure FFT block size reported once
     _mpi_block_size_reported = False  #: Make sure MPI block size reported once
-
-    def allreduce_in_place(self, x: torch.Tensor, op: MPI.Op = MPI.SUM) -> None:
-        """Allreduce `x` in place using `op` over `self.comm`.
-        Convenient wrapper used in many basis operations."""
-        if self.division.n_procs > 1:
-            rc.current_stream_synchronize()
-            self.comm.Allreduce(MPI.IN_PLACE, BufferView(x), op)
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
@@ -327,13 +319,13 @@ class Basis(TreeNode):
 
     def _set_n(self, n: torch.Tensor) -> None:
         """Set n and its stats (min, max, avg and tot)."""
-        comm = self.kpoints.comm
+        group = self.kpoints.group
         self.n = n
-        self.n_min = globalreduce.min(n, comm)
-        self.n_max = globalreduce.max(n, comm)
-        n_procs_b = self.comm.size
+        self.n_min = int(globalreduce.min(n, group).item())
+        self.n_max = int(globalreduce.max(n, group).item())
+        n_procs_b = self.group.size()
         self.n_tot = ceildiv(self.n_max, n_procs_b) * n_procs_b
-        self.n_avg = globalreduce.sum(self.n * self.wk, comm)
+        self.n_avg = float(globalreduce.sum(self.n * self.wk, group))
         log.info(
             f"n_basis:  min: {self.n_min}  max: {self.n_max}"
             f"  avg: {self.n_avg:.3f}  ideal: {self.n_ideal:.3f}"

@@ -1,9 +1,7 @@
 from __future__ import annotations
-from typing import Union
 
 import torch
 from qimpy import rc
-
 
 N_GHOST: int = 2  #: currently a constant, but could depend on slope method later
 
@@ -12,7 +10,7 @@ N_GHOST: int = 2  #: currently a constant, but could depend on slope method late
 NON_GHOST: slice = slice(N_GHOST, -N_GHOST)
 GHOST_L: slice = slice(0, N_GHOST)  #: ghost indices on left/bottom
 GHOST_R: slice = slice(-N_GHOST, None)  #: ghost indices on right/top side
-Mask = Union[bool, torch.Tensor]
+Mask = bool | torch.Tensor
 
 
 class Advect(torch.nn.Module):

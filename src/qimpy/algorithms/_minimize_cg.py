@@ -16,9 +16,9 @@ def cg(self: algorithms.Minimize[Vector]) -> Energy:
     E = self._compute(state, energy_only=False)
     E_prev = 0.0
     along_gradient = True  # Whether current search direction is along gradient
-    direction: Vector  #: Search direction (initialized at 0th iteration)
-    g_prev: Vector  #: Previous gradient (initialized at 0th iteration)
-    g_prev_Kg_prev: float  #: Preconditioned norm of g_prev
+    direction: Vector | None = None  #: Search direction (initialized at 0th iteration)
+    g_prev: Vector | None = None  #: Previous gradient (initialized at 0th iteration)
+    g_prev_Kg_prev: float = 0.0  #: Preconditioned norm of g_prev
     g_prev_used = not (
         (self.method == "gradient") or (self.cg_type == "fletcher-reeves")
     )  # whether previous gradient used in direction update
@@ -45,20 +45,20 @@ def cg(self: algorithms.Minimize[Vector]) -> Energy:
             return state.energy
 
         # Direction update:
-        g_Kg = self._sync(state.gradient.vdot(state.K_gradient))
+        g_Kg = self._sync(state.gradient.vdot(state.K_gradient)).item()
         if along_gradient or self.method == "gradient":
             beta = 0.0  # weight of previous search direction
         else:
             # Conjugate gradient update:
-            g_d = self._sync(state.gradient.vdot(direction))
+            g_d = self._sync(state.gradient.vdot(direction)).item()
             g_prev_Kg = (
-                self._sync(g_prev.vdot(state.K_gradient)) if g_prev_used else 0.0
+                self._sync(g_prev.vdot(state.K_gradient)).item() if g_prev_used else 0.0
             )
             # --- nonlinear CG variants:
             if self.cg_type == "polak-ribiere":
                 beta = (g_Kg - g_prev_Kg) / g_prev_Kg_prev
             elif self.cg_type == "hestenes-stiefel":
-                g_prev_d = self._sync(g_prev.vdot(direction))
+                g_prev_d = self._sync(g_prev.vdot(direction)).item()
                 beta = (g_Kg - g_prev_Kg) / (g_d - g_prev_d)
             else:  # self.cg_type == 'fletcher-reeves':
                 beta = g_Kg / g_prev_Kg_prev
@@ -135,7 +135,7 @@ def check_convergence(
     line = f"{self.name}: {i_iter}  {Ename}: {E:+.11f}  "
     dE = E - E_prev
     E_prev = E
-    values = [dE] + [self._sync(v) for v in state.extra]
+    values = [dE] + self._sync(state.extra).tolist()
     converged = []
     for i_check, (check_name, check) in enumerate(checks.items()):
         if not (i_check or i_iter):

@@ -1,5 +1,4 @@
 import functools
-from typing import Optional
 
 import torch
 import numpy as np
@@ -26,7 +25,7 @@ class PseudoQuantumNumbers:
     i_ljm: torch.Tensor  #: combined (l, j, m_j) index used for orbitals
     i_ljms: torch.Tensor  #: combined (l, j, m_l, s) index used for projectors
 
-    def __init__(self, l: torch.Tensor, j: Optional[torch.Tensor]) -> None:
+    def __init__(self, l: torch.Tensor, j: torch.Tensor | None) -> None:
         """Initialize given `l` of each projector / orbital of a
         pseudopotential. The input corresponds to the distinct radial functions
         read from a pseudoptential, while the members of this class are for

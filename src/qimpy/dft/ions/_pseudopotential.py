@@ -1,11 +1,11 @@
 from __future__ import annotations
-from typing import Optional
 import pathlib
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import log, MPI
+from qimpy import log
 from qimpy.math import RadialFunction
 from qimpy.dft.ions import PseudoQuantumNumbers
 from qimpy.dft.ions._read_upf import read_upf
@@ -31,15 +31,15 @@ class Pseudopotential:
     beta: RadialFunction  #: Nonlocal projectors
     psi: RadialFunction  #: Atomic orbitals
     is_relativistic: bool  #: Whether this is a relativistic pseudopotential
-    j_beta: Optional[torch.Tensor]  #: l+s of projectors (if relativistic)
-    j_psi: Optional[torch.Tensor]  #: l+s of atomic orbitals (if relativistic)
+    j_beta: torch.Tensor | None  #: l+s of projectors (if relativistic)
+    j_psi: torch.Tensor | None  #: l+s of atomic orbitals (if relativistic)
     eig_psi: np.ndarray  #: Energy eigenvalue of each atomic orbital
     D: torch.Tensor  #: Descreened nonlocal pseudopotential matrix
 
     Gmax: float  #: Current reciprocal space extent of radial functions
     pqn_beta: PseudoQuantumNumbers  #: quantum numbers for projectors
     pqn_psi: PseudoQuantumNumbers  #: quantum numbers for orbitals
-    pulay_data: Optional[np.ndarray]  #: Pulay correction data for finite ke cutoff
+    pulay_data: np.ndarray | None  #: Pulay correction data for finite ke cutoff
 
     def __init__(self, filename: str) -> None:
         """Read pseudopotential from file.
@@ -57,11 +57,11 @@ class Pseudopotential:
         self.pqn_psi = PseudoQuantumNumbers(self.psi.l, self.j_psi)
         self._read_pulay(filename)
 
-    def update(self, Gmax: float, ion_width: float, comm: MPI.Comm) -> None:
+    def update(self, Gmax: float, ion_width: float, group: dist.ProcessGroup) -> None:
         """Update to support calculation of G upto `Gmax`.
         Along with radial function transformations, also update the range
         separation of Vloc to be consistent with specified `ion_width`.
-        Parallelize transformations of radial functions over `comm`.
+        Parallelize transformations of radial functions over `group`.
         """
         # Update ion width if necessary:
         if ion_width != self.ion_width:
@@ -74,7 +74,7 @@ class Pseudopotential:
             )
             if Gmax <= self.Gmax:
                 # Not a global Gmax update, transform Vloc separately:
-                RadialFunction.transform([self.Vloc], Gmax, comm, self.element)
+                RadialFunction.transform([self.Vloc], Gmax, group, self.element)
             self.ion_width = ion_width
 
         # Update radial transforms if necessary:
@@ -82,7 +82,7 @@ class Pseudopotential:
             transform_list = [self.rho_atom, self.Vloc, self.beta, self.psi]
             if hasattr(self, "n_core"):
                 transform_list.append(self.n_core)
-            RadialFunction.transform(transform_list, Gmax, comm, self.element)
+            RadialFunction.transform(transform_list, Gmax, group, self.element)
             self.Gmax = Gmax
 
     @property
@@ -147,13 +147,13 @@ class Pseudopotential:
             ke_cutoff_min = ke_cutoffs[0]
             if ke_cutoff < ke_cutoff_min:
                 raise ValueError(
-                    f"ke_cutoff lower than {ke_cutoff_min = } Eh for {self.element}"
+                    f"ke_cutoff lower than {ke_cutoff_min=} Eh for {self.element}"
                     " Pulay correction"
                 )
             ke_cutoff_max = ke_cutoffs[-1]
             if ke_cutoff > ke_cutoff_max:
                 log.warning(
-                    f"ke_cutoff higher than {ke_cutoff_max = } Eh in {self.element}"
+                    f"ke_cutoff higher than {ke_cutoff_max=} Eh in {self.element}"
                     " Pulay correction."
                 )
                 return 0.0

@@ -1,9 +1,9 @@
 from __future__ import annotations
-from typing import Optional, Sequence
 
 import torch
+import torch.distributed as dist
 
-from qimpy import dft, Energy, MPI
+from qimpy import dft, Energy
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import globalreduce
 from qimpy.algorithms import Pulay
@@ -16,7 +16,7 @@ class SCF(Pulay[FieldH]):
     mix_fraction_mag: float  #: Mix-fraction for magnetization
     q_kerker: float  #: Kerker-mixing wavevector
     q_metric: float  #: Wavevector controlling reciprocal-space metric
-    q_kappa: Optional[float]  #: Debye wavevector (automatic if None)
+    q_kappa: float | None  #: Debye wavevector (automatic if None)
     n_eig_steps: int  #: Number of eigenvalue steps per cycle
     eig_threshold: float  #: Eigenvalue convergence threshold
     mix_density: bool  #: Mix density if True, else mix potential
@@ -27,7 +27,7 @@ class SCF(Pulay[FieldH]):
     def __init__(
         self,
         *,
-        comm: MPI.Comm,
+        group: dist.ProcessGroup,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         n_iterations: int = 50,
         energy_threshold: float = 1e-8,
@@ -38,7 +38,7 @@ class SCF(Pulay[FieldH]):
         mix_fraction_mag: float = 1.5,
         q_kerker: float = 0.8,
         q_metric: float = 0.8,
-        q_kappa: Optional[float] = None,
+        q_kappa: float | None = None,
         n_eig_steps: int = 2,
         eig_threshold: float = 1e-8,
         mix_density: bool = True,
@@ -81,7 +81,7 @@ class SCF(Pulay[FieldH]):
             :yaml:`Characteristic wavevector controlling Pulay metric.`
         q_kappa
             :yaml:`Long-range cutoff wavevector for grand-canonical SCF.`
-            If unspecified, set based on Debye screening length.
+            If unspecified, regularize with minimum non-zero G-vector instead.
         n_eig_steps
             :yaml:`Number of inner eigenvalue iterations for each SCF cycle.`
         eig_threshold
@@ -100,7 +100,7 @@ class SCF(Pulay[FieldH]):
         self.eig_threshold = float(eig_threshold)
         self.mix_density = mix_density
         super().__init__(
-            comm=comm,
+            group=group,
             name="SCF",
             checkpoint_in=checkpoint_in,
             n_iterations=n_iterations,
@@ -139,7 +139,7 @@ class SCF(Pulay[FieldH]):
         iG = grid.get_mesh("H").to(torch.double)  # half-space
         Gsq = ((iG @ grid.lattice.Gbasis.T) ** 2).sum(dim=-1)
         # --- regularize Gsq by q_kappa or min(G!=0) as appropriate
-        Gsq_min = globalreduce.min(Gsq[Gsq > 0.0], self.comm)
+        Gsq_min = globalreduce.min(Gsq[Gsq > 0.0], self.group)
         q_kappa_sq = 0.0 if (self.q_kappa is None) else (self.q_kappa**2)
         Gsq_reg = (Gsq + q_kappa_sq) if q_kappa_sq else torch.clamp(Gsq, min=Gsq_min)
         # --- compute kernels
@@ -151,11 +151,10 @@ class SCF(Pulay[FieldH]):
             if self.mix_density
             else Gsq_reg / (Gsq_reg + q_metric_sq)
         )
-        self.K_metric *= grid.lattice.volume * grid.weight2H  # integration weight
         # Initialize electronic energy for current state:
         system.electrons.update(system)
 
-    def cycle(self, dEprev: float) -> Sequence[float]:
+    def cycle(self, dEprev: float) -> torch.Tensor:
         electrons = self.system.electrons
         eig_prev = electrons.eig[..., : electrons.fillings.n_bands]
         eig_threshold_inner = min(1e-6, 0.1 * abs(dEprev))
@@ -166,8 +165,8 @@ class SCF(Pulay[FieldH]):
         # Compute eigenvalue difference for extra convergence threshold:
         eig_cur = electrons.eig[..., : electrons.fillings.n_bands]
         deig = (eig_cur - eig_prev).abs()
-        deig_max = globalreduce.max(deig, electrons.comm)
-        return [deig_max]
+        deig_max = globalreduce.max(deig, electrons.group)
+        return deig_max[None]
 
     @property
     def energy(self) -> Energy:

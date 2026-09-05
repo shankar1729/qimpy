@@ -1,12 +1,12 @@
 from __future__ import annotations
-from typing import Union, Optional
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import log, rc, TreeNode, dft, MPI
+from qimpy import log, rc, TreeNode, dft
 from qimpy.io import CheckpointPath, CheckpointContext, Checkpoint
-from qimpy.mpi import ProcessGrid, globalreduce, BufferView
+from qimpy.mpi import ProcessGrid, globalreduce
 from qimpy.math import abs_squared
 from qimpy.lattice import Lattice, Kpoints, Kmesh, Kpath
 from qimpy.symmetries import Symmetries
@@ -20,7 +20,7 @@ from ._hamiltonian import _hamiltonian
 class Electrons(TreeNode):
     """Electronic subsystem"""
 
-    comm: MPI.Comm  #: Overall electronic communicator (k-points and bands/basis)
+    group: dist.ProcessGroup  #: Net electrons process group (k-points + bands/basis)
     kpoints: Kpoints  #: Set of kpoints (mesh or path)
     spin_polarized: bool  #: Whether calculation is spin-polarized
     spinorial: bool  #: Whether calculation is relativistic / spinorial
@@ -36,7 +36,7 @@ class Electrons(TreeNode):
     _n_bands_done: int  #: Number of bands in C that have been initialized
     fixed_H: str  #: If given, fix Hamiltonian to checkpoint file of this name
     save_wavefunction: bool  #: Whether to save wavefunction in checkpoint
-    lcao: Optional[LCAO]  #: If present, use LCAO initialization
+    lcao: LCAO | None  #: If present, use LCAO initialization
     eig: torch.Tensor  #: Electronic orbital eigenvalues
     deig_max: float  #: Estimate of accuracy of current `eig`
     n_tilde: FieldH  #: Electron density (and magnetization, if `spin_polarized`)
@@ -52,19 +52,19 @@ class Electrons(TreeNode):
         ions: Ions,
         symmetries: Symmetries,
         checkpoint_in: CheckpointPath = CheckpointPath(),
-        k_mesh: Optional[Union[dict, Kmesh]] = None,
-        k_path: Optional[Union[dict, Kpath]] = None,
+        k_mesh: dict | Kmesh | None = None,
+        k_path: dict | Kpath | None = None,
         spin_polarized: bool = False,
         spinorial: bool = False,
-        fillings: Optional[Union[dict, Fillings]] = None,
-        basis: Optional[Union[dict, Basis]] = None,
-        xc: Optional[Union[dict, XC]] = None,
+        fillings: dict | Fillings | None = None,
+        basis: dict | Basis | None = None,
+        xc: dict | XC | None = None,
         fixed_H: str = "",
         save_wavefunction: bool = True,
-        lcao: Optional[Union[dict, bool, LCAO]] = None,
-        davidson: Optional[Union[dict, Davidson]] = None,
-        chefsi: Optional[Union[dict, CheFSI]] = None,
-        scf: Optional[Union[dict, SCF]] = None,
+        lcao: dict | bool | LCAO | None = None,
+        davidson: dict | Davidson | None = None,
+        chefsi: dict | CheFSI | None = None,
+        scf: dict | SCF | None = None,
     ) -> None:
         """Initialize from components and/or dictionary of options.
 
@@ -152,7 +152,7 @@ class Electrons(TreeNode):
             ),
             have_default=True,
         )
-        self.comm = process_grid.get_comm("kb")
+        self.group = process_grid.get_group("kb")
 
         # Initialize spin:
         self.spin_polarized = spin_polarized
@@ -227,7 +227,7 @@ class Electrons(TreeNode):
                 raise ValueError("lcao must be False or LCAO parameters")
             self.lcao = None
         else:
-            self.add_child("lcao", LCAO, lcao, checkpoint_in, comm=self.comm)
+            self.add_child("lcao", LCAO, lcao, checkpoint_in, group=self.group)
 
         # Initialize diagonalizer:
         self.add_child_one_of(
@@ -250,7 +250,7 @@ class Electrons(TreeNode):
         log.info("\nDiagonalization: " + repr(self.diagonalize))
 
         # Initialize SCF:
-        self.add_child("scf", SCF, scf, checkpoint_in, comm=self.comm)
+        self.add_child("scf", SCF, scf, checkpoint_in, group=self.group)
 
     def initialize_wavefunctions(self, system: dft.System) -> None:
         """Initialize wavefunctions to LCAO / random (if not from checkpoint).
@@ -362,17 +362,23 @@ class Electrons(TreeNode):
         # Hartree and local contributions:
         rho_tilde = self.n_tilde[0]  # total charge density
         VH_tilde = system.coulomb.kernel(rho_tilde)  # Hartree potential
-        system.energy["Ehartree"] = 0.5 * (rho_tilde ^ VH_tilde).item()
-        system.energy["Eloc"] = (rho_tilde ^ system.ions.Vloc_tilde).item()
+        system.energy["Ehartree"] = 0.5 * (rho_tilde ^ VH_tilde).detach()
+        system.energy["Eloc"] = (rho_tilde ^ system.ions.Vloc_tilde).detach()
         if requires_grad:
             self.n_tilde.grad[0] += system.ions.Vloc_tilde + VH_tilde
+
+        # +U contributions:
+        if self.xc.plus_U:
+            system.energy["U"] = self.xc.plus_U.rhoAtom_computeU(
+                system.electrons.C, system.electrons.fillings
+            )
 
         # Fluid contributions
         if system.fluid.enabled:
             rho_tilde = self.n_tilde[0] + system.ions.rho_tilde  # total solute charge
             rho_tilde.requires_grad_(requires_grad, clear=True)
-            system.fluid.model.update(n_xc_tilde, rho_tilde)
-            system.energy["Afluid"] = float(system.fluid.model.energy)
+            system.fluid.model.update(n_xc_tilde, rho_tilde, system.ions.phi_o_offset)
+            system.energy["Afluid"] = system.fluid.model.energy.total
             if requires_grad:
                 self.n_tilde.grad[0] += rho_tilde.grad
 
@@ -390,8 +396,8 @@ class Electrons(TreeNode):
         f = self.fillings.f
         system.energy["KE"] = globalreduce.sum(
             self.C.band_ke()[:, :, : f.shape[2]] * self.basis.w_sk * f,
-            self.kpoints.comm,
-        )
+            self.kpoints.group,
+        ).detach()
         # Nonlocal projector:
         beta_C = self.C.proj[..., : self.fillings.n_bands]
         system.energy["Enl"] = globalreduce.sum(
@@ -400,8 +406,8 @@ class Electrons(TreeNode):
                 * self.basis.w_sk
                 * f
             ).real,
-            self.kpoints.comm,
-        )
+            self.kpoints.group,
+        ).detach()
 
     def accumulate_geometry_grad(self, system: dft.System) -> None:
         """Accumulate geometry gradient contributions of electronic energy.
@@ -432,7 +438,7 @@ class Electrons(TreeNode):
         if system.fluid.enabled:
             rho_tilde = self.n_tilde[0] + system.ions.rho_tilde  # total solute charge
             rho_tilde.requires_grad_(True, clear=True)
-            system.fluid.model.update(n_xc_tilde, rho_tilde)
+            system.fluid.model.update(n_xc_tilde, rho_tilde, system.ions.phi_o_offset)
             if system.ions.rho_tilde.requires_grad:
                 system.ions.rho_tilde.grad += rho_tilde.grad
 
@@ -477,8 +483,8 @@ class Electrons(TreeNode):
                         if i_dir != j_dir:
                             lattice_grad_mine[j_dir, i_dir] += result
 
-            # Collect above local contributions over MPI:
-            self.comm.Allreduce(MPI.IN_PLACE, BufferView(lattice_grad_mine))
+            # Collect above local contributions over processes:
+            dist.all_reduce(lattice_grad_mine, group=self.group)
             system.lattice.grad += lattice_grad_mine
 
             # Volume contributions:
@@ -509,13 +515,23 @@ class Electrons(TreeNode):
             system.energy["Eband"] = self.diagonalize.get_Eband()
         else:
             if system.fluid.enabled and (not self._n_bands_done):
+                # Disable fluid and fixed-mu:
                 system.fluid.enabled = False
+                mu, mu_constrain = self.fillings.mu, self.fillings.mu_constrain
+                self.fillings.mu, self.fillings.mu_constrain = np.nan, False
                 self.run(system, suffix=" (initial vacuum run)")
                 log.info(
                     "\nVacuum energy after initial minimize, "
                     f"{system.energy.name} = {float(system.energy):.16f}"
                 )
+                # Restore fluid and fixed-mu:
                 system.fluid.enabled = True
+                delta_mu = mu - self.fillings.mu
+                self.fillings.mu, self.fillings.mu_constrain = mu, mu_constrain
+                if self.fillings.mu_constrain:
+                    n_electrons = self.fillings.n_electrons
+                    log.info(f"Shifting eigs by {delta_mu:f} to keep {n_electrons=:f}")
+                    self.eig += delta_mu
             log.info(f"\n--- Electronic optimization{suffix} ---\n")
             self.initialize_wavefunctions(system)  # LCAO / randomize
             self.scf.update(system)

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Union, Sequence
+from typing import Sequence
 
 import torch
 import numpy as np
@@ -7,8 +7,7 @@ import numpy as np
 from qimpy import rc
 from . import InvalidInputException
 
-
-TensorCompatible = Union[torch.Tensor, np.ndarray, float, Sequence[float]]
+TensorCompatible = torch.Tensor | np.ndarray | float | Sequence[float]
 
 
 def cast_tensor(t: TensorCompatible) -> torch.Tensor:

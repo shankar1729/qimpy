@@ -23,7 +23,7 @@ def get_test_field(cls: Type[FieldType], grid: Grid) -> Field[Any]:
 
 
 def get_test_shapes() -> Sequence[Sequence[int]]:
-    return (36, 40, 48), (40, 48, 64)
+    return (36, 40, 48), (41, 47, 67)
 
 
 def get_shape_field_combinations() -> Sequence[tuple[Sequence[int], Type]]:
@@ -82,7 +82,7 @@ def test_resample(cls: Type[FieldType]) -> None:
 
 
 def get_plot_slice(v: Field) -> tuple[np.ndarray, np.ndarray]:
-    assert v.grid.comm is None
+    assert v.grid.group is None
     Lz = v.grid.lattice.Rbasis[:, 2].norm().item()
     Nz = v.grid.shape[2]
     z = np.arange(Nz) * (Lz / Nz)

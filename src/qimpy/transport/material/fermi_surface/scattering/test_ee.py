@@ -16,6 +16,22 @@ from qimpy import rc
 from qimpy.mpi import ProcessGrid
 from . import _kernels
 
+# ⛔ CACHE THE PROCESS GRID.  Under MPI, ProcessGrid.get_comm was a free
+# communicator split.  Upstream's torch.distributed get_group splits a real
+# NCCL communicator, which allocates ~512 MB of device memory that is never
+# released, so creating one grid per test exhausted a 40 GB card after ~50
+# tests: 86 failures, every one "Failed to CUDA calloc 536870912 bytes", none
+# of them a logic error.  One grid per process is all any of these tests need.
+_PG_CACHE: dict[tuple, ProcessGrid] = {}
+
+
+def _cached_pg(dim_names: str, shape) -> ProcessGrid:
+    key = (dim_names, tuple(shape) if shape else None)
+    if key not in _PG_CACHE:
+        _PG_CACHE[key] = ProcessGrid(dim_names, shape)
+    return _PG_CACHE[key]
+
+
 M_STAR, EPS_B, KF, T0 = 0.067, 12.9, 7.5e-3, 1.33e-5
 E_F = 0.5 * KF**2 / M_STAR
 KAPPA = 2 * M_STAR / EPS_B
@@ -42,7 +58,7 @@ def _no_default_device_mode():
 def make_fs(M_theta=8, Nr=1, ee=None, **kwargs):
     from qimpy.transport.material import FermiSurface
 
-    process_grid = ProcessGrid(rc.comm, "rk", (-1, 1))
+    process_grid = _cached_pg("rk", (-1, 1))
     return FermiSurface(
         kF=KF, vF=KF / M_STAR, M_theta=M_theta, Nr=Nr, T=T0,
         process_grid=process_grid, ee_scattering=ee, **kwargs,
@@ -1262,7 +1278,7 @@ def test_cartesian_local_te_rates():
     T = 0.02
     ee = dict(epsilon_bg=12.9, nonlinear=False, on_shell=False,
               check_convergence=False, n_xi=8, n_phi=64, n_xi_proj=6)
-    pg = ProcessGrid(rc.comm, "rk", (-1, 1))
+    pg = _cached_pg("rk", (-1, 1))
 
     def mk(local):
         return FermiSurface(
@@ -1293,7 +1309,7 @@ def test_local_te_ensemble_exact():
     (T_e/T)^2 fallback, which misses the O(t) shape drift of M_1."""
     from qimpy.transport.material import FermiSurface
     torch.set_default_dtype(torch.float64)
-    pg = ProcessGrid(rc.comm, "rk", (-1, 1))
+    pg = _cached_pg("rk", (-1, 1))
     T = 0.02
     ee_base = dict(epsilon_bg=12.9, nonlinear=False, on_shell=False,
                    check_convergence=False, n_xi=16, n_phi=128, n_xi_proj=8)

@@ -1,7 +1,8 @@
 from typing import Type, Sequence
 from functools import cache
 
-from qimpy import rc
+import torch.distributed as dist
+
 from qimpy.io import Unit
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
@@ -12,13 +13,15 @@ from ._field import FieldType
 @cache
 def get_sequential_grid(shape: Sequence[int]) -> Grid:
     lattice, symmetries = get_grid_inputs()
-    return Grid(lattice=lattice, symmetries=symmetries, shape=shape, comm=None)
+    return Grid(lattice=lattice, symmetries=symmetries, shape=shape, group=None)
 
 
 @cache
 def get_parallel_grid(shape: Sequence[int]) -> Grid:
     lattice, symmetries = get_grid_inputs()
-    return Grid(lattice=lattice, symmetries=symmetries, shape=shape, comm=rc.comm)
+    return Grid(
+        lattice=lattice, symmetries=symmetries, shape=shape, group=dist.group.WORLD
+    )
 
 
 @cache

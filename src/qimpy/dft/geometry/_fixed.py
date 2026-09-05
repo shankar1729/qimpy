@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from qimpy import MPI, dft
+import torch.distributed as dist
+
+from qimpy import dft
 from qimpy.io import CheckpointPath, CheckpointContext, Checkpoint
 from qimpy.lattice import Lattice
 from . import Relax
@@ -12,14 +14,14 @@ class Fixed(Relax):
     def __init__(
         self,
         *,
-        comm: MPI.Comm,
+        group: dist.ProcessGroup,
         lattice: Lattice,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         super().__init__(
             n_iterations=0,
             save_history=False,
-            comm=comm,
+            group=group,
             lattice=lattice,
             checkpoint_in=checkpoint_in,
         )

@@ -6,6 +6,7 @@ import torch
 from qimpy import log, rc
 from qimpy.lattice import Lattice
 from qimpy.grid import Grid, FieldH, coulomb
+from qimpy.grid._embed import CoulombEmbedder
 
 
 class KernelSlab:
@@ -15,11 +16,16 @@ class KernelSlab:
     i_dir: int  # Truncated direction (zero-based indexing)
     radius: float  # Range of truncation
     _kernel: torch.Tensor  # Coulomb kernel
+    G0_correction: float  #: G=0 correction to kernel for ion width
 
     def __init__(self, coul: coulomb.Coulomb, i_dir: int) -> None:
         """Initialize truncated coulomb calculation"""
-        self.grid = grid = coul.grid
+        self.grid = coul.grid
         self.i_dir = i_dir
+        self.embedder = CoulombEmbedder(self.grid)
+        self.gridEmbed = self.embedder.gridEmbed
+        self.embed = coul.embed
+        grid = self.gridEmbed if self.embed else self.grid
         if coul.radius:
             self.radius = coul.radius
         else:
@@ -36,12 +42,17 @@ class KernelSlab:
             * (1 - torch.exp(-Gplane * self.radius) * torch.cos(np.pi * iG[..., i_dir]))
             / Gsq,
         )
+        self.G0_correction = 0.0
 
-    def __call__(self, rho: FieldH, correct_G0_width: bool = False) -> FieldH:
-        """Apply coulomb operator on charge density `rho`.
-        If correct_G0_width = True, rho is a point charge distribution
-        widened by `ion_width` and needs a corresponding G=0 correction.
-        """
+    def __call__(self, rho: FieldH) -> FieldH:
+        """Apply coulomb operator on charge density `rho`."""
+        if self.embed:  # TODO: centralize embed logic in a KernelEmbed wrapper
+            k_space_expanded_rho = ~self.embedder.embedExpand(~rho)
+            assert self.grid is rho.grid
+            result = FieldH(
+                self.gridEmbed, data=self._kernel * k_space_expanded_rho.data
+            )
+            return ~self.embedder.embedShrink(~result)
         assert self.grid is rho.grid
         result = FieldH(self.grid, data=(self._kernel * rho.data))
         return result
@@ -130,7 +141,7 @@ class EwaldSlab:
             f"  nR: {self.iR.shape[0]}  nG: {self.iG.shape[0]}"
         )
 
-    def __call__(self, positions: torch.Tensor, Z: torch.Tensor) -> float:
+    def __call__(self, positions: torch.Tensor, Z: torch.Tensor) -> torch.Tensor:
         lattice = self.lattice
         Lz = lattice.volume / self.area
         sigma = self.sigma
@@ -247,10 +258,7 @@ class EwaldSlab:
             )
             minus_zTerm_G_by_G_3 = torch.einsum(
                 "l, ij -> ijl",
-                sigma
-                * np.sqrt(2 / np.pi)
-                * torch.exp(-0.5 * sigmaSq * G**2)
-                / G**2,
+                sigma * np.sqrt(2 / np.pi) * torch.exp(-0.5 * sigmaSq * G**2) / G**2,
                 torch.exp(-etaSq * z12**2),
             )
             minus_zTerm_G_by_G = (

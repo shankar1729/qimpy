@@ -202,6 +202,7 @@ def main():
     # Dry-run bypass:
     if args.dry_run:
         log.info("Dry run initialization successful: input is valid.")
+        rc.free()
         rc.report_end()
         StopWatch.print_stats()
         exit()
@@ -210,5 +211,6 @@ def main():
     system.run()
 
     # Report timings:
+    rc.free()
     rc.report_end()
     StopWatch.print_stats()

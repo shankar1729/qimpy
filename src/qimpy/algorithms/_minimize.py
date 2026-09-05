@@ -1,10 +1,12 @@
 from __future__ import annotations
-from typing import Generic, Sequence, NamedTuple, Optional, Union
+from typing import Generic, Sequence, NamedTuple
 from abc import ABC, abstractmethod
 
 import numpy as np
+import torch
+import torch.distributed as dist
 
-from qimpy import log, Energy, TreeNode, MPI
+from qimpy import log, Energy, TreeNode
 from qimpy.io import CheckpointPath
 from qimpy.io.dict import key_cleanup
 from ._minimize_lbfgs import lbfgs
@@ -16,7 +18,7 @@ class MinimizeState(Generic[Vector]):
     """Current energies and gradients of `Minimize` algorithm."""
 
     energy: Energy  #: Current energy (objective function)
-    extra: Sequence[float]  #: Extra convergence quantities
+    extra: torch.Tensor  #: Extra convergence quantities
     gradient: Vector  #: Gradient of energy w.r.t. parameters
     K_gradient: Vector  #: Preconditioned version of `gradient`
 
@@ -25,8 +27,7 @@ class MinimizeState(Generic[Vector]):
 
     def clear(self) -> None:
         self.energy = Energy()
-        self.extra = []
-        for attr_name in ("gradient", "K_gradient"):
+        for attr_name in ("extra", "gradient", "K_gradient"):
             if hasattr(self, attr_name):
                 delattr(self, attr_name)
 
@@ -52,7 +53,7 @@ class Minimize(Generic[Vector], ABC, TreeNode):
         energy: float = 1e-4  #: Dimensionless minimum energy reduction in step
         gradient: float = 0.9  #: Required reduction of projected gradient
 
-    comm: MPI.Comm  #: Communicator over which algorithm operates in unison
+    group: dist.ProcessGroup | None  #: Process group over which to operate in unison
     name: str  #: Name of algorithm instance used in reporting eg. 'Ionic'
     i_iter_start: int  #: Starting iteration number (eg. if continuing from checkpoint)
     n_iterations: int  #: Maximum number of iterations
@@ -64,7 +65,7 @@ class Minimize(Generic[Vector], ABC, TreeNode):
     step_size: StepSize  #: Step size options
     n_history: int  #: Maximum history size (only used for L-BFGS)
     wolfe: Wolfe  #: Wolfe line minimize stopping conditions
-    converge_on: Union[str, int]  #: Converge on 'any', 'all' or a number of thresholds
+    converge_on: str | int  #: Converge on 'any', 'all' or a number of thresholds
     n_converge: int  #: Number of thresholds that `converge_on` corresponds to
 
     #: Names and thresholds for any additional convergence quantities. These
@@ -77,7 +78,7 @@ class Minimize(Generic[Vector], ABC, TreeNode):
         self,
         *,
         checkpoint_in: CheckpointPath,
-        comm: MPI.Comm,
+        group: dist.ProcessGroup | None,
         name: str,
         n_iterations: int,
         energy_threshold: float,
@@ -86,15 +87,15 @@ class Minimize(Generic[Vector], ABC, TreeNode):
         method: str,
         cg_type: str = "polak-ribiere",
         line_minimize: str = "auto",
-        step_size: Optional[dict] = None,
+        step_size: dict | None = None,
         i_iter_start: int = 0,
         n_history: int = 15,
-        wolfe: Optional[dict] = None,
-        converge_on: Union[str, int] = "any",
+        wolfe: dict | None = None,
+        converge_on: str | int = "any",
     ) -> None:
         """Initialize minimization algorithm parameters."""
         super().__init__()
-        self.comm = comm
+        self.group = group
         self.name = name
         self.i_iter_start = i_iter_start
         self.n_iterations = n_iterations
@@ -168,7 +169,7 @@ class Minimize(Generic[Vector], ABC, TreeNode):
         return lbfgs(self) if (self.method == "l-bfgs") else cg(self)
 
     def finite_difference_test(
-        self, direction: Vector, step_sizes: Optional[Sequence[float]] = None
+        self, direction: Vector, step_sizes: Sequence[float] | None = None
     ) -> None:
         """Check gradient implementation by taking steps along `direction`.
         This will print ratio of actual energy differences along steps of
@@ -177,7 +178,7 @@ class Minimize(Generic[Vector], ABC, TreeNode):
         approaching 1 for a range of step sizes, with deviations at lower
         step sizes due to round off error and at higher step sizes due to
         nonlinearity."""
-        log.info(f'{self.name}: {"-"*12} Finite difference test {"-"*12}')
+        log.info(f'{self.name}: {"-" * 12} Finite difference test {"-" * 12}')
         if step_sizes is None:
             step_sizes = np.logspace(-9, 1, 11).tolist()
         # Initial state with gradient:
@@ -185,7 +186,7 @@ class Minimize(Generic[Vector], ABC, TreeNode):
         E0 = self._compute(state, energy_only=False)
         dE_step = self._sync(
             state.gradient.vdot(direction)
-        )  # directional derivative along step direction
+        ).item()  # directional derivative along step direction
         # Finite difference derivatives:
         step_size_prev = 0.0  # cumulative progress along step:
         for step_size in sorted(step_sizes):
@@ -196,25 +197,27 @@ class Minimize(Generic[Vector], ABC, TreeNode):
             log.info(
                 f"{self.name}: step size: {step_size:.3e}"
                 f"  d{state.energy.name}"
-                f" ratio: {deltaE/dE_expected:.11f}"
+                f" ratio: {deltaE / dE_expected:.11f}"
             )
-        log.info(f'{self.name}: {"-"*48}')
+        log.info(f'{self.name}: {"-" * 48}')
         # Restore original position:
         self.step(direction, -step_size_prev)
 
-    def _sync(self, v: float) -> float:
-        """Ensure `v` is consistent on `comm`."""
-        return self.comm.bcast(v)
+    def _sync(self, v: torch.Tensor) -> torch.Tensor:
+        """Ensure `v` is consistent on `group`."""
+        if (self.group is not None) and (self.group.size() > 1):
+            dist.broadcast(v, group=self.group, group_src=0)
+        return v
 
     def _compute(self, state: MinimizeState[Vector], energy_only: bool) -> float:
         """Internal helper to prepare `state`, call `compute`
         and return `_sync`'d energy."""
         state.clear()  # prevent use of old results
         self.compute(state, energy_only)
-        return self._sync(float(state.energy))
+        return self._sync(state.energy.total).item()
 
 
-def _get_nconverge(converge_on: Union[str, int], n_thresholds: int) -> int:
+def _get_nconverge(converge_on: str | int, n_thresholds: int) -> int:
     """Convert `converge_on` to number of convergence thresholds."""
     if isinstance(converge_on, str):
         converge_key = converge_on.lower()  # don't enforce case

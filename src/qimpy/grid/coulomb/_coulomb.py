@@ -15,12 +15,10 @@ from ._isolated import KernelSpherical, KernelIsolated, EwaldIsolated
 class Kernel(Protocol):
     """Specification for Coulomb kernel."""
 
-    def __call__(self, rho: FieldH, correct_G0_width: bool = False) -> FieldH:
-        """
-        Apply coulomb operator on charge density `rho`.
-        If correct_G0_width = True, rho is a point charge distribution
-        widened by `ion_width` and needs a corresponding G=0 correction.
-        """
+    G0_correction: float  #: G=0 correction to kernel for ion width
+
+    def __call__(self, rho: FieldH) -> FieldH:
+        """Apply coulomb operator on charge density `rho`."""
 
     def stress(self, rho1: FieldH, rho2: FieldH) -> torch.Tensor:
         """
@@ -32,7 +30,7 @@ class Kernel(Protocol):
 class Ewald(Protocol):
     """Specification for Ewald sum."""
 
-    def __call__(self, positions: torch.Tensor, Z: torch.Tensor) -> float:
+    def __call__(self, positions: torch.Tensor, Z: torch.Tensor) -> torch.Tensor:
         """Compute Ewald energy, and optionally accumulate gradients.
         Each gradient contribution is accumulated to a `grad` attribute,
         only if the corresponding `requires_grad` is enabled.
@@ -120,9 +118,6 @@ class Coulomb(TreeNode):
         log.info(f"Ionic width for embedding / fluids: {self.ion_width:f}")
 
         # For simplicity, just recreate kernel and ewald with new lattice
-        if self.embed:
-            raise NotImplementedError  # TODO
-
         i_periodic = [i for (i, x) in enumerate(lattice.periodic) if x]
         n_periodic = len(i_periodic)
         if n_periodic == 3:

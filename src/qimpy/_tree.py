@@ -1,9 +1,8 @@
-from typing import Union, TypeVar, Type, final
+from typing import TypeVar, Type, final
 
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.io.dict import key_cleanup
 from . import log
-
 
 ClassType = TypeVar("ClassType")
 TreeNodeType = TypeVar("TreeNodeType", bound="TreeNode")
@@ -59,7 +58,7 @@ class TreeNode:
         self,
         attr_name: str,
         cls: Type[TreeNodeType],
-        params: Union[TreeNodeType, dict, str, None],
+        params: TreeNodeType | dict | str | None,
         checkpoint_in: CheckpointPath,
         attr_variant_name: str = "",
         **kwargs,
@@ -136,7 +135,7 @@ class TreeNode:
             self,
             attr_variant_name: str,
             cls: Type[TreeNodeType],
-            params: Union[TreeNodeType, dict, None],
+            params: TreeNodeType | dict | None,
             **kwargs,
         ) -> None:
             self.attr_variant_name = attr_variant_name
@@ -185,7 +184,7 @@ class TreeNode:
                     arg_sel = arg  # version selected by checkpoint
                     break
             else:
-                raise KeyError(f"{variant_name = } not recognized for {attr_name}")
+                raise KeyError(f"{variant_name=} not recognized for {attr_name}")
         else:
             arg_sel = args[0]  # default
 

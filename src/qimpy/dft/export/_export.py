@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Protocol, Optional, Union
+from typing import Protocol
 
 from qimpy import TreeNode, dft
 from qimpy.io import CheckpointPath, CheckpointContext
@@ -9,8 +9,7 @@ from . import BGW
 class Exporter(Protocol):
     """Class requirements to use as a geometry action."""
 
-    def export(self, system: dft.System) -> None:
-        ...
+    def export(self, system: dft.System) -> None: ...
 
 
 class Export(TreeNode):
@@ -24,7 +23,7 @@ class Export(TreeNode):
         *,
         system: dft.System,
         checkpoint_in: CheckpointPath = CheckpointPath(),
-        bgw: Optional[Union[dict, BGW]] = None,
+        bgw: dict | BGW | None = None,
     ) -> None:
         """Specify one or more export formats.
 

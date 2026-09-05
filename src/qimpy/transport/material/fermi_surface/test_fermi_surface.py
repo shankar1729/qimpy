@@ -23,9 +23,25 @@ from qimpy.transport.material import FermiSurface
 from ._fermi_surface import AngularBasis, RadialBasis
 from ._representation import _DeltaKReflector
 
+# ⛔ CACHE THE PROCESS GRID.  Under MPI, ProcessGrid.get_comm was a free
+# communicator split.  Upstream's torch.distributed get_group splits a real
+# NCCL communicator, which allocates ~512 MB of device memory that is never
+# released, so creating one grid per test exhausted a 40 GB card after ~50
+# tests: 86 failures, every one "Failed to CUDA calloc 536870912 bytes", none
+# of them a logic error.  One grid per process is all any of these tests need.
+_PG_CACHE: dict[tuple, ProcessGrid] = {}
+
+
+def _cached_pg(dim_names: str, shape) -> ProcessGrid:
+    key = (dim_names, tuple(shape) if shape else None)
+    if key not in _PG_CACHE:
+        _PG_CACHE[key] = ProcessGrid(dim_names, shape)
+    return _PG_CACHE[key]
+
+
 
 def _pg() -> ProcessGrid:
-    return ProcessGrid(rc.comm, "rk", (1, 1))
+    return _cached_pg("rk", (1, 1))
 
 
 def _make(M_theta: int, Nr: int = 1, *, T_temp: float = 1.0,

@@ -1,18 +1,18 @@
 from __future__ import annotations
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import rc, dft, MPI
+from qimpy import rc, dft
 from qimpy.profiler import stopwatch
-from qimpy.mpi import BufferView
 from qimpy.math import ortho_matrix, cis, abs_squared
 
 
 class LowdinResults(NamedTuple):
     Q: torch.Tensor  #: Lowdin charges
-    M: Optional[torch.Tensor] = None  #: Lowdin magnetizations in spin-polarized cases
+    M: torch.Tensor | None = None  #: Lowdin magnetizations in spin-polarized cases
 
 
 class Lowdin:
@@ -22,7 +22,7 @@ class Lowdin:
     psi: dft.electrons.Wavefunction  #: Atomic orbitals
     psi_Opsi: torch.Tensor  #: Self-overlap of atomic orbitals
     psi_OC: torch.Tensor  #: Overlap of atomic orbitals with current wavefunction `C`
-    coeff: Optional[torch.Tensor]  #: Best-fit coefficents of C on psi used for dragging
+    coeff: torch.Tensor | None  #: Best-fit coefficents of C on psi used for dragging
 
     def __init__(self, C: dft.electrons.Wavefunction) -> None:
         """Prepare to analyze / manipulate wavefunction `C`."""
@@ -50,7 +50,7 @@ class Lowdin:
         if spin_polarized and self.C.spinorial:
             # Need off-diagonal density matrix components for spinorial magnetization:
             Rho = torch.einsum("skab, skb, skAb -> aA", lowdin, wf, lowdin.conj())
-            basis.kpoints.comm.Allreduce(MPI.IN_PLACE, BufferView(Rho))
+            dist.all_reduce(Rho, group=basis.kpoints.group)
             result = torch.empty((4, ions.n_ions), device=rc.device)
             i_psi_start = 0
             for slice_i, ps in zip(ions.slices, ions.pseudopotentials):
@@ -72,7 +72,7 @@ class Lowdin:
         else:
             # Diagonal components of density matrix suffice:
             Rho = torch.einsum("skb, skab -> sa", wf, abs_squared(lowdin))
-            basis.kpoints.comm.Allreduce(MPI.IN_PLACE, BufferView(Rho))
+            dist.all_reduce(Rho, group=basis.kpoints.group)
             # Reduce to (spin)-number on each atom:
             Ns = torch.zeros((Rho.shape[0], ions.n_ions), device=rc.device)
             Ns.index_add_(1, i_ion, Rho)

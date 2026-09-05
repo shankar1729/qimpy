@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Union, Sequence, Callable, Optional
+from typing import Sequence, Callable
 from functools import cache
 from dataclasses import dataclass
 
@@ -20,16 +20,16 @@ class SingleBand(Material):
     def __init__(
         self,
         *,
-        lattice: Union[Lattice, dict],
-        kmesh: Union[Sequence[int], np.ndarray],
+        lattice: Lattice | dict,
+        kmesh: Sequence[int] | np.ndarray,
         v: float = 0.0,
         m: float = 0.0,
-        dispersion: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+        dispersion: Callable[[torch.Tensor], torch.Tensor] | None = None,
         mu: float,
         T: float,
         nT_below: float = 5,
         nT_above: float = 5,
-        scatter: Optional[Union[Scatter, dict]] = None,
+        scatter: Scatter | dict | None = None,
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:

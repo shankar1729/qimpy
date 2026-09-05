@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Optional
 
 import numpy as np
 import torch
@@ -14,7 +13,7 @@ def _randomize(
     self: electrons.Wavefunction,
     seed: int = 0,
     b_start: int = 0,
-    b_stop: Optional[int] = None,
+    b_stop: int | None = None,
 ) -> None:
     """Set wavefunction coefficients to bandwidth-limited random numbers.
     This is done reproducibly, regardless of MPI configuration of the run,

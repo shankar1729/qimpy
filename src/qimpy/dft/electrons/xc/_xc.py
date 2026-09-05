@@ -1,15 +1,13 @@
-from typing import Union, Optional
-
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import log, TreeNode, MPI
+from qimpy import log, TreeNode
 from qimpy.profiler import StopWatch
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.grid import FieldH, FieldR
 from .functional import Functional, get_libxc_functional_names, FunctionalsLibxc
 from . import lda, gga, mgga, PlusU
-
 
 N_CUT = 1e-16  # Regularization threshold for densities
 
@@ -19,7 +17,7 @@ class XC(TreeNode):
 
     _functional_name: str  #: Internal name of functional for checkpoint
     _functionals: list[Functional]  #: list of functionals that add up to XC
-    plus_U: Optional[PlusU]  #: optional DFT+U correction
+    plus_U: PlusU | None  #: optional DFT+U correction
     need_sigma: bool  #: whether overall functional needs gradient
     need_lap: bool  #: whether overall functional needs laplacian
     need_tau: bool  #: whether overall functional needs KE density
@@ -29,8 +27,8 @@ class XC(TreeNode):
         *,
         spin_polarized: bool,
         checkpoint_in: CheckpointPath = CheckpointPath(),
-        functional: Union[str, list[str]] = "gga-pbe",
-        plus_U: Optional[Union[dict, PlusU]] = None,
+        functional: str | list[str] = "gga-pbe",
+        plus_U: dict | PlusU | None = None,
     ):
         """Initialize exchange-correlation functional.
 
@@ -101,7 +99,7 @@ class XC(TreeNode):
         attrs["functional"] = self._functional_name
         return list(attrs.keys())
 
-    def __call__(self, n_tilde: FieldH, tau_tilde: FieldH) -> float:
+    def __call__(self, n_tilde: FieldH, tau_tilde: FieldH) -> torch.Tensor:
         """Compute exchange-correlation energy and potential.
         Here, `n_tilde` and `tau_tilde` are the electron density and KE density
         (used if `need_tau` is True) in reciprocal space.
@@ -185,7 +183,7 @@ class XC(TreeNode):
             tau.grad = torch.zeros_like(tau)
         E = 0.0
         for functional in self._functionals:
-            E += functional(n, sigma, lap, tau, requires_grad) * grid.dV
+            E += functional(n, sigma, lap, tau, requires_grad).detach() * grid.dV
         watch.stop()
 
         # Gradient propagation for potential:
@@ -264,8 +262,8 @@ class XC(TreeNode):
             watch.stop()
 
         # Collect energy
-        if grid.comm is not None:
-            E = grid.comm.allreduce(E, MPI.SUM)
+        if grid.group is not None:
+            dist.all_reduce(E, group=grid.group)
         return E
 
 
@@ -290,7 +288,7 @@ if XC.__init__.__doc__:
     )
 
 
-def _get_functionals(name: str, scale_factor: float) -> list[Union[Functional, str]]:
+def _get_functionals(name: str, scale_factor: float) -> list[Functional | str]:
     """Get list of Functional objects associated with a functional `name`.
     For Libxc functionals, a validated list of strings is returned so that
     all the Libxc evaluations can be consolidated in a single wrapper.

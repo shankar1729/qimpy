@@ -1,12 +1,12 @@
 from __future__ import annotations
-from typing import Union, Optional, Callable
+from typing import Callable
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
-from qimpy import rc, log, TreeNode, dft, MPI
+from qimpy import rc, log, TreeNode, dft
 from qimpy.io import Unit, UnitOrFloat, Checkpoint, CheckpointPath, CheckpointContext
-from qimpy.mpi import BufferView
 from qimpy.dft.ions import Ions
 from qimpy.dft.ions.symbols import ATOMIC_WEIGHTS, ATOMIC_NUMBERS
 from ._stepper import Stepper
@@ -23,7 +23,7 @@ class Dynamics(TreeNode):
     system: dft.System  #: System being optimized currently
     masses: torch.Tensor  #: Mass of each ion in system (Dim: n_ions x 1 for bcast)
     stepper: Stepper
-    comm: MPI.Comm  #: Communictaor over which forces consistent
+    group: dist.ProcessGroup  #: Communictaor over which forces consistent
     dt: float  #: Time step
     n_steps: int  #: Number of MD steps
     thermostat: Thermostat  #: Thermostat/barostat method
@@ -36,30 +36,30 @@ class Dynamics(TreeNode):
     B0: float  #: Characteristic bulk modulus for Berendsen barostat
     langevin_gamma: float  #: Damping rate for Langevin thermostat
     drag_wavefunctions: bool  #: Whether to drag atomic components of wavefunctions
-    P: Optional[float]  #: Current pressure (available if `lattice.compute_stress`)
+    P: float | None  #: Current pressure (available if `lattice.compute_stress`)
     T: float  #: Current temperature
     KE: float  #: Current kinetic energy
-    stress: Optional[torch.Tensor]  #: Current stress including kinetic contributions
-    history: Optional[History]  #: Utility to save trajectory data
-    report_callback: Optional[Callable[[Dynamics, int], None]]  #: Callback from report
+    stress: torch.Tensor | None  #: Current stress including kinetic contributions
+    history: History | None  #: Utility to save trajectory data
+    report_callback: Callable[[Dynamics, int], None] | None  #: Callback from report
     i_iter_start: int  #: Starting iteration number (when continuing from checkpoint)
 
     def __init__(
         self,
         *,
-        comm: MPI.Comm,
+        group: dist.ProcessGroup,
         dt: float,
         n_steps: int,
-        thermostat: Union[Thermostat, dict, str, None] = None,
+        thermostat: Thermostat | dict | str | None = None,
         seed: int = 1234,
         T0: UnitOrFloat = Unit(298.0, "K"),
         P0: UnitOrFloat = Unit(1.0, "bar"),
-        stress0: Optional[Union[np.ndarray, torch.Tensor]] = None,
+        stress0: np.ndarray | torch.Tensor | None = None,
         t_damp_T: UnitOrFloat = Unit(50.0, "fs"),
         t_damp_P: UnitOrFloat = Unit(100.0, "fs"),
         drag_wavefunctions: bool = True,
         save_history: bool = True,
-        report_callback: Optional[Callable[[Dynamics, int], None]] = None,
+        report_callback: Callable[[Dynamics, int], None] | None = None,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """
@@ -105,7 +105,7 @@ class Dynamics(TreeNode):
             The functional will be called as `report_callback(dynamics, i_iter)`.
         """
         super().__init__()
-        self.comm = comm
+        self.group = group
         self.dt = dt
         self.n_steps = n_steps
         self.seed = seed
@@ -126,7 +126,7 @@ class Dynamics(TreeNode):
         self.drag_wavefunctions = drag_wavefunctions
         if save_history:
             self.add_child(
-                "history", History, {}, checkpoint_in, comm=comm, n_max=(n_steps + 1)
+                "history", History, {}, checkpoint_in, group=group, n_max=(n_steps + 1)
             )
         else:
             self.history = None
@@ -191,7 +191,7 @@ class Dynamics(TreeNode):
             )
             / self.masses.sqrt()
         )
-        self.comm.Bcast(BufferView(velocities))
+        dist.broadcast(velocities, group=self.group)
         velocities = self.stepper.constrain(self.create_gradient(velocities)).ions
         # Normalize to set temperature:
         T_current = self.get_T(self.get_KE(velocities))
@@ -246,7 +246,7 @@ class Dynamics(TreeNode):
         amu = float(Unit(1.0, "amu"))
         return torch.tensor(atomic_weights, device=rc.device).unsqueeze(1) * amu
 
-    def get_stress(self, velocity: torch.Tensor) -> Optional[torch.Tensor]:
+    def get_stress(self, velocity: torch.Tensor) -> torch.Tensor | None:
         """Compute total stress tensor including ion `velocity` contributions."""
         lattice = self.system.lattice
         if not lattice.compute_stress:
@@ -257,7 +257,7 @@ class Dynamics(TreeNode):
         return kinetic_stress + self.system.lattice.stress.detach()
 
     @staticmethod
-    def get_pressure(stress: Optional[torch.Tensor]) -> Optional[float]:
+    def get_pressure(stress: torch.Tensor | None) -> float | None:
         if stress is None:
             return None
         return (-1.0 / 3) * torch.trace(stress).item()

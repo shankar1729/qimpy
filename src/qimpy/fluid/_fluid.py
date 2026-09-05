@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Protocol, Optional, Union
+from typing import Protocol
 
 from qimpy import TreeNode, Energy
 from qimpy.io import CheckpointPath
@@ -12,10 +12,13 @@ class Model(Protocol):
     """Class requirements to use as a fluid model."""
 
     energy: Energy  #: energy components
+    screening_length: float  #: Debye screening length, if any
 
-    def update(self, n_tilde: FieldH, rho_tilde: FieldH) -> None:
+    def update(self, n_tilde: FieldH, rho_tilde: FieldH, phi_o_offset: float) -> None:
         """Update fluid given electron density `n_tilde` to determine
         cavity and total solute charge density `rho_tilde`.
+        Use offset `phi_G0_correction` when calculating solute potential
+        to account for the finite ionic width used in `rho_tilde`.
         Update `energy` and accumulate gradients to `n_tilde.grad`
         and `rho_tilde.grad` if corresponding requires_grad is set."""
         ...
@@ -34,7 +37,7 @@ class Fluid(TreeNode):
         coulomb: Coulomb,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         solvent: str = "",
-        linear: Optional[Union[dict, Linear]] = None,
+        linear: dict | Linear | None = None,
     ) -> None:
         """Specify one of the supported fluid models.
         Defaults to the Null model (no solvation) if none specified.

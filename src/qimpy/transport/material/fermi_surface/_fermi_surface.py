@@ -195,7 +195,7 @@ class FermiSurface(Material):
         rep = self.representation
         self.initialize(wk=rep.wk, nk=rep.Nk, n_bands=1, n_dim=2,
                         process_grid=process_grid)
-        if self.comm.size > 1:
+        if self.group.size() > 1:
             raise InvalidInputException(
                 "FermiSurface couples k-channels; the k process-grid dimension "
                 "must be 1 (parallelize over space)."

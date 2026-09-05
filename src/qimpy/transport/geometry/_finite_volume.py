@@ -26,11 +26,12 @@ from typing import Optional
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
 from qimpy import rc, log, TreeNode
 from qimpy.rc import MPI
 from qimpy.io import CheckpointPath, InvalidInputException, CheckpointContext
-from qimpy.mpi import ProcessGrid
+from qimpy.mpi import ProcessGrid, all_reduce_scalars
 from ..material import Material
 from . import TensorList, Geometry
 from ._mesh import load_mesh
@@ -298,7 +299,7 @@ def _coordinate_part(mesh, nparts: int) -> np.ndarray:
     return part
 
 
-def partition(mesh, comm: MPI.Comm) -> tuple[np.ndarray, np.ndarray]:
+def partition(mesh, group: "dist.ProcessGroup") -> tuple[np.ndarray, np.ndarray]:
     """Renumber cells into contiguous per-rank blocks.
 
     Returns ``(perm, bounds)``: applying ``EToV[perm]`` places rank ``r``'s cells
@@ -308,18 +309,22 @@ def partition(mesh, comm: MPI.Comm) -> tuple[np.ndarray, np.ndarray]:
     not installed.
     """
     K = len(mesh.EToV)
-    nparts = comm.size
+    nparts = group.size()
     if nparts == 1:
         return np.arange(K), np.array([0, K], int)
     part = None
-    if comm.rank == 0:
+    if dist.get_rank(group) == 0:
         try:
             import pymetis
             _, p = pymetis.part_graph(nparts, adjacency=_dual_graph(mesh.EToV))
             part = np.asarray(p, np.int32)
         except ImportError:
             part = _coordinate_part(mesh, nparts)
-    part = comm.bcast(part, root=0)
+    # ⛔ dist has no bcast for python objects that returns a value; use the
+    # object-list form and read element 0 back out.
+    box = [part]
+    dist.broadcast_object_list(box, src=0, group=group)
+    part = box[0]
     perm = np.argsort(part, kind="stable")              # group cells by rank
     bounds = np.concatenate([[0], np.cumsum(np.bincount(part, minlength=nparts))])
     return perm, bounds.astype(int)
@@ -335,10 +340,10 @@ class SpatialDecomp:
     """
 
     def __init__(self, nbr_np: np.ndarray, bounds: np.ndarray,
-                 comm: MPI.Comm) -> None:
-        self.comm = comm
-        self.size = comm.size
-        self.rank = comm.rank
+                 group: "dist.ProcessGroup") -> None:
+        self.group = group
+        self.size = group.size()
+        self.rank = dist.get_rank(group)
         self.K = nbr_np.shape[0]
         self.offset = np.asarray(bounds, int)
         self.start = int(self.offset[self.rank])
@@ -379,22 +384,27 @@ class SpatialDecomp:
         """Fill this rank's ghost rows of ``u`` (K, Nk) with their owners' values."""
         if not self.recv and not self.send:
             return
-        un = u.detach().to("cpu").numpy()
+        # torch.distributed point-to-point.  ⛔ Unlike mpi4py's Irecv/Isend on
+        # numpy buffers, dist.irecv/isend take TENSORS and (for nccl) they must
+        # live on the GPU, so the halo stays on u.device instead of round-
+        # tripping through numpy.  Ranks are GROUP-relative, matching
+        # self.recv/self.send which were built from group ranks.
         reqs = []
         recv_bufs = {}
         for q, idx in self.recv.items():
-            buf = np.empty((len(idx), un.shape[1]), un.dtype)
+            buf = torch.empty((len(idx), u.shape[1]), dtype=u.dtype,
+                              device=u.device)
             recv_bufs[q] = (buf, idx)
-            reqs.append(self.comm.Irecv(buf, source=q, tag=11))
+            reqs.append(dist.irecv(buf, src=q, group=self.group, tag=11))
         send_bufs = []
         for q, idx in self.send.items():
-            sb = np.ascontiguousarray(un[idx])
+            sb = u[torch.as_tensor(idx, device=u.device)].contiguous()
             send_bufs.append(sb)
-            reqs.append(self.comm.Isend(sb, dest=q, tag=11))
-        MPI.Request.Waitall(reqs)
+            reqs.append(dist.isend(sb, dst=q, group=self.group, tag=11))
+        for r in reqs:
+            r.wait()
         for q, (buf, idx) in recv_bufs.items():
-            u[torch.as_tensor(idx, device=u.device)] = torch.as_tensor(
-                buf, device=u.device, dtype=u.dtype)
+            u[torch.as_tensor(idx, device=u.device)] = buf
 
 
 @dataclass
@@ -465,7 +475,7 @@ class FiniteVolume(Geometry):
         """
         TreeNode.__init__(self)
         self.material = material
-        self.comm = process_grid.get_comm("r")
+        self.group = process_grid.get_group("r")
         self.mesh_file = mesh_file
         self.contacts = contacts
         self.save_rho = save_rho
@@ -473,12 +483,12 @@ class FiniteVolume(Geometry):
         self._vk_eps2 = float(vk_eps2)
 
         self.mesh = load_mesh(mesh_file)
-        self._mpi = self.comm.size > 1
+        self._mpi = self.group.size() > 1
         if self._mpi:
             # METIS min-cut partition, renumbered so each rank owns a contiguous
             # block (compact halos + direct checkpoint slices). Keep the
             # permutation so the renumbered solution maps back to the input order.
-            self._perm, bounds = partition(self.mesh, self.comm)
+            self._perm, bounds = partition(self.mesh, self.group)
             self.mesh.EToV = np.asarray(self.mesh.EToV, int)[self._perm]
         else:
             self._perm, bounds = None, None
@@ -493,7 +503,7 @@ class FiniteVolume(Geometry):
         # Spatial decomposition: owned cell block, reconstruction rows (owned +
         # 1-ring), owned-incident edges and the halo exchange (see SpatialDecomp).
         if self._mpi:
-            self._decomp = SpatialDecomp(g.nbr.detach().cpu().numpy(), bounds, self.comm)
+            self._decomp = SpatialDecomp(g.nbr.detach().cpu().numpy(), bounds, self.group)
             self._own_start, self._own_stop = self._decomp.start, self._decomp.stop
             self._R = torch.as_tensor(self._decomp.recon_rows,
                                       device=rc.device, dtype=torch.long)
@@ -714,7 +724,7 @@ class FiniteVolume(Geometry):
 
         vmax = float(v.norm(dim=1).max())
         dt_local = float(cfl) * float(g.inradius.min()) / max(vmax, 1e-300)
-        self.dt_max = self.comm.allreduce(dt_local, op=MPI.MIN)
+        self.dt_max = all_reduce_scalars(dt_local, dist.ReduceOp.MIN, self.group)
 
         rho0 = getattr(material, "rho0", None)
         if (self._decomp is None) and checkpoint_in and checkpoint_in.member("rho"):
@@ -797,7 +807,8 @@ class FiniteVolume(Geometry):
                     f"the dense matrix fits GPU memory.")
 
         def allreduce(x: float) -> float:
-            return self.comm.allreduce(x) if self._mpi else x
+            return (all_reduce_scalars(x, dist.ReduceOp.SUM, self.group)
+                    if self._mpi else x)
 
         self._contacts: list[_Contact] = []
         for nm, params in self.contacts.items():
@@ -980,7 +991,7 @@ class FiniteVolume(Geometry):
                 # I_net = num_out + inflow(ghost); num_out is the interior outflow.
                 num = float((c.cur_out * uMb[c.idx]).sum())
                 if self._mpi:
-                    num = self.comm.allreduce(num)
+                    num = all_reduce_scalars(num, dist.ReduceOp.SUM, self.group)
                 if c.nonlinear:
                     # Full physical contact: ghost is the exact Pauli-bounded Fermi-
                     # Dirac deviation FD(mu0+dmu)-f0, NONLINEAR in dmu.  Newton-solve
@@ -993,7 +1004,8 @@ class FiniteVolume(Geometry):
                         gh = self.material.get_contactor(c.bn, dmu=dmu + c.hmu, vD=c.vD)(0.0)
                         ih = float((c.cur_in * gh).sum())
                         if self._mpi:
-                            i0 = self.comm.allreduce(i0); ih = self.comm.allreduce(ih)
+                            i0 = all_reduce_scalars(i0, dist.ReduceOp.SUM, self.group)
+                            ih = all_reduce_scalars(ih, dist.ReduceOp.SUM, self.group)
                         dIdmu = (ih - i0) / c.hmu
                         if abs(dIdmu) < 1e-300:
                             break
@@ -1126,7 +1138,8 @@ class FiniteVolume(Geometry):
         out = {}
         for c in self._contacts:
             I = float((c.cur * uup_b[c.idx]).sum())           # this rank's edges
-            out[c.name] = self.comm.allreduce(I) if self._mpi else I
+            out[c.name] = (all_reduce_scalars(I, dist.ReduceOp.SUM, self.group)
+                           if self._mpi else I)
         return out
 
     def maybe_probe(self, i_step: int, t: float) -> None:
@@ -1149,12 +1162,12 @@ class FiniteVolume(Geometry):
         row.update({f"I_{k}": v for k, v in cur.items()})
         for name, sel in self._probe_regions.items():
             if self._mpi:
-                tot = self.comm.allreduce(float(sc[sel].sum()))
-                cnt = self.comm.allreduce(int(sel.size))
+                tot = all_reduce_scalars(float(sc[sel].sum()), dist.ReduceOp.SUM, self.group)
+                cnt = all_reduce_scalars(int(sel.size), dist.ReduceOp.SUM, self.group)
             else:
                 tot, cnt = float(sc[sel].sum()), int(sel.size)
             row[f"V_{name}"] = tot / max(cnt, 1)
-        if self._mpi and self.comm.rank:
+        if self._mpi and dist.get_rank(self.group):
             return
         new = not self._probe_header
         with open(self.probe_file, "a") as fh:

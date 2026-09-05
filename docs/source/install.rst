@@ -101,7 +101,7 @@ For the latest version from `git <https://github.com/shankar1729/qimpy>`_:
 
     (qimpy) codes$ git clone https://github.com/shankar1729/qimpy.git
     (qimpy) codes$ cd qimpy
-    (qimpy) qimpy$ python setup.py install
+    (qimpy) qimpy$ pip install .
 
 Do this within the directory where you want to keep the code, say `codes`
 (just make sure you don't create a venv called `qimpy` and fetch
@@ -111,7 +111,7 @@ If you want to set-up for development, replace that last line:
 
 .. code-block:: bash
 
-    (qimpy) qimpy$ python setup.py develop
+    (qimpy) qimpy$ pip install -e .
 
 which will allow you to modify the code, and have it take effect
 directly in the active environment (without installing again).
