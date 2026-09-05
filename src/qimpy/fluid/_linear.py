@@ -126,7 +126,6 @@ class Linear(LinearSolve[FieldH]):
 
         # Electrostatic contributions:
         phi_ext_tilde = self.coulomb.kernel(rho_tilde)
-        phi_ext_tilde.o += phi_o_offset
         self.energy["Acoulomb"] = -0.5 * (
             self.phi_tilde ^ self.hessian(self.phi_tilde)
         ) + ((self.phi_tilde - 0.5 * phi_ext_tilde) ^ rho_tilde)
@@ -147,6 +146,10 @@ class Linear(LinearSolve[FieldH]):
 
         # Cavitation terms:
         self.variant.update_energy(self.energy)
+
+        # Corrections due to ion width:
+        phi_ext_tilde.o += phi_o_offset
+        self.energy["muShift"] = -phi_o_offset * rho_tilde.integral()
 
         # Propagate gradients as needed:
         if n_tilde.requires_grad:

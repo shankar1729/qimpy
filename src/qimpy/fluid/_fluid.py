@@ -12,6 +12,7 @@ class Model(Protocol):
     """Class requirements to use as a fluid model."""
 
     energy: Energy  #: energy components
+    screening_length: float  #: Debye screening length, if any
 
     def update(self, n_tilde: FieldH, rho_tilde: FieldH, phi_o_offset: float) -> None:
         """Update fluid given electron density `n_tilde` to determine

@@ -515,13 +515,23 @@ class Electrons(TreeNode):
             system.energy["Eband"] = self.diagonalize.get_Eband()
         else:
             if system.fluid.enabled and (not self._n_bands_done):
+                # Disable fluid and fixed-mu:
                 system.fluid.enabled = False
+                mu, mu_constrain = self.fillings.mu, self.fillings.mu_constrain
+                self.fillings.mu, self.fillings.mu_constrain = np.nan, False
                 self.run(system, suffix=" (initial vacuum run)")
                 log.info(
                     "\nVacuum energy after initial minimize, "
                     f"{system.energy.name} = {float(system.energy):.16f}"
                 )
+                # Restore fluid and fixed-mu:
                 system.fluid.enabled = True
+                delta_mu = mu - self.fillings.mu
+                self.fillings.mu, self.fillings.mu_constrain = mu, mu_constrain
+                if self.fillings.mu_constrain:
+                    n_electrons = self.fillings.n_electrons
+                    log.info(f"Shifting eigs by {delta_mu:f} to keep {n_electrons=:f}")
+                    self.eig += delta_mu
             log.info(f"\n--- Electronic optimization{suffix} ---\n")
             self.initialize_wavefunctions(system)  # LCAO / randomize
             self.scf.update(system)

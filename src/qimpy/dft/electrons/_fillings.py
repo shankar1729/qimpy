@@ -423,9 +423,11 @@ class Fillings(TreeNode):
             w_sk * results["S"], el.kpoints.group
         ).detach()
         # --- update n_electrons or mu, depending on which is free
-        n_electrons = results["NM"][0].item()
+        n_electrons_tensor = results["NM"][0]
+        n_electrons = n_electrons_tensor.item()
         if self.mu_constrain:
             self.n_electrons = n_electrons
+            energy["-muN"] = -self.mu * n_electrons_tensor.detach()
         else:
             self.mu = mu_B[0].item()
         # --- update magnetization or B, depending on which is free

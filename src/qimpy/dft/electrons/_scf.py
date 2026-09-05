@@ -81,7 +81,7 @@ class SCF(Pulay[FieldH]):
             :yaml:`Characteristic wavevector controlling Pulay metric.`
         q_kappa
             :yaml:`Long-range cutoff wavevector for grand-canonical SCF.`
-            If unspecified, set based on Debye screening length.
+            If unspecified, regularize with minimum non-zero G-vector instead.
         n_eig_steps
             :yaml:`Number of inner eigenvalue iterations for each SCF cycle.`
         eig_threshold
