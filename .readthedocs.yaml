@@ -5,14 +5,11 @@ sphinx:
   configuration: docs/source/conf.py
 
 build:
-  os: ubuntu-22.04
+  os: ubuntu-lts-latest
   tools:
-    python: "mambaforge-22.9"
-
-conda:
-  environment: environment.yml
+    python: "3.14"
 
 python:
   install:
-    - method: setuptools
+    - method: pip
       path: .
