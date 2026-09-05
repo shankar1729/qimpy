@@ -53,19 +53,21 @@ class Linear(LinearSolve[FieldH]):
         coulomb: Coulomb,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         n_iterations: int = 100,
-        gradient_threshold: float = 1e-8,
+        threshold: float = 1e-8,
         epsilon_0: float | None = None,
         screening_length: float | None = None,
         solvent: str = "",
         GLSSA13: dict | variants.GLSSA13 | None = None,
         LA12: dict | variants.LA12 | None = None,
         zero_nyquist: bool = True,
+        verbose: bool = False,
     ):
         super().__init__(
             checkpoint_in=checkpoint_in,
             group=grid.group,
             n_iterations=n_iterations,
-            gradient_threshold=gradient_threshold,
+            threshold=threshold,
+            name=("  Fluid" if verbose else ""),
         )
         self.grid = grid
         self.coulomb = coulomb
@@ -94,7 +96,7 @@ class Linear(LinearSolve[FieldH]):
 
         # Initialize preconditioner:
         Gsq = grid.get_gradient_operator("H", zero_nyquist).imag.square().sum(dim=0)
-        Kinv = (self.epsilon_0 * Gsq + self.kappa_sq) * grid.lattice.volume
+        Kinv = (self.epsilon_0 * Gsq + self.kappa_sq) / (4 * np.pi)
         KINV_CUT = 1e-12  # regularization
         self.Kkernel = torch.clamp(Kinv, min=KINV_CUT).reciprocal()
         self.Kkernel[Kinv < KINV_CUT] = 0.0  # project out null-space
