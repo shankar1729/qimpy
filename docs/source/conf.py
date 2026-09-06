@@ -12,10 +12,21 @@
 
 import os
 import sys
+from unittest.mock import MagicMock
 
 sys.path.append(os.path.abspath("../../src/"))
 sys.path.append(os.path.abspath("./_ext/"))
 
+
+# -- Mock MPI for readthedocs build ------------------------------------------
+
+
+class MockMPI(MagicMock):
+    COMM_WORLD = MagicMock()
+
+
+sys.modules["mpi4py"] = MagicMock()
+sys.modules["mpi4py.MPI"] = MockMPI()
 
 # -- Project information -----------------------------------------------------
 
@@ -54,9 +65,6 @@ autodoc_typehints = "description"
 
 # Order entries by type:
 autodoc_member_order = "groupwise"
-
-# Mock heavy/unsupported imports:
-autodoc_mock_imports = ["mpi4py"]
 
 # Suppress unnecessary paths in class / function names:
 add_module_names = False
