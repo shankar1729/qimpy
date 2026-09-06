@@ -1,5 +1,5 @@
 Spin-orbit Coupling
-==================
+===================
 
 Most density-functional theory calculations are based in non-relativistic
 quantum mechanics, where spin decouples completely from the spatial degrees

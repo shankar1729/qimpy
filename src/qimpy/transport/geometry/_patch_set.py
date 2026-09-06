@@ -43,7 +43,7 @@ class PatchSet(Geometry):
         Parameters
         ----------
         svg_file
-            :yaml:`Path to an SVG file containing the input geometry.
+            :yaml:`Path to an SVG file containing the input geometry.`
         svg_unit
             :yaml:`Real length corresponding to one unit of distance in SVG.`
         grid_spacing

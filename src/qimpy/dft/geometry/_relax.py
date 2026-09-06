@@ -57,7 +57,7 @@ class Relax(Minimize[Gradient]):
         fmax_threshold
             :yaml:`Convergence threshold on maximum force in Eh/a0.`
         stress_threshold
-            :yaml:`Convergence threshold on |stress| (stress tensor norm) in Eh/a0^3.`
+            :yaml:`Convergence threshold on stress tensor norm in Eh/a0^3.`
         n_consecutive
             :yaml:`Number of consecutive iterations each threshold must be satisfied.`
         method

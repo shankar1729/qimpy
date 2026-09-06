@@ -55,6 +55,9 @@ autodoc_typehints = "description"
 # Order entries by type:
 autodoc_member_order = "groupwise"
 
+# Mock heavy/unsupported imports:
+autodoc_mock_imports = ["mpi4py"]
+
 # Suppress unnecessary paths in class / function names:
 add_module_names = False
 python_use_unqualified_type_names = True
