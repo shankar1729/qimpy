@@ -292,7 +292,12 @@ def _coordinate_part(mesh, nparts: int) -> np.ndarray:
     equal-count blocks. Correct but with poorer locality on branchy meshes."""
     V = np.stack([mesh.VX, mesh.VY], axis=1)
     cen = V[np.asarray(mesh.EToV, int)].mean(axis=1)
-    axis = 0 if cen[:, 0].ptp() >= cen[:, 1].ptp() else 1
+    # ⛔ NumPy 2.0 removed ndarray.ptp; the free function still exists.
+    # This one line broke EVERY multi-rank run -- the decomposition could
+    # not even be built -- so the halo exchange had never executed under
+    # any numpy >= 2, and test_decomp_matches_serial failed on the
+    # pristine tree for the same reason.
+    axis = 0 if np.ptp(cen[:, 0]) >= np.ptp(cen[:, 1]) else 1
     order = np.argsort(cen[:, axis], kind="stable")
     part = np.empty(len(order), np.int32)
     part[order] = np.minimum((np.arange(len(order)) * nparts) // len(order), nparts - 1)
