@@ -750,7 +750,29 @@ def test_decomp_matches_serial() -> None:
     mesh = _make_rect_mesh(12.0, os.path.join(tmp, "rect.npz"))
     mod = "qimpy.transport.geometry.test_finite_volume"
     f1, f2 = os.path.join(tmp, "u1.npy"), os.path.join(tmp, "u2.npy")
-    env = dict(os.environ, FV_MPI_MESH=mesh)
+    # ⛔ STRIP THE RENDEZVOUS VARS FROM THE CHILD ENVIRONMENT.  Upstream's
+    # rc.init() *writes* MASTER_ADDR/MASTER_PORT/RANK/WORLD_SIZE/LOCAL_RANK into
+    # os.environ (the old mpi4py path never did).  So if ANY earlier test in this
+    # pytest process has already called rc.init(), a plain dict(os.environ) hands
+    # the worker the port its own parent is still listening on and TCPStore dies
+    # with EADDRINUSE.  That makes the failure ORDER-DEPENDENT: run this test
+    # alone and it passes, run the suite and it dies -- which is exactly how it
+    # slipped through a full-suite run that reported 145 passed.
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("MASTER_ADDR", "MASTER_PORT", "RANK", "WORLD_SIZE",
+                        "LOCAL_RANK")}
+    env["FV_MPI_MESH"] = mesh
+
+    # ⛔ NCCL REFUSES TWO RANKS ON ONE GPU ("invalid usage", NCCLUtils.cpp:77),
+    # and rc.init() picks the default backend for the visible device -- so on any
+    # single-GPU machine the 2-rank arm dies before it computes anything.  Fall
+    # back to CPU + gloo there.  ⛔ BOTH arms must move together: the assert below
+    # is bit-for-bit at atol=1e-12, and a GPU serial run vs a CPU 2-rank run
+    # differs far above that for reasons that have nothing to do with the halo
+    # exchange this test exists to check.
+    if torch.cuda.device_count() < 2:
+        env["BACKEND"] = "gloo"
+        env["CUDA_VISIBLE_DEVICES"] = ""
     subprocess.run([sys.executable, "-m", mod], check=True, env=dict(env, FV_MPI_OUT=f1))
     subprocess.run(["mpirun", "-n", "2", sys.executable, "-m", mod], check=True,
                    env=dict(env, FV_MPI_OUT=f2))
