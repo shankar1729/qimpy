@@ -8,6 +8,9 @@ build:
   os: ubuntu-lts-latest
   tools:
     python: "3.14"
+  jobs:
+    install:
+      - pip install sphinx-rtd-theme
 
 python:
   install:
