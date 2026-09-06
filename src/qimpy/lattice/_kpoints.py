@@ -75,7 +75,7 @@ class Kmesh(Kpoints):
         lattice: Lattice,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         offset: Sequence[float] | np.ndarray = (0.0, 0.0, 0.0),
-        size: float | Sequence[int, np.ndarray] = (1, 1, 1),
+        size: float | Sequence[int] | np.ndarray = (1, 1, 1),
         use_inversion: bool = True,
     ) -> None:
         """Construct k-mesh of specified `size` and `offset`.

@@ -67,7 +67,7 @@ To visualize the Silicon unit cell as well as its ground state density, run:
 and visualize the resulting xsf file with Vesta. 
 
 Convergence with respect to k-point sampling
--------------------------------------------
+--------------------------------------------
 
 Next, we see how the Brillouin zone sampling affects the total energies. Change the line
 

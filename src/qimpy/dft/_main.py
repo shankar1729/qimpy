@@ -16,7 +16,7 @@ def main():
 
     :code:`mpirun [mpi-options] python -m qimpy.dft -i INPUT_FILE [qimpy-options]`
 
-    Command-line parameters (obtained using :code:`python -m qimpy.run -h`):
+    Command-line parameters (obtained using :code:`python -m qimpy.dft -h`):
 
     .. code-block:: bash
 
@@ -74,7 +74,7 @@ def main():
 
         parser = ArgumentParser(
             add_help=False,
-            prog="python -m qimpy.run",
+            prog="python -m qimpy.dft",
             description="Run a QimPy calculation from an input file",
         )
         # --- mutually-exclusive group of help, version or input file

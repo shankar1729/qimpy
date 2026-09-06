@@ -106,7 +106,7 @@ class Field(Gradable[FieldType]):
     def add_(
         self: FieldType, other: FieldType | float, *, alpha: float = 1.0
     ) -> FieldType:
-        """Add in-place with optional scale factor (Mirroring torch.Tensor.add_)."""
+        """Add in-place with optional scale factor (Mirroring `torch.Tensor.add_`)."""
         if isinstance(other, float):
             if self.is_tilde:
                 # Scalar shift only affects constant G=0 term:

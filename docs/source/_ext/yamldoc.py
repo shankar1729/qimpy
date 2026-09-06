@@ -3,8 +3,7 @@ from sphinx.application import Sphinx
 from sphinx.util.docutils import SphinxDirective
 from docutils.statemachine import ViewList
 from docutils import nodes
-from typing import get_type_hints, get_args, get_origin, NamedTuple
-from collections.abc import Sequence
+from typing import get_type_hints, get_args, get_origin, NamedTuple, Sequence
 from functools import lru_cache
 import importlib
 import inspect
@@ -206,7 +205,7 @@ class YamlDocDirective(SphinxDirective):
             f"\nComponent classes:\n\n"
             f".. toctree::\n"
             f"    :maxdepth: 1\n\n"
-            f"    {classdoc.cls.__qualname__} <yamldoc/{class_path}>\n"
+            f"    {classdoc.cls.__qualname__} </yamldoc/{class_path}>\n"
         )
         for line in toclines.split("\n"):
             viewlist.append(line, "memory.rst", len(viewlist))
@@ -457,3 +456,7 @@ def setup(app):
     app.add_role("yamltype", yaml_highlight("type"))
     app.add_role("yamlcomment", yaml_highlight("comment"))
     app.connect("builder-inited", create_yamldoc_rst_files)
+    app.connect(
+        "autodoc-skip-member",
+        lambda app, what, name, obj, skip, options: (True if name == "MPI" else None),
+    )

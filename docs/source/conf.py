@@ -12,15 +12,26 @@
 
 import os
 import sys
+from unittest.mock import MagicMock
 
 sys.path.append(os.path.abspath("../../src/"))
 sys.path.append(os.path.abspath("./_ext/"))
 
 
+# -- Mock MPI for readthedocs build ------------------------------------------
+
+
+class MockMPI(MagicMock):
+    COMM_WORLD = MagicMock()
+
+
+sys.modules["mpi4py"] = MagicMock()
+sys.modules["mpi4py.MPI"] = MockMPI()
+
 # -- Project information -----------------------------------------------------
 
 project = "QimPy"
-copyright = "2023, QimPy Collaboration"
+copyright = "2026, QimPy Collaboration"
 author = "QimPy Collaboration"
 
 

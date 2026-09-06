@@ -107,10 +107,12 @@ class AbInitio(Material):
             :yaml:`Control which observables will be output.`
             Specify either as a list of names, or a comma-separated string.
             Supported variables:
+
                 * n: number density
                 * jx, jy: number flux components
                 * Sx, Sy, Sz: spin density components
                 * jx_Sx, jx_Sy, ...: spin flux, where jx_Sy = Sy flux along x direction
+
             By default, only n (number density) is output.
         """
         super().__init__()

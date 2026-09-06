@@ -25,7 +25,7 @@ class Lattice(TreeNode):
 
     # Gradient / stress:
     compute_stress: bool  #: Whether to compute and report stress
-    grad: torch.Tensor  #: Lattice gradient of energy := dE/dRbasis @ Rbasis.T
+    grad: torch.Tensor  #: Lattice gradient of energy = dE/dRbasis @ Rbasis.T
     _requires_grad: bool  #: Internal flag to control collection of lattice gradients
     strain_rate: torch.Tensor | None  #: Strain rate (for lattice-movable dynamics)
 
