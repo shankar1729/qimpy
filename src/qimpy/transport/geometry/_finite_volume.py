@@ -394,20 +394,42 @@ class SpatialDecomp:
         # live on the GPU, so the halo stays on u.device instead of round-
         # tripping through numpy.  Ranks are GROUP-relative, matching
         # self.recv/self.send which were built from group ranks.
-        reqs = []
         recv_bufs = {}
+        ops = []
         for q, idx in self.recv.items():
             buf = torch.empty((len(idx), u.shape[1]), dtype=u.dtype,
                               device=u.device)
             recv_bufs[q] = (buf, idx)
-            reqs.append(dist.irecv(buf, src=q, group=self.group, tag=11))
+            ops.append((dist.irecv, buf, q))
         send_bufs = []
         for q, idx in self.send.items():
             sb = u[torch.as_tensor(idx, device=u.device)].contiguous()
             send_bufs.append(sb)
-            reqs.append(dist.isend(sb, dst=q, group=self.group, tag=11))
-        for r in reqs:
-            r.wait()
+            ops.append((dist.isend, sb, q))
+
+        # ⛔⛔ NCCL POINT-TO-POINT MUST BE GROUPED OR IT DEADLOCKS.
+        # mpi4py's Irecv/Isend are genuinely asynchronous, so posting every
+        # receive and then every send is fine.  NCCL's isend/irecv are not:
+        # each enqueues a ncclSend/ncclRecv that is matched and serialized on
+        # the stream, so a rank that posts all of its receives first blocks
+        # before issuing the sends its peers are waiting for -- symmetric
+        # deadlock, every rank stuck, no error.  dist.batch_isend_irecv wraps
+        # the whole set in ncclGroupStart/ncclGroupEnd so NCCL matches them
+        # together.
+        # ⛔ And this is invisible on CPU: gloo tolerates the ungrouped form,
+        # so the 36-run rank sweep passed 27/27 on gloo while every cross-node
+        # NCCL run hung at the first exchange.  A CPU-only parallel test cannot
+        # validate this path.
+        # ⛔ batch_isend_irecv is NCCL-only, hence the branch rather than using
+        # it unconditionally.
+        if dist.get_backend(self.group) == "nccl":
+            p2p = [dist.P2POp(fn, t, peer, group=self.group) for fn, t, peer in ops]
+            for r in dist.batch_isend_irecv(p2p):
+                r.wait()
+        else:
+            for r in [fn(t, peer, group=self.group, tag=11)
+                      for fn, t, peer in ops]:
+                r.wait()
         for q, (buf, idx) in recv_bufs.items():
             u[torch.as_tensor(idx, device=u.device)] = buf
 

@@ -68,6 +68,16 @@ def make_mesh(base: str, kind: str, out: str) -> str:
     return out
 
 
+def _stage(msg: str) -> None:
+    # ⛔ Every rank prints, unconditionally and flushed: a hang is diagnosed by
+    # seeing WHICH rank stopped printing and where, and rank-0-only logging
+    # hides exactly the asymmetric-deadlock case we are hunting.
+    if os.environ.get("STAGE"):
+        import socket
+        print(f"  [stage] {socket.gethostname()} r{os.environ.get('OMPI_COMM_WORLD_RANK','?')} {msg}",
+              flush=True)
+
+
 def run(mesh: str, steps: int, n_k: int) -> dict:
     fs = dict(CFG_FS)
     fs["cartesian"] = dict(CFG_FS["cartesian"])
@@ -79,11 +89,13 @@ def run(mesh: str, steps: int, n_k: int) -> dict:
         contacts["source"] = {"dmu": DMU, "nonlinear": True}
     if "drain" in names:
         contacts["drain"] = {"dmu": -DMU, "nonlinear": True}
+    _stage('before Transport')
     t = Transport(
         fermi_surface=fs,
         spatial_transport=dict(mesh_file=mesh, compile=False, save_rho=True,
                                contacts=contacts),
         time_evolution=dict(t_max=1e30, dt_save=1e30, n_collate=1))
+    _stage('Transport built')
     g = t.geometry
     assert float(t.material.rho_dot(
         torch.randn(4, g.Nk, device=rc.device), 0.0, 0).abs().max()) == 0.0, \
@@ -91,6 +103,7 @@ def run(mesh: str, steps: int, n_k: int) -> dict:
     f0 = t.material.representation._f0_lab[None, :]
     u = g.rho[0].clone()
     dt = float(g.dt_max)
+    _stage(f'stepping {steps} (K={g.K} own={g._own_stop-g._own_start})')
     for _ in range(steps):
         uh = u + (0.5 * dt) * g.rho_dot(TensorList([u]), 0.0)[0]
         u = u + dt * g.rho_dot(TensorList([uh]), 0.5 * dt)[0]
@@ -99,6 +112,7 @@ def run(mesh: str, steps: int, n_k: int) -> dict:
     # [_own_start:_own_stop] slice fails (896 vs 1792); copy the whole thing.
     g._u.copy_(u)
 
+    _stage('stepped')
     f = f0 + u
     # ⛔ but REDUCE over owned cells only: every rank holds halo duplicates of
     # its neighbours' cells, so summing the full array double-counts them and
@@ -107,12 +121,29 @@ def run(mesh: str, steps: int, n_k: int) -> dict:
     area = g.geom.area[own, None]
     n_ch = (area * f[own]).sum(0)
     loc = torch.stack([f[own].min().reshape(()), (-f[own].max()).reshape(())])
-    if g._mpi:
-        dist.all_reduce(n_ch, group=g.group)
-        dist.all_reduce(loc, op=dist.ReduceOp.MIN, group=g.group)
+    # ⛔ Drive BOTH trees from one harness: pre-merge exposes an mpi4py
+    # `comm` (comm.size, comm.Allreduce), merged exposes a torch.distributed
+    # `group` (group.size(), dist.all_reduce).  Without this the pre-merge arm
+    # of an equivalence test dies on AttributeError and silently compares
+    # nothing.
+    grp = getattr(g, "group", None)
+    if grp is not None:                                   # merged tree
+        n_ranks = grp.size()
+        if g._mpi:
+            dist.all_reduce(n_ch, group=grp)
+            dist.all_reduce(loc, op=dist.ReduceOp.MIN, group=grp)
+    else:                                                 # pre-merge tree
+        from qimpy import MPI
+        from qimpy.mpi import BufferView
+        comm = g.comm
+        n_ranks = comm.size
+        if g._mpi:
+            comm.Allreduce(MPI.IN_PLACE, BufferView(n_ch))
+            comm.Allreduce(MPI.IN_PLACE, BufferView(loc), op=MPI.MIN)
     out = dict(dt_max=dt, min_f=float(loc[0]), max_f=float(-loc[1]),
                n_ch_sum=float(n_ch.sum()), n_ch_absmax=float(n_ch.abs().max()),
-               K=int(g.K), Nk=int(g.Nk), ranks=g.group.size())
+               K=int(g.K), Nk=int(g.Nk), ranks=n_ranks)
+    _stage('reduced')
     try:
         out["currents"] = {k: float(v) for k, v in g.contact_currents(0.0).items()}
     except Exception as e:
