@@ -496,3 +496,113 @@ def test_residual_closure_off_is_bit_identical() -> None:
     b = rep.apply_collision(df.clone(), fs_off._modal_collision)
     assert torch.equal(a, b), "collision apply is not deterministic"
     assert fs_off.gamma_residual() is None
+
+
+# ----------------------------------------------------------------------------
+# Radial basis (Nr > 1): the conservation laws must survive the extra radial
+# dimension, not just the Fermi-circle (Nr=1) limit.
+#
+# ⛔ EVERY Nr=1 CONSERVATION TEST ABOVE IS BLIND TO A RADIAL-BASIS DEFECT.  At
+# Nr=1 the radial quadrature is one weight equal to 1.0, so the w_r-weighted
+# sums below degenerate into the unweighted ones and a mis-weighted radial
+# projection cannot change any of their results.  These four tests carry the
+# Nr>1 coverage; they were stranded on the `triangular_mesh` PR branch and
+# reached the trunk only when it was ported (the module had moved to
+# material/fermi_surface/, so the cherry-pick was a delete/update conflict).
+# ----------------------------------------------------------------------------
+@pytest.mark.parametrize("Nr", [2, 4, 8])
+@pytest.mark.parametrize("r_c", [np.inf, 2.0])
+def test_collision_conserves_mass_radial(Nr: int, r_c: float) -> None:
+    """At Nr>1 the collision (+ cyclotron, if r_c finite) still conserves particle
+    number: the (n=0, m=0) rate is forced to 0 and the cyclotron generator leaves
+    the m=0 angular mode invariant, so d/dt <n> = 0 for an arbitrary state."""
+    torch.set_default_dtype(torch.float64)
+    fs = _make(M_theta=8, Nr=Nr, tau_p=2.0, tau_ee=3.0, r_c=r_c)
+    n_obs = fs.get_observables(0.0)[0]
+    rng = torch.Generator(device=rc.device).manual_seed(2)
+    rho = torch.randn(7, fs.v.shape[0], dtype=torch.float64, generator=rng)
+    rdot = fs.rho_dot(rho, 0.0, 0)
+    mdot = (n_obs[None, :] * rdot).sum(-1)
+    mass = (n_obs[None, :] * rho).sum(-1)
+    assert float((mdot / mass.abs().clamp(min=1e-30)).abs().max()) < 1e-11
+
+
+@pytest.mark.parametrize("phi_deg", [0.0, 23.7, 45.0, 90.0, 137.0])
+@pytest.mark.parametrize("s", [0.0, 0.3, 1.0])
+def test_reflector_mass_conservation_radial(phi_deg: float, s: float) -> None:
+    """Net (w_r-weighted) normal mass flux at the wall is zero at Nr>1.  Only the
+    n=0 radial projection carries mass; the per-radial (D, T) solve conserves it."""
+    torch.set_default_dtype(torch.float64)
+    Nr = 4
+    fs = _make(M_theta=8, Nr=Nr, specularity=s)
+    phi = np.deg2rad(phi_deg)
+    n = torch.tensor([[np.cos(phi), np.sin(phi)]], dtype=torch.float64)
+    refl = _DeltaKReflector(fs, n, specularity=s)
+    rng = torch.Generator(device=rc.device).manual_seed(0)
+    u_in = torch.randn(1, 1, fs.v.shape[0], dtype=torch.float64, generator=rng)
+    u_out = refl(u_in)
+    Nth = fs.angular.N_theta
+    ui = u_in.reshape(Nr, Nth)
+    uo = u_out.reshape(Nr, Nth)
+    w_r = fs.radial.quad_w
+    theta = fs.angular.theta
+    vdn = fs.vF * (n[0, 0] * torch.cos(theta) + n[0, 1] * torch.sin(theta))
+    F_out = (w_r[:, None] * vdn.clamp(min=0)[None, :] * ui).sum()
+    F_in = (w_r[:, None] * vdn.clamp(max=0)[None, :] * uo).sum()
+    assert float((F_out + F_in).abs()) / max(float(F_out.abs()), 1e-30) < 1e-11
+
+
+@pytest.mark.parametrize("phi_deg", [0.0, 23.7, 45.0, 90.0, 137.0])
+@pytest.mark.parametrize("s", [0.0, 0.3, 1.0])
+def test_reflector_tang_momentum_radial(phi_deg: float, s: float) -> None:
+    """At Nr>1 the (w_r-weighted) tangential-momentum flux into the wall equals the
+    continuum value (1 - s) * F_out_tang to roundoff (specular fraction kept)."""
+    torch.set_default_dtype(torch.float64)
+    Nr = 4
+    fs = _make(M_theta=8, Nr=Nr, specularity=s)
+    phi = np.deg2rad(phi_deg)
+    n = torch.tensor([[np.cos(phi), np.sin(phi)]], dtype=torch.float64)
+    refl = _DeltaKReflector(fs, n, specularity=s)
+    rng = torch.Generator(device=rc.device).manual_seed(0)
+    u_in = torch.randn(1, 1, fs.v.shape[0], dtype=torch.float64, generator=rng)
+    u_out = refl(u_in)
+    Nth = fs.angular.N_theta
+    ui = u_in.reshape(Nr, Nth)
+    uo = u_out.reshape(Nr, Nth)
+    w_r = fs.radial.quad_w
+    theta = fs.angular.theta
+    vdn = fs.vF * (n[0, 0] * torch.cos(theta) + n[0, 1] * torch.sin(theta))
+    vtg = fs.vF * (-n[0, 1] * torch.cos(theta) + n[0, 0] * torch.sin(theta))
+    F_out = (w_r[:, None] * (vdn.clamp(min=0) * vtg)[None, :] * ui).sum()
+    F_in = (w_r[:, None] * (vdn.clamp(max=0) * vtg)[None, :] * uo).sum()
+    expected = (1.0 - s) * F_out
+    assert float((F_out + F_in - expected).abs()) / max(float(F_out.abs()),
+                                                        1e-30) < 1e-11
+
+
+@pytest.mark.xfail(
+    reason="The current relaxation-time collision damps the n>=1 radial (energy) "
+    "modes at 1/tau_ee, so e-e scattering does not conserve energy. A "
+    "momentum-conserving e-e operator (the microscopic-L matrix) must conserve "
+    "energy too; remove this xfail once that operator replaces the placeholder.",
+    strict=False,
+)
+@pytest.mark.parametrize("Nr", [2, 4])
+def test_collision_conserves_energy_radial(Nr: int) -> None:
+    """Electron-electron scattering conserves energy: it only relaxes the
+    distribution shape toward local equilibrium, not its energy content.  The
+    energy moment is E ~ sum_r w_r * xi_r over the isotropic (m=0) part (energy is
+    orthogonal to the n=0 mass mode since <xi>_w = 0).  Under pure e-e (no
+    impurities tau_p=inf, no field r_c=inf), d/dt <E> must vanish."""
+    torch.set_default_dtype(torch.float64)
+    fs = _make(M_theta=8, Nr=Nr, tau_p=np.inf, tau_ee=2.0, r_c=np.inf)
+    Nth = fs.angular.N_theta
+    w_r, xi = fs.radial.quad_w, fs.radial.xi
+    E_obs = (w_r[:, None] * xi[:, None]
+             * torch.ones(Nr, Nth, dtype=torch.float64) / Nth).reshape(-1)
+    rng = torch.Generator(device=rc.device).manual_seed(3)
+    rho = torch.randn(9, fs.v.shape[0], dtype=torch.float64, generator=rng)
+    rdot = fs.rho_dot(rho, 0.0, 0)
+    e_rate = (E_obs[None, :] * rdot).sum(-1)
+    e_val = (E_obs[None, :] * rho).sum(-1)
+    assert float((e_rate / e_val.abs().clamp(min=1e-30)).abs().max()) < 1e-11
