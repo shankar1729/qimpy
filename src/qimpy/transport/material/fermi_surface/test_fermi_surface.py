@@ -592,13 +592,31 @@ def test_tau_ee_placeholder_damps_energy_by_construction(Nr: int) -> None:
     Nr>=2.  The two operators are mutually exclusive (_fermi_surface.py raises
     InvalidInputException if both `tau_ee` and `ee_scattering` are given).
 
-    `tau_ee` is a relaxation-time PLACEHOLDER, and the rate table says what it
-    does: `rad[1:] = tau_inv_ee` damps every radial mode n>=1, and only
-    `rates[0, 0] = 0` is protected.  Since `ang[0] = 0` (that loop starts at m=1),
-    the whole m=0 column decays at exactly 1/tau_ee apart from the n=0 mass mode.
-    The energy moment E ~ sum_r w_r xi_r lives entirely in n>=1, so it decays at
-    1/tau_ee.  Conserving mass and nothing else is the definition of this
-    operator, not a bug in it.
+    `tau_ee` is a relaxation-time PLACEHOLDER.  It protects TWO collision
+    invariants, not one:
+
+      mass      `rates[0, 0] = 0`, set explicitly.
+      momentum  the m=1 angular column is exempted from tau_inv_ee by the
+                `if m == 1` in the rate loop -- e-e does not relax momentum, only
+                impurities do -- so `rates[0, 1] = rates[0, 2] = tau_inv_p`,
+                which is 0 at tau_p = inf.
+
+    Energy is the one it drops.  The radial basis makes the {1, xi} shapes EXACT
+    and w(xi) = (1/4T) sech^2(xi/2) is even, so <xi>_w = 0 and the energy null is
+    EXACTLY the n=1 radial mode -- which `rad[1:] = tau_inv_ee` damps at exactly
+    1/tau_ee.
+
+    ⛔ So the placeholder is INTERNALLY INCONSISTENT: it encodes "e-e conserves
+    momentum" and not "e-e conserves energy", though both are equally true of the
+    operator it stands in for.  Making it consistent is `rad[2:] = tau_inv_ee`,
+    a one-character change -- deliberately NOT made here, because it alters the
+    physics of every tau_ee run in the repo.
+
+    ⚠ The momentum protection is exact only on the Fermi circle.  The true
+    momentum null is k ~ sqrt(1 + (T/E_F) xi) (see
+    scattering/test_ee.py, `k_c`), which carries an n=1 component of relative
+    size T/2E_F; `rates[1, 1] = tau_inv_p + tau_inv_ee` damps that.  So momentum
+    is conserved exactly at Nr=1 and to O(T/E_F) at Nr>1.
 
     ⛔ An earlier version of this test asserted the opposite and was marked xfail
     "pending the L-matrix".  That premise was false twice over: the L-matrix
@@ -620,7 +638,101 @@ def test_tau_ee_placeholder_damps_energy_by_construction(Nr: int) -> None:
     ratio = e_rate / e_val.abs().clamp(min=1e-30).copysign(e_val)
     assert float((ratio + 1.0 / tau_ee).abs().max()) < 1e-11
 
-    # ...and the rate table it comes from, read directly:
+    # ...and the rate table it comes from, read directly.  This is the whole
+    # content of the operator, so assert every block of it:
     rates = fs.rates_modal.reshape(Nr, fs.angular.dim)
-    assert float(rates[0, 0]) == 0.0                       # mass is protected
-    assert float((rates[1:, 0] - 1.0 / tau_ee).abs().max()) < 1e-15
+    assert float(rates[0, 0]) == 0.0                    # mass:     protected
+    assert float(rates[0, 1]) == 0.0                    # momentum: protected
+    assert float(rates[0, 2]) == 0.0                    #           (tau_p = inf)
+    assert float((rates[1:, 0] - 1.0 / tau_ee).abs().max()) < 1e-15   # energy: NOT
+    # the m=1 exemption is what protects momentum -- if it were dropped, these
+    # would pick up 1/tau_ee like every other column
+    assert float((rates[1:, 1] - 1.0 / tau_ee).abs().max()) < 1e-15
+    assert float((rates[1:, 2] - 1.0 / tau_ee).abs().max()) < 1e-15
+
+
+@pytest.mark.parametrize("Nr", [1, 4])
+def test_tau_ee_placeholder_conserves_momentum(Nr: int) -> None:
+    """The `tau_ee` placeholder DOES conserve momentum -- exactly at Nr=1.
+
+    The rate loop exempts m=1 from tau_inv_ee (`self.tau_inv_p if m == 1`), which
+    is the statement that e-e scattering does not relax momentum.  At tau_p = inf
+    the whole m=1 column of the n=0 block is therefore identically zero.
+
+    ⛔ WHAT THIS TEST MEASURES IS THE MODAL MOMENT (n=0, m=1), not the physical
+    momentum.  That distinction is why it passes to roundoff at Nr=4 as well as
+    Nr=1: the (n=0, m=1) mode is exactly protected at every Nr.  The PHYSICAL
+    momentum is int f v with v ~ k ~ sqrt(1 + (T/E_F) xi) (see `k_c` in
+    scattering/test_ee.py), whose n>=1 components `rates[n, 1]` does damp.  That
+    leak is pinned by the companion test below."""
+    torch.set_default_dtype(torch.float64)
+    tau_ee = 2.0
+    fs = _make(M_theta=8, Nr=Nr, tau_p=np.inf, tau_ee=tau_ee, r_c=np.inf)
+    rates = fs.rates_modal.reshape(Nr, fs.angular.dim)
+    assert float(rates[0, 1]) == 0.0 and float(rates[0, 2]) == 0.0
+
+    # behavioural: the leading (Fermi-circle) momentum moment does not decay.
+    # Same observable construction as the energy test above, with the radial
+    # shape 1 (the n=0 mode) in place of xi, and cos(theta) in place of isotropic.
+    Nth = fs.angular.N_theta
+    w_r = fs.radial.quad_w
+    Jx = (w_r[:, None] * torch.cos(fs.angular.theta)[None, :]).reshape(-1)
+    rng = torch.Generator(device=rc.device).manual_seed(5)
+    rho = torch.randn(6, fs.v.shape[0], dtype=torch.float64, generator=rng)
+    rdot = fs.rho_dot(rho, 0.0, 0)
+    j_rate = (Jx[None, :] * rdot).sum(-1)
+    j_val = (Jx[None, :] * rho).sum(-1)
+    ratio = float((j_rate / j_val.abs().clamp(min=1e-30)).abs().max())
+    assert ratio < 1e-11, f"momentum decaying at {ratio:.3e}"
+
+
+@pytest.mark.parametrize("Nr", [1, 2, 4, 8])
+def test_tau_ee_placeholder_physical_momentum_leak(Nr: int) -> None:
+    """MEASURED size of the placeholder's physical-momentum leak: 6.1e-4 / tau_ee.
+
+    The modal test above shows the (n=0, m=1) moment is exactly protected.  The
+    PHYSICAL momentum null is k ~ sqrt(1 + (T/E_F) xi), whose n>=1 content is
+    damped at 1/tau_ee, so it is conserved exactly only at Nr=1.  This pins how
+    much that costs at a REAL T/E_F (the mixer material, T/E_F = 3.17e-2):
+
+        Nr    decay rate x tau_ee
+         1    2.0e-31           exact -- the Fermi circle
+         2    4.3e-04
+         4    5.6e-04
+         8    6.0e-04
+        16    6.1e-04           converged
+
+    i.e. 0.06% of the e-e rate, converged in Nr.  Negligible, and it does NOT
+    grow with Nr.
+
+    ⛔⛔ THIS IS A RAYLEIGH QUOTIENT, NOT A MAX-OVER-STATES RATIO, AND THAT IS THE
+    WHOLE POINT.  Measured the obvious way -- random states, max of
+    (d/dt<J>)/<J> -- the same quantity reads 6.9e-2 / 5.6e-2 / 3.7e-1 at
+    Nr = 2/4/8, which looks like a 23x violation GROWING with Nr.  Every bit of
+    that is a near-zero denominator: a random state carries almost no net
+    momentum.  Seeding the state WITH the momentum null makes <J,J> ~ 1e10 and
+    the number falls by three orders of magnitude and goes flat.  Never report
+    the max of a ratio whose denominator you have not looked at.
+
+    ⛔ The toy material used elsewhere in this file cannot be used here at all:
+    it has T/E_F = 1.33, so 1 + (T/E_F) xi goes NEGATIVE inside the xi window and
+    sqrt() returns nan.  The degenerate expansion is not merely inaccurate there,
+    it is undefined."""
+    torch.set_default_dtype(torch.float64)
+    tau_ee = 2.0
+    kF, vF, T = 7.5e-3, 0.11194, 1.3301e-5          # mixer material
+    t = T / (0.5 * kF * vF)
+    fs = FermiSurface(kF=kF, vF=vF, M_theta=8, Nr=Nr, T=T, xi_max=6.0,
+                      tau_p=np.inf, tau_ee=tau_ee, r_c=np.inf, specularity=1.0,
+                      process_grid=_pg())
+    w_r, xi = fs.radial.quad_w, fs.radial.xi
+    arg = 1.0 + t * xi
+    assert float(arg.min()) > 0.0, "band bottom inside the xi window"
+    J = (w_r[:, None] * torch.sqrt(arg)[:, None]
+         * torch.cos(fs.angular.theta)[None, :]).reshape(-1)
+    rho = J[None, :].clone()                        # denominator = <J,J>, never small
+    rate = -float((J[None, :] * fs.rho_dot(rho, 0.0, 0)).sum()) / float((J * J).sum())
+    assert rate >= -1e-15, f"momentum GROWING at {rate:.3e}"
+    assert rate * tau_ee < 1e-3, f"leak {rate * tau_ee:.3e} exceeds the measured 6.1e-4"
+    if Nr == 1:
+        assert rate * tau_ee < 1e-20, "Fermi circle must be exact"
