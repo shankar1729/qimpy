@@ -1,4 +1,15 @@
-"""Unit-test the divergence dump WITHOUT qimpy, a GPU, or Jetstream.
+"""Check the divergence dump WITHOUT qimpy, a GPU, or Jetstream.
+
+⛔ NOT A PYTEST MODULE, and it must not be named like one.  This is a standalone
+script: it executes at import and ends in `sys.exit()`.  While it was called
+`test_collision_dump_logic.py` inside the package, pytest collected it and that
+module-level exit killed the whole session with `INTERNALERROR> SystemExit: 0`
+-- 0 tests run, exit code 0, i.e. a totally silent green.  Run it directly:
+
+    python -m qimpy.transport.tools.check_collision_dump_logic
+
+Original notes:
+
 
 Same trick as outputs/test_kick_logic.py: ast-extract the real functions from
 the repo file and drive them with a stub `collision_dot`, so the code under
@@ -13,7 +24,11 @@ import numpy as np
 import torch
 import h5py
 
-SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_time_evolution.py")
+# ⛔ ..: this script lives in transport/tools/, the file it ast-parses is in
+# transport/.  A sibling-directory join silently pointed at a nonexistent path
+# after the move.
+SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                   "_time_evolution.py")
 tree = ast.parse(open(SRC).read())
 
 WANT_FN = {"_amax", "_patches", "_clone", "_amax_where"}
