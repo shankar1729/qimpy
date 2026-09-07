@@ -580,22 +580,33 @@ def test_reflector_tang_momentum_radial(phi_deg: float, s: float) -> None:
                                                         1e-30) < 1e-11
 
 
-@pytest.mark.xfail(
-    reason="The current relaxation-time collision damps the n>=1 radial (energy) "
-    "modes at 1/tau_ee, so e-e scattering does not conserve energy. A "
-    "momentum-conserving e-e operator (the microscopic-L matrix) must conserve "
-    "energy too; remove this xfail once that operator replaces the placeholder.",
-    strict=False,
-)
 @pytest.mark.parametrize("Nr", [2, 4])
-def test_collision_conserves_energy_radial(Nr: int) -> None:
-    """Electron-electron scattering conserves energy: it only relaxes the
-    distribution shape toward local equilibrium, not its energy content.  The
-    energy moment is E ~ sum_r w_r * xi_r over the isotropic (m=0) part (energy is
-    orthogonal to the n=0 mass mode since <xi>_w = 0).  Under pure e-e (no
-    impurities tau_p=inf, no field r_c=inf), d/dt <E> must vanish."""
+def test_tau_ee_placeholder_damps_energy_by_construction(Nr: int) -> None:
+    """The PHENOMENOLOGICAL `tau_ee` does not conserve energy, and cannot.
+
+    ⛔ THIS IS NOT A DEFECT IN e-e SCATTERING.  Real electron-electron collisions
+    conserve energy by construction -- two-body kinematics gives
+    eps_1 + eps_2 = eps_3 + eps_4 -- and qimpy's MICROSCOPIC operator does exactly
+    that: scattering/test_ee.py::test_nonlinear_conservation asserts the cubic and
+    quadratic outputs annihilate the number, energy and momentum nulls at Nr=1 and
+    Nr>=2.  The two operators are mutually exclusive (_fermi_surface.py raises
+    InvalidInputException if both `tau_ee` and `ee_scattering` are given).
+
+    `tau_ee` is a relaxation-time PLACEHOLDER, and the rate table says what it
+    does: `rad[1:] = tau_inv_ee` damps every radial mode n>=1, and only
+    `rates[0, 0] = 0` is protected.  Since `ang[0] = 0` (that loop starts at m=1),
+    the whole m=0 column decays at exactly 1/tau_ee apart from the n=0 mass mode.
+    The energy moment E ~ sum_r w_r xi_r lives entirely in n>=1, so it decays at
+    1/tau_ee.  Conserving mass and nothing else is the definition of this
+    operator, not a bug in it.
+
+    ⛔ An earlier version of this test asserted the opposite and was marked xfail
+    "pending the L-matrix".  That premise was false twice over: the L-matrix
+    operator already exists and already conserves energy, and no change to it
+    could ever make THIS test pass, because this test builds the placeholder."""
     torch.set_default_dtype(torch.float64)
-    fs = _make(M_theta=8, Nr=Nr, tau_p=np.inf, tau_ee=2.0, r_c=np.inf)
+    tau_ee = 2.0
+    fs = _make(M_theta=8, Nr=Nr, tau_p=np.inf, tau_ee=tau_ee, r_c=np.inf)
     Nth = fs.angular.N_theta
     w_r, xi = fs.radial.quad_w, fs.radial.xi
     E_obs = (w_r[:, None] * xi[:, None]
@@ -605,4 +616,11 @@ def test_collision_conserves_energy_radial(Nr: int) -> None:
     rdot = fs.rho_dot(rho, 0.0, 0)
     e_rate = (E_obs[None, :] * rdot).sum(-1)
     e_val = (E_obs[None, :] * rho).sum(-1)
-    assert float((e_rate / e_val.abs().clamp(min=1e-30)).abs().max()) < 1e-11
+    # exact exponential decay of the energy moment at the placeholder's own rate
+    ratio = e_rate / e_val.abs().clamp(min=1e-30).copysign(e_val)
+    assert float((ratio + 1.0 / tau_ee).abs().max()) < 1e-11
+
+    # ...and the rate table it comes from, read directly:
+    rates = fs.rates_modal.reshape(Nr, fs.angular.dim)
+    assert float(rates[0, 0]) == 0.0                       # mass is protected
+    assert float((rates[1:, 0] - 1.0 / tau_ee).abs().max()) < 1e-15
