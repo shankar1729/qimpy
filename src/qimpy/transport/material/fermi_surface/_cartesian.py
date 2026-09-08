@@ -871,9 +871,96 @@ class _CartesianReflector:
         g = ((k_ref - rep._k_min) / rep._dk_grid).clamp(0, n_k - 1.0001)
         i0 = g.floor().long(); fr = g - i0
         ix, iy = i0[..., 0], i0[..., 1]; fx, fy = fr[..., 0], fr[..., 1]
-        idx_full = (ix * n_k + iy, (ix + 1) * n_k + iy,
-                    ix * n_k + iy + 1, (ix + 1) * n_k + iy + 1)
-        wts = ((1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy)
+
+        # ⛔ THE STENCIL ORDER IS THE WHOLE BALLGAME.  The interpolation error
+        # is what the rank-4 closure then has to repair, and it repairs it by
+        # depositing a correction that is not headroom-limited pointwise -- so
+        # the interpolation error is what ultimately takes f out of [0, 1].
+        # Bilinear is O(dxi^2/8) = 12.6% at the production spacing dxi = 1;
+        # Catmull-Rom is O(dxi^4), ~16x smaller here, and shrinks the pointwise
+        # error and the moment residual TOGETHER, with no trade-off between
+        # them.  Both stencils are fixed linear functions of k, so the dense
+        # (nw, Nk, Nk) cache _setup_boundary builds stays valid either way.
+        order = os.environ.get("QIMPY_REFL_INTERP", "cubic")
+        if order == "linear":
+            offs = (0, 1)
+
+            def w1(t, o):
+                return (1 - t) if o == 0 else t
+        else:                                        # Catmull-Rom, 4x4
+            offs = (-1, 0, 1, 2)
+
+            def w1(t, o):
+                t2 = t * t; t3 = t2 * t
+                if o == -1:
+                    return -0.5 * t3 + t2 - 0.5 * t
+                if o == 0:
+                    return 1.5 * t3 - 2.5 * t2 + 1.0
+                if o == 1:
+                    return -1.5 * t3 + 2.0 * t2 + 0.5 * t
+                return 0.5 * t3 - 0.5 * t2
+
+        idx_full, wts = [], []
+        for ox in offs:
+            for oy in offs:
+                jx = (ix + ox).clamp(0, n_k - 1)
+                jy = (iy + oy).clamp(0, n_k - 1)
+                idx_full.append(jx * n_k + jy)
+                wts.append(w1(fx, ox) * w1(fy, oy))
+        idx_full = tuple(idx_full); wts = tuple(wts)
+
+        # ---- RADIALLY EXACT WEIGHTS -------------------------------------
+        # ⛔⛔ THE EXACT MIRROR NEVER CHANGES |k|; THE STENCIL MUST NOT EITHER.
+        # Proven by rotating a rectangular channel: with walls along the k-grid
+        # axes the mirror is an exact grid permutation and 800 steps give
+        # min f = +5.7e-34 with ZERO points outside [0, 1]; rotate the SAME
+        # channel by 17 deg and the same run gives min f = -4.2e-2 with 596,327
+        # points below zero.  Nothing else differs.
+        #
+        # Raising the stencil order is not enough: it cuts the single-shot error
+        # ~16x but the device applies the reflector every step, so ~10^3 bounces
+        # compound it and the device improves by under 2x.  The error has to be
+        # removed in the direction that matters, not merely made smaller.
+        #
+        # So constrain the weights to reproduce, exactly:
+        #     sum_i w_i = 1                  (constants, as before)
+        #     sum_i w_i f0(|k_i|) = f0(|k|)  (the equilibrium radial profile)
+        # the second being the one bilinear breaks -- the corners sit on
+        # neighbouring shells whose f0 differ by e^(+-dxi).  Least-change
+        # projection onto that pair of constraints; a 2x2 solve per point,
+        # fixed and state-independent, so the dense boundary cache stays valid.
+        if os.environ.get("QIMPY_REFL_RADEX", "1") == "1":
+            # ⛔ idx_full still indexes the FULL n_k x n_k grid here (the
+            # full->active translation happens below), so f0 must be built on
+            # the FULL grid.  Using the active-set _f0_lab indexes out of range
+            # and dies as an opaque CUDA device-side assert.
+            # ⛔ _k_min and _dk_grid are SCALARS (the grid is square and
+            # cell-centred), not per-axis vectors -- indexing them raises.
+            gx = (torch.arange(n_k, device=rc.device, dtype=k.dtype)
+                  * float(rep._dk_grid) + float(rep._k_min))
+            GX, GY = torch.meshgrid(gx, gx, indexing="ij")
+            eps_g = (GX.square() + GY.square()).reshape(-1) / (2 * rep.m_star)
+            f0g = torch.special.expit(-(eps_g - rep.mu) / rep.T_temp)
+            k_out_mag = k.norm(dim=-1)                       # |k| of the OUTPUT
+            eps_o = k_out_mag.square() / (2 * rep.m_star)
+            f0_target = torch.special.expit(
+                -(eps_o - rep.mu) / rep.T_temp)[None].expand(self.Ns, -1)
+            W = torch.stack(wts, 0)                          # (S, Ns, Nk)
+            F = torch.stack([f0g[i] for i in idx_full], 0)    # f0 at the corners
+            one = torch.ones_like(W)
+            # residuals of the two constraints
+            r1 = 1.0 - W.sum(0)
+            r2 = f0_target - (W * F).sum(0)
+            # Gram of the constraint rows over the stencil
+            a11 = one.sum(0); a12 = F.sum(0); a22 = (F * F).sum(0)
+            det = (a11 * a22 - a12 * a12)
+            ok = det.abs() > 1e-30 * (a11 * a22).abs().clamp(min=1e-300)
+            det = torch.where(ok, det, torch.ones_like(det))
+            l1 = (a22 * r1 - a12 * r2) / det
+            l2 = (a11 * r2 - a12 * r1) / det
+            dW = l1[None] * one + l2[None] * F
+            W = W + torch.where(ok[None], dW, torch.zeros_like(dW))
+            wts = tuple(W[i] for i in range(W.shape[0]))
         self._idx = []; self._wt = []
         for idx, wt in zip(idx_full, wts):
             if rep._full2act is not None:
@@ -882,6 +969,67 @@ class _CartesianReflector:
                 idx = a.clamp(min=0)
             self._idx.append(idx)
             self._wt.append(wt)
+        # ---- SHELL-WEIGHTED INTERPOLATION -------------------------------
+        # ⛔⛔ THE EXACT SPECULAR MAP PRESERVES |k|; THE BILINEAR STENCIL DOES
+        # NOT.  k* = k - 2(k.n)n has |k*| = |k| exactly, so reflection never
+        # moves weight between energy shells.  The four stencil corners around
+        # k*, however, sit on NEIGHBOURING shells whose equilibrium occupancy
+        # differs by e^(+-dxi) -- a factor 2.7 at the production spacing
+        # dxi = 1.0 -- and linear interpolation across an exponential
+        # overshoots.  MEASURED against the exact image of a drifted FD, at
+        # angles where the mirror is NOT a grid symmetry (15, 30 deg):
+        #     n_k    56     112     224
+        #     shell  44%    13.2%   3.6%
+        #     tail  583%    76%     19.3%
+        # while 0/45/90 deg -- where the mirror IS a grid permutation -- are
+        # exact to 1e-14.  Order 1.88, i.e. 2nd order in dk.  Near the Fermi
+        # surface f0 ~ 0.5 and a few % on delta-f is harmless; where f0 has
+        # SATURATED to 0 or 1 there is no headroom and the same relative error
+        # is exactly what takes f out of [0, 1].
+        #
+        # Fix: interpolate delta-f / W instead of delta-f, and multiply by W at
+        # the output point.  Because |k*| = |k|, W at the output is the same W
+        # the exact image would carry, so this is a similarity transform that
+        # divides the exponential out of the stencil and puts it back exactly.
+        #
+        # ⛔ W MUST BE A FIXED FUNCTION OF k, NOT RECOVERED FROM `u`.
+        # _setup_boundary caches this reflector as a dense (nw, Nk, Nk) matrix
+        # by pushing identity basis vectors through __call__, so anything that
+        # depends on the state would be silently wrong wherever that cache is
+        # taken.  A fixed W keeps the operator exactly linear.
+        # ⛔ SHELL WEIGHTING IS OFF, AND THAT IS A MEASURED CHOICE.  Dividing by
+        # f0(1-f0) before interpolating does fix the bound on its own with the
+        # LINEAR stencil (min f -2.5e-7 -> -1.8e-14), but it wrecks hot cells:
+        # for Te = 5.69 T the ratio delta-f / f0_lab(1-f0_lab) GROWS like
+        # e^(+0.82|xi|), so its curvature is enormous and the shell error goes
+        # 2.8% -> 83%, with the closure amplitude alpha reaching 45.  Once the
+        # stencil is cubic the weighting is not needed and still hurts
+        # (hot shell 0.57% -> 11.4%).  Kept only as an ablation knob.
+        mode = os.environ.get("QIMPY_REFL_W", "none")
+        self._f0i = None
+        if mode == "none":
+            self._W = None
+        elif mode == "fint":
+            # ⛔ INTERPOLATE f, NOT delta-f.  Bilinear weights are non-negative
+            # and sum to 1, so sum_i w_i f(k_i) is a CONVEX COMBINATION of
+            # values that are themselves in [0, 1] -- the result cannot leave
+            # [0, 1], unconditionally, at any dk and any wall angle.  Since
+            # |k*| = |k|, delta-f_out = f_interp - f0(k), which differs from the
+            # current estimator by the FIXED vector
+            #     b = sum_i w_i f0(k_i) - f0(k),
+            # i.e. exactly the bilinear interpolation error of f0 itself.  That
+            # makes the operator AFFINE rather than linear; `_setup_boundary`
+            # caches it by pushing identity vectors through, so b has to be
+            # carried separately there.
+            self._W = None
+            self._f0i = rep._f0_lab
+        else:
+            tref = 1.0 if mode == "lab" else float(mode[1:])
+            xi_r = (k.square().sum(-1) / (2 * rep.m_star) - rep.mu) / (
+                rep.T_temp * tref)
+            fr = torch.special.expit(-xi_r)
+            self._W = (fr * (1.0 - fr)).clamp(min=1e-300)
+
         # (1) undo the dropped corners: the surviving weights must still sum to 1
         tot = sum(self._wt)
         scale = torch.where(tot > 1e-12, 1.0 / tot.clamp(min=1e-12),
@@ -953,6 +1101,10 @@ class _CartesianReflector:
                     -1, keepdim=True).clamp(min=1e-300)
                 return C
 
+        f0r_all = rep._f0_lab
+        self._shell_env_all = (f0r_all * (1.0 - f0r_all))
+        self._shell_any = self._shell_env_all > 1e-12 * float(
+            self._shell_env_all.max())
         self._C4 = biorth(self._mu_rows)                # stage 1: numerics
         self._C2 = biorth(self._mu_rows[:2])            # stage 2: diffuse model
         # alpha only exists for a partially diffuse wall; a specular wall has
@@ -964,9 +1116,24 @@ class _CartesianReflector:
             self._shell_sel = (self._shell[0] > 1e-8 * self._shell.max())
 
     def __call__(self, u: torch.Tensor) -> torch.Tensor:
+        sh_env = self._shell_env_all
+        # interpolate delta-f / W, then restore W at the output point (see the
+        # SHELL-WEIGHTED INTERPOLATION note in __init__)
+        if self._f0i is not None:
+            src = u + self._f0i                     # interpolate f, not delta-f
+        elif self._W is not None:
+            src = u / self._W
+        else:
+            src = u
         spec = torch.zeros_like(u)
         for idx, wt in zip(self._idx, self._wt):
-            spec += wt[None] * torch.gather(u, -1, idx[None].expand_as(u))
+            spec += wt[None] * torch.gather(src, -1, idx[None].expand_as(src))
+        if self._W is not None:
+            spec = spec * self._W
+        elif self._f0i is not None:
+            spec = spec - self._f0i                 # back to delta-f
+        self._stage = {"interp": spec.detach().clone()} \
+            if os.environ.get("QIMPY_REFL_DEBUG") else None
         # Targets: the EXACT specular reflection returns, on the inflow side,
         # exactly the outflow-side sum of each of these four moments.  None of
         # them depends on s.
@@ -975,7 +1142,19 @@ class _CartesianReflector:
         # specular operator reproduces the exact specular map in all four.
         for a in range(4):
             got = (self._w_in * self._mu_rows[a] * spec).sum(-1, keepdim=True)
-            spec = spec + self._C4[:, a, :] * (T[a] - got)
+            corr4 = self._C4[:, a, :] * (T[a] - got)
+            if self._stage is not None:
+                # alpha = |correction| / (f0(1-f0)) : the SAME Pauli criterion
+                # _check_alpha applies to stage 2.  alpha <= 1 is necessary and
+                # sufficient for the correction to stay inside the headroom.
+                # ⛔ stage 1 has NEVER been checked: _alpha_check is only set
+                # when s < 1, and production runs s = 1.
+                sh = self._shell_any
+                self._stage[f"alpha{a}"] = float(
+                    (corr4[..., sh] / sh_env[sh]).abs().max())
+            spec = spec + corr4
+        if self._stage is not None:
+            self._stage["stage1"] = spec.detach().clone()
         # ---- stage 2: PHYSICS.  The diffuse refill supplies the flux the
         # specular part did not return.  It constrains MASS and TANGENTIAL
         # MOMENTUM only -- exactly what the modal _DeltaKReflector does.
@@ -994,6 +1173,8 @@ class _CartesianReflector:
             if b == 0 and self._alpha_check:
                 self._check_alpha(corr)
             out = out + corr
+        if self._stage is not None:
+            self._stage["stage2"] = out.detach().clone()
         return out
 
     def _check_alpha(self, corr: torch.Tensor) -> None:

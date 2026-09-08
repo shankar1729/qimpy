@@ -736,3 +736,89 @@ def test_tau_ee_placeholder_physical_momentum_leak(Nr: int) -> None:
     assert rate * tau_ee < 1e-3, f"leak {rate * tau_ee:.3e} exceeds the measured 6.1e-4"
     if Nr == 1:
         assert rate * tau_ee < 1e-20, "Fermi circle must be exact"
+
+
+# ----------------------------------------------------------------------------
+# THE WALL-ANGLE REGRESSION.  This is the test that would have caught the cause
+# of f leaving [0, 1], and it is the one thing here that must never regress.
+# ----------------------------------------------------------------------------
+@pytest.mark.parametrize("deg", [0.0, 45.0, 90.0])
+def test_reflector_exact_at_grid_symmetric_angles(deg: float) -> None:
+    """At a wall whose mirror is a k-grid symmetry the reflector is EXACT.
+
+    k -> k* = k - 2(k.n)n preserves |k|, and at 0 / 45 / 90 degrees k* is a grid
+    permutation (kx -> -kx, the diagonal swap, ky -> -ky), so no interpolation
+    happens and the answer is exact to roundoff.  This pins the reference
+    against which the tilted-wall error below is meaningful."""
+    torch.set_default_dtype(torch.float64)
+    kF, vF, T = 7.5e-3, 0.11194, 1.3301e-5
+    fs = FermiSurface(kF=kF, vF=vF, M_theta=32, Nr=6, T=T, xi_max=6.0,
+                      tau_p=np.inf, specularity=1.0,
+                      cartesian=dict(annulus_xi=0.0, te_fac_max=6.0,
+                                     kD_max=1.2e-3, dmu_max=1.2e-4,
+                                     k_max=0.0132557160008, n_k=112),
+                      process_grid=_pg())
+    rep = fs.representation
+    k = rep.k
+    m, mu = float(rep.m_star), float(rep.mu)
+    f0 = rep._f0_lab
+    kD = torch.tensor([0.05 * kF, 0.0], dtype=k.dtype, device=k.device)
+    u_in = torch.special.expit(
+        -(((k - kD) ** 2).sum(-1) / (2 * m) - mu) / T) - f0
+    phi = np.deg2rad(deg)
+    n = torch.tensor([[np.cos(phi), np.sin(phi)]], dtype=k.dtype, device=k.device)
+    out = fs.get_reflector(n)(u_in[None, None, :])[0, 0]
+    kn = (k * n[0]).sum(-1, keepdim=True)
+    kstar = k - 2.0 * kn * n[0][None, :]
+    exact = torch.special.expit(
+        -(((kstar - kD) ** 2).sum(-1) / (2 * m) - mu) / T) - f0
+    scale = exact.abs().max().clamp(min=1e-300)
+    assert float((out - exact).abs().max() / scale) < 1e-12
+    assert float((f0 + out).min()) >= -1e-14, "occupancy went negative"
+
+
+def test_reflector_tilted_wall_error_is_bounded() -> None:
+    """At a wall angle that is NOT a grid symmetry the mirror lands between grid
+    points and must be interpolated -- and THAT is what takes f out of [0, 1].
+
+    ⛔ THE HISTORY THIS PINS.  Rotating a rectangular channel (contacts on the
+    +-x ends, walls on +-y) by 17 degrees, with everything else identical, took
+    an 800-step run from min f = +5.7e-34 with ZERO points outside [0, 1] to
+    min f = -4.2e-2 with 596,327 points below zero.  The wall angle was the only
+    difference.  With the bilinear stencil the single-shot relative error here
+    was 3.6% in the Fermi shell and 19% in the tail; a cubic stencil with
+    radially exact weights brings it under 1.5%.
+
+    This test fails if that regresses, and it is deliberately a LOOSE bound: the
+    point is to catch a return to the O(10%) regime, not to freeze a number."""
+    torch.set_default_dtype(torch.float64)
+    kF, vF, T = 7.5e-3, 0.11194, 1.3301e-5
+    fs = FermiSurface(kF=kF, vF=vF, M_theta=32, Nr=6, T=T, xi_max=6.0,
+                      tau_p=np.inf, specularity=1.0,
+                      cartesian=dict(annulus_xi=0.0, te_fac_max=6.0,
+                                     kD_max=1.2e-3, dmu_max=1.2e-4,
+                                     k_max=0.0132557160008, n_k=224),
+                      process_grid=_pg())
+    rep = fs.representation
+    k = rep.k
+    m, mu = float(rep.m_star), float(rep.mu)
+    f0 = rep._f0_lab
+    kD = torch.tensor([0.05 * kF, 0.0], dtype=k.dtype, device=k.device)
+    u_in = torch.special.expit(
+        -(((k - kD) ** 2).sum(-1) / (2 * m) - mu) / T) - f0
+    phi = np.deg2rad(17.0)
+    n = torch.tensor([[np.cos(phi), np.sin(phi)]], dtype=k.dtype, device=k.device)
+    out = fs.get_reflector(n)(u_in[None, None, :])[0, 0]
+    kn = (k * n[0]).sum(-1, keepdim=True)
+    kstar = k - 2.0 * kn * n[0][None, :]
+    exact = torch.special.expit(
+        -(((kstar - kD) ** 2).sum(-1) / (2 * m) - mu) / T) - f0
+    xi = (k.square().sum(-1) / (2 * m) - mu) / T
+    shell = xi.abs() < 6
+    rel = float((out - exact)[shell].abs().max()
+                / exact[shell].abs().max().clamp(min=1e-300))
+    # ⛔ n_k=224 ON PURPOSE: at n_k=112 the fixed stencil still reads 6.6e-2 and
+    # the broken one ~1.4e-1, barely a factor 2 apart -- no margin for a test.
+    # At 224 it is 9.0e-3 fixed vs 3.6e-2 for the old bilinear stencil, so 2e-2
+    # separates them by 2x on each side.
+    assert rel < 2e-2, f"tilted-wall shell error {rel:.3e} back in the O(10%) regime"
