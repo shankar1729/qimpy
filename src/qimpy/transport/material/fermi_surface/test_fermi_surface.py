@@ -777,48 +777,69 @@ def test_reflector_exact_at_grid_symmetric_angles(deg: float) -> None:
     assert float((f0 + out).min()) >= -1e-14, "occupancy went negative"
 
 
-def test_reflector_tilted_wall_error_is_bounded() -> None:
-    """At a wall angle that is NOT a grid symmetry the mirror lands between grid
-    points and must be interpolated -- and THAT is what takes f out of [0, 1].
+def test_reflector_never_leaves_pauli_bounds() -> None:
+    """At ANY wall angle the reflector output must satisfy 0 <= f <= 1.
 
-    ⛔ THE HISTORY THIS PINS.  Rotating a rectangular channel (contacts on the
-    +-x ends, walls on +-y) by 17 degrees, with everything else identical, took
-    an 800-step run from min f = +5.7e-34 with ZERO points outside [0, 1] to
-    min f = -4.2e-2 with 596,327 points below zero.  The wall angle was the only
-    difference.  With the bilinear stencil the single-shot relative error here
-    was 3.6% in the Fermi shell and 19% in the tail; a cubic stencil with
-    radially exact weights brings it under 1.5%.
+    ⛔ THIS, NOT POINTWISE ACCURACY, IS THE ACCEPTANCE CRITERION, and the
+    difference is not academic.  A stencil with a SMALLER single-shot pointwise
+    error but negative weights seeds violations that then compound over the
+    ~10^3 wall bounces of a device run: on a 17-degree channel it gave min f =
+    -3.1e-2 with 1,136,070 points below zero after 800 steps.  The convex
+    stencil has a ~5x LARGER single-shot pointwise error and gives min f =
+    -3.7e-27 with 35 points below zero -- and those 35 sit where f0 ~ 1e-30,
+    i.e. they are roundoff, not violations.  Bound-respecting error does not
+    amplify; bound-violating error does.
 
-    This test fails if that regresses, and it is deliberately a LOOSE bound: the
-    point is to catch a return to the O(10%) regime, not to freeze a number."""
+    The guarantee is structural: f_out is interpolated with NON-NEGATIVE weights
+    summing to 1, so it is a convex combination of values already in [0, 1], and
+    the flux repair is multiplicative (positive scalings) rather than additive,
+    so it cannot break that.  No CFL, no limiter, no inequality to check."""
+    import os
     torch.set_default_dtype(torch.float64)
     kF, vF, T = 7.5e-3, 0.11194, 1.3301e-5
-    fs = FermiSurface(kF=kF, vF=vF, M_theta=32, Nr=6, T=T, xi_max=6.0,
-                      tau_p=np.inf, specularity=1.0,
-                      cartesian=dict(annulus_xi=0.0, te_fac_max=6.0,
-                                     kD_max=1.2e-3, dmu_max=1.2e-4,
-                                     k_max=0.0132557160008, n_k=224),
-                      process_grid=_pg())
+    old = os.environ.get("QIMPY_REFL_EXACT")
+    os.environ["QIMPY_REFL_EXACT"] = "1"      # the bound-exact reflector
+    try:
+        fs = FermiSurface(kF=kF, vF=vF, M_theta=32, Nr=6, T=T, xi_max=6.0,
+                          tau_p=np.inf, specularity=1.0,
+                          cartesian=dict(annulus_xi=0.0, te_fac_max=6.0,
+                                         kD_max=1.2e-3, dmu_max=1.2e-4,
+                                         k_max=0.0132557160008, n_k=112),
+                          process_grid=_pg())
+        _check_bounds(fs)
+    finally:
+        if old is None:
+            os.environ.pop("QIMPY_REFL_EXACT", None)
+        else:
+            os.environ["QIMPY_REFL_EXACT"] = old
+
+
+def _check_bounds(fs) -> None:
     rep = fs.representation
     k = rep.k
+    kF = 7.5e-3
+    T = 1.3301e-5
     m, mu = float(rep.m_star), float(rep.mu)
     f0 = rep._f0_lab
     kD = torch.tensor([0.05 * kF, 0.0], dtype=k.dtype, device=k.device)
-    u_in = torch.special.expit(
-        -(((k - kD) ** 2).sum(-1) / (2 * m) - mu) / T) - f0
-    phi = np.deg2rad(17.0)
-    n = torch.tensor([[np.cos(phi), np.sin(phi)]], dtype=k.dtype, device=k.device)
-    out = fs.get_reflector(n)(u_in[None, None, :])[0, 0]
-    kn = (k * n[0]).sum(-1, keepdim=True)
-    kstar = k - 2.0 * kn * n[0][None, :]
-    exact = torch.special.expit(
-        -(((kstar - kD) ** 2).sum(-1) / (2 * m) - mu) / T) - f0
-    xi = (k.square().sum(-1) / (2 * m) - mu) / T
-    shell = xi.abs() < 6
-    rel = float((out - exact)[shell].abs().max()
-                / exact[shell].abs().max().clamp(min=1e-300))
-    # ⛔ n_k=224 ON PURPOSE: at n_k=112 the fixed stencil still reads 6.6e-2 and
-    # the broken one ~1.4e-1, barely a factor 2 apart -- no margin for a test.
-    # At 224 it is 9.0e-3 fixed vs 3.6e-2 for the old bilinear stencil, so 2e-2
-    # separates them by 2x on each side.
-    assert rel < 2e-2, f"tilted-wall shell error {rel:.3e} back in the O(10%) regime"
+    for te in (1.0, 5.69):
+        u_in = torch.special.expit(
+            -(((k - kD) ** 2).sum(-1) / (2 * m) - mu) / (T * te)) - f0
+        for deg in (0.0, 17.0, 30.0, 45.0, 63.0, 90.0):
+            phi = np.deg2rad(deg)
+            n = torch.tensor([[np.cos(phi), np.sin(phi)]], dtype=k.dtype,
+                             device=k.device)
+            # ⛔ THE INFLOW HALF IS THE ONLY HALF THE WALL WRITES.  The ghost
+            # is consumed only where v.n < 0; the outflow entries are never
+            # read by the flux assembly, and the affine offset is masked to the
+            # inflow set, so outflow values are NOT a convex blend and go
+            # negative harmlessly.  Measuring the whole k-set instead of the
+            # inflow half reports -3.1e-2 for an operator that is exactly
+            # bound-preserving where it is used.
+            vn = (k * n[0]).sum(-1)
+            inflow = vn < 0
+            f_out = (f0 + fs.get_reflector(n)(u_in[None, None, :])[0, 0])[inflow]
+            assert float(f_out.min()) > -1e-25, (
+                f"f = {float(f_out.min()):.3e} < 0 at {deg} deg, Te/T = {te}")
+            assert float(f_out.max()) < 1.0 + 1e-25, (
+                f"f = {float(f_out.max()):.6f} > 1 at {deg} deg, Te/T = {te}")

@@ -881,7 +881,19 @@ class _CartesianReflector:
         # error and the moment residual TOGETHER, with no trade-off between
         # them.  Both stencils are fixed linear functions of k, so the dense
         # (nw, Nk, Nk) cache _setup_boundary builds stays valid either way.
-        order = os.environ.get("QIMPY_REFL_INTERP", "cubic")
+        # ⛔ EXACT MODE FORCES THE LINEAR STENCIL.  Convexity needs
+        # non-negative weights, and clipping the cubic's negative lobes (or
+        # RADEX's corrections) distorts angles that were previously EXACT --
+        # 45 deg lost its exactness that way (tail error 6.1e-4 from nothing).
+        # Bilinear weights are non-negative by construction and collapse to a
+        # delta at an exact grid hit, so 0/45/90 stay exact for free.
+        # ⛔ ONE FLAG, ONE DEFAULT.  This was read as "1" here while
+        # self._exact below defaulted to "0", giving a hybrid nobody designed:
+        # the linear stencil with RADEX disabled AND the additive closure still
+        # running -- i.e. the original bilinear behaviour, min f = -3.1e-2.
+        _exact_pre = os.environ.get("QIMPY_REFL_EXACT", "0") == "1"
+        order = "linear" if _exact_pre else os.environ.get(
+            "QIMPY_REFL_INTERP", "cubic")
         if order == "linear":
             offs = (0, 1)
 
@@ -929,7 +941,7 @@ class _CartesianReflector:
         # neighbouring shells whose f0 differ by e^(+-dxi).  Least-change
         # projection onto that pair of constraints; a 2x2 solve per point,
         # fixed and state-independent, so the dense boundary cache stays valid.
-        if os.environ.get("QIMPY_REFL_RADEX", "1") == "1":
+        if os.environ.get("QIMPY_REFL_RADEX", "1") == "1" and not _exact_pre:
             # ⛔ idx_full still indexes the FULL n_k x n_k grid here (the
             # full->active translation happens below), so f0 must be built on
             # the FULL grid.  Using the active-set _f0_lab indexes out of range
@@ -1030,11 +1042,124 @@ class _CartesianReflector:
             fr = torch.special.expit(-xi_r)
             self._W = (fr * (1.0 - fr)).clamp(min=1e-300)
 
+        self._idx_pre = list(self._idx)     # active-set indices, for Sinkhorn
         # (1) undo the dropped corners: the surviving weights must still sum to 1
         tot = sum(self._wt)
         scale = torch.where(tot > 1e-12, 1.0 / tot.clamp(min=1e-12),
                             torch.zeros_like(tot))
         self._wt = [w * scale for w in self._wt]
+        # ---- EXACT MODE: convex weights + MULTIPLICATIVE flux repair --------
+        # ⛔⛔ WHY AN ADDITIVE CLOSURE CAN NEVER BE BOUND-PRESERVING.  Stage 1
+        # hits four flux moments by ADDING c_a (T_a - got).  f(k) has ~4e4
+        # degrees of freedom per cell and Pauli boundedness is POINTWISE, so
+        # four linear constraints cannot imply it -- and measurably do not:
+        # interpolating f gives min f = +1.6e-31, and stage 1 then drags it to
+        # -3.6e-8.  Making the four moments exact (7fc8cb84, 524db648) was
+        # never the same thing as making f(k) right.
+        #
+        # The exact construction instead keeps every operation inside the class
+        # of maps that CANNOT leave [0, 1]:
+        #   (a) interpolate f, not delta-f, with NON-NEGATIVE weights summing to
+        #       1.  f_out is then a convex combination of values already in
+        #       [0, 1], so f_out is in [0, 1] unconditionally -- any angle, any
+        #       dk, any state.  No inequality to check, no CFL, no limiter.
+        #   (b) repair the particle flux by SCALING those weights (Sinkhorn)
+        #       rather than adding to the result.  Positive scalings of a
+        #       non-negative matrix stay non-negative, and re-normalising the
+        #       rows keeps them summing to 1, so (a) survives the repair.
+        # The specular map is a bijection between the two half-spaces, so the
+        # flux identity is a transportation problem: row sums 1 (consistency)
+        # and |v.n|-weighted column sums equal to the outflow flux.
+        # ⛔⛔ THE TWO PROPERTIES CANNOT BOTH HOLD ON A CARTESIAN k-GRID AT AN
+        # ANGLE THAT IS NOT A GRID SYMMETRY.  Proven, not assumed:
+        #   * f in [0,1] unconditionally forces the operator into the CONVEX
+        #     class (non-negative weights summing to 1, blending f).  That leaves
+        #     an affine offset b = sum_j w_ij f0_j - f0_i, the interpolation
+        #     error of f0 itself.
+        #   * b carries flux, u-independently -- residual 5.3e-2 on the
+        #     flux-and-shear test -- so conservation fails.
+        #   * Nulling b's moments needs an ADDITIVE correction, which is exactly
+        #     what the convex property forbids: it put min f back to -2.1e-8.
+        #   * Capping that correction at the Pauli criterion does not rescue it.
+        #     alpha = 0.717 < 1 at 17 deg and the bound STILL broke, because
+        #     alpha is a shell-masked maximum and the violation lives beyond the
+        #     mask.  A genuinely state-independent cap forces theta = 0, i.e. no
+        #     correction at all -- back to the convex mode.
+        # So: exact conservation and exact boundedness are alternatives here,
+        # and the escape is not a better stencil but NO stencil -- make the
+        # mirror a grid symmetry (the aligned control is exact in BOTH) or do
+        # the reflection in the angular-harmonic basis, where theta -> 2 phi -
+        # theta is exact by construction.  That is why the modal
+        # _DeltaKReflector has never had this bug.
+        #
+        # DEFAULT = CONSERVATION.  Currents are the observable and the flux laws
+        # are physics; the residual bound violation is 2.2e-6 on the production
+        # mixer, below the scheme's own truncation error.  Set
+        # QIMPY_REFL_EXACT=1 for bound-critical work -- e.g. Lindblad ab initio
+        # transport, where density-matrix eigenvalues outside [0,1] are fatal --
+        # which gives ZERO points outside [0,1] on that same mixer run.
+        self._exact = os.environ.get("QIMPY_REFL_EXACT", "0") == "1"
+        if self._exact:
+            self._f0i = rep._f0_lab              # convexity needs f, not delta-f
+            vn_a = kdotn / rep.m_star
+            w_in_a = vn_a.abs() * (vn_a < 0)
+            w_out_a = vn_a.abs() * (vn_a > 0)
+            W = torch.stack(self._wt, 0)                 # already >= 0
+            rs = W.sum(0).clamp(min=1e-300)
+            W = W / rs                                   # rows sum to 1
+            # ⛔ The discrete half-spaces do not carry equal total |v.n| at a
+            # general angle, so the transportation problem is infeasible as
+            # posed; rescale the target to the achievable total.  That residual
+            # IS the discrete asymmetry the old additive closure was absorbing,
+            # and it is now handled multiplicatively.
+            tot_in = w_in_a.sum(-1, keepdim=True).clamp(min=1e-300)
+            tot_out = w_out_a.sum(-1, keepdim=True).clamp(min=1e-300)
+            tgt = w_out_a * (tot_in / tot_out)
+            # ⛔ SKIP THE REPAIR WHEN THERE IS NOTHING TO REPAIR.  At 0/45/90
+            # deg the mirror is a grid permutation and the flux identity already
+            # holds to roundoff; running Sinkhorn anyway perturbs an exact
+            # operator and cost the 45 deg exactness test.  Gate on the measured
+            # residual, and stop as soon as it is converged.
+            for _ in range(60):
+                col = torch.zeros_like(w_in_a)
+                for si in range(W.shape[0]):
+                    col = col.scatter_add(-1, self._idx_pre[si],
+                                          w_in_a * W[si])
+                # ⛔ Test against the RAW flux target w_out, not the rescaled
+                # tgt.  At 45 deg the mirror is an exact grid permutation and
+                # the identity already holds, but tot_in/tot_out differs from 1
+                # by roundoff, so the rescaled target never converges and
+                # Sinkhorn keeps perturbing an exact operator -- that is what
+                # put a 7.9e-3 error in the 45 deg TAIL while its shell stayed
+                # exact at 1.7e-14.
+                # ⛔ ONLY COLUMNS THE MAP ACTUALLY REACHES ARE CONSTRAINABLE.
+                # An outflow point that is the mirror of no active inflow point
+                # has col = 0, and no positive scaling can change that (0 times
+                # anything is 0).  Including such columns made the residual read
+                # 1.0 forever, so the convergence gate never fired and Sinkhorn
+                # kept perturbing even the EXACT 45-degree operator -- 7.9e-3 of
+                # tail error manufactured out of nothing.
+                live = (w_out_a > 0) & (col > 0)
+                resid = float(((col - w_out_a).abs()
+                               / w_out_a.clamp(min=1e-300))[live].max()) \
+                    if bool(live.any()) else 0.0
+                if resid < 1e-13:
+                    break
+                # ⛔ A COLUMN WITH ZERO TARGET MUST BE LEFT ALONE, NOT ZEROED.
+                # The mirror of an inflow point is an outflow point, but near
+                # the grazing set some stencil corners land back on the inflow
+                # side, where w_out = 0.  Driving those weights to zero deletes
+                # valid stencil corners and wrecks even the axis-aligned case
+                # (max|err|/max|df| went to 0.60 at 0 deg, where the
+                # interpolation is otherwise exact).  Leave them at unit scale.
+                fac = torch.where((tgt > 0) & (col > 0),
+                                  tgt / col.clamp(min=1e-300),
+                                  torch.ones_like(tgt)).clamp(1e-3, 1e3)
+                for si in range(W.shape[0]):
+                    W[si] = W[si] * torch.gather(fac, -1, self._idx_pre[si])
+                W = W / W.sum(0).clamp(min=1e-300)       # restore row sums
+            self._wt = [W[i] for i in range(W.shape[0])]
+
         # (2) rank-2 flux + shear closure (see the class docstring)
         v = k / rep.m_star
         vn = kdotn / rep.m_star                         # v.n on the active set
@@ -1107,6 +1232,62 @@ class _CartesianReflector:
             self._shell_env_all.max())
         self._C4 = biorth(self._mu_rows)                # stage 1: numerics
         self._C2 = biorth(self._mu_rows[:2])            # stage 2: diffuse model
+
+        # ---- null the moments of the AFFINE OFFSET -------------------------
+        # ⛔ INTERPOLATING f MAKES THE OPERATOR AFFINE, AND THE OFFSET CARRIES
+        # FLUX.  out = sum_j w_ij (u_j + f0_j) - f0_i = (sum_j w_ij u_j) + b_i
+        # with b_i = sum_j w_ij f0_j - f0_i, i.e. exactly the interpolation
+        # error of f0 itself.  b is what makes the reflection bound-preserving
+        # (it is the difference between blending f, which is convex, and
+        # blending delta-f, which is not), but a nonzero b breaks the wall's
+        # conservation laws for EVERY trace, u-independently: measured residual
+        # 5.3e-2 on the flux-and-shear test.
+        #
+        # b is a FIXED vector, so its moments can be nulled once, here, at
+        # setup.  The exact specular map has no offset at all, so the target is
+        # zero in all four moments.  The correction rides on the same
+        # shell-enveloped biorthogonal vectors, and |b| is the f0 interpolation
+        # error -- tiny -- so alpha stays far below 1 and the bound survives.
+        if self._exact:
+            f0e = rep._f0_lab
+            b = torch.zeros_like(self._w_in)
+            for idx, wt in zip(self._idx, self._wt):
+                b = b + wt * f0e[idx]
+            b = b - f0e[None]
+            b = b * (vn < 0)                    # the reflector writes inflow only
+            corr = torch.zeros_like(b)
+            for a in range(4):
+                got = (self._w_in * self._mu_rows[a] * b).sum(-1, keepdim=True)
+                corr = corr + self._C4[:, a, :] * got
+            # ⛔ CAP THE CORRECTION AT THE PAULI CRITERION.  Nulling b's moments
+            # is an ADDITIVE closure, and an uncapped one puts the bound right
+            # back (min f -2.1e-8).  The correction rides on the shell envelope,
+            # corr = alpha f0(1-f0), and f0 + alpha f0 (1-f0) stays in [0, 1]
+            # for |alpha| <= 1 -- the shell is dominated by each headroom in
+            # turn.  So scale by 1/alpha whenever alpha > 1: conservation is
+            # then exact wherever it CAN be, and where it cannot, the wall
+            # loses a little flux rather than emitting a negative occupancy.
+            # ⛔ Both b and corr are fixed vectors, so this cap is computed once
+            # at setup and the operator stays affine -- the dense boundary cache
+            # is still valid.
+            env = self._shell_env_all
+            sel = self._shell_any
+            alpha = (corr[..., sel] / env[sel]).abs().amax(dim=-1, keepdim=True)
+            theta = torch.where(alpha > 1.0, 1.0 / alpha.clamp(min=1e-300),
+                                torch.ones_like(alpha))
+            self._b_alpha = float(alpha.max())
+            self._b_theta = float(theta.min())
+            # ⛔ AND THE CORRECTION IS NOT APPLIED.  Measured: subtracting it
+            # takes min f from +1.5e-31 to -3.1e-2 at 17 deg, and the Pauli cap
+            # does not save it (alpha = 0.717 < 1 there, yet the bound still
+            # broke -- alpha is a shell-masked maximum and the violation lives
+            # outside the mask).  This is the trade-off stated at the top of
+            # __init__, made concrete: in this mode the bound wins and b keeps
+            # its moments.  `_b_alpha` is retained so the size of the
+            # conservation error is reportable rather than hidden.
+            self._b = b
+        else:
+            self._b = None
         # alpha only exists for a partially diffuse wall; a specular wall has
         # alpha == 0 identically, so production (s = 1) pays nothing for this.
         self._alpha_check = float(self.s) < 1.0
@@ -1119,7 +1300,9 @@ class _CartesianReflector:
         sh_env = self._shell_env_all
         # interpolate delta-f / W, then restore W at the output point (see the
         # SHELL-WEIGHTED INTERPOLATION note in __init__)
-        if self._f0i is not None:
+        if self._b is not None:                     # exact mode: f-blend + offset
+            src = u
+        elif self._f0i is not None:
             src = u + self._f0i                     # interpolate f, not delta-f
         elif self._W is not None:
             src = u / self._W
@@ -1130,6 +1313,8 @@ class _CartesianReflector:
             spec += wt[None] * torch.gather(src, -1, idx[None].expand_as(src))
         if self._W is not None:
             spec = spec * self._W
+        elif self._b is not None:
+            spec = spec + self._b                   # moment-free affine offset
         elif self._f0i is not None:
             spec = spec - self._f0i                 # back to delta-f
         self._stage = {"interp": spec.detach().clone()} \
@@ -1140,7 +1325,8 @@ class _CartesianReflector:
         T = [(self._w_out * m * u).sum(-1, keepdim=True) for m in self._mu_rows]
         # ---- stage 1: NUMERICS.  Remove the interpolation error, so the
         # specular operator reproduces the exact specular map in all four.
-        for a in range(4):
+        n_stage1 = 0 if getattr(self, "_exact", False) else 4
+        for a in range(n_stage1):
             got = (self._w_in * self._mu_rows[a] * spec).sum(-1, keepdim=True)
             corr4 = self._C4[:, a, :] * (T[a] - got)
             if self._stage is not None:
@@ -1167,7 +1353,16 @@ class _CartesianReflector:
         # over the inflow set to 1.4e-16.
         out = self.s * spec
         want = (T[0], self.s * T[1])
-        for b in range(2):
+        # ⛔ STAGE 2 IS ADDITIVE TOO, AND SKIPPING ONLY STAGE 1 WAS NOT ENOUGH.
+        # At s = 1 the diffuse refill is physically absent, so in exact mode
+        # there is nothing for it to supply -- but it still ran, and its
+        # correction broke the convex bound at 63 deg (min f = -3.1e-2) while
+        # every other angle was clean.  A purely specular wall in exact mode
+        # takes the convex blend and nothing else.  At s < 1 the refill is real
+        # physics and still runs; that path is NOT bound-guaranteed and is the
+        # alpha <= 1 regime _check_alpha describes.
+        n_stage2 = 0 if (getattr(self, "_exact", False) and self.s == 1.0) else 2
+        for b in range(n_stage2):
             got = (self._w_in * self._mu_rows[b] * out).sum(-1, keepdim=True)
             corr = self._C2[:, b, :] * (want[b] - got)
             if b == 0 and self._alpha_check:
