@@ -843,3 +843,89 @@ def _check_bounds(fs) -> None:
                 f"f = {float(f_out.min()):.3e} < 0 at {deg} deg, Te/T = {te}")
             assert float(f_out.max()) < 1.0 + 1e-25, (
                 f"f = {float(f_out.max()):.6f} > 1 at {deg} deg, Te/T = {te}")
+
+
+# ----------------------------------------------------------------------------
+# WHAT IT TAKES TO REFLECT AT fp64, AT ANY ANGLE.  These two pin the result of
+# the wall-angle investigation: the reflection is already exact, and it is the
+# FLUX QUADRATURE that is not, because |v.n| has a kink at v.n = 0.
+# ----------------------------------------------------------------------------
+@pytest.mark.parametrize("deg", [0.0, 11.37, 17.0, 30.0, 45.0, 63.0, 88.3])
+def test_modal_specular_rotation_is_exact_at_any_angle(deg: float) -> None:
+    """Specular reflection is theta -> 2 alpha - theta, which on the angular
+    harmonics is an orthogonal per-mode 2x2 rotation -- exact at EVERY angle,
+    with no interpolation anywhere.  Measured against the exact reflected
+    function: ~1e-14 at 11.37, 17, 30, 63, 88.3 degrees alike.
+
+    ⛔ This is the half of the wall problem that was never broken.  What is
+    broken is the flux integral (next test), and every closure ever added to
+    this class was repairing that, not this."""
+    torch.set_default_dtype(torch.float64)
+    M = 32
+    fs = FermiSurface(kF=1.0, vF=1.5, M_theta=M, Nr=1, T=1.0, tau_p=np.inf,
+                      specularity=1.0, process_grid=_pg())
+    rep = fs.representation
+    th = fs.angular.theta.clone()
+    g = torch.Generator(device=th.device).manual_seed(1)
+    c = torch.randn(M + 1, generator=g, device=th.device, dtype=torch.float64)
+    s = torch.randn(M + 1, generator=g, device=th.device, dtype=torch.float64)
+
+    def series(x):
+        out = torch.zeros_like(x)
+        for m in range(M + 1):
+            out = out + c[m] * torch.cos(m * x) + s[m] * torch.sin(m * x)
+        return out
+
+    u = series(th)
+    phi = np.deg2rad(deg)
+    n = torch.tensor([[np.cos(phi), np.sin(phi)]], dtype=torch.float64,
+                     device=th.device)
+    R = fs.get_reflector(n)
+    rot = rep.from_modes(R._specular_modal(rep.to_modes(u[None, None, :])))[0, 0]
+    exact = series(2 * (phi + np.pi / 2) - th)
+    assert float((rot - exact).abs().max() / u.abs().max()) < 1e-12
+
+
+def test_split_panel_quadrature_reaches_fp64_where_uniform_cannot() -> None:
+    """The wall's conservation laws integrate |v.n| f over a half-space, and
+    |v.n| has a KINK at v.n = 0.  On the uniform theta grid that is a
+    first-order rule however smooth f is -- residual 9.7e-4 / 8.9e-3 / 6.9e-2 at
+    17 / 30 / 63 degrees, and 1e-13 at 0 and 45 where the kink lands on the
+    grid's own symmetry.  THAT asymmetry is why axis-aligned walls always looked
+    perfect.
+
+    Splitting the integral at the kink makes |v.n| smooth on each panel, so
+    Gauss converges spectrally: 8.1e-6 at 34 nodes, 2.7e-14 at 48, and flat
+    thereafter -- the fp64 floor.  This test pins that a split panel beats the
+    uniform rule by orders of magnitude at a generic angle."""
+    M = 32
+    rng = np.random.default_rng(1)
+    c = rng.standard_normal(M + 1)
+    s = rng.standard_normal(M + 1)
+
+    def f(x):
+        out = np.zeros_like(x)
+        for m in range(M + 1):
+            out += c[m] * np.cos(m * x) + s[m] * np.sin(m * x)
+        return out
+
+    N = 2 * M + 4
+    th = 2 * np.pi * np.arange(N) / N
+    for deg in (17.0, 30.0, 63.0, 11.37):
+        phi = np.deg2rad(deg)
+        lo, hi = phi - np.pi / 2, phi + np.pi / 2
+        gx, gw = np.polynomial.legendre.leggauss(400)
+        X = 0.5 * (hi - lo) * gx + 0.5 * (lo + hi)
+        W = 0.5 * (hi - lo) * gw
+        ref = float(np.sum(W * np.cos(X - phi) * f(X)))
+        uni = float((2 * np.pi / N) * np.sum(np.clip(np.cos(th - phi), 0, None)
+                                             * f(th)))
+        gx2, gw2 = np.polynomial.legendre.leggauss(64)
+        X2 = 0.5 * (hi - lo) * gx2 + 0.5 * (lo + hi)
+        W2 = 0.5 * (hi - lo) * gw2
+        spl = float(np.sum(W2 * np.cos(X2 - phi) * f(X2)))
+        e_uni = abs(uni - ref) / abs(ref)
+        e_spl = abs(spl - ref) / abs(ref)
+        assert e_spl < 1e-12, f"split panel {e_spl:.3e} at {deg} deg"
+        assert e_spl < 1e-6 * e_uni, (
+            f"split {e_spl:.3e} vs uniform {e_uni:.3e} at {deg} deg")
