@@ -27,6 +27,10 @@ class Lindblad(TreeNode):
     scale_factor: dict[int, torch.Tensor]  #: scale factors per patch
     detailed_balance: str
 
+    low_rank_file: str  #: Name of HDF5 file to load `U` and `Vdag` from
+    U: torch.Tensor  #: Low-rank approximation to P and Pbar (left factor)
+    Vdag: torch.Tensor  #: Low-rank approximation to P and Pbar (right factor)
+
     @stopwatch
     def __init__(
         self,
@@ -35,6 +39,7 @@ class Lindblad(TreeNode):
         data_file: Checkpoint,
         scale_factor: float = 1.0,
         detailed_balance: str = "single",
+        low_rank_file: str = "",
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """
@@ -48,6 +53,11 @@ class Lindblad(TreeNode):
         super().__init__()
         self.ab_initio = ab_initio
         self.detailed_balance = detailed_balance
+        self.low_rank_file = low_rank_file
+
+        if low_rank_file:
+            # TODO: load U and Vdag and then skip P initialization below
+            raise NotImplementedError
 
         if detailed_balance == "spatial":
             max_dmu = 1e-3
@@ -167,6 +177,7 @@ class Lindblad(TreeNode):
         self.P = P.unflatten(1, (nk_mine, nk)).swapaxes(2, 3).reshape(op_shape)
 
         # Finishing up ...
+        # TODO: replace P with U and Vdag below if low_rank_file
         self.P_eye = apply_batched(
             self.P, torch.tile(ab_initio.eye_bands[None], (nk, 1, 1))[..., None]
         )
@@ -197,6 +208,8 @@ class Lindblad(TreeNode):
     ) -> list[str]:
         attrs = cp_path.attrs
         attrs["scale_factor"] = self.constant_params["scale_factor"].item()
+        attrs["detailed_balance"] = self.detailed_balance
+        attrs["low_rank_file"] = self.low_rank_file
         return list(attrs.keys())
 
     def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
@@ -268,7 +281,10 @@ class Lindblad(TreeNode):
         ph = ab_initio.packed_hermitian
         eye = ab_initio.eye_bands
         rho_all = self._collectT(ph.pack(rho))  # packed, all k
-        Prho_packed = apply_batched(self.P, rho_all)
+        if self.low_rank_file:
+            Prho_packed = apply_low_rank_batched(self.U, self.Vdag, rho_all)
+        else:
+            Prho_packed = apply_batched(self.P, rho_all)
         Prho_packed[1] -= self.P_eye[1]  # convert [1] to Pbar @ (rho - eye)
         Prho, minus_Prhobar = ph.unpack(Prho_packed)
         return (eye - rho) @ Prho + rho @ minus_Prhobar  # unpacked, my k only
@@ -291,4 +307,15 @@ def apply_batched(P: torch.Tensor, rho: torch.Tensor) -> torch.Tensor:
     """Apply batched flattened-rho operator P on batched rho.
     Batch dimension is at end of input, and at beginning of output."""
     result = torch.einsum("ikK, K... -> i...k", P, rho.flatten(0, 2))
+    return result.unflatten(-1, (-1,) + rho.shape[1:3])
+
+
+def apply_low_rank_batched(
+    U: torch.Tensor, Vdag: torch.Tensor, rho: torch.Tensor
+) -> torch.Tensor:
+    """Apply batched flattened-rho operator P on batched rho
+    using low-rank factorization in `U` and `Vdag`.
+    Batch dimension is at end of input, and at beginning of output."""
+    Vdag_rho = torch.einsum("ink, k... -> in...", Vdag, rho.flatten(0, 2))
+    result = torch.einsum("ikn, in... -> i...k", U, Vdag_rho)
     return result.unflatten(-1, (-1,) + rho.shape[1:3])
