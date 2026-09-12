@@ -136,3 +136,13 @@ dmypy.json
 
 # vim swap files
 *.sw*
+animation/
+_scratch_ee/
+
+# Transport meshes are GENERATED, never committed -- binary blobs bloat history
+# and every yaml that needs one names its generator in a header comment
+# (examples/Transport/make_*_mesh.py).
+*.npz
+
+# transport dev scratch: C[f] verification probes (kept out of upstream)
+prototypes/

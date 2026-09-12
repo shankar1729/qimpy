@@ -108,7 +108,10 @@ class SingleBand(Material):
         k_sel = []
         for k0_i in k0:
             k12[:, 0] = k0_i
-            k_cart = k12 @ self.lattice.Gbasis.T
+            # k-space setup runs in the lattice's precision (Gbasis is fp64
+            # regardless of the working dtype); results are stored into the
+            # working-dtype material buffers below.
+            k_cart = k12.to(self.lattice.Gbasis.dtype) @ self.lattice.Gbasis.T
             E = self.dispersion(k_cart, self.lattice)
             sel = torch.where(torch.logical_and(E >= Emin, E <= Emax))[0]
             if len(sel):
@@ -121,7 +124,7 @@ class SingleBand(Material):
 
         # Initialize further properties for selected k-points:
         self.k[:] = k_all[self.k_mine]
-        k_cart = self.k @ self.lattice.Gbasis.T
+        k_cart = self.k.to(self.lattice.Gbasis.dtype) @ self.lattice.Gbasis.T
         k_cart.requires_grad_(True)
         E = self.dispersion(k_cart, self.lattice)
         E.sum().backward()  # compute v = dE/dk in k_cart.grad
