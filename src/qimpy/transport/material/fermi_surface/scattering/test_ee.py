@@ -10,11 +10,26 @@ against the unreduced collision integral by Monte-Carlo quadratic form).
 """
 import numpy as np
 import torch
+
 import pytest
 
 from qimpy import rc
 from qimpy.mpi import ProcessGrid
 from . import _kernels
+
+# ⛔⛔ THE WHOLE e-e BATTERY IS `validate`, NOT JUST THE OBVIOUS OFFENDERS.
+# Measured on an A100 the transport suite is 2055 s and this module is nearly
+# all of it; measured on CPU the ratio is far worse, because every test here
+# builds and applies the e-e collision operator, which is a GPU-scale object:
+#   test_unreduced_vs_reduced_reference     17 s GPU  ->  >17 min CPU  (60x)
+#   test_matrix_free_rho_dot_integration    29 s GPU  ->  >14 min CPU  (30x)
+# So picking the top-N by GPU time is the wrong criterion -- it is the whole
+# module.  `make test` must run on a laptop (upstream's is under a minute), so
+# these are deselected by default and run by `make test-validate`.
+# ⛔ Coverage is NOT simply dropped: test_ee_smoke.py keeps a seconds-scale
+# construct / apply / conserve check in the default suite, so a build that
+# breaks the operator outright still fails `make test`.
+pytestmark = pytest.mark.validate
 
 # ⛔ CACHE THE PROCESS GRID.  Under MPI, ProcessGrid.get_comm was a free
 # communicator split.  Upstream's torch.distributed get_group splits a real

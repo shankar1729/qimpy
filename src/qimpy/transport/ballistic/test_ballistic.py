@@ -214,12 +214,37 @@ def test_closed_cavity_is_entirely_unresolved() -> None:
         assert int((cid != 0).sum()) == 0, "a ray escaped a closed cavity"
 
 
+@pytest.mark.parametrize(
+    "n_ang, n_edge, max_bounce, n_k, M_th, Nr_, h_, blocks, steady, "
+    "trap_max, tol",
+    [
+        # Default: laptop-sized, CPU-only.  ⛔ THE REFERENCE WAS NEVER THE
+        # EXPENSIVE HALF -- dropping n_ang 2048 -> 256 alone still left ~6 min
+        # on CPU, because the cost is the FV STEADY-STATE SOLVE (up to 60x50
+        # steps).  The mesh, M_theta, Nr and the block cap have to come down
+        # with it.  Still a real constraint: 25% cannot hide the 4x wall bug
+        # this suite previously missed.  But the reference is NOT converged
+        # here, so a pass means "nothing is grossly broken", not agreement.
+        pytest.param(256, 8, 200, 16, 16, 2, 8.0, 20, 1e-3, 0.40, 0.25,
+                     id="smoke"),
+        # Converged: the real cross-check.  ~15 s on an A100 and ~7 min on a
+        # CPU, which is why it is behind the `validate` marker.
+        pytest.param(2048, 24, 3200, 48, 32, 4, 3.0, 60, 1e-4, 0.25, 0.10,
+                     id="converged", marks=pytest.mark.validate),
+    ],
+)
 @pytest.mark.timeout(1800)
-def test_finite_volume_matches_exact_ballistic() -> None:
+def test_finite_volume_matches_exact_ballistic(
+    n_ang: int, n_edge: int, max_bounce: int, n_k: int, M_th: int, Nr_: int,
+    h_: float, blocks: int, steady: float, trap_max: float, tol: float,
+) -> None:
     """★ THE CROSS-CHECK: FV must reproduce the exact ballistic current.
 
     This is the only test in the suite that compares qimpy against an
-    independently derived answer rather than against itself.
+    independently derived answer rather than against itself, so it is the one
+    expensive test worth keeping a cheap version of rather than deselecting
+    outright: the `smoke` case keeps the code path in every `make test`, and
+    `converged` carries the actual numerical claim.
 
     ⛔ TOLERANCE.  The exact solver's own uncertainty is the unresolved-orbit
     fraction, which is reported and asserted small; the FV solver carries
@@ -234,23 +259,27 @@ def test_finite_volume_matches_exact_ballistic() -> None:
 
     with tempfile.TemporaryDirectory() as td:
         mesh = _channel_mesh(os.path.join(td, "c.npz"), length=30.0,
-                             width=12.0, h=3.0)
+                             width=12.0, h=h_)
         exact = Ballistic(mesh, contacts={"source": DMU, "drain": -DMU},
                           **CHANNEL)
         # ⛔ n_ang must be high enough to be converged: on the production
         # mixer 1024 reads 2.8% low and is not even monotone (9.6908 / 9.5130 /
         # 9.7649 / 9.7863 at 512/1024/2048/4096).  A cross-check against an
-        # unconverged reference is worse than no cross-check.
-        I_exact, trap = exact.contact_current("source", n_ang=2048, n_edge=24,
-                                              max_bounce=3200)
-        assert trap < 0.25, f"unresolved {trap}: reference too weak to test FV"
+        # unconverged reference is worse than no cross-check -- which is
+        # exactly why the cheap case above is labelled `smoke` and given a
+        # tolerance it cannot mistake for agreement.
+        I_exact, trap = exact.contact_current("source", n_ang=n_ang,
+                                              n_edge=n_edge,
+                                              max_bounce=max_bounce)
+        assert trap < trap_max, (
+            f"unresolved {trap}: reference too weak to test FV")
 
         t = Transport(
             fermi_surface=dict(
-                kF=CHANNEL["kF"], vF=CHANNEL["vF"], M_theta=32, Nr=4,
+                kF=CHANNEL["kF"], vF=CHANNEL["vF"], M_theta=M_th, Nr=Nr_,
                 T=CHANNEL["T"], xi_max=6.0, tau_p=np.inf, specularity=1.0,
                 residual_damping=False,
-                cartesian=dict(annulus_xi=0.0, te_fac_max=2.0, n_k=48)),
+                cartesian=dict(annulus_xi=0.0, te_fac_max=2.0, n_k=n_k)),
             spatial_transport=dict(
                 mesh_file=mesh, compile=False, save_rho=True,
                 contacts={"source": {"dmu": DMU, "nonlinear": True},
@@ -263,16 +292,31 @@ def test_finite_volume_matches_exact_ballistic() -> None:
         # against a steady solution, and a transient would disagree for
         # reasons that have nothing to do with correctness.
         prev = None
-        for block in range(60):
+        converged = False
+        for block in range(blocks):
             for _ in range(50):
                 uh = u + (0.5 * dt) * g.rho_dot(TensorList([u]), 0.0)[0]
                 u = u + dt * g.rho_dot(TensorList([uh]), 0.5 * dt)[0]
             g._u.copy_(u)
             I_fv = g.contact_currents(0.0)["source"]
-            if prev is not None and abs(I_fv - prev) < 1e-4 * abs(I_fv):
+            # ⛔ MATCH THE STEADINESS CRITERION TO THE COMPARISON TOLERANCE.
+            # Demanding 1e-4 on a case judged at 25% just burns blocks and
+            # then trips the guard below: measured, the coarse mesh was still
+            # moving after 12 blocks at 1e-4 and the smoke case FAILED.
+            if prev is not None and abs(I_fv - prev) < steady * abs(I_fv):
+                converged = True
                 break
             prev = I_fv
+        # ⛔ NEVER COMPARE A TRANSIENT.  The block cap is a safety net, not a
+        # stopping rule; if it is hit, I_fv is whatever the run happened to
+        # reach and agreement or disagreement with the exact answer means
+        # nothing.  Shrinking this test for the laptop suite is exactly the
+        # change that could silently turn it into a transient comparison, so
+        # the convergence is asserted rather than assumed.
+        assert converged, (
+            f"FV current still moving after {blocks} blocks; "
+            f"raise `blocks` rather than trusting this number")
         rel = abs(I_fv - I_exact) / abs(I_exact)
-        assert rel < 0.10, (
+        assert rel < tol, (
             f"FV {I_fv:.6e} vs exact {I_exact:.6e} = {100 * rel:.2f}% apart "
             f"(unresolved {trap:.3f}, {block + 1} blocks)")
