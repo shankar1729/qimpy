@@ -13,37 +13,13 @@ where all of it is seconds on a CPU.  It is deliberately NOT a numerical
 accuracy check: nothing here would catch a wrong prefactor or a bad vertex, and
 it must not be mistaken for the thing that does.  That is `make test-validate`.
 """
+
 from __future__ import annotations
 
-import pytest
 import torch
 
 from qimpy import rc
 from qimpy.mpi import ProcessGrid
-
-
-@pytest.fixture(autouse=True)
-def _no_default_device_mode():
-    """⛔ WITHOUT THIS THE WHOLE MODULE FAILS ON A GPU NODE, AND PASSES ON CPU.
-
-    qimpy's conftest installs `torch.set_default_device(rc.device)`, whose
-    TorchFunctionMode wrapper breaks the e-e kernels' numpy interop and injects
-    a `device=` kwarg into `torch.vander`, which does not take one.  test_ee.py
-    carries the same fixture for the same reason; this file needs it because it
-    builds the same operator.  Measured: without it, all three tests here fail
-    on GPU with "can't convert cuda:0 device type tensor to numpy" while
-    passing CPU-only -- which is exactly how a test that only ever ran on a
-    laptop would look green and mean nothing on the machine that matters.
-    """
-    try:
-        prev = torch.get_default_device()
-    except (AttributeError, RuntimeError):
-        prev = None
-    torch.set_default_device(None)
-    yield
-    if prev is not None:
-        torch.set_default_device(prev)
-
 
 KF = 7.5e-3
 M_STAR = 0.067
@@ -61,8 +37,15 @@ def _fs(**kw):
     from qimpy.transport.material import FermiSurface
 
     return FermiSurface(
-        kF=KF, vF=KF / M_STAR, M_theta=3, Nr=1, T=T0,
-        tau_p=float("inf"), process_grid=ProcessGrid("rk", (1, 1)), **kw)
+        kF=KF,
+        vF=KF / M_STAR,
+        M_theta=3,
+        Nr=1,
+        T=T0,
+        tau_p=float("inf"),
+        process_grid=ProcessGrid("rk", (1, 1)),
+        **kw,
+    )
 
 
 def test_ee_operator_constructs_and_applies() -> None:
@@ -75,8 +58,7 @@ def test_ee_operator_constructs_and_applies() -> None:
     fs = _fs(ee_scattering=dict(**SMALL))
     dim = 2 * fs.M_theta + 1
     torch.manual_seed(0)
-    a = 1e-2 * torch.randn(4, fs.Nr * dim, dtype=torch.float64,
-                           device=rc.device)
+    a = 1e-2 * torch.randn(4, fs.Nr * dim, dtype=torch.float64, device=rc.device)
     out = fs.ee_scattering.a_dot(a)
     assert out.shape == a.shape, (out.shape, a.shape)
     assert torch.isfinite(out).all(), "a_dot produced non-finite values"
@@ -94,8 +76,7 @@ def test_ee_conserves_particles_and_momentum() -> None:
     fs = _fs(ee_scattering=dict(**SMALL))
     dim = 2 * fs.M_theta + 1
     torch.manual_seed(1)
-    a = 1e-2 * torch.randn(4, fs.Nr * dim, dtype=torch.float64,
-                           device=rc.device)
+    a = 1e-2 * torch.randn(4, fs.Nr * dim, dtype=torch.float64, device=rc.device)
     out = fs.ee_scattering.a_dot(a).reshape(4, fs.Nr, dim)
     scale = float(out.abs().max().clamp(min=1e-300))
     # m = 0 is the particle-number channel; m = 1 (cos, sin) is momentum.
@@ -126,14 +107,13 @@ def test_ee_linear_is_linear_and_nonlinear_is_not() -> None:
     lin = _fs(ee_scattering=dict(**{**SMALL, "nonlinear": False}))
     o1 = lin.ee_scattering.a_dot(a)
     o2 = lin.ee_scattering.a_dot(2.0 * a)
-    err = float((o2 - 2.0 * o1).abs().max()
-                / o1.abs().max().clamp(min=1e-300))
+    err = float((o2 - 2.0 * o1).abs().max() / o1.abs().max().clamp(min=1e-300))
     assert err < 1e-12, f"linear operator is not linear: {err:.2e}"
 
     nl = _fs(ee_scattering=dict(**SMALL))
     n1 = nl.ee_scattering.a_dot(a)
     n2 = nl.ee_scattering.a_dot(2.0 * a)
-    dev = float((n2 - 2.0 * n1).abs().max()
-                / n1.abs().max().clamp(min=1e-300))
-    assert dev > 1e-9, (
-        f"nonlinear=True behaves linearly ({dev:.2e}): the cubic is not live")
+    dev = float((n2 - 2.0 * n1).abs().max() / n1.abs().max().clamp(min=1e-300))
+    assert (
+        dev > 1e-9
+    ), f"nonlinear=True behaves linearly ({dev:.2e}): the cubic is not live"

@@ -1,5 +1,4 @@
 import pytest
-import torch
 
 from . import rc
 
@@ -17,9 +16,6 @@ def pytest_report_teststatus(report, config):
 @pytest.fixture(scope="session", autouse=True)
 def init_run_config():
     rc.init()
-    # Tests build bare tensors without an explicit device; place them on the
-    # run device so the suite is correct on GPU. No-op on CPU (rc.device == cpu).
-    torch.set_default_device(rc.device)
 
 
 def pytest_collection_modifyitems(config, items):

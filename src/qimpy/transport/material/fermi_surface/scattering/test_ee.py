@@ -8,6 +8,7 @@ The exact thermal-shell (Galerkin) rates at T/E_F = 0.032 are larger:
 gamma_2 = 1.299x, gamma_4 = 1.156x closed form (verified independently
 against the unreduced collision integral by Monte-Carlo quadratic form).
 """
+
 import numpy as np
 import torch
 
@@ -52,31 +53,19 @@ E_F = 0.5 * KF**2 / M_STAR
 KAPPA = 2 * M_STAR / EPS_B
 
 
-@pytest.fixture(autouse=True)
-def _no_default_device_mode():
-    """qimpy's conftest installs torch.set_default_device(rc.device), whose
-    TorchFunctionMode wrapper (a) breaks the kernels' numpy interop on GPU
-    nodes and (b) injects a device= kwarg into torch.vander, which does not
-    accept one -- silently failing this ENTIRE module on GPU nodes (the
-    long-standing 'torch.vander env bug').  Disable the mode for this module;
-    code that explicitly asks for rc.device is unaffected."""
-    try:
-        prev = torch.get_default_device()
-    except (AttributeError, RuntimeError):
-        prev = None
-    torch.set_default_device(None)                # remove the wrapper entirely
-    yield
-    if prev is not None:
-        torch.set_default_device(prev)
-
-
 def make_fs(M_theta=8, Nr=1, ee=None, **kwargs):
     from qimpy.transport.material import FermiSurface
 
     process_grid = _cached_pg("rk", (-1, 1))
     return FermiSurface(
-        kF=KF, vF=KF / M_STAR, M_theta=M_theta, Nr=Nr, T=T0,
-        process_grid=process_grid, ee_scattering=ee, **kwargs,
+        kF=KF,
+        vF=KF / M_STAR,
+        M_theta=M_theta,
+        Nr=Nr,
+        T=T0,
+        process_grid=process_grid,
+        ee_scattering=ee,
+        **kwargs,
     )
 
 
@@ -106,14 +95,17 @@ def test_on_shell_rates():
     default (on_shell=False) is the larger finite-T/E_F thermal-shell rate."""
     K = _kernels.K_table(4, kF=KF, epsilon_bg=EPS_B, kappa=KAPPA)
     gam = _kernels.gamma_linear(K, m_star=M_STAR, T=T0, E_F=E_F)
-    fs = make_fs(M_theta=4,
-                 ee=dict(epsilon_bg=EPS_B, on_shell=True, nonlinear=False))
+    fs = make_fs(M_theta=4, ee=dict(epsilon_bg=EPS_B, on_shell=True, nonlinear=False))
     # the m=2 (cos) block, l=0 diagonal, equals the closed-form gamma_2 exactly:
-    assert abs(fs.ee_scattering.L_coeff[3, 0, 0].item() - gam[2].item()) \
+    assert (
+        abs(fs.ee_scattering.L_coeff[3, 0, 0].item() - gam[2].item())
         < 1e-12 * gam[2].item()
+    )
     # the exact default is ~30% larger for the shear mode at T/E_F ~ 0.03:
-    fs_x = make_fs(M_theta=4, ee=dict(epsilon_bg=EPS_B, nonlinear=False,
-                                      n_xi=24, n_phi=512, n_xi_proj=12))
+    fs_x = make_fs(
+        M_theta=4,
+        ee=dict(epsilon_bg=EPS_B, nonlinear=False, n_xi=24, n_phi=512, n_xi_proj=12),
+    )
     assert fs_x.ee_scattering.L_coeff[3, 0, 0].item() > 1.2 * gam[2].item()
     # on_shell=True with the radial (energy) tower Nr>1 is rejected:
     with pytest.raises(Exception):
@@ -155,8 +147,7 @@ def _real_coeffs(c_vec, M):
     return ghat
 
 
-def _reference_eps_terms(df_of_phi, x1, phi1, n_phi, order,
-                         n_xi=24, xi_cut=10.0):
+def _reference_eps_terms(df_of_phi, x1, phi1, n_phi, order, n_xi=24, xi_cut=10.0):
     """Amplitude-isolate the eps^k term of exact_collision_reference at the
     given (x1, phi1) via the 4-point stencil of proto_cubic_nr1.
 
@@ -172,7 +163,10 @@ def _reference_eps_terms(df_of_phi, x1, phi1, n_phi, order,
     fd = {
         s: _kernels.exact_collision_reference(
             (lambda s_: (lambda x, phi: df_of_phi(x, phi) * s_))(s),
-            x1, phi1, linearize=False, **refkw,
+            x1,
+            phi1,
+            linearize=False,
+            **refkw,
         )
         for s in (1.0, 2.0, -1.0, -2.0)
     }
@@ -223,12 +217,15 @@ def test_cubic_vertex_vs_reference():
         # V[node, co, la, a, lb, b, lc, c].  -Phi_dot real coeffs at x1=0
         # (conv=4): reconstruct the output harmonics, then Phi_dot(phi1).
         V = _kernels.cubic_vertex(
-            x_nodes=torch.zeros(1), psi_coeff=torch.ones(1, 1), M=M,
-            n_xi=24, xi_cut=10.0, n_phi=n_phi, **common,
+            x_nodes=torch.zeros(1),
+            psi_coeff=torch.ones(1, 1),
+            M=M,
+            n_xi=24,
+            xi_cut=10.0,
+            n_phi=n_phi,
+            **common,
         )
-        coeff = torch.einsum(
-            "oxaybzd,xa,yb,zd->o", V[0], c, c, c
-        )  # -Phi_dot^co
+        coeff = torch.einsum("oxaybzd,xa,yb,zd->o", V[0], c, c, c)  # -Phi_dot^co
         # Vc returns -Phi_dot coeffs (decay/conv convention); recover f_dot
         # real coeffs: f_dot_coeffs = -coeff / conv, conv = 4 T0 at x1 = 0:
         fdot_re = -coeff / (4.0 * T0)
@@ -240,12 +237,9 @@ def test_cubic_vertex_vs_reference():
         basis = torch.stack(cols, dim=-1)  # (n_phi1, nh)
         fdot_tensor = basis @ fdot_re
         C_ref = _reference_eps_terms(df, x1, phi1, n_phi, order=3)
-        rels0.append(
-            abs(fdot_tensor[0] - C_ref[0]).item() / abs(C_ref[0]).item()
-        )
+        rels0.append(abs(fdot_tensor[0] - C_ref[0]).item() / abs(C_ref[0]).item())
         rels_grid.append(
-            (fdot_tensor - C_ref).abs().max().item()
-            / C_ref.abs().max().item()
+            (fdot_tensor - C_ref).abs().max().item() / C_ref.abs().max().item()
         )
     # The vertex (built at phi1 = 0) and the reference now share the SAME
     # edge-clustered azimuth grid relative to phi1 (the reference grades phi3 =
@@ -277,9 +271,11 @@ def test_cubic_vertex_energy_structured_vs_reference():
     _fc = [torch.ones_like(xi_c), xi_c]
     _pe, _po = 2, 1
     while len(_fc) < Nr:
-        _fc.append(torch.tanh(0.5 * xi_c) ** _pe); _pe += 2
+        _fc.append(torch.tanh(0.5 * xi_c) ** _pe)
+        _pe += 2
         if len(_fc) < Nr:
-            _fc.append(torch.tanh(0.5 * xi_c) ** _po); _po += 2
+            _fc.append(torch.tanh(0.5 * xi_c) ** _po)
+            _po += 2
     psi_coeff = torch.linalg.solve(torch.stack(_fc[:Nr], dim=-1), Tfm)
     nh = 2 * M + 1
     common = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
@@ -288,19 +284,21 @@ def test_cubic_vertex_energy_structured_vs_reference():
     # l=1 cos(2) coefficient is the energy-weighted shear that the l=0-only
     # cubic cannot see.
     amod = torch.zeros(Nr, nh, dtype=torch.float64)
-    amod[0, 3] = 0.8    # l=0, cos(2 phi)
-    amod[1, 3] = 0.6    # l=1, cos(2 phi)  <- energy-weighted shear discriminator
-    amod[1, 1] = 0.4    # l=1, cos(1 phi)
-    amod[0, 4] = -0.3   # l=0, sin(2 phi)
+    amod[0, 3] = 0.8  # l=0, cos(2 phi)
+    amod[1, 3] = 0.6  # l=1, cos(2 phi)  <- energy-weighted shear discriminator
+    amod[1, 1] = 0.4  # l=1, cos(1 phi)
+    amod[0, 4] = -0.3  # l=0, sin(2 phi)
 
     def psi_eval(x):
         v = np.tanh(0.5 * x)
         cols = [np.ones_like(x), x]
         pe, po = 2, 1
         while len(cols) < Nr:
-            cols.append(v ** pe); pe += 2
+            cols.append(v**pe)
+            pe += 2
             if len(cols) < Nr:
-                cols.append(v ** po); po += 2
+                cols.append(v**po)
+                po += 2
         return np.stack(cols[:Nr], axis=-1) @ psi_coeff.numpy()
 
     def ec_real(phi):
@@ -321,17 +319,20 @@ def test_cubic_vertex_energy_structured_vs_reference():
     rels_full, rels_l0 = [], []
     for n_phi in (256, 512):
         Vc = _kernels.cubic_vertex(
-            x_nodes=torch.zeros(1), psi_coeff=psi_coeff, M=M,
-            n_xi=24, xi_cut=10.0, n_phi=n_phi, **common,
+            x_nodes=torch.zeros(1),
+            psi_coeff=psi_coeff,
+            M=M,
+            n_xi=24,
+            xi_cut=10.0,
+            n_phi=n_phi,
+            **common,
         )
 
         def fdot0_from(field):
             # Vc[node, co, la, a, lb, b, lc, c]; node x1=0 (conv=4 T0) ->
             # -4 T0 Phi_dot coeffs.  Recover f_dot real coeffs and evaluate at
             # phi1 = 0 (only cos channels contribute, e_co(0) = 1):
-            coeff = torch.einsum(
-                "oxaybzd,xa,yb,zd->o", Vc[0], field, field, field
-            )
+            coeff = torch.einsum("oxaybzd,xa,yb,zd->o", Vc[0], field, field, field)
             fdot_re = -coeff / (4.0 * T0)
             val = fdot_re[0]
             for m in range(1, M + 1):
@@ -352,15 +353,13 @@ def test_cubic_vertex_energy_structured_vs_reference():
     # The full cubic matches the reference to the quadrature floor at phi1=0
     # (identical node placement); the l=0-only restriction is off by O(10%) --
     # the l>0 inputs carry a real, distinct contribution that is now exact.
-    assert rels_full[-1] < 1e-6, (
-        f"full cubic vs reference (energy-structured): {rels_full}"
-    )
+    assert (
+        rels_full[-1] < 1e-6
+    ), f"full cubic vs reference (energy-structured): {rels_full}"
     assert max(rels_full) < 1e-6
     # the l=0-only cubic FAILS the same test by a wide, resolution-independent
     # margin (NOT a quadrature artifact) -- proof that l>0 matters:
-    assert min(rels_l0) > 1e-3, (
-        f"l=0-only should mismatch but matched: {rels_l0}"
-    )
+    assert min(rels_l0) > 1e-3, f"l=0-only should mismatch but matched: {rels_l0}"
     assert min(rels_l0) > 1e3 * max(rels_full)  # full is orders better
 
 
@@ -377,28 +376,32 @@ def test_quadratic_vertex_vs_reference():
     _fc = [torch.ones_like(xi_c), xi_c]
     _pe, _po = 2, 1
     while len(_fc) < Nr:
-        _fc.append(torch.tanh(0.5 * xi_c) ** _pe); _pe += 2
+        _fc.append(torch.tanh(0.5 * xi_c) ** _pe)
+        _pe += 2
         if len(_fc) < Nr:
-            _fc.append(torch.tanh(0.5 * xi_c) ** _po); _po += 2
+            _fc.append(torch.tanh(0.5 * xi_c) ** _po)
+            _po += 2
     psi_coeff = torch.linalg.solve(torch.stack(_fc[:Nr], dim=-1), Tfm)
     nh = 2 * M + 1
     common = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
 
     # energy-structured field: mixes l=0 and l=1, harmonics m=1,2:
     amod = torch.zeros(Nr, nh, dtype=torch.float64)
-    amod[0, 3] = 0.8   # l=0, cos(2 phi)
-    amod[1, 1] = 0.5   # l=1, cos(1 phi)
+    amod[0, 3] = 0.8  # l=0, cos(2 phi)
+    amod[1, 1] = 0.5  # l=1, cos(1 phi)
     amod[1, 4] = -0.3  # l=1, sin(2 phi)
-    amod[0, 2] = 0.4   # l=0, sin(1 phi)
+    amod[0, 2] = 0.4  # l=0, sin(1 phi)
 
     def psi_eval(x):
         v = np.tanh(0.5 * x)
         cols = [np.ones_like(x), x]
         pe, po = 2, 1
         while len(cols) < Nr:
-            cols.append(v ** pe); pe += 2
+            cols.append(v**pe)
+            pe += 2
             if len(cols) < Nr:
-                cols.append(v ** po); po += 2
+                cols.append(v**po)
+                po += 2
         return np.stack(cols[:Nr], axis=-1) @ psi_coeff.numpy()
 
     def ec_real(phi):
@@ -416,13 +419,16 @@ def test_quadratic_vertex_vs_reference():
 
     phi1 = torch.zeros(1)
     x1 = torch.zeros(1)
-    U = _kernels._real_to_complex(M)
-    ahat = torch.einsum("lc,mc->lm", amod.to(torch.complex128), U)
     rels = []
     for n_phi in (256, 512):
         Vq = _kernels.quadratic_vertex(
-            x_nodes=torch.zeros(1), psi_coeff=psi_coeff, M=M,
-            n_xi=24, xi_cut=10.0, n_phi=n_phi, **common,
+            x_nodes=torch.zeros(1),
+            psi_coeff=psi_coeff,
+            M=M,
+            n_xi=24,
+            xi_cut=10.0,
+            n_phi=n_phi,
+            **common,
         )
         # Vq[node, co, la, a, lb, b]; node x1=0 (conv=4 T0): -4 T0*Phi_dot coeffs.
         coeff = torch.einsum("oxayb,xa,yb->o", Vq[0], amod, amod)
@@ -447,17 +453,27 @@ def test_quadratic_vertex_vs_reference():
     a_surf = torch.zeros(Nr, nh, dtype=torch.float64)
     a_surf[0, 3] = 0.8  # l=0 cos(2 phi)
     Vc = _kernels.cubic_vertex(
-        x_nodes=torch.zeros(1), psi_coeff=psi_coeff, M=M,
-        n_xi=24, xi_cut=10.0, n_phi=512, **common,
+        x_nodes=torch.zeros(1),
+        psi_coeff=psi_coeff,
+        M=M,
+        n_xi=24,
+        xi_cut=10.0,
+        n_phi=512,
+        **common,
     )
     Vq2 = _kernels.quadratic_vertex(
-        x_nodes=torch.zeros(1), psi_coeff=psi_coeff, M=M,
-        n_xi=24, xi_cut=10.0, n_phi=512, **common,
+        x_nodes=torch.zeros(1),
+        psi_coeff=psi_coeff,
+        M=M,
+        n_xi=24,
+        xi_cut=10.0,
+        n_phi=512,
+        **common,
     )
     q_out = torch.einsum("oxayb,xa,yb->o", Vq2[0], a_surf, a_surf).abs().max()
-    c_out = torch.einsum(
-        "oxaybzd,xa,yb,zd->o", Vc[0], a_surf, a_surf, a_surf
-    ).abs().max()
+    c_out = (
+        torch.einsum("oxaybzd,xa,yb,zd->o", Vc[0], a_surf, a_surf, a_surf).abs().max()
+    )
     ratio = (q_out / c_out).item()
     # Finite-T particle-hole residual ~ T/E_F.  The numeric value scales with
     # 1/psi_0, i.e. with the basis band-mass normalization (hybrid basis:
@@ -472,23 +488,26 @@ def test_nonlinear_conservation():
     for Nr in (1, 3):
         M = 2
         fs = make_fs(
-            M_theta=M, Nr=Nr,
+            M_theta=M,
+            Nr=Nr,
             ee=dict(
                 epsilon_bg=EPS_B,
-                nonlinear=True, n_xi=16, n_phi=256, n_xi_proj=8,
+                nonlinear=True,
+                n_xi=16,
+                n_phi=256,
+                n_xi_proj=8,
             ),
         )
         dim = fs.angular.dim
         Ttm = fs.radial.T_to_modes.to(torch.float64).cpu()
         ones_c = Ttm @ torch.ones(Nr, dtype=torch.float64)
         t_ratio = T0 / E_F
-        k_c = Ttm @ torch.sqrt(
-            1.0 + t_ratio * fs.radial.xi.to(torch.float64).cpu()
-        )
+        k_c = Ttm @ torch.sqrt(1.0 + t_ratio * fs.radial.xi.to(torch.float64).cpu())
         torch.manual_seed(3)
         a = 1e-2 * torch.randn(4, Nr * dim, dtype=fs.v.dtype, device=rc.device)
         a_lin = -torch.einsum(  # isolate the nonlinear part of a_dot
-            "cij,...jc->...ic", fs.ee_scattering.L_coeff,
+            "cij,...jc->...ic",
+            fs.ee_scattering.L_coeff,
             a.reshape(4, Nr, dim),
         ).reshape(4, Nr * dim)
         nl = (fs.ee_scattering.a_dot(a) - a_lin).reshape(4, Nr, dim)
@@ -519,8 +538,11 @@ def test_even_m_selection():
     fs = make_fs(
         M_theta=6,
         ee=dict(
-            epsilon_bg=EPS_B, nonlinear=True,
-            n_xi=16, n_phi=256, n_xi_proj=8,
+            epsilon_bg=EPS_B,
+            nonlinear=True,
+            n_xi=16,
+            n_phi=256,
+            n_xi_proj=8,
         ),
     )
     dim = fs.angular.dim
@@ -532,6 +554,7 @@ def test_even_m_selection():
             a4 = aa.reshape(*aa.shape[:-1], fs.Nr, dim)
             lin = -torch.einsum("cij,...jc->...ic", fs.ee_scattering.L_coeff, a4)
             return fs.ee_scattering.a_dot(aa) - lin.reshape(aa.shape)
+
         o1 = 0.5 * (nl(1.0) - nl(-1.0))
         o2 = 0.5 * (nl(2.0) - nl(-2.0))  # odd-parity stencil -> cubic
         cub = (o2 - 2.0 * o1) / 6.0
@@ -579,8 +602,7 @@ def test_exact_rates_nr1():
     """Exact thermal-shell rates: corner ratios vs verified reference."""
     fs = make_fs(
         M_theta=4,
-        ee=dict(epsilon_bg=EPS_B, nonlinear=False,
-                n_xi=24, n_phi=512, n_xi_proj=12),
+        ee=dict(epsilon_bg=EPS_B, nonlinear=False, n_xi=24, n_phi=512, n_xi_proj=12),
     )
     K = _kernels.K_table(4, kF=KF, epsilon_bg=EPS_B, kappa=KAPPA)
     gam = _kernels.gamma_linear(K, m_star=M_STAR, T=T0, E_F=E_F)
@@ -591,15 +613,19 @@ def test_exact_rates_nr1():
     assert fs.ee_scattering.L_coeff[1, 0, 0] == 0.0  # momentum: exact null projection
     assert fs.ee_scattering.L_coeff[0, 0, 0] == 0.0  # number
     # small genuine odd-m relaxation, positive:
-    assert 0.0 <= fs.ee_scattering.L_coeff[5, 0, 0] < 0.3 * fs.ee_scattering.L_coeff[3, 0, 0]
+    assert (
+        0.0
+        <= fs.ee_scattering.L_coeff[5, 0, 0]
+        < 0.3 * fs.ee_scattering.L_coeff[3, 0, 0]
+    )
 
 
 def test_exact_rates_radial_tower():
     """Nr > 1: conservation nulls, PSD, and the hydrodynamic hierarchy."""
     fs = make_fs(
-        M_theta=2, Nr=3,
-        ee=dict(epsilon_bg=EPS_B, nonlinear=False,
-                n_xi=24, n_phi=512, n_xi_proj=12),
+        M_theta=2,
+        Nr=3,
+        ee=dict(epsilon_bg=EPS_B, nonlinear=False, n_xi=24, n_phi=512, n_xi_proj=12),
     )
     L = fs.ee_scattering.L_coeff.to(torch.float64).cpu()
     # symmetry + PSD:
@@ -626,9 +652,9 @@ def test_exact_rates_radial_tower():
 def test_material_integration():
     """FermiSurface.rho_dot with ee: shapes, decay, density conservation."""
     fs = make_fs(
-        M_theta=6, tau_p=np.inf,
-        ee=dict(epsilon_bg=EPS_B, nonlinear=True,
-                n_xi=16, n_phi=256, n_xi_proj=8),
+        M_theta=6,
+        tau_p=np.inf,
+        ee=dict(epsilon_bg=EPS_B, nonlinear=True, n_xi=16, n_phi=256, n_xi_proj=8),
     )
     Nk = fs.angular.N_theta
     torch.manual_seed(0)
@@ -659,14 +685,26 @@ def test_L_blocks_pointwise_vs_reference():
     x_chk = torch.tensor([-2.0, 1.0], dtype=torch.float64)
     common = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
     R = _kernels.L_blocks(
-        x_nodes=x_chk, psi_coeff=torch.ones(1, 1, dtype=torch.float64),
-        m_list=[2], n_xi=16, xi_cut=9.0, n_phi=256, **common,
+        x_nodes=x_chk,
+        psi_coeff=torch.ones(1, 1, dtype=torch.float64),
+        m_list=[2],
+        n_xi=16,
+        xi_cut=9.0,
+        n_phi=256,
+        **common,
     )
     w_occ = lambda x: 0.25 / torch.cosh(x / 2) ** 2
     df = lambda x, phi: w_occ(x) * torch.cos(2 * phi) / T0
     fdot = _kernels.exact_collision_reference(
-        df, x_chk, torch.zeros(2, dtype=torch.float64), linearize=True,
-        n_xi=16, xi_cut=9.0, n_phi=256, chunk=2, **common,
+        df,
+        x_chk,
+        torch.zeros(2, dtype=torch.float64),
+        linearize=True,
+        n_xi=16,
+        xi_cut=9.0,
+        n_phi=256,
+        chunk=2,
+        **common,
     )
     phidot = fdot * 4 * T0 * torch.cosh(x_chk / 2) ** 2
     assert torch.allclose(R[0, :, 0], -phidot, rtol=1e-10)
@@ -698,10 +736,18 @@ def test_unreduced_vs_reduced_reference():
     phi1 = torch.tensor([0.3], dtype=torch.float64, device=rc.device)
 
     def reduced(fn, linearize):
-        with torch.device(rc.device):   # internal grids must match x1's device
+        with torch.device(rc.device):  # internal grids must match x1's device
             return _kernels.exact_collision_reference(
-                fn, x1, phi1, linearize=linearize, n_xi=32, xi_cut=9.0,
-                n_phi=2048, chunk=1, **common)[0].item()
+                fn,
+                x1,
+                phi1,
+                linearize=linearize,
+                n_xi=32,
+                xi_cut=9.0,
+                n_phi=2048,
+                chunk=1,
+                **common,
+            )[0].item()
 
     def unreduced(fn, linearize):
         """Reduction-free value, Richardson-extrapolated in sigma at the
@@ -714,22 +760,36 @@ def test_unreduced_vs_reduced_reference():
         the trend is clean (2.60, 1.53, 0.72, 0.46 %) and both Richardson pairs
         agree to 0.004 % of each other."""
         with torch.device(rc.device):
-            u = [_kernels.unreduced_collision_reference(
-                     fn, x1, phi1, linearize=linearize, sigma=sg, n_phi=0,
-                     n_xi3=24, xi_cut=9.0, x2chunk=2, **common)[0].item()
-                 for sg in (0.4, 0.2)]
-        return (4.0 * u[1] - u[0]) / 3.0        # bias is O(sigma^2)
+            u = [
+                _kernels.unreduced_collision_reference(
+                    fn,
+                    x1,
+                    phi1,
+                    linearize=linearize,
+                    sigma=sg,
+                    n_phi=0,
+                    n_xi3=24,
+                    xi_cut=9.0,
+                    x2chunk=2,
+                    **common,
+                )[0].item()
+                for sg in (0.4, 0.2)
+            ]
+        return (4.0 * u[1] - u[0]) / 3.0  # bias is O(sigma^2)
 
     # (1) Linearized operator on a shear (cos 2phi) Fermi-surface mode:
     df = lambda x, phi: w_occ(x) * torch.cos(2 * phi) / T0
     red = reduced(df, True)
     unr = unreduced(df, True)
     rel_lin = abs(unr - red) / abs(red)
-    print(f"\n  reduction check (linear):    reduced {red:.6e}  "
-          f"reduction-free {unr:.6e}  rel {rel_lin:.3%}")
+    print(
+        f"\n  reduction check (linear):    reduced {red:.6e}  "
+        f"reduction-free {unr:.6e}  rel {rel_lin:.3%}"
+    )
     assert rel_lin < 0.005, (
         f"linear reduction mismatch: reduced={red:.4e} unreduced={unr:.4e}"
-        f" (rel={rel_lin:.2e})")
+        f" (rel={rel_lin:.2e})"
+    )
 
     # (2) FULL nonlinear bracket at a physical O(1) deformation (Phi = cos 2phi
     # so delta_f = w_occ cos 2phi, |delta_f| <= 0.25, occupations stay in [0,1]).
@@ -739,15 +799,19 @@ def test_unreduced_vs_reduced_reference():
     dfn = lambda x, phi: w_occ(x) * torch.cos(2 * phi)
     redL = reduced(dfn, True)
     redF = reduced(dfn, False)
-    assert abs(redF - redL) / abs(redL) > 0.10, (
-        "nonlinear content too small to discriminate the reduction")
+    assert (
+        abs(redF - redL) / abs(redL) > 0.10
+    ), "nonlinear content too small to discriminate the reduction"
     unrF = unreduced(dfn, False)
     rel_nl = abs(unrF - redF) / abs(redF)
-    print(f"  reduction check (nonlinear): reduced {redF:.6e}  "
-          f"reduction-free {unrF:.6e}  rel {rel_nl:.3%}")
+    print(
+        f"  reduction check (nonlinear): reduced {redF:.6e}  "
+        f"reduction-free {unrF:.6e}  rel {rel_nl:.3%}"
+    )
     assert rel_nl < 0.03, (
         f"nonlinear reduction mismatch: reduced={redF:.4e} unreduced={unrF:.4e}"
-        f" (rel={rel_nl:.2e})")
+        f" (rel={rel_nl:.2e})"
+    )
 
 
 def test_full_Cf_QUADRATIC_vs_unreduced_definition() -> None:
@@ -780,9 +844,11 @@ def test_full_Cf_QUADRATIC_vs_unreduced_definition() -> None:
     and C3 exactly.
     """
     torch.set_default_dtype(torch.float64)
-    fs = make_fs(M_theta=6, Nr=3,
-                 ee=dict(epsilon_bg=EPS_B, nonlinear=True,
-                         check_convergence=False))
+    fs = make_fs(
+        M_theta=6,
+        Nr=3,
+        ee=dict(epsilon_bg=EPS_B, nonlinear=True, check_convergence=False),
+    )
     ee = fs.ee_scattering
     dim = fs.angular.dim
     Nr = fs.Nr
@@ -794,9 +860,11 @@ def test_full_Cf_QUADRATIC_vs_unreduced_definition() -> None:
         cols = [torch.ones_like(x), x]
         pe, po = 2, 1
         while len(cols) < Nr:
-            cols.append(v ** pe); pe += 2
+            cols.append(v**pe)
+            pe += 2
             if len(cols) < Nr:
-                cols.append(v ** po); po += 2
+                cols.append(v**po)
+                po += 2
         return torch.stack(cols[:Nr], dim=-1) @ psi_coeff
 
     xg = torch.tensor(np.linspace(-9.0, 9.0, 9), dtype=torch.float64)
@@ -805,59 +873,79 @@ def test_full_Cf_QUADRATIC_vs_unreduced_definition() -> None:
     psi_dev = psi_coeff.to(rc.device)
 
     a = torch.zeros(Nr * dim, dtype=torch.float64, device=rc.device)
-    a[3] = amp                                   # (n = 0, cos 2phi)
+    a[3] = amp  # (n = 0, cos 2phi)
     # the EVEN amplitude combination cancels the linear and cubic exactly:
     quad = (0.5 * (ee.a_dot(a) + ee.a_dot(-a))).cpu()
-    prod = float(quad[1 * dim + 7])              # (n = 1, cos 4phi)
+    prod = float(quad[1 * dim + 7])  # (n = 1, cos 4phi)
 
-    ph = torch.tensor(np.linspace(0.0, 2 * np.pi, 5, endpoint=False),
-                      dtype=torch.float64)
+    ph = torch.tensor(
+        np.linspace(0.0, 2 * np.pi, 5, endpoint=False), dtype=torch.float64
+    )
     X, P = torch.meshgrid(xg, ph, indexing="ij")
     Xf, Pf = X.reshape(-1).to(rc.device), P.reshape(-1).to(rc.device)
 
-    def df(x, p):   # the reference runs on rc.device (n_phi ~ 500: GPU or bust)
+    def df(x, p):  # the reference runs on rc.device (n_phi ~ 500: GPU or bust)
         v = torch.tanh(0.5 * x)
         cols = [torch.ones_like(x), x]
         pe, po = 2, 1
         while len(cols) < Nr:
-            cols.append(v ** pe); pe += 2
+            cols.append(v**pe)
+            pe += 2
             if len(cols) < Nr:
-                cols.append(v ** po); po += 2
+                cols.append(v**po)
+                po += 2
         psi0 = (torch.stack(cols[:Nr], dim=-1) @ psi_dev)[..., 0]
         return w_occ(x) * psi0 * (amp * torch.cos(2 * p)) / T0
-    common2 = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B,
-                   kappa=KAPPA, g_s=ee.g_s)
+
+    common2 = dict(
+        kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA, g_s=ee.g_s
+    )
     dx = float(xg[1] - xg[0])
     W = w_occ(xg)
     Ginv = torch.linalg.inv(torch.einsum("xn,xm,x->nm", psi_g, psi_g, W) * dx)
 
     def ref_coeff(sigma, n_xi2):
         with torch.device(rc.device):
-            fd = {s: _kernels.unreduced_collision_reference(
-                      (lambda s_: (lambda x, p: df(x, p) * s_))(s),
-                      Xf, Pf, linearize=False, sigma=sigma, n_xi2=n_xi2,
-                      n_xi3=16, n_phi=0, xi_cut=9.0, x2chunk=2, **common2).cpu()
-                  for s in (1.0, -1.0)}
+            fd = {
+                s: _kernels.unreduced_collision_reference(
+                    (lambda s_: (lambda x, p: df(x, p) * s_))(s),
+                    Xf,
+                    Pf,
+                    linearize=False,
+                    sigma=sigma,
+                    n_xi2=n_xi2,
+                    n_xi3=16,
+                    n_phi=0,
+                    xi_cut=9.0,
+                    x2chunk=2,
+                    **common2,
+                ).cpu()
+                for s in (1.0, -1.0)
+            }
         Q2 = (0.5 * (fd[1.0] + fd[-1.0])).reshape(len(xg), len(ph))
-        c4 = (Q2 * (2.0 / len(ph)) * torch.cos(4 * ph)).sum(1)   # exact DFT
+        c4 = (Q2 * (2.0 / len(ph)) * torch.cos(4 * ph)).sum(1)  # exact DFT
         Phi = c4 * (4 * T0 * torch.cosh(xg / 2) ** 2)
         return float(torch.einsum("nm,xm,x,x->n", Ginv, psi_g, W * dx, Phi)[1])
 
-    r_hi = ref_coeff(0.4, 240)                   # bias O(sigma^2)
+    r_hi = ref_coeff(0.4, 240)  # bias O(sigma^2)
     r_lo = ref_coeff(0.2, 480)
-    ref = (4.0 * r_lo - r_hi) / 3.0              # Richardson sigma -> 0
+    ref = (4.0 * r_lo - r_hi) / 3.0  # Richardson sigma -> 0
     drift = abs(r_lo / r_hi - 1.0)
     rel = abs(prod / ref - 1.0)
-    print(f"\n  QUADRATIC full C[f] vs definition, Q(n=1, m=4): production "
-          f"{prod:+.5e}  sigma=0.4 {r_hi:+.5e}  sigma=0.2 {r_lo:+.5e}"
-          f"  Richardson {ref:+.5e}  rel {rel:.2%}  (sigma-drift {drift:.1%})")
+    print(
+        f"\n  QUADRATIC full C[f] vs definition, Q(n=1, m=4): production "
+        f"{prod:+.5e}  sigma=0.4 {r_hi:+.5e}  sigma=0.2 {r_lo:+.5e}"
+        f"  Richardson {ref:+.5e}  rel {rel:.2%}  (sigma-drift {drift:.1%})"
+    )
     assert drift < 0.10, (
         f"reference not in the asymptotic regime (sigma drift {drift:.1%});"
-        " Richardson is not valid")
+        " Richardson is not valid"
+    )
     assert prod * ref > 0, "assembled quadratic has the WRONG SIGN vs eq (1)"
     assert rel < 0.08, (
         f"assembled quadratic disagrees with the reduction-free definition by "
-        f"{rel:.2%} (production {prod:.4e} vs {ref:.4e})")
+        f"{rel:.2%} (production {prod:.4e} vs {ref:.4e})"
+    )
 
 
 def test_unreduced_reference_angular_convergence() -> None:
@@ -880,12 +968,22 @@ def test_unreduced_reference_angular_convergence() -> None:
 
     def Q2_at(n_phi):
         with torch.device(rc.device):
-            fd = {s: _kernels.unreduced_collision_reference(
-                      (lambda s_: (lambda x, p: df(x, p) * s_))(s),
-                      x1.to(rc.device), phi1.to(rc.device), linearize=False,
-                      sigma=0.4, n_xi2=240, n_xi3=16, n_phi=n_phi, xi_cut=9.0,
-                      x2chunk=2, **common)
-                  for s in (1.0, -1.0)}
+            fd = {
+                s: _kernels.unreduced_collision_reference(
+                    (lambda s_: (lambda x, p: df(x, p) * s_))(s),
+                    x1.to(rc.device),
+                    phi1.to(rc.device),
+                    linearize=False,
+                    sigma=0.4,
+                    n_xi2=240,
+                    n_xi3=16,
+                    n_phi=n_phi,
+                    xi_cut=9.0,
+                    x2chunk=2,
+                    **common,
+                )
+                for s in (1.0, -1.0)
+            }
         # particle-hole-ODD part of the even (quadratic) amplitude combination
         q = 0.5 * (fd[1.0] + fd[-1.0])
         return float(q[0] - q[1])
@@ -893,11 +991,14 @@ def test_unreduced_reference_angular_convergence() -> None:
     q_auto = Q2_at(0)
     q_fine = Q2_at(2 * int(np.ceil(1.5 * _auto_n_phi(0.4, 9.0))))
     rel = abs(q_auto / q_fine - 1.0)
-    print(f"\n  unreduced reference angular convergence: auto {q_auto:+.5e},"
-          f" 1.5x n_phi {q_fine:+.5e}, rel {rel:.2%}")
+    print(
+        f"\n  unreduced reference angular convergence: auto {q_auto:+.5e},"
+        f" 1.5x n_phi {q_fine:+.5e}, rel {rel:.2%}"
+    )
     assert rel < 0.02, (
         f"the auto n_phi rule is NOT converged ({rel:.1%} on refinement);"
-        " every definitional test that uses it is unreliable")
+        " every definitional test that uses it is unreliable"
+    )
 
 
 def _auto_n_phi(sigma: float, xi_cut: float) -> int:
@@ -920,46 +1021,62 @@ def test_detailed_balance_and_H_theorem() -> None:
     projector): C[f_le]/C[f_neq] ~ 2e-14 and Sdot[f_neq] = +1.5e-5.
     """
     torch.set_default_dtype(torch.float64)
-    theta, dmu, U = 0.769, 0.5, 0.30          # T/Te = 0.769  =>  Te = 1.3 T
+    theta, dmu, U = 0.769, 0.5, 0.30  # T/Te = 0.769  =>  Te = 1.3 T
     t = T0 / (0.5 * KF**2 / M_STAR)
     f0 = lambda x: torch.sigmoid(-x)
 
     def df_le(x, p):
-        return torch.sigmoid(-theta * (
-            x - dmu - U * torch.sqrt(torch.clamp(1 + t * x, min=0))
-            * torch.cos(p))) - f0(x)
+        return torch.sigmoid(
+            -theta
+            * (x - dmu - U * torch.sqrt(torch.clamp(1 + t * x, min=0)) * torch.cos(p))
+        ) - f0(x)
 
     w_occ = lambda x: 0.25 / torch.cosh(x / 2) ** 2
     df_neq = lambda x, p: 1.2 * w_occ(x) * torch.cos(2 * p)
 
     xg = torch.tensor(np.linspace(-9.0, 9.0, 15), dtype=torch.float64)
-    ph = torch.tensor(np.linspace(0.0, 2 * np.pi, 12, endpoint=False),
-                      dtype=torch.float64)
+    ph = torch.tensor(
+        np.linspace(0.0, 2 * np.pi, 12, endpoint=False), dtype=torch.float64
+    )
     X, P = torch.meshgrid(xg, ph, indexing="ij")
     common = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
     with torch.device(rc.device):
         Xf, Pf = X.reshape(-1).to(rc.device), P.reshape(-1).to(rc.device)
-        fd = {k: _kernels.exact_collision_reference(
-                  f, Xf, Pf, linearize=False, n_xi=32, xi_cut=9.0, n_phi=512,
-                  chunk=2, **common).cpu()
-              for k, f in (("le", df_le), ("neq", df_neq))}
+        fd = {
+            k: _kernels.exact_collision_reference(
+                f,
+                Xf,
+                Pf,
+                linearize=False,
+                n_xi=32,
+                xi_cut=9.0,
+                n_phi=512,
+                chunk=2,
+                **common,
+            ).cpu()
+            for k, f in (("le", df_le), ("neq", df_neq))
+        }
 
     ratio = float(fd["le"].abs().max() / fd["neq"].abs().max())
     print(f"\n  detailed balance: max|C[f_le]| / max|C[f_neq]| = {ratio:.3e}")
     assert ratio < 1e-10, (
         "the drifted-heated Fermi-Dirac is NOT annihilated: eq (1)'s nonlinear"
-        f" null state leaks at {ratio:.2e} of a comparable non-equilibrium field")
+        f" null state leaks at {ratio:.2e} of a comparable non-equilibrium field"
+    )
 
     sdot = {}
     for k, fn in (("le", df_le), ("neq", df_neq)):
         f = (f0(X) + fn(X, P)).clamp(1e-14, 1 - 1e-14)
         s = -(fd[k].reshape(len(xg), len(ph)) * torch.log(f / (1 - f)))
         sdot[k] = float(s.sum() * float(xg[1] - xg[0]) * (2 * np.pi / len(ph)))
-    print(f"  H-theorem: Sdot[f_le] = {sdot['le']:+.3e}, "
-          f"Sdot[f_neq] = {sdot['neq']:+.3e}")
+    print(
+        f"  H-theorem: Sdot[f_le] = {sdot['le']:+.3e}, "
+        f"Sdot[f_neq] = {sdot['neq']:+.3e}"
+    )
     assert sdot["neq"] > 0.0, "ENTROPY PRODUCTION IS NEGATIVE -- H-theorem violated"
-    assert abs(sdot["le"]) < 1e-8 * abs(sdot["neq"]), (
-        "entropy production does not vanish on the drifted-heated Fermi-Dirac")
+    assert abs(sdot["le"]) < 1e-8 * abs(
+        sdot["neq"]
+    ), "entropy production does not vanish on the drifted-heated Fermi-Dirac"
 
 
 def test_nonlinear_packing_dense_vs_matrix_free() -> None:
@@ -981,28 +1098,39 @@ def test_nonlinear_packing_dense_vs_matrix_free() -> None:
     torch.set_default_dtype(torch.float64)
     outs = []
     for backend in ("dense", "matrix_free"):
-        fs = make_fs(M_theta=6, Nr=3,
-                     ee=dict(epsilon_bg=EPS_B, nonlinear=True, backend=backend,
-                             check_convergence=False, n_xi=12, n_phi=128,
-                             n_xi_proj=8))
+        fs = make_fs(
+            M_theta=6,
+            Nr=3,
+            ee=dict(
+                epsilon_bg=EPS_B,
+                nonlinear=True,
+                backend=backend,
+                check_convergence=False,
+                n_xi=12,
+                n_phi=128,
+                n_xi_proj=8,
+            ),
+        )
         ee = fs.ee_scattering
         dim = fs.angular.dim
         a = torch.zeros(3 * dim, dtype=torch.float64, device=rc.device)
-        a[0 * dim + 1] = 0.9 * T0          # cos(phi),   radial mode 0
-        a[1 * dim + 3] = 0.6 * T0          # cos(2 phi), radial mode 1
-        a[2 * dim + 6] = 0.8 * T0          # sin(3 phi), radial mode 2
+        a[0 * dim + 1] = 0.9 * T0  # cos(phi),   radial mode 0
+        a[1 * dim + 3] = 0.6 * T0  # cos(2 phi), radial mode 1
+        a[2 * dim + 6] = 0.8 * T0  # sin(3 phi), radial mode 2
         ad_p, ad_m = ee.a_dot(a).cpu(), ee.a_dot(-a).cpu()
-        outs.append(dict(Q=0.5 * (ad_p + ad_m), full=ad_p,
-                         odd=0.5 * (ad_p - ad_m)))
+        outs.append(dict(Q=0.5 * (ad_p + ad_m), full=ad_p, odd=0.5 * (ad_p - ad_m)))
     for key in ("Q", "odd", "full"):
         d, m = outs[0][key], outs[1][key]
         rel = float((d - m).abs().max() / d.abs().max().clamp(min=1e-300))
-        print(f"\n  packing {key}: |dense| = {float(d.abs().max()):.4e}, "
-              f"dense vs matrix-free rel = {rel:.2e}")
+        print(
+            f"\n  packing {key}: |dense| = {float(d.abs().max()):.4e}, "
+            f"dense vs matrix-free rel = {rel:.2e}"
+        )
         assert rel < 1e-11, (
             f"{key}: the packed (dense) assembly disagrees with the "
             f"packing-free matrix-free evaluation by {rel:.1e} on a multi-mode "
-            "input -- suspect the multiplicity or permutation bookkeeping")
+            "input -- suspect the multiplicity or permutation bookkeeping"
+        )
 
 
 def test_a_dot_regression_baseline():
@@ -1043,19 +1171,20 @@ def test_a_dot_regression_baseline():
     path = os.path.join(here, "baseline_adot.json")
     assert os.path.exists(path), (
         f"regression baseline missing at {path}; it is committed next to this "
-        f"test -- do not turn this back into a skip")
+        f"test -- do not turn this back into a skip"
+    )
     with open(path) as fh:
         data = json.load(fh)
-    for (M, Nr) in ((4, 2), (6, 2)):
+    for M, Nr in ((4, 2), (6, 2)):
         key_a, key_o = f"{M}_{Nr}_a", f"{M}_{Nr}_out"
         if key_a not in data:
             continue
         a = torch.tensor(data[key_a], dtype=torch.float64)
         out_ref = torch.tensor(data[key_o], dtype=torch.float64)
         fs = make_fs(
-            M_theta=M, Nr=Nr,
-            ee=dict(epsilon_bg=EPS_B, nonlinear=True,
-                    n_xi=16, n_phi=256, n_xi_proj=8),
+            M_theta=M,
+            Nr=Nr,
+            ee=dict(epsilon_bg=EPS_B, nonlinear=True, n_xi=16, n_phi=256, n_xi_proj=8),
         )
         a_dev = a.to(dtype=fs.v.dtype, device=rc.device)
         out = fs.ee_scattering.a_dot(a_dev).to(dtype=out_ref.dtype, device="cpu")
@@ -1106,8 +1235,14 @@ def test_matrix_free_vs_kernel_reference():
         psi_coeff, x_fine, P, Ginv, _ = ee._radial_galerkin(T0)
         psi_coeff, x_fine = psi_coeff.cpu(), x_fine.cpu()
         P, Ginv = P.cpu(), Ginv.cpu()
-        kin = dict(M=M, well_width=ee.well_width, n_xi=ee.n_xi,
-                   xi_cut=ee.xi_cut, n_phi=ee.n_phi, **common)
+        kin = dict(
+            M=M,
+            well_width=ee.well_width,
+            n_xi=ee.n_xi,
+            xi_cut=ee.xi_cut,
+            n_phi=ee.n_phi,
+            **common,
+        )
         Vc = _kernels.cubic_vertex(x_nodes=x_fine, psi_coeff=psi_coeff, **kin)
         Vq = _kernels.quadratic_vertex(x_nodes=x_fine, psi_coeff=psi_coeff, **kin)
         GP = Ginv @ P
@@ -1117,24 +1252,33 @@ def test_matrix_free_vs_kernel_reference():
         V_cubic = torch.einsum("cLl,lcxaybzd->Lcxaybzd", Proj, V_cubic)
         V_quad = torch.einsum("cLl,lcxayb->Lcxayb", Proj, V_quad)
         a4 = a4.cpu()
-        cub = torch.einsum(
-            "lcxaybzd,...xa,...yb,...zd->...lc", V_cubic, a4, a4, a4)
+        cub = torch.einsum("lcxaybzd,...xa,...yb,...zd->...lc", V_cubic, a4, a4, a4)
         qd = torch.einsum("lcxayb,...xa,...yb->...lc", V_quad, a4, a4)
         # kernels output the "-Phi_dot" convention; production folds +conv so
         # nl = +Phi_dot_NL -- negate here to mirror it:
         return -(cub + qd).reshape(*a4.shape[:-2], fs.Nr * fs.angular.dim)
 
-    for (M, Nr) in ((3, 1), (3, 2), (4, 2)):
+    for M, Nr in ((3, 1), (3, 2), (4, 2)):
         dim = 2 * M + 1
-        fs = make_fs(M_theta=M, Nr=Nr, ee=dict(  # force the matrix-free path
-            epsilon_bg=EPS_B, nonlinear=True, n_xi=12, n_phi=128, n_xi_proj=8,
-            backend="matrix_free"))
+        fs = make_fs(
+            M_theta=M,
+            Nr=Nr,
+            ee=dict(  # force the matrix-free path
+                epsilon_bg=EPS_B,
+                nonlinear=True,
+                n_xi=12,
+                n_phi=128,
+                n_xi_proj=8,
+                backend="matrix_free",
+            ),
+        )
         ee = fs.ee_scattering
         torch.manual_seed(7)
         a = 1e-2 * torch.randn(4, Nr * dim, dtype=fs.v.dtype, device=rc.device)
         a4 = a.reshape(4, Nr, dim)
-        nl_mf = ee.a_dot(a) + torch.einsum(
-            "cij,...jc->...ic", ee.L_coeff, a4).reshape(4, Nr * dim)
+        nl_mf = ee.a_dot(a) + torch.einsum("cij,...jc->...ic", ee.L_coeff, a4).reshape(
+            4, Nr * dim
+        )
         nl_ref = dense_nonlinear(ee, a4)
         rel = (nl_mf.cpu() - nl_ref).abs().max().item() / nl_ref.abs().max().item()
         assert rel < 1e-9, f"matrix-free vs kernel (M={M}, Nr={Nr}): rel={rel:.2e}"
@@ -1144,9 +1288,8 @@ def test_dense_backend_vs_matrix_free():
     """The dense (precontracted-vertex) and matrix-free backends are the same
     operator: a_dot agrees to roundoff.  Also checks that 'auto' picks dense when
     the vertex fits the storage cap and matrix_free when it would not."""
-    common = dict(epsilon_bg=EPS_B, nonlinear=True, n_xi=12, n_phi=128,
-                  n_xi_proj=8)
-    for (M, Nr) in ((3, 1), (4, 2)):
+    common = dict(epsilon_bg=EPS_B, nonlinear=True, n_xi=12, n_phi=128, n_xi_proj=8)
+    for M, Nr in ((3, 1), (4, 2)):
         dim = 2 * M + 1
         fd = make_fs(M_theta=M, Nr=Nr, ee=dict(backend="dense", **common))
         fm = make_fs(M_theta=M, Nr=Nr, ee=dict(backend="matrix_free", **common))
@@ -1173,22 +1316,28 @@ def test_matrix_free_conservation():
     for Nr in (1, 3):
         M = 2
         fs = make_fs(
-            M_theta=M, Nr=Nr,
-            ee=dict(epsilon_bg=EPS_B,
-                    nonlinear=True, backend="matrix_free",
-                    n_xi=16, n_phi=256, n_xi_proj=8),
+            M_theta=M,
+            Nr=Nr,
+            ee=dict(
+                epsilon_bg=EPS_B,
+                nonlinear=True,
+                backend="matrix_free",
+                n_xi=16,
+                n_phi=256,
+                n_xi_proj=8,
+            ),
         )
         dim = fs.angular.dim
         Ttm = fs.radial.T_to_modes.to(torch.float64).cpu()
         ones_c = Ttm @ torch.ones(Nr, dtype=torch.float64)
         t_ratio = T0 / E_F
-        k_c = Ttm @ torch.sqrt(
-            1.0 + t_ratio * fs.radial.xi.to(torch.float64).cpu()
-        )
+        k_c = Ttm @ torch.sqrt(1.0 + t_ratio * fs.radial.xi.to(torch.float64).cpu())
         torch.manual_seed(3)
         a = 1e-2 * torch.randn(4, Nr * dim, dtype=fs.v.dtype, device=rc.device)
         a_lin = -torch.einsum(
-            "cij,...jc->...ic", fs.ee_scattering.L_coeff, a.reshape(4, Nr, dim),
+            "cij,...jc->...ic",
+            fs.ee_scattering.L_coeff,
+            a.reshape(4, Nr, dim),
         ).reshape(4, Nr * dim)
         nl = (fs.ee_scattering.a_dot(a) - a_lin).reshape(4, Nr, dim)
         scale = nl.abs().max().item()
@@ -1213,21 +1362,25 @@ def test_matrix_free_storage_flat_in_Nr():
     sizes = {}
     for Nr in (2, 4):
         fs = make_fs(
-            M_theta=4, Nr=Nr,
-            ee=dict(epsilon_bg=EPS_B, nonlinear=True, backend="matrix_free",
-                    n_xi=8, n_phi=64, n_xi_proj=6),
+            M_theta=4,
+            Nr=Nr,
+            ee=dict(
+                epsilon_bg=EPS_B,
+                nonlinear=True,
+                backend="matrix_free",
+                n_xi=8,
+                n_phi=64,
+                n_xi_proj=6,
+            ),
         )
         ee = fs.ee_scattering
         gen = sum(
-            getattr(ee, f"_mf_{k}").numel()
-            for k in ("x4", "dphi2", "dphi4", "Wk")
+            getattr(ee, f"_mf_{k}").numel() for k in ("x4", "dphi2", "dphi4", "Wk")
         )
         psi = ee._mf_psi_coeff.numel()
         sizes[Nr] = (gen, psi)
     # generator quadrature arrays identical across Nr; psi table tiny (~Nr^2):
-    assert sizes[2][0] == sizes[4][0], (
-        f"generator size changed with Nr: {sizes}"
-    )
+    assert sizes[2][0] == sizes[4][0], f"generator size changed with Nr: {sizes}"
     assert sizes[4][1] <= 64, f"psi table not tiny: {sizes[4][1]}"
 
 
@@ -1236,9 +1389,16 @@ def test_matrix_free_rho_dot_integration():
     conserved exactly per spatial point, and the small-amplitude free-energy
     norm decays (the PSD linear operator dominates)."""
     fs = make_fs(
-        M_theta=6, tau_p=np.inf,
-        ee=dict(epsilon_bg=EPS_B, nonlinear=True, backend="matrix_free",
-                n_xi=16, n_phi=256, n_xi_proj=8),
+        M_theta=6,
+        tau_p=np.inf,
+        ee=dict(
+            epsilon_bg=EPS_B,
+            nonlinear=True,
+            backend="matrix_free",
+            n_xi=16,
+            n_phi=256,
+            n_xi_proj=8,
+        ),
     )
     Nk = fs.angular.N_theta
     torch.manual_seed(0)
@@ -1262,19 +1422,23 @@ def test_a_dot_nonlinear_signed():
     NOT valid here: the cubic's cos(2 phi) overlap changes sign across the shell,
     so the reference must be Galerkin-projected exactly like the operator."""
     torch.set_default_dtype(torch.float64)
-    fs = make_fs(M_theta=4, Nr=1, ee=dict(epsilon_bg=EPS_B, nonlinear=True,
-                                          check_convergence=False))
+    fs = make_fs(
+        M_theta=4,
+        Nr=1,
+        ee=dict(epsilon_bg=EPS_B, nonlinear=True, check_convergence=False),
+    )
     ee = fs.ee_scattering
     dim = fs.angular.dim
     amp = 2.0 * T0
     a = torch.zeros(dim, dtype=torch.float64, device=rc.device)
-    a[3] = amp                                    # m=2 cosine channel
+    a[3] = amp  # m=2 cosine channel
     a4 = a.reshape(1, dim)
     lin = (-torch.einsum("cij,jc->ic", ee.L_coeff, a4)).reshape(-1)
     cub = 0.5 * (ee.a_dot(a) - ee.a_dot(-a)) - lin
     # scaling sanity: the odd channel is pure cubic (series terminates)
-    cub_h = 0.5 * (ee.a_dot(0.5 * a) - ee.a_dot(-0.5 * a)) \
-        - (-torch.einsum("cij,jc->ic", ee.L_coeff, 0.5 * a4)).reshape(-1)
+    cub_h = 0.5 * (ee.a_dot(0.5 * a) - ee.a_dot(-0.5 * a)) - (
+        -torch.einsum("cij,jc->ic", ee.L_coeff, 0.5 * a4)
+    ).reshape(-1)
     assert abs(float(cub[3] / cub_h[3]) - 8.0) < 1e-6
     # governing-equation reference: eps^3 Richardson, Galerkin-projected
     # (w_eq_RB * conv = 1 -> unit x-weight; Ginv = T0/Gband at Nr=1).
@@ -1282,8 +1446,9 @@ def test_a_dot_nonlinear_signed():
     # default-device wrapper otherwise breaks the reference's numpy interop.
     with torch.device("cpu"):
         xg = torch.tensor(np.linspace(-8.0, 8.0, 25), dtype=torch.float64)
-        phi1 = torch.tensor(np.linspace(0, 2 * np.pi, 16, endpoint=False),
-                            dtype=torch.float64)
+        phi1 = torch.tensor(
+            np.linspace(0, 2 * np.pi, 16, endpoint=False), dtype=torch.float64
+        )
 
         def df(x, phi):
             return (0.25 / torch.cosh(x / 2) ** 2) * (amp * torch.cos(2 * phi)) / T0
@@ -1292,10 +1457,16 @@ def test_a_dot_nonlinear_signed():
         refkw = dict(n_xi=20, xi_cut=10.0, n_phi=128, chunk=2, **common2)
         X, P = torch.meshgrid(xg, phi1, indexing="ij")
         Xf, Pf = X.reshape(-1), P.reshape(-1)
-        fd = {s: _kernels.exact_collision_reference(
+        fd = {
+            s: _kernels.exact_collision_reference(
                 (lambda s_: (lambda x, phi: df(x, phi) * s_))(s),
-                Xf, Pf, linearize=False, **refkw).reshape(len(xg), len(phi1))
-              for s in (1.0, 2.0, -1.0, -2.0)}
+                Xf,
+                Pf,
+                linearize=False,
+                **refkw,
+            ).reshape(len(xg), len(phi1))
+            for s in (1.0, 2.0, -1.0, -2.0)
+        }
         C3 = (0.5 * (fd[2.0] - fd[-2.0]) - (fd[1.0] - fd[-1.0])) / 6.0
         ov = 2.0 * (C3 * torch.cos(2 * phi1)[None, :]).mean(1)
         dx = float(xg[1] - xg[0])
@@ -1312,17 +1483,32 @@ def test_cartesian_local_te_rates():
     isolates the per-cell rescale exactly).  Lives here for the module's
     no-default-device fixture (builds an EEScattering)."""
     from qimpy.transport.material import FermiSurface
+
     torch.set_default_dtype(torch.float64)
     T = 0.02
-    ee = dict(epsilon_bg=12.9, nonlinear=False, on_shell=False,
-              check_convergence=False, n_xi=8, n_phi=64, n_xi_proj=6)
+    ee = dict(
+        epsilon_bg=12.9,
+        nonlinear=False,
+        on_shell=False,
+        check_convergence=False,
+        n_xi=8,
+        n_phi=64,
+        n_xi_proj=6,
+    )
     pg = _cached_pg("rk", (-1, 1))
 
     def mk(local):
         return FermiSurface(
-            kF=1.0, vF=1.5, M_theta=6, Nr=1, T=T, xi_max=6.0,
+            kF=1.0,
+            vF=1.5,
+            M_theta=6,
+            Nr=1,
+            T=T,
+            xi_max=6.0,
             cartesian=dict(dk=T / (3.0 * 1.5), local_te_rates=local),
-            ee_scattering=dict(ee), process_grid=pg)
+            ee_scattering=dict(ee),
+            process_grid=pg,
+        )
 
     outs = {}
     for tag, local in (("on", True), ("off", False)):
@@ -1346,24 +1532,40 @@ def test_local_te_ensemble_exact():
     reproduces the material operator at te = T, and beats the scalar
     (T_e/T)^2 fallback, which misses the O(t) shape drift of M_1."""
     from qimpy.transport.material import FermiSurface
+
     torch.set_default_dtype(torch.float64)
     pg = _cached_pg("rk", (-1, 1))
     T = 0.02
-    ee_base = dict(epsilon_bg=12.9, nonlinear=False, on_shell=False,
-                   check_convergence=False, n_xi=16, n_phi=128, n_xi_proj=8)
+    ee_base = dict(
+        epsilon_bg=12.9,
+        nonlinear=False,
+        on_shell=False,
+        check_convergence=False,
+        n_xi=16,
+        n_phi=128,
+        n_xi_proj=8,
+    )
 
     def mk(Tm, local=None):
         eed = dict(ee_base)
         if local:
             eed["local_te"] = local
-        return FermiSurface(kF=1.0, vF=1.5, M_theta=4, Nr=1, T=Tm, xi_max=6.0,
-                            ee_scattering=eed, process_grid=pg)
+        return FermiSurface(
+            kF=1.0,
+            vF=1.5,
+            M_theta=4,
+            Nr=1,
+            T=Tm,
+            xi_max=6.0,
+            ee_scattering=eed,
+            process_grid=pg,
+        )
 
     fs = mk(T, local=dict(n_nodes=6, te_fac_min=0.5, te_fac_max=3.0))
     fs2 = mk(2 * T)
     dim = fs.angular.dim
     a = torch.zeros(1, dim, dtype=torch.float64, device=rc.device)
-    a[0, 3] = 1.0                                       # m=2 channel
+    a[0, 3] = 1.0  # m=2 channel
     te = torch.full((1,), 2 * T, dtype=torch.float64, device=rc.device)
     gam_ens = -float(fs._modal_collision(a, te=te)[0, 3])
     gam_fresh = float(fs2.ee_scattering.L_coeff[3, 0, 0])
@@ -1390,7 +1592,7 @@ def test_spin_degeneracy_scales_the_rate() -> None:
     ee2 = dict(epsilon_bg=EPS_B, kappa=KAPPA, nonlinear=False, g_s=2.0)
     L1 = make_fs(M_theta=2, Nr=1, ee=ee1).ee_scattering.L_coeff[3, 0, 0].item()
     L2 = make_fs(M_theta=2, Nr=1, ee=ee2).ee_scattering.L_coeff[3, 0, 0].item()
-    assert abs(L2 / L1 - 2.0) < 1e-12, f"rate not linear in g_s: {L2/L1}"
+    assert abs(L2 / L1 - 2.0) < 1e-12, f"rate not linear in g_s: {L2 / L1}"
     # default is the unpolarized 2DEG, and kappa follows the same degeneracy
     fs = make_fs(M_theta=2, Nr=1, ee=dict(epsilon_bg=EPS_B, nonlinear=False))
     assert fs.ee_scattering.g_s == 2.0
@@ -1426,32 +1628,65 @@ def test_L1_finite_difference_vs_reference() -> None:
     x_chk = torch.tensor([-2.0, 1.0], dtype=torch.float64)
     common = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA)
     R = _kernels.L_blocks(
-        x_nodes=x_chk, psi_coeff=torch.ones(1, 1, dtype=torch.float64),
-        m_list=[2], n_xi=n_xi, xi_cut=xi_cut, n_phi=n_phi, **common,
+        x_nodes=x_chk,
+        psi_coeff=torch.ones(1, 1, dtype=torch.float64),
+        m_list=[2],
+        n_xi=n_xi,
+        xi_cut=xi_cut,
+        n_phi=n_phi,
+        **common,
     )
     w_occ = lambda x: 0.25 / torch.cosh(x / 2) ** 2
     df = lambda x, phi: AMP * w_occ(x) * torch.cos(2 * phi) / T0
     L1 = _reference_eps_terms(
-        df, x_chk, torch.zeros(2, dtype=torch.float64), n_phi, order=1,
-        n_xi=n_xi, xi_cut=xi_cut,
+        df,
+        x_chk,
+        torch.zeros(2, dtype=torch.float64),
+        n_phi,
+        order=1,
+        n_xi=n_xi,
+        xi_cut=xi_cut,
     )
     phidot = L1 * 4 * T0 * torch.cosh(x_chk / 2) ** 2 / AMP
-    rel = float((R[0, :, 0] + phidot).abs().max()
-                / phidot.abs().max().clamp(min=1e-300))
+    rel = float(
+        (R[0, :, 0] + phidot).abs().max() / phidot.abs().max().clamp(min=1e-300)
+    )
     assert rel < 1e-12, f"hand-derived L1 disagrees with FD of raw B-F: {rel:.2e}"
 
     # the stencil must also reproduce the OTHER orders on the same data, i.e.
     # L1 + Q2 + C3 == the full bracket at unit amplitude (no missing piece)
-    Q2 = _reference_eps_terms(df, x_chk, torch.zeros(2, dtype=torch.float64),
-                              n_phi, order=2, n_xi=n_xi, xi_cut=xi_cut)
-    C3 = _reference_eps_terms(df, x_chk, torch.zeros(2, dtype=torch.float64),
-                              n_phi, order=3, n_xi=n_xi, xi_cut=xi_cut)
-    full = _kernels.exact_collision_reference(
-        df, x_chk, torch.zeros(2, dtype=torch.float64), linearize=False,
-        n_xi=n_xi, xi_cut=xi_cut, n_phi=n_phi, chunk=2, **common,
+    Q2 = _reference_eps_terms(
+        df,
+        x_chk,
+        torch.zeros(2, dtype=torch.float64),
+        n_phi,
+        order=2,
+        n_xi=n_xi,
+        xi_cut=xi_cut,
     )
-    closes = float((full - (L1 + Q2 + C3)).abs().max()
-                   / full.abs().max().clamp(min=1e-300))
+    C3 = _reference_eps_terms(
+        df,
+        x_chk,
+        torch.zeros(2, dtype=torch.float64),
+        n_phi,
+        order=3,
+        n_xi=n_xi,
+        xi_cut=xi_cut,
+    )
+    full = _kernels.exact_collision_reference(
+        df,
+        x_chk,
+        torch.zeros(2, dtype=torch.float64),
+        linearize=False,
+        n_xi=n_xi,
+        xi_cut=xi_cut,
+        n_phi=n_phi,
+        chunk=2,
+        **common,
+    )
+    closes = float(
+        (full - (L1 + Q2 + C3)).abs().max() / full.abs().max().clamp(min=1e-300)
+    )
     assert closes < 1e-10, f"L1+Q2+C3 != B-F: {closes:.2e}"
 
 
@@ -1489,45 +1724,61 @@ def test_full_Cf_vs_unreduced_definition(m_test: int) -> None:
     against the definition directly.
     """
     torch.set_default_dtype(torch.float64)
-    fs = make_fs(M_theta=4, Nr=1,
-                 ee=dict(epsilon_bg=EPS_B, nonlinear=False,
-                         check_convergence=False))
+    fs = make_fs(
+        M_theta=4,
+        Nr=1,
+        ee=dict(epsilon_bg=EPS_B, nonlinear=False, check_convergence=False),
+    )
     ee = fs.ee_scattering
-    prod = float(ee.L_coeff[2 * m_test - 1, 0, 0])       # production linear rate
+    prod = float(ee.L_coeff[2 * m_test - 1, 0, 0])  # production linear rate
 
     with torch.device(rc.device):
         xg = torch.tensor(np.linspace(-9.0, 9.0, 19), dtype=torch.float64)
         ph0 = torch.zeros_like(xg)
         w_occ = lambda x: 0.25 / torch.cosh(x / 2) ** 2
         df = lambda x, phi: w_occ(x) * torch.cos(m_test * phi) / T0
-        common2 = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B,
-                       kappa=KAPPA, g_s=ee.g_s)
+        common2 = dict(
+            kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA, g_s=ee.g_s
+        )
         dx = float(xg[1] - xg[0])
         Gband = float(w_occ(xg).sum() * dx)
 
         def ref_rate(sigma, n_xi2):
             """Galerkin-projected LINEAR rate from the reduction-free path."""
             fdot = _kernels.unreduced_collision_reference(
-                df, xg, ph0, linearize=True, sigma=sigma, n_xi2=n_xi2,
-                n_xi3=20, n_phi=0, xi_cut=9.0, x2chunk=4, **common2,
+                df,
+                xg,
+                ph0,
+                linearize=True,
+                sigma=sigma,
+                n_xi2=n_xi2,
+                n_xi3=20,
+                n_phi=0,
+                xi_cut=9.0,
+                x2chunk=4,
+                **common2,
             )
             # fdot at phi=0 IS the cos(m phi) overlap (rotational invariance);
             # convert to the Phi-code rate and radially Galerkin-project.
-            return -float((fdot * 4 * T0 * torch.cosh(xg / 2) ** 2
-                           * w_occ(xg)).sum() * dx / Gband)
+            return -float(
+                (fdot * 4 * T0 * torch.cosh(xg / 2) ** 2 * w_occ(xg)).sum() * dx / Gband
+            )
 
-        r_hi = ref_rate(0.4, 220)          # bias O(sigma^2)
+        r_hi = ref_rate(0.4, 220)  # bias O(sigma^2)
         r_lo = ref_rate(0.2, 440)
-        ref = (4.0 * r_lo - r_hi) / 3.0    # Richardson sigma -> 0
+        ref = (4.0 * r_lo - r_hi) / 3.0  # Richardson sigma -> 0
 
     rel = abs(prod / ref - 1.0)
-    print(f"\n  m={m_test} full C[f] vs definition: production {prod:.6e}, "
-          f"unreduced sigma=0.4 {r_hi:.6e}, sigma=0.2 {r_lo:.6e}, "
-          f"Richardson {ref:.6e}, rel {rel:.3%}")
+    print(
+        f"\n  m={m_test} full C[f] vs definition: production {prod:.6e}, "
+        f"unreduced sigma=0.4 {r_hi:.6e}, sigma=0.2 {r_lo:.6e}, "
+        f"Richardson {ref:.6e}, rel {rel:.3%}"
+    )
     assert prod * ref > 0, "assembled operator has the WRONG SIGN vs eq (6)"
     assert rel < 0.02, (
         f"assembled C[f] disagrees with the reduction-free definition by "
-        f"{rel:.2%} (production {prod:.4e} vs {ref:.4e})")
+        f"{rel:.2%} (production {prod:.4e} vs {ref:.4e})"
+    )
 
 
 def test_full_Cf_NONLINEAR_vs_unreduced_definition() -> None:
@@ -1558,45 +1809,61 @@ def test_full_Cf_NONLINEAR_vs_unreduced_definition() -> None:
     """
     torch.set_default_dtype(torch.float64)
     M_theta = 6
-    fs = make_fs(M_theta=M_theta, Nr=1,
-                 ee=dict(epsilon_bg=EPS_B, nonlinear=True,
-                         check_convergence=False))
+    fs = make_fs(
+        M_theta=M_theta,
+        Nr=1,
+        ee=dict(epsilon_bg=EPS_B, nonlinear=True, check_convergence=False),
+    )
     ee = fs.ee_scattering
     dim = fs.angular.dim
-    amp = 2.0 * T0                                   # delta-f ~ 0.5 at the peak
+    amp = 2.0 * T0  # delta-f ~ 0.5 at the peak
     a = torch.zeros(dim, dtype=torch.float64, device=rc.device)
     a[3] = amp
     a4 = a.reshape(1, dim)
     lin = (-torch.einsum("cij,jc->ic", ee.L_coeff, a4)).reshape(-1)
     cub = (0.5 * (ee.a_dot(a) - ee.a_dot(-a)) - lin).cpu()
-    prod = {2: float(cub[3]), 6: float(cub[11])}     # cos2phi, cos6phi channels
+    prod = {2: float(cub[3]), 6: float(cub[11])}  # cos2phi, cos6phi channels
 
     with torch.device(rc.device):
         xg = torch.tensor(np.linspace(-9.0, 9.0, 13), dtype=torch.float64)
-        ph = torch.tensor([0.0, np.pi / 6.0], dtype=torch.float64)   # 2 azimuths
+        ph = torch.tensor([0.0, np.pi / 6.0], dtype=torch.float64)  # 2 azimuths
         X, P = torch.meshgrid(xg, ph, indexing="ij")
         Xf, Pf = X.reshape(-1), P.reshape(-1)
         w_occ = lambda x: 0.25 / torch.cosh(x / 2) ** 2
         df = lambda x, phi: w_occ(x) * (amp * torch.cos(2 * phi)) / T0
-        common2 = dict(kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B,
-                       kappa=KAPPA, g_s=ee.g_s)
+        common2 = dict(
+            kF=KF, m_star=M_STAR, T=T0, epsilon_bg=EPS_B, kappa=KAPPA, g_s=ee.g_s
+        )
         dx = float(xg[1] - xg[0])
         Gband = float(w_occ(xg).sum() * dx)
         # A cos2phi + B cos6phi at the two azimuths -> solve the 2x2
-        Vt = torch.tensor([[np.cos(2 * float(p)), np.cos(6 * float(p))]
-                           for p in ph], dtype=torch.float64)
+        Vt = torch.tensor(
+            [[np.cos(2 * float(p)), np.cos(6 * float(p))] for p in ph],
+            dtype=torch.float64,
+        )
         Vinv = torch.linalg.inv(Vt)
 
         def ref_coeffs(sigma, n_xi2):
-            fd = {s: _kernels.unreduced_collision_reference(
-                      (lambda s_: (lambda x, p: df(x, p) * s_))(s),
-                      Xf, Pf, linearize=False, sigma=sigma, n_xi2=n_xi2,
-                      n_xi3=18, n_phi=0, xi_cut=9.0, x2chunk=4, **common2)
-                  for s in (1.0, 2.0, -1.0, -2.0)}
+            fd = {
+                s: _kernels.unreduced_collision_reference(
+                    (lambda s_: (lambda x, p: df(x, p) * s_))(s),
+                    Xf,
+                    Pf,
+                    linearize=False,
+                    sigma=sigma,
+                    n_xi2=n_xi2,
+                    n_xi3=18,
+                    n_phi=0,
+                    xi_cut=9.0,
+                    x2chunk=4,
+                    **common2,
+                )
+                for s in (1.0, 2.0, -1.0, -2.0)
+            }
             o1 = 0.5 * (fd[1.0] - fd[-1.0])
             o2 = 0.5 * (fd[2.0] - fd[-2.0])
             C3 = ((o2 - 2.0 * o1) / 6.0).reshape(len(xg), len(ph))
-            AB = C3 @ Vinv.T                          # (nx, 2): [A(x), B(x)]
+            AB = C3 @ Vinv.T  # (nx, 2): [A(x), B(x)]
             # radial Galerkin at Nr = 1 (psi_0 = const), fdot -> Phi_dot
             Phi = AB * (4 * T0 * torch.cosh(xg / 2) ** 2)[:, None]
             g = (Phi * w_occ(xg)[:, None]).sum(0) * dx / Gband
@@ -1607,12 +1874,14 @@ def test_full_Cf_NONLINEAR_vs_unreduced_definition() -> None:
         ref = {m: (4.0 * r_lo[m] - r_hi[m]) / 3.0 for m in (2, 6)}
 
     conv = {m: abs(r_lo[m] / r_hi[m] - 1.0) for m in (2, 6)}
-    print(f"\n  NONLINEAR full C[f] vs definition (cubic modal coefficients):")
+    print("\n  NONLINEAR full C[f] vs definition (cubic modal coefficients):")
     for m in (2, 6):
         rel = abs(prod[m] / ref[m] - 1.0)
-        print(f"    m={m}: production {prod[m]:+.5e}  sigma=0.3 {r_hi[m]:+.5e}"
-              f"  sigma=0.15 {r_lo[m]:+.5e}  Richardson {ref[m]:+.5e}"
-              f"  rel {rel:.2%}  (sigma-drift {conv[m]:.1%})")
+        print(
+            f"    m={m}: production {prod[m]:+.5e}  sigma=0.3 {r_hi[m]:+.5e}"
+            f"  sigma=0.15 {r_lo[m]:+.5e}  Richardson {ref[m]:+.5e}"
+            f"  rel {rel:.2%}  (sigma-drift {conv[m]:.1%})"
+        )
     # NOTE on the tolerance.  Against the CONVERGED reduction-free reference
     # (n_phi = 0) the cubic m = 6 channel lands at ~0.9 % but m = 2 at ~7 %.
     # That is the (n = 0, m = 2) cubic modal coefficient, the one channel of the
@@ -1630,11 +1899,13 @@ def test_full_Cf_NONLINEAR_vs_unreduced_definition() -> None:
     for m in (2, 6):
         assert conv[m] < 0.10, (
             f"m={m}: reference not in the asymptotic regime "
-            f"(sigma drift {conv[m]:.1%}); Richardson is not valid")
+            f"(sigma drift {conv[m]:.1%}); Richardson is not valid"
+        )
         assert prod[m] * ref[m] > 0, f"m={m}: cubic SIGN flipped vs definition"
         assert abs(prod[m] / ref[m] - 1.0) < 0.15, (
             f"m={m}: assembled cubic disagrees with the reduction-free "
-            f"definition: production {prod[m]:.4e} vs {ref[m]:.4e}")
+            f"definition: production {prod[m]:.4e} vs {ref[m]:.4e}"
+        )
 
 
 def _gamma_even(fs, slowest=True):
@@ -1694,9 +1965,9 @@ def test_residual_closure_rate_bounds_the_band_it_replaces() -> None:
     percent-level amounts -- still fails.
     """
     fs = make_fs(
-        M_theta=16, Nr=2,
-        ee=dict(epsilon_bg=EPS_B, nonlinear=False,
-                n_xi=16, n_phi=256, n_xi_proj=8),
+        M_theta=16,
+        Nr=2,
+        ee=dict(epsilon_bg=EPS_B, nonlinear=False, n_xi=16, n_phi=256, n_xi_proj=8),
     )
     gam = _gamma_even(fs)
     ms = sorted(gam)
@@ -1708,7 +1979,8 @@ def test_residual_closure_rate_bounds_the_band_it_replaces() -> None:
     for lo, hi in zip(ms, ms[1:]):
         assert fast[hi] > fast[lo], (
             f"fastest radial channel not monotone over even m: "
-            f"gamma_{lo}={fast[lo]:.6e} >= gamma_{hi}={fast[hi]:.6e}")
+            f"gamma_{lo}={fast[lo]:.6e} >= gamma_{hi}={fast[hi]:.6e}"
+        )
 
     # The slow channel -- the one the closure reads -- may dip, but only by the
     # measured plateau amount.  A closure built at any m_top must not exceed
@@ -1716,17 +1988,19 @@ def test_residual_closure_rate_bounds_the_band_it_replaces() -> None:
     TOL = 0.005
     worst = 0.0
     for i, m_cut in enumerate(ms[:-1]):
-        for m in ms[i + 1:]:
+        for m in ms[i + 1 :]:
             over = gam[m_cut] / gam[m] - 1.0
             worst = max(worst, over)
             assert over < TOL, (
                 f"closure at m_top={m_cut} over-damps m={m} by "
                 f"{100 * over:.2f}% (gamma {gam[m_cut]:.6e} vs {gam[m]:.6e}), "
-                f"past the {100 * TOL:.1f}% plateau allowance")
+                f"past the {100 * TOL:.1f}% plateau allowance"
+            )
     assert worst > 0.0, (
         "the slow-channel spectrum is now strictly monotone; the plateau "
         "inversion this test documents is gone, so tighten it to a strict "
-        "monotonicity assert and drop the allowance")
+        "monotonicity assert and drop the allowance"
+    )
 
 
 def test_te_rescale_fallback_is_a_leading_form_not_an_identity() -> None:
@@ -1748,22 +2022,29 @@ def test_te_rescale_fallback_is_a_leading_form_not_an_identity() -> None:
     roundoff would mean the ensemble is not doing anything.
     """
     te_fac = 2.0
-    common = dict(epsilon_bg=EPS_B, nonlinear=False,
-                  n_xi=16, n_phi=256, n_xi_proj=8)
+    common = dict(epsilon_bg=EPS_B, nonlinear=False, n_xi=16, n_phi=256, n_xi_proj=8)
     from qimpy.transport.material import FermiSurface
 
     # exact: an operator built AT the elevated temperature
     ref = FermiSurface(
-        kF=KF, vF=KF / M_STAR, M_theta=4, Nr=2, T=T0 * te_fac,
-        process_grid=_cached_pg("rk", (-1, 1)), ee_scattering=dict(**common))
+        kF=KF,
+        vF=KF / M_STAR,
+        M_theta=4,
+        Nr=2,
+        T=T0 * te_fac,
+        process_grid=_cached_pg("rk", (-1, 1)),
+        ee_scattering=dict(**common),
+    )
     cold = make_fs(M_theta=4, Nr=2, ee=dict(**common))
     g_hot = _gamma_even(ref)[2]
     g_cold = _gamma_even(cold)[2]
-    ratio = (g_cold * te_fac ** 2) / g_hot
+    ratio = (g_cold * te_fac**2) / g_hot
     assert ratio > 1.0, (
         f"(T_e/T)^2 fallback is BELOW the operator built at T_e "
-        f"(ratio={ratio:.4f}): it would under-damp, not over-damp")
+        f"(ratio={ratio:.4f}): it would under-damp, not over-damp"
+    )
     assert ratio < 1.25, (
         f"(T_e/T)^2 fallback overshoots the exact rate by "
         f"{100 * (ratio - 1):.1f}%, well past the ~7% the NLO correction "
-        f"accounts for at T_e = 2T")
+        f"accounts for at T_e = 2T"
+    )
