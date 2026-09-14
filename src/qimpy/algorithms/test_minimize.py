@@ -66,7 +66,6 @@ class RandomFunction(Minimize[FieldR]):  # type: ignore
         # Preconditioner (inexact inverse):
         Kreg = 0.1 * (M_all[0] ** 2).sum() * torch.eye(n_dim, device=rc.device)
         self.K = torch.linalg.inv(Kreg + M_all[0].T @ M_all[0])[:, self.i0slice]
-        self.K *= grid.dV  # include integration weights in preconditioner
 
     def step(self, direction: FieldR, step_size: float) -> None:
         self.x += step_size * direction
@@ -77,13 +76,13 @@ class RandomFunction(Minimize[FieldR]):  # type: ignore
             self.x.data.requires_grad = True
             self.x.data.grad = None
 
-        E = torch.tensor(self.E0, device=rc.device)
+        E = 0.0
         for i_M, M in enumerate(self.M):
             v = M @ (self.x - self.x0).data.flatten()  # partial results, full array
             with torch.no_grad():
                 dist.all_reduce(v, group=self.group)
-            E += (v**2).sum() ** (i_M + 1) * grid.dV
-        state.energy["E"] = E
+            E += (v**2).sum() ** (i_M + 1)
+        state.energy["E"] = self.E0 + E.detach() * grid.dV
 
         if not energy_only:
             E.backward()
