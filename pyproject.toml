@@ -24,6 +24,7 @@ dependencies = [
     "h5py",
     "psutil",
     "svg.path",
+    "triangle",
     "opt-einsum",
 ]
 dynamic = ["version"]
