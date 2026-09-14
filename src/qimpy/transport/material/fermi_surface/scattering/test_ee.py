@@ -1006,29 +1006,52 @@ def test_nonlinear_packing_dense_vs_matrix_free() -> None:
 
 
 def test_a_dot_regression_baseline():
-    """The optimized (convolution-form) a_dot reproduces the pre-optimization
-    operator bit-for-bit (<= 1e-11).  Baseline saved by the regression harness
-    at _scratch_ee/baseline_adot.npz (keys '{M}_{Nr}_a', '{M}_{Nr}_out' built
-    with rates='exact', nonlinear=True, n_xi=16, n_phi=256, n_xi_proj=8);
-    skipped gracefully if the file is absent."""
+    """a_dot is frozen against a committed baseline (<= 1e-11).
+
+    ⛔ THIS TEST HAD NEVER RUN.  The baseline was looked up six directories
+    above this file, in a `_scratch_ee/` folder belonging to a different repo
+    layout -- a path that resolves outside the repo for everyone.  Missing, it
+    called `pytest.skip`, so it reported as SKIPPED and read green: a test in
+    the suite, guarding nothing, for as long as it has existed.  (Same class as
+    the standalone script whose module-level `sys.exit()` ended the whole
+    session with 0 tests and exit code 0.)  The baseline now sits next to this
+    file and is committed, so it runs everywhere.
+
+    ⛔ AND IT NO LONGER MEANS WHAT THE OLD DOCSTRING SAID.  It claimed the
+    optimized convolution-form a_dot reproduces the PRE-optimization operator.
+    That baseline is gone; regenerating it from today's code cannot resurrect
+    that comparison, and pretending otherwise would make the test a tautology
+    dressed as a cross-check.  What it is now: a forward-looking freeze.  The
+    numbers were produced by the current operator (rates='exact',
+    nonlinear=True, n_xi=16, n_phi=256, n_xi_proj=8) and any future change that
+    moves a_dot will fail here and has to be justified deliberately.
+
+    ⛔ THE BASELINE IS BUILT THROUGH `make_fs`, NOT A HAND-ROLLED
+    `FermiSurface(...)`.  The first regeneration used its own constructor call
+    with what looked like the same parameters and missed by 3.8e-03 -- two
+    spellings of "the same" operator are not the same operator, which is
+    precisely what this test is for.
+    ⛔ AND IT IS JSON, NOT .npz: `*.npz` is gitignored by the mesh purge, so a
+    binary baseline would silently not commit and the test would be back to
+    "file absent".  repr-precision floats round-trip exactly.
+    """
     import os
 
+    import json
+
     here = os.path.dirname(os.path.abspath(__file__))
-    # repo root is .../qimpy-collisions; the baseline lives under _scratch_ee
-    # (test is at src/qimpy/transport/material/fermi_surface/scattering -> 6 up):
-    root = os.path.abspath(
-        os.path.join(here, "..", "..", "..", "..", "..", "..")
-    )
-    npz = os.path.join(root, "_scratch_ee", "baseline_adot.npz")
-    if not os.path.exists(npz):
-        pytest.skip(f"regression baseline absent ({npz})")
-    data = np.load(npz)
+    path = os.path.join(here, "baseline_adot.json")
+    assert os.path.exists(path), (
+        f"regression baseline missing at {path}; it is committed next to this "
+        f"test -- do not turn this back into a skip")
+    with open(path) as fh:
+        data = json.load(fh)
     for (M, Nr) in ((4, 2), (6, 2)):
         key_a, key_o = f"{M}_{Nr}_a", f"{M}_{Nr}_out"
         if key_a not in data:
             continue
-        a = torch.as_tensor(data[key_a])
-        out_ref = torch.as_tensor(data[key_o])
+        a = torch.tensor(data[key_a], dtype=torch.float64)
+        out_ref = torch.tensor(data[key_o], dtype=torch.float64)
         fs = make_fs(
             M_theta=M, Nr=Nr,
             ee=dict(epsilon_bg=EPS_B, nonlinear=True,
@@ -1612,3 +1635,135 @@ def test_full_Cf_NONLINEAR_vs_unreduced_definition() -> None:
         assert abs(prod[m] / ref[m] - 1.0) < 0.15, (
             f"m={m}: assembled cubic disagrees with the reduction-free "
             f"definition: production {prod[m]:.4e} vs {ref[m]:.4e}")
+
+
+def _gamma_even(fs, slowest=True):
+    """Decay rate per EVEN harmonic, read the way the closure reads it.
+
+    `_gamma_res_ee` takes the slowest radial channel at the top even harmonic as
+    the smallest eigenvalue of the symmetric part of that harmonic's L block, so
+    the spectrum this test checks is built the same way and not by some other
+    convention that might agree by accident.
+    """
+    L = fs.ee_scattering.L_coeff.to(torch.float64).cpu()
+    out = {}
+    for m in range(2, fs.M_theta + 1, 2):
+        blk = L[2 * m - 1]
+        sym = 0.5 * (blk + blk.T)
+        ev = torch.linalg.eigvalsh(sym)
+        out[m] = float(ev.min() if slowest else ev.max())
+    return out
+
+
+def test_residual_closure_rate_bounds_the_band_it_replaces() -> None:
+    """The closure's ONE justification, measured rather than asserted.
+
+    `residual_damping` replaces the whole discarded band above M_theta with a
+    zeroth-order hold at gamma_{m_top}, and the docstring defends that with:
+    "gamma_m is monotone increasing over the EVEN harmonics, so this is a
+    strict LOWER bound on every discarded even rate and cannot over-damp".
+    Nothing tested it; the only coverage was an ablation showing
+    `residual_damping=False` is a no-op.
+
+    ⛔ MEASURED, THE GUARANTEE IS NOT EXACT -- AND IT FAILS IN EXACTLY THE
+    CHANNEL THE CLOSURE READS.  `_gamma_res_ee` takes the SLOWEST radial
+    channel (smallest eigenvalue of the symmetric part) at m_top.  On that
+    spectrum, at Nr = 2, gamma is NOT monotone:
+
+        m        2         4         6         8        10
+        min-eig  4.994e-07 6.917e-07 7.251e-07 7.238e-07 7.445e-07   <- dips
+
+    and the dip survives refinement -- gamma_8/gamma_6 = 0.9982, 0.9967,
+    0.9971 at (n_xi, n_phi, n_xi_proj) = (16, 256, 8), (24, 512, 12),
+    (32, 1024, 16) -- so it is not quadrature noise.  It is a near-degeneracy:
+    the spectrum plateaus between m = 6 and m = 8 (at Nr = 1 they differ by
+    0.01%, 7.2538e-07 vs 7.2548e-07), and the radial mixing at Nr >= 2 is
+    enough to invert the order.
+
+    What IS monotone, at every quadrature tried: the FASTEST radial channel
+    (largest eigenvalue), and the whole spectrum at Nr = 1 -- which is the
+    closed-form case the docstring's "verified out to m = 420" refers to.  So
+    the claim is true of the closed form and of the fast channel, and false of
+    the slow one.
+
+    Consequence: the closure can over-damp, by <= 0.3% and only inside the
+    m ~ 6-8 plateau.  That is small enough to keep the closure honest and far
+    too small to matter against the ~4x spread it stands in for, but it is not
+    the "cannot" the docstring claims.  This test pins the size of the
+    violation so a real regression -- a closure that starts over-damping by
+    percent-level amounts -- still fails.
+    """
+    fs = make_fs(
+        M_theta=16, Nr=2,
+        ee=dict(epsilon_bg=EPS_B, nonlinear=False,
+                n_xi=16, n_phi=256, n_xi_proj=8),
+    )
+    gam = _gamma_even(fs)
+    ms = sorted(gam)
+    assert all(g > 0 for g in gam.values()), f"non-positive even rate: {gam}"
+
+    # The fast channel must be strictly monotone -- that part of the claim is
+    # exact, and a failure here is a real change in the operator.
+    fast = _gamma_even(fs, slowest=False)
+    for lo, hi in zip(ms, ms[1:]):
+        assert fast[hi] > fast[lo], (
+            f"fastest radial channel not monotone over even m: "
+            f"gamma_{lo}={fast[lo]:.6e} >= gamma_{hi}={fast[hi]:.6e}")
+
+    # The slow channel -- the one the closure reads -- may dip, but only by the
+    # measured plateau amount.  A closure built at any m_top must not exceed
+    # the rates it replaces by more than that.
+    TOL = 0.005
+    worst = 0.0
+    for i, m_cut in enumerate(ms[:-1]):
+        for m in ms[i + 1:]:
+            over = gam[m_cut] / gam[m] - 1.0
+            worst = max(worst, over)
+            assert over < TOL, (
+                f"closure at m_top={m_cut} over-damps m={m} by "
+                f"{100 * over:.2f}% (gamma {gam[m_cut]:.6e} vs {gam[m]:.6e}), "
+                f"past the {100 * TOL:.1f}% plateau allowance")
+    assert worst > 0.0, (
+        "the slow-channel spectrum is now strictly monotone; the plateau "
+        "inversion this test documents is gone, so tighten it to a strict "
+        "monotonicity assert and drop the allowance")
+
+
+def test_te_rescale_fallback_is_a_leading_form_not_an_identity() -> None:
+    """The (T_e/T)^2 rescale, against the exact local-T_e ensemble.
+
+    Without a `local_te` ensemble every e-e rate -- including the residual
+    closure's -- is rescaled by the leading (T_e/T)^2.  The existing coverage
+    checks that against an internal expectation (a heated cell relaxing about
+    4x faster, asserted as 3.5 < ratio < 4.5), which cannot distinguish the
+    leading form from the truth.  The ensemble path IS the truth here:
+    test_local_te_ensemble_exact establishes it reproduces operators built at
+    the actual T_e, so comparing the fallback against it is a comparison
+    against the definition and not against the fallback's own formula.
+
+    The claimed sign and size (docstring of `_gamma_res`): the NLO correction
+    is linear in T_e/E_F with NEGATIVE coefficients, about -7% at T_e ~ 2T, so
+    the fallback should sit ABOVE the exact rate by a few percent.  A fallback
+    that came out below would silently under-damp; one that matched to
+    roundoff would mean the ensemble is not doing anything.
+    """
+    te_fac = 2.0
+    common = dict(epsilon_bg=EPS_B, nonlinear=False,
+                  n_xi=16, n_phi=256, n_xi_proj=8)
+    from qimpy.transport.material import FermiSurface
+
+    # exact: an operator built AT the elevated temperature
+    ref = FermiSurface(
+        kF=KF, vF=KF / M_STAR, M_theta=4, Nr=2, T=T0 * te_fac,
+        process_grid=_cached_pg("rk", (-1, 1)), ee_scattering=dict(**common))
+    cold = make_fs(M_theta=4, Nr=2, ee=dict(**common))
+    g_hot = _gamma_even(ref)[2]
+    g_cold = _gamma_even(cold)[2]
+    ratio = (g_cold * te_fac ** 2) / g_hot
+    assert ratio > 1.0, (
+        f"(T_e/T)^2 fallback is BELOW the operator built at T_e "
+        f"(ratio={ratio:.4f}): it would under-damp, not over-damp")
+    assert ratio < 1.25, (
+        f"(T_e/T)^2 fallback overshoots the exact rate by "
+        f"{100 * (ratio - 1):.1f}%, well past the ~7% the NLO correction "
+        f"accounts for at T_e = 2T")
