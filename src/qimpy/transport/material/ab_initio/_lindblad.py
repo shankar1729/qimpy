@@ -183,7 +183,7 @@ class Lindblad(TreeNode):
         )
         ntotP = 2 * (nk * n_bands_sq) ** 2
         nnzP = torch.count_nonzero(self.P)
-        dist.all_reduce(nnzP, ab_initio.group)
+        dist.all_reduce(nnzP, group=ab_initio.group)
         fill_percent_P = 100.0 * nnzP.item() / ntotP
         log.info(f"P tensor fill fraction: {fill_percent_P:.1f}%")
 
