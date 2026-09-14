@@ -15,12 +15,35 @@ it must not be mistaken for the thing that does.  That is `make test-validate`.
 """
 from __future__ import annotations
 
-import numpy as np
+import pytest
 import torch
 
 from qimpy import rc
 from qimpy.mpi import ProcessGrid
-from .. import FermiSurface
+
+
+@pytest.fixture(autouse=True)
+def _no_default_device_mode():
+    """⛔ WITHOUT THIS THE WHOLE MODULE FAILS ON A GPU NODE, AND PASSES ON CPU.
+
+    qimpy's conftest installs `torch.set_default_device(rc.device)`, whose
+    TorchFunctionMode wrapper breaks the e-e kernels' numpy interop and injects
+    a `device=` kwarg into `torch.vander`, which does not take one.  test_ee.py
+    carries the same fixture for the same reason; this file needs it because it
+    builds the same operator.  Measured: without it, all three tests here fail
+    on GPU with "can't convert cuda:0 device type tensor to numpy" while
+    passing CPU-only -- which is exactly how a test that only ever ran on a
+    laptop would look green and mean nothing on the machine that matters.
+    """
+    try:
+        prev = torch.get_default_device()
+    except (AttributeError, RuntimeError):
+        prev = None
+    torch.set_default_device(None)
+    yield
+    if prev is not None:
+        torch.set_default_device(prev)
+
 
 KF = 7.5e-3
 M_STAR = 0.067
@@ -35,6 +58,8 @@ SMALL = dict(epsilon_bg=EPS_B, nonlinear=True, n_xi=8, n_phi=64, n_xi_proj=6)
 
 
 def _fs(**kw):
+    from qimpy.transport.material import FermiSurface
+
     return FermiSurface(
         kF=KF, vF=KF / M_STAR, M_theta=3, Nr=1, T=T0,
         tau_p=float("inf"), process_grid=ProcessGrid("rk", (1, 1)), **kw)
