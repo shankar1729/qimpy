@@ -1,11 +1,12 @@
-from typing import Sequence
+from typing import Optional, Sequence, Union
 
-from qimpy import log, TreeNode
+from qimpy import rc, log, TreeNode
+from qimpy.rc import MPI
 from qimpy.io import CheckpointPath, Checkpoint, CheckpointContext
 from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
-from .geometry import Geometry, PatchSet, ParameterGrid
-from .material import Material, FermiCircle
+from .geometry import Geometry, FiniteVolume
+from .material import Material, FermiSurface
 from .material.ab_initio import AbInitio
 from .material.single_band import SingleBand
 from . import TimeEvolution
@@ -19,15 +20,14 @@ class Transport(TreeNode):
     def __init__(
         self,
         *,
-        ab_initio: AbInitio | dict | None = None,
-        fermi_circle: FermiCircle | dict | None = None,
-        single_band: SingleBand | dict | None = None,
-        patch_set: PatchSet | dict | None = None,
-        parameter_grid: ParameterGrid | dict | None = None,
-        time_evolution: TimeEvolution | dict | None = None,
-        checkpoint: str | None = None,
-        checkpoint_out: str | None = None,
-        process_grid_shape: Sequence[int] | None = None,
+        ab_initio: Optional[Union[AbInitio, dict]] = None,
+        fermi_surface: Optional[Union[FermiSurface, dict]] = None,
+        single_band: Optional[Union[SingleBand, dict]] = None,
+        spatial_transport: Optional[Union[FiniteVolume, dict]] = None,
+        time_evolution: Optional[Union[TimeEvolution, dict]] = None,
+        checkpoint: Optional[str] = None,
+        checkpoint_out: Optional[str] = None,
+        process_grid_shape: Optional[Sequence[int]] = None,
     ):
         """Compose a System to calculate from its pieces. Each piece
         could be provided as an object or a dictionary of parameters
@@ -38,17 +38,16 @@ class Transport(TreeNode):
         ab_initio
             :yaml:`Ab-initio material.`
             Exactly one supported material type must be specified.
-        fermi_circle
-            :yaml:`Fermi-circle material for graphene/2DEG.`
+        fermi_surface
+            :yaml:`Unified Fermi-surface (delta-k storage with modal transforms).`
+            Set Nr=1 to recover the Fermi-circle limit.
             Exactly one supported material type must be specified.
         single_band
             :yaml:`Single-band model material for energy-resolved charge transport.`
             Exactly one supported material type must be specified.
-        patch_set
-            :yaml:`Geometry consisting of bicubic patches.`
-            Exactly one supported geometry type must be specified.
-        parameter_grid
-            :yaml:`Virtual geometry of disconnected points for batched dynamics.`
+        spatial_transport
+            :yaml:`Cell-centered finite-volume spatial transport on an external
+            mesh (triangles in 2D, line segments in 1D).`
             Exactly one supported geometry type must be specified.
         time_evolution
             :yaml:`Time integration options.`
@@ -64,7 +63,9 @@ class Transport(TreeNode):
             auto-determined based on number of tasks available to split along them.
             Default: all process grid dimensions are auto-determined."""
         super().__init__()
-        self.process_grid = ProcessGrid("rk", process_grid_shape)
+        self.process_grid = ProcessGrid(
+            "rk", process_grid_shape
+        )
         self.process_grid.provide_n_tasks("k", 1)  # prefer r-split if unspecified
         # Set in and out checkpoints:
         checkpoint_in = CheckpointPath()
@@ -82,9 +83,9 @@ class Transport(TreeNode):
                 "ab-initio", AbInitio, ab_initio, process_grid=self.process_grid
             ),
             TreeNode.ChildOptions(
-                "fermi-circle",
-                FermiCircle,
-                fermi_circle,
+                "fermi-surface",
+                FermiSurface,
+                fermi_surface,
                 process_grid=self.process_grid,
             ),
             TreeNode.ChildOptions(
@@ -96,16 +97,9 @@ class Transport(TreeNode):
             "geometry",
             checkpoint_in,
             TreeNode.ChildOptions(
-                "patch_set",
-                PatchSet,
-                patch_set,
-                material=self.material,
-                process_grid=self.process_grid,
-            ),
-            TreeNode.ChildOptions(
-                "parameter_grid",
-                ParameterGrid,
-                parameter_grid,
+                "spatial_transport",
+                FiniteVolume,
+                spatial_transport,
                 material=self.material,
                 process_grid=self.process_grid,
             ),

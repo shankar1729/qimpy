@@ -1,0 +1,43 @@
+# rect-domain with microscopic e-e collisions (2D Fermi liquid), driven by
+# source/drain contacts on the finite-volume triangle mesh.  Generate the mesh
+# first with:
+#     python make_rect_mesh.py --out rect-domain-tri.npz
+#
+# Model units chosen so the e-e mean free path is comparable to the device
+# (hydrodynamic onset): E_F = kF vF / 2 = 0.75, T/E_F = 0.16.
+#
+# For a physical GaAs/AlGaAs 2DEG in atomic units (30 nm QW, n = 3.2e15 m^-2,
+# 4.2 K -- the structure of the growth notes) use instead:
+#   kF: 7.5e-3, vF: 0.11194 (m* = 0.067), T: 1.33e-5,
+#   ee_scattering: {epsilon_bg: 12.9, well_width: 567.0}   # 30 nm = 567 a.u.
+# and a mesh with coordinates in a.u. (1 um = 1.89e4 a.u.).
+fermi_surface:
+  kF: 1.0
+  vF: 1.5
+  M_theta: 16
+  Nr: 1
+  T: 0.12
+  tau_p: .inf       # no impurity/phonon channel; e-e only
+  specularity: 1.0  # specular walls: momentum-conserving boundaries
+  ee_scattering:
+    epsilon_bg: 0.25  # screened-interaction strength (kappa = 2 m*/eps_b);
+                      # tau_ee and mean free path l_ee are logged at init
+    nonlinear: true   # exact cubic + quadratic vertices
+    # on_shell: false # (default) exact thermal-shell rates; true = closed form (Nr=1)
+    # tol: 1.0e-3     # (default) single accuracy dial; quadrature auto-derived
+
+spatial_transport:
+  mesh_file: rect-domain-tri.npz
+  compile: true
+  contacts:
+    source:
+      dmu: +0.1
+    drain:
+      dmu: -0.1
+
+time_evolution:
+  t_max: 1000.0
+  dt_save: 5.0
+  n_collate: 32
+
+checkpoint_out: animation/ee_{:04d}.h5

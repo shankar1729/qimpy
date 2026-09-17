@@ -86,7 +86,9 @@ class Scatter(TreeNode):
         iq, q_index = iq_pair.flatten(0, 1).unique(dim=0, return_inverse=True)
         q = iq / kmesh
         q -= torch.round(q)  # wrap to [-0.5, 0.5) in each dimension
-        q_mag = (q @ single_band.lattice.Gbasis.T).norm(dim=-1)
+        # Gbasis is fp64 regardless of the working dtype; match it to q so the
+        # scatter matrices stay in the working precision (no-op in fp64).
+        q_mag = (q @ single_band.lattice.Gbasis.T.to(q.dtype)).norm(dim=-1)
         n_q = len(q_mag)
         log.info(f"Found {n_q} unique momentum transfers")
 
