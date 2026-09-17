@@ -715,6 +715,11 @@ class Cartesian(KRepresentation):
         return _CartesianContactor(self, n, **kwargs)
 
     def get_reflector(self, n: torch.Tensor) -> Callable:
+        if os.environ.get("QIMPY_REFL_FFT", "0") == "1":
+            # FFT unitary involution: exact at any wall angle once the grid
+            # resolves the Fermi step (dk <= T/3v_F, odd n_k); see _cartesian_fft
+            from ._cartesian_fft import _CartesianFFTReflector
+            return _CartesianFFTReflector(self, n, self.fs.specularity)
         return _CartesianReflector(self, n, self.fs.specularity)
 
 
