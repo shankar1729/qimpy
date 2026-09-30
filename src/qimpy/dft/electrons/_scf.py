@@ -187,6 +187,7 @@ class SCF(Pulay[FieldH]):
             electrons.update_potential(self.system)
         else:
             electrons.n_tilde.grad = v
+            electrons.update_D_aug(self.system.ions)
 
     def precondition(self, v: FieldH) -> FieldH:
         result = v.convolve(self.K_kerker)

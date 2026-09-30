@@ -22,7 +22,7 @@ def _hamiltonian(self: dft.electrons.Electrons, C: Wavefunction) -> Wavefunction
     beta_C = C.proj
     beta = ions.beta_full if C.band_division else ions.beta
     assert beta is not None
-    HC += beta @ (ions.D_all @ beta_C)
+    HC += beta @ ((ions.D_all + ions.D_aug) @ beta_C)  # D_aug = 0 unless ultrasoft
 
     # DFT+U:
     if self.xc.plus_U:
