@@ -207,6 +207,11 @@ class _LocalTerms:
             )
             # Propagate to lattice gradient:
             ions.lattice.grad += radial_grad ^ self.stress_kernel
+            # Partial-core density keeps its 1/volume normalization (from SF) under
+            # strain, unlike the electron density at fixed wavefunctions. (For
+            # Vloc and rho, the same factor cancels the volume of the integral.)
+            n_core_volume_term = (ions.n_core_tilde.grad ^ ions.n_core_tilde).sum()
+            ions.lattice.grad -= n_core_volume_term * torch.eye(3, device=rc.device)
 
     def get_structure_factor(self) -> torch.Tensor:
         """Compute structure factor."""
