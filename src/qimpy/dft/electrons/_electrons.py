@@ -524,14 +524,25 @@ class Electrons(TreeNode):
             )
 
         # Nonlocal:
-        if system.ions.beta.requires_grad:
+        ions = system.ions
+        if ions.beta.requires_grad:
             beta_C = C.proj
-            beta_C_grad = (system.ions.D_all @ beta_C) * wf[:, :, None]
+            beta_C_grad = ((ions.D_all + ions.D_aug) @ beta_C) * wf[:, :, None]
+            if ions.q_all is not None:
+                # Overlap: the constraint C^ O C = 1 contributes -eig q (the
+                # Hellmann-Feynman theorem of the generalized eigenproblem):
+                eig = self.eig[..., : self.fillings.n_bands]
+                beta_C_grad -= (ions.q_all @ beta_C) * (wf * eig)[:, :, None]
             if self.n_spinor == 2:
                 beta_C_grad = (
                     beta_C_grad.unflatten(2, (-1, 2)).swapaxes(-2, -1).flatten(-2, -1)
                 )
             system.ions.beta.grad = C.non_spinor @ beta_C_grad.transpose(-2, -1).conj()
+
+        # Ultrasoft augmentation charges, which move with the ions and lattice:
+        if ions.augmentation is not None:
+            rho_beta = ions.augmentation.density_matrix(C.proj, wf, self.kpoints.group)
+            ions.augmentation.accumulate_geometry_grad(self.n_tilde.grad, rho_beta)
 
     def run(self, system: dft.System, suffix: str = "") -> None:
         """Run any actions specified in the input."""

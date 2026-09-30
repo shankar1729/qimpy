@@ -29,7 +29,8 @@ class Augmentation:
     -> radial parts at \|G\| (interpolate) -> n_aug(G) (harmonics and phases).
     Radial functions are combined before interpolating, so that each G evaluates
     one spline per (atom, LM) instead of one per (i, j, L). `D_aug` applies the
-    transposed chain to a potential.
+    transposed chain to a potential, and `accumulate_geometry_grad` differentiates
+    the last two maps with respect to atom positions and strain.
 
     Projections use the phase convention of `Ions.get_projectors`, i^l instead of
     the (-i)^l of the Fourier transform, i.e. an extra (-1)^l per projector.
@@ -180,6 +181,69 @@ class Augmentation:
             )
             block.diagonal(dim1=1, dim2=3).copy_(D.permute(0, 2, 3, 1))
         return D_aug
+
+    @stopwatch(name="Augmentation.geometry_grad")
+    def accumulate_geometry_grad(self, V: FieldH, rho_beta: list[torch.Tensor]) -> None:
+        """Accumulate force and stress contributions of the augmentation charges
+        moving with the ions and the lattice, at fixed `rho_beta`, in the potential
+        V (see `D_aug`). Changes of rho_beta itself (through the projectors) are
+        accounted for by `Ions.beta.grad`. As in `Ions.accumulate_geometry_grad`,
+        each is collected only if the corresponding `requires_grad` is enabled."""
+        ions = self.ions
+        lattice = self.grid.lattice
+        need_forces = ions.positions.requires_grad
+        need_stress = lattice.requires_grad
+        if not (need_forces or need_stress):
+            return
+        n_spins = V.data.shape[0]
+        V_weighted = V.data.conj() * self.grid.weight2H
+        pos_grad = torch.zeros_like(ions.positions)
+        lattice_grad = torch.zeros((3, 3), device=rc.device)
+        if need_stress:
+            # Derivatives of radial parts and harmonics with respect to G:
+            Gmag = self.G.norm(dim=-1)
+            Ginterp_prime = Interpolator(Gmag, RadialFunction.DG, deriv=1)
+            Ghat = self.G * torch.where(Gmag == 0.0, 0.0, 1.0 / Gmag)[..., None]
+            Y_prime = sh.get_harmonics_and_prime(self.L_max, self.G)[1]
+            Y_prime = self._signed(Y_prime[:, self.LM_order]) * self.in_sphere
+
+        for species, rho in zip(self.species, rho_beta):
+            coeff = self._radial_coefficients(species, rho)
+            for atoms in self._atom_chunks(
+                species, n_spins * (4 if need_stress else 1)
+            ):
+                radial = self.Ginterp(coeff[:, :, atoms])  # d, atom, LM, grid
+                U = V_weighted[:, None] * self._phase(species, atoms)  # d, atom, grid
+                # E = sum Re(U T), with d(phase)/d(position) = -2 pi i iG phase:
+                UT = U * self._combine(radial, self.Y)
+                if need_forces:
+                    atom_start = species.atom_slice.start
+                    pos_grad[atom_start + atoms.start : atom_start + atoms.stop] += (
+                        2 * np.pi
+                    ) * torch.einsum("da..., ...k -> ak", UT.imag, self.iG)
+                if need_stress:
+                    # Volume factor 1/Omega of the density at fixed rho_beta
+                    # (unlike the wavefunction density in QimPy's convention):
+                    lattice_grad -= torch.eye(3, device=rc.device) * UT.real.sum()
+                    # Strain changes G -> (1 - strain) G at fixed phases, giving
+                    # d(f(|G|) Y(G))/d(strain_ij) = -G_j d(f Y)/dG_i:
+                    radial_prime = Ginterp_prime(coeff[:, :, atoms])
+                    T_prime_radial = self._combine(radial_prime, self.Y)
+                    for i_dir in range(3):
+                        dT_dG = T_prime_radial * Ghat[..., i_dir] + self._combine(
+                            radial, Y_prime[i_dir]
+                        )
+                        lattice_grad[i_dir] -= torch.einsum(
+                            "da..., ...j -> j", (U * dT_dG).real, self.G
+                        )
+        if self.grid.group is not None:
+            dist.all_reduce(pos_grad, group=self.grid.group)
+            dist.all_reduce(lattice_grad, group=self.grid.group)
+        if need_forces:
+            assert ions.positions.grad is not None
+            ions.positions.grad += pos_grad
+        if need_stress:
+            lattice.grad += lattice_grad
 
     def _radial_coefficients(
         self, species: _Species, rho: torch.Tensor
