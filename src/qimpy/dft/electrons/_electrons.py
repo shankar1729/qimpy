@@ -248,9 +248,26 @@ class Electrons(TreeNode):
             have_default=True,
         )
         log.info("\nDiagonalization: " + repr(self.diagonalize))
+        if any(ps.is_ultrasoft for ps in ions.pseudopotentials):
+            self._check_ultrasoft_support()
 
         # Initialize SCF:
         self.add_child("scf", SCF, scf, checkpoint_in, group=self.group)
+
+    def _check_ultrasoft_support(self) -> None:
+        """Raise an error for features not yet combined with ultrasoft
+        pseudopotentials (each needs its own augmentation terms)."""
+        unsupported = {
+            "spinorial calculations": self.spinorial,
+            "CheFSI (its filter needs the inverse overlap)": isinstance(
+                self.diagonalize, CheFSI
+            ),
+            "DFT+U": bool(self.xc.plus_U),
+            "meta-GGA functionals": self.xc.need_tau,
+        }
+        if any(unsupported.values()):
+            names = ", ".join(name for name, flag in unsupported.items() if flag)
+            raise NotImplementedError(f"Ultrasoft pseudopotentials with {names}")
 
     def initialize_wavefunctions(self, system: dft.System) -> None:
         """Initialize wavefunctions to LCAO / random (if not from checkpoint).

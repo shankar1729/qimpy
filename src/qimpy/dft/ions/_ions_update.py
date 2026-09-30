@@ -35,6 +35,7 @@ def update(self: ions.Ions, system: dft.System) -> None:
             ),
         )
         self.D_all = torch.empty((0, 0), dtype=torch.complex128, device=rc.device)
+        self.q_all = None
         if system.electrons.need_full_projectors:
             n_basis_tot = system.electrons.basis.n_tot
             self.beta_full = dft.electrons.Wavefunction(
@@ -239,18 +240,25 @@ class _LocalTerms:
 
 def collect_ps_matrix(self: ions.Ions, n_spinor: int) -> None:
     """Collect pseudopotential matrices across species and atoms.
-    Initializes `D_all`."""
+    Initializes `D_all`, and `q_all` if any pseudopotential is ultrasoft."""
     n_proj = self.n_projectors * n_spinor
     self.D_all = torch.zeros((n_proj, n_proj), device=rc.device, dtype=torch.complex128)
+    ultrasoft = any((ps.q is not None) for ps in self.pseudopotentials)
+    self.q_all = torch.zeros_like(self.D_all) if ultrasoft else None
     i_proj_start = 0
     for i_ps, ps in enumerate(self.pseudopotentials):
         D_nlms = ps.pqn_beta.expand_matrix(ps.D, n_spinor)
+        # q_ij expands exactly like D_ij: only the L = 0 part of Q_ij survives
+        # the integral over angles, which is diagonal in (l, m):
+        q_nlms = None if (ps.q is None) else ps.pqn_beta.expand_matrix(ps.q, n_spinor)
         n_proj_atom = D_nlms.shape[0]
         # Set diagonal block for each atom:
         for i_atom in range(self.n_ions_type[i_ps]):
             i_proj_stop = i_proj_start + n_proj_atom
             slice_cur = slice(i_proj_start, i_proj_stop)
             self.D_all[slice_cur, slice_cur] = D_nlms
+            if (self.q_all is not None) and (q_nlms is not None):
+                self.q_all[slice_cur, slice_cur] = q_nlms
             i_proj_start = i_proj_stop
 
 

@@ -7,7 +7,7 @@ import torch.distributed as dist
 
 from qimpy.profiler import stopwatch
 from qimpy.mpi import Waitable, Waitless, globalreduce
-from qimpy.math import abs_squared, ortho_matrix
+from qimpy.math import abs_squared, ortho_matrix, dagger
 from qimpy.dft import electrons
 
 
@@ -134,9 +134,24 @@ def _dot_O(
         Dimensions: n_spins x nk_mine x n_bands(self) x n_bands(other)
     """
     result = _dot(self, other)
-    # Overlap augmentation:
-    # TODO: augment overlap here when adding ultrasoft / PAW
-    return result
+    q_all = self.basis.ions.q_all
+    if q_all is None:
+        return result  # norm-conserving: O = 1
+    # Ultrasoft: C1^ O C2 = C1^ C2 + (beta^ C1)^ q (beta^ C2), from the cached
+    # projections of both. (They are reduced over basis already, so the extra
+    # term is added only after the pending reduction of the plane-wave part.)
+    return _AddAfterWait(result, dagger(self.proj) @ (q_all @ other.proj))
+
+
+@dataclass
+class _AddAfterWait:
+    """Waitable sum of a pending dot-product result and a local extra term."""
+
+    pending: Waitable[torch.Tensor]
+    extra: torch.Tensor
+
+    def wait(self) -> torch.Tensor:
+        return self.pending.wait() + self.extra
 
 
 def _overlap(self: electrons.Wavefunction) -> electrons.Wavefunction:
@@ -144,7 +159,14 @@ def _overlap(self: electrons.Wavefunction) -> electrons.Wavefunction:
     This is identity and returns a view of the original wavefunction
     for norm-conserving pseudopotentials, but includes augmentation terms
     for ultrasoft and PAW pseudopotentials"""
-    return self  # TODO: augment overlap here when adding ultrasoft / PAW
+    ions = self.basis.ions
+    if ions.q_all is None:
+        return self  # norm-conserving: O = 1
+    # Ultrasoft: O C = C + beta q beta^ C, which has the form of the nonlocal
+    # term of the Hamiltonian and likewise reuses the cached projections:
+    beta = ions.beta_full if self.band_division else ions.beta
+    assert beta is not None
+    return self + beta @ (ions.q_all @ self.proj)
 
 
 @stopwatch(name="Wavefunction.matmul")

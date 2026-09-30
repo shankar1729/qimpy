@@ -42,6 +42,7 @@ class Ions(TreeNode):
     beta_full: dft.electrons.Wavefunction | None  #: full-basis version of `beta`
     beta_version: int  #: version of `beta` to invalidate cached projections
     D_all: torch.Tensor  #: nonlocal pseudopotential matrix (all atoms)
+    q_all: torch.Tensor | None  #: ultrasoft overlap matrix, like `D_all` (None if NC)
     dEtot_drho_basis: float  #: dE/d(basis function density) for Pulay correction
 
     _get_projectors = _ions_projectors.get_projectors
