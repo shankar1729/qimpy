@@ -9,6 +9,7 @@ from qimpy.grid import FieldH
 from qimpy.dft import ions
 from qimpy.math import RadialFunction
 from qimpy.math.quintic_spline import Interpolator
+from ._augmentation import Augmentation
 
 
 def update(self: ions.Ions, system: dft.System) -> None:
@@ -36,6 +37,8 @@ def update(self: ions.Ions, system: dft.System) -> None:
         )
         self.D_all = torch.empty((0, 0), dtype=torch.complex128, device=rc.device)
         self.q_all = None
+        self.D_aug = torch.zeros((), dtype=torch.complex128, device=rc.device)
+        self.augmentation = None
         if system.electrons.need_full_projectors:
             n_basis_tot = system.electrons.basis.n_tot
             self.beta_full = dft.electrons.Wavefunction(
@@ -55,6 +58,14 @@ def update(self: ions.Ions, system: dft.System) -> None:
 
     # Update pseudopotential matrix and projectors:
     self._collect_ps_matrix(system.electrons.n_spinor)
+    # Ultrasoft augmentation (None if norm-conserving). Its part of the nonlocal
+    # matrix, D_aug, follows the potential (see Electrons.update_D_aug), and it
+    # stays zero for norm-conserving pseudopotentials, so that D_all + D_aug
+    # needs no special case:
+    self.augmentation = (
+        None if (self.q_all is None) else Augmentation(self, system.grid)
+    )
+    self.D_aug = torch.zeros((), dtype=torch.complex128, device=rc.device)
     if system.electrons.need_full_projectors:
         beta_full = self._get_projectors(system.electrons.basis, full_basis=True)
         self.beta_full = beta_full
