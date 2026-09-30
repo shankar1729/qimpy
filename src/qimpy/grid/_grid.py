@@ -203,7 +203,6 @@ class Grid(TreeNode):
         mesh1D = self._mesh1D_mine[space] if mine else self._mesh1D[space]
         return torch.stack(torch.meshgrid(*mesh1D, indexing="ij")).permute(1, 2, 3, 0)
 
-    @cache
     def get_gradient_operator(self, space: str, zero_nyquist: bool) -> torch.Tensor:
         """Get gradient operator in reciprocal space.
 
@@ -222,11 +221,19 @@ class Grid(TreeNode):
             Tensor with dimensions (3,) + shape_mine, where
             shape_mine is the relevant local dimensions of requested space
         """
+        # Only the integer mesh is cached: the lattice may change (e.g. in a
+        # variable-cell relaxation), so apply the current Gbasis on each call.
+        iG = self._get_gradient_mesh(space, zero_nyquist)
+        return 1j * torch.tensordot(self.lattice.Gbasis, iG, dims=1)
+
+    @cache
+    def _get_gradient_mesh(self, space: str, zero_nyquist: bool) -> torch.Tensor:
+        """Integer mesh (3,) + shape_mine used by `get_gradient_operator`."""
         mesh1D = self._mesh1D_mine[space]
         iG = torch.stack(torch.meshgrid(*mesh1D, indexing="ij")).to(torch.double)
         if zero_nyquist:
             self.zero_nyquist(iG, space)
-        return 1j * torch.tensordot(self.lattice.Gbasis, iG, dims=1)
+        return iG
 
     @cache
     def get_nyquist_indices(self, space: str) -> list[tuple(int, int)]:
