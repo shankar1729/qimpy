@@ -5,16 +5,17 @@ import numpy as np
 import torch
 import torch.distributed as dist
 
-from qimpy import log
+from qimpy import log, rc
 from qimpy.math import RadialFunction
 from qimpy.dft.ions import PseudoQuantumNumbers
 from qimpy.dft.ions._read_upf import read_upf
+from qimpy.dft.ions._read_uspp import read_uspp
 
 
 class Pseudopotential:
     """Specification of electron-ion interactions. Contains
     for local potential, nonlocal projectors and atomic orbitals.
-    Currently supports norm-conserving pseudopotentials."""
+    Supports norm-conserving and ultrasoft pseudopotentials."""
 
     element: str  #: Chemical symbol of element
     atomic_number: int  #: Atomic number of element
@@ -35,6 +36,9 @@ class Pseudopotential:
     j_psi: torch.Tensor | None  #: l+s of atomic orbitals (if relativistic)
     eig_psi: np.ndarray  #: Energy eigenvalue of each atomic orbital
     D: torch.Tensor  #: Descreened nonlocal pseudopotential matrix
+    q: torch.Tensor | None  #: Ultrasoft overlap coefficients (like `D`; None if NC)
+    Q: RadialFunction | None  #: Ultrasoft augmentation functions, with Q.l = L
+    Q_pair: torch.Tensor | None  #: Radial projectors (i <= j) of each `Q` (n_Q x 2)
 
     Gmax: float  #: Current reciprocal space extent of radial functions
     pqn_beta: PseudoQuantumNumbers  #: quantum numbers for projectors
@@ -47,11 +51,17 @@ class Pseudopotential:
         Parameters
         ----------
         filename : str
-            File to read pseudopotential from.
-            Currently, only norm-conserving UPF files are supported.
+            File to read pseudopotential from: UPF (norm-conserving or ultrasoft)
+            or Vanderbilt '.uspp' (ultrasoft, e.g. the GBRV library).
         """
-        assert filename[-4:].lower() == ".upf"
-        read_upf(self, filename)
+        self.q = self.Q = self.Q_pair = None  # set by readers only if ultrasoft
+        suffix = pathlib.Path(filename).suffix.lower()
+        if suffix == ".upf":
+            read_upf(self, filename)
+        elif suffix == ".uspp":
+            read_uspp(self, filename)
+        else:
+            raise ValueError(f"Unknown pseudopotential format '{suffix}' in {filename}")
         self.Gmax = 0.0  # reciprocal space versions not yet initialized
         self.pqn_beta = PseudoQuantumNumbers(self.beta.l, self.j_beta)
         self.pqn_psi = PseudoQuantumNumbers(self.psi.l, self.j_psi)
@@ -82,8 +92,86 @@ class Pseudopotential:
             transform_list = [self.rho_atom, self.Vloc, self.beta, self.psi]
             if hasattr(self, "n_core"):
                 transform_list.append(self.n_core)
+            if self.Q is not None:
+                transform_list.append(self.Q)  # same radial grid: same batch
             RadialFunction.transform(transform_list, Gmax, group, self.element)
             self.Gmax = Gmax
+
+    def set_augmentation(
+        self,
+        r2_Q: np.ndarray,
+        q_file: np.ndarray,
+        r_inner: np.ndarray | None = None,
+        Q_taylor: np.ndarray | None = None,
+    ) -> None:
+        """Set ultrasoft augmentation from data parsed in any file format.
+        The readers only parse, and this does the processing common to formats:
+        inner pseudization, dropping zero functions, and the overlap coefficients.
+
+        Parameters
+        ----------
+        r2_Q
+            :math:`r^2 Q_{ij}(r)` on the radial grid for each pair of radial
+            projectors (symmetric in i, j): shape (n_beta, n_beta, n_r) if one
+            function serves all L ('.uspp', and UPF with q_with_l false), or
+            (n_beta, n_beta, n_L, n_r) with one function per L (UPF q_with_l true).
+        q_file
+            Overlap coefficients :math:`q_{ij}` stored in the file (n_beta^2).
+            Only reported: `q` is instead integrated from the pseudized
+            :math:`Q^0_{ij}`, so that the augmentation charge exactly equals
+            :math:`\\sum_{ij}\\rho_{ij} q_{ij}` (as in JDFTx).
+        r_inner, Q_taylor
+            Optional inner pseudization: for r < r_inner[L], replace
+            :math:`Q^L_{ij}(r)` by the series :math:`\\sum_k c_k r^{L+2k}`, with
+            :math:`c_k` = Q_taylor[i, j, L, k] (shapes (n_L,), (n_beta, n_beta, n_L,
+            n_qf)). This is the Vanderbilt 'qfcoef' / 'rinner' scheme.
+        """
+        r = self.r.to(rc.cpu).numpy()
+        l_beta = self.beta.l.tolist()
+        n_beta = len(l_beta)
+        # Integration weights for q = int r^2 Q dr: the same Simpson rule as the
+        # G = 0 limit of RadialFunction.transform, so that q matches the
+        # augmentation charge on the grid to machine precision:
+        w = (2.0 / 3) * (r**2) * self.dr.to(rc.cpu).numpy()
+        w[1::2] *= 2.0
+        w[[0, -1]] *= 0.5
+
+        # Collect the distinct nonzero Q^L_ij(r) for i <= j (few, only at read):
+        Q_f: list[np.ndarray] = []  # Q^L_ij(r) / r^L (RadialFunction convention)
+        Q_l: list[int] = []  # L of each function
+        Q_pair: list[tuple[int, int]] = []  # (i, j) of each function
+        q = np.zeros((n_beta, n_beta))
+        for i in range(n_beta):
+            for j in range(i, n_beta):
+                l_i, l_j = l_beta[i], l_beta[j]
+                for L in range(abs(l_i - l_j), l_i + l_j + 1, 2):  # Gaunt selection
+                    Q = (r2_Q[i, j] if (r2_Q.ndim == 3) else r2_Q[i, j, L]) / r**2
+                    if Q_taylor is not None:
+                        assert r_inner is not None
+                        inner = r < r_inner[L]
+                        powers = L + 2 * np.arange(Q_taylor.shape[-1])
+                        Q[inner] = (r[inner, None] ** powers) @ Q_taylor[i, j, L]
+                    if not np.any(Q):
+                        continue  # nothing to augment (e.g. NC in ultrasoft format)
+                    Q_f.append(Q / r**L)
+                    Q_l.append(L)
+                    Q_pair.append((i, j))
+                    if L == 0:  # only possible for l_i = l_j
+                        q[i, j] = q[j, i] = Q @ w
+
+        if not Q_f:
+            log.info("  No augmentation functions: treated as norm-conserving.")
+            self.is_ultrasoft = False
+            self.q = self.Q = self.Q_pair = None
+            return
+        self.is_ultrasoft = True
+        self.q = torch.tensor(q, device=rc.device)
+        self.Q = RadialFunction(self.r, self.dr, np.array(Q_f), np.array(Q_l))
+        self.Q_pair = torch.tensor(Q_pair, device=rc.device)
+        log.info(
+            f"  Ultrasoft: {len(Q_f)} augmentation functions Q^L_ij(r) up to"
+            f" L = {max(Q_l)}; max |q_ij - q_file| = {np.abs(q - q_file).max():.1e}"
+        )
 
     @property
     def n_projectors(self) -> int:
