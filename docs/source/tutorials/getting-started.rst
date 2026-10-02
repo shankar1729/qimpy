@@ -41,7 +41,8 @@ and SLURM_CPUS_PER_TASK, which QimPy will use to select the appropriate GPU and 
 Pseudopotentials
 ----------------
 
-QimPy currently supports norm-conserving UPF pseudopotentials,
+QimPy currently supports norm-conserving and ultrasoft pseudopotentials
+(UPF files, and the ``.uspp`` files of the GBRV library),
 but does not distribute any pseudopotentials with the code.
 You can refer to pseudopotentials with relative or absolute paths
 in each calculation, but this can be cumbersome.

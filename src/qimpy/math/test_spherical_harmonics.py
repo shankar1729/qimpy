@@ -110,6 +110,24 @@ def test_ylm_prime(r_ylm: tuple[torch.Tensor, torch.Tensor]) -> None:
     assert np.all(err_avg < 1e-8)
 
 
+@pytest.mark.mpi_skip
+def test_product_coefficients() -> None:
+    """Dense real Gaunt table reproduces products of harmonics on the unit sphere."""
+    l_max = sh.L_MAX_HLF
+    c = sh.get_product_coefficients(l_max)
+    torch.manual_seed(1)
+    r_hat = torch.nn.functional.normalize(
+        torch.randn(1000, 3, device=rc.device), dim=-1
+    )
+    Y = sh.get_harmonics(2 * l_max, r_hat)  # all L of products (unit r: no r^L)
+    n_lm = (l_max + 1) ** 2
+    product = Y[:n_lm, None] * Y[None, :n_lm]
+    assert torch.allclose(torch.einsum("abL, Lr -> abr", c, Y), product, atol=1e-13)
+    assert torch.equal(c, c.transpose(0, 1))
+    Y00 = 1.0 / np.sqrt(4 * np.pi)  # Y_a Y_b integrates to delta_ab = c_ab^00 / Y00
+    assert torch.allclose(c[:, :, 0], Y00 * torch.eye(n_lm, device=rc.device))
+
+
 def main():
     """Run test with verbose log."""
     log_config()

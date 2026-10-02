@@ -14,6 +14,7 @@ from qimpy.lattice import Lattice
 from qimpy.symmetries import LabeledPositions
 from qimpy.grid import FieldH
 from . import Pseudopotential, _ions_projectors, _ions_atomic, _ions_update
+from ._augmentation import Augmentation
 
 
 class Ions(TreeNode):
@@ -42,6 +43,9 @@ class Ions(TreeNode):
     beta_full: dft.electrons.Wavefunction | None  #: full-basis version of `beta`
     beta_version: int  #: version of `beta` to invalidate cached projections
     D_all: torch.Tensor  #: nonlocal pseudopotential matrix (all atoms)
+    q_all: torch.Tensor | None  #: ultrasoft overlap matrix, like `D_all` (None if NC)
+    D_aug: torch.Tensor  #: augmentation part of nonlocal matrix (zero if NC)
+    augmentation: Augmentation | None  #: ultrasoft augmentation (None if NC)
     dEtot_drho_basis: float  #: dE/d(basis function density) for Pulay correction
 
     _get_projectors = _ions_projectors.get_projectors

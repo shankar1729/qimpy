@@ -12,7 +12,7 @@ from . import symbols
 
 def read_upf(ps: ions.Pseudopotential, filename: str) -> None:
     """Read a UPF pseudopotential.
-    Note that only norm-conserving UPF files are currently supported.
+    Note that only norm-conserving and ultrasoft UPF files are supported (not PAW).
 
     Parameters
     ----------
@@ -67,9 +67,7 @@ def read_upf(ps: ions.Pseudopotential, filename: str) -> None:
         raise ValueError("PAW dataset in " + filename + " unsupported")
 
     ps.is_ultrasoft = str(section.attrib.get("is_ultrasoft")).lower() in ["t", "true"]
-    if ps.is_ultrasoft:
-        log.error("  Ultrasoft pseudopotentials are not yet supported.")
-        raise ValueError("Ultrasoft pseudopotential in " + filename + " unsupported")
+    augmentation = None  # read from PP_NONLOCAL/PP_AUGMENTATION if ultrasoft
 
     # --- Valence properties:
     ps.Z = float(section.attrib["z_valence"])
@@ -154,6 +152,8 @@ def read_upf(ps: ions.Pseudopotential, filename: str) -> None:
                     else:
                         # np.fromstring misbehaves for an empty string
                         ps.D = torch.zeros((0, 0), device=rc.device)
+                elif entry.tag == "PP_AUGMENTATION":
+                    augmentation = _read_augmentation(entry, n_beta, len(r), ps.l_max)
                 else:
                     log.info(f"  NOTE: ignored section '{entry.tag}'")
             # Create projector radial function:
@@ -234,3 +234,53 @@ def read_upf(ps: ions.Pseudopotential, filename: str) -> None:
         ps.rho_atom = RadialFunction(ps.r, ps.dr)
     if not hasattr(ps, "n_core"):
         ps.n_core = RadialFunction(ps.r, ps.dr)
+    if ps.is_ultrasoft:
+        if augmentation is None:
+            raise ValueError("Ultrasoft pseudopotential without PP_AUGMENTATION")
+        ps.set_augmentation(*augmentation)
+
+
+def _read_augmentation(
+    section: ET.Element, n_beta: int, n_grid: int, l_max: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None, np.ndarray | None]:
+    """Parse PP_AUGMENTATION of an ultrasoft UPF v2 file.
+    Returns the arguments of :meth:`Pseudopotential.set_augmentation`."""
+    # Logicals appear as T/F, true/false or .true./.false. depending on QE version:
+    q_with_l = section.attrib.get("q_with_l", "F").strip().lower() in (
+        "t",
+        "true",
+        ".true.",
+    )
+    n_qf = int(section.attrib.get("nqf", 0))  # Taylor coefficients (if pseudized)
+    n_L = int(section.attrib.get("nqlc", 0)) or (2 * l_max + 1)
+    shape_Q = (n_beta, n_beta) + ((n_L,) if q_with_l else ()) + (n_grid,)
+    r2_Q = np.zeros(shape_Q)  # r^2 Q_ij(r), per L only if q_with_l
+    q_file = np.zeros((n_beta, n_beta))
+    r_inner = Q_taylor = None
+    for entry in section:
+        data = np.fromstring(entry.text or "", sep=" ")
+        if entry.tag == "PP_Q":
+            q_file = data.reshape(n_beta, n_beta)
+        elif entry.tag == "PP_QFCOEF":
+            Q_taylor = data.reshape(n_beta, n_beta, n_L, n_qf)
+        elif entry.tag == "PP_RINNER":
+            r_inner = data
+        elif entry.tag.startswith("PP_QIJ"):
+            # PP_QIJ.i.j (q_with_l false) or PP_QIJL.i.j.L (true), 1-based i, j.
+            # The tag and the attribute must agree: otherwise functions of
+            # different L would be silently mixed up, so refuse instead.
+            indices = [int(index) for index in entry.tag.split(".")[1:]]
+            if (len(indices) == 3) != q_with_l:
+                raise ValueError(
+                    f"{entry.tag} inconsistent with q_with_l = {q_with_l} in"
+                    " PP_AUGMENTATION"
+                )
+            i, j = indices[0] - 1, indices[1] - 1
+            L_index = tuple(indices[2:])  # empty unless q_with_l
+            r2_Q[(i, j) + L_index][: len(data)] = data
+            r2_Q[(j, i) + L_index][: len(data)] = data
+        else:
+            log.info(f"  NOTE: ignored section '{entry.tag}'")
+    if q_with_l or (not n_qf):
+        r_inner = Q_taylor = None  # inner pseudization only for q_with_l false
+    return r2_Q, q_file, r_inner, Q_taylor
