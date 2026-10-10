@@ -313,12 +313,13 @@ class Geometry(TreeNode):
         # Precompute velocity-weighted, area-scaled edge operators (constant):
         #   into eL: -a*elen/area_L,  into eR: +a*elen/area_R,  a = v_c.n
         a_int = g.en @ v.t()  # (Ne, Nk)
+        inv_area = 1 / g.area
         self._maskL = a_int > 0
-        self._wL = -a_int * (g.elen * g.inv_area[g.eL])[:, None]
-        self._wR = a_int * (g.elen * g.inv_area[g.eR])[:, None]
+        self._wL = -a_int * (g.elen * inv_area[g.eL])[:, None]
+        self._wR = a_int * (g.elen * inv_area[g.eR])[:, None]
         self._a_bnd = g.bn @ v.t()  # (Nb, Nk)
         self._maskB = self._a_bnd > 0
-        self._wB = -self._a_bnd * (g.blen * g.inv_area[g.bcell])[:, None]
+        self._wB = -self._a_bnd * (g.blen * inv_area[g.bcell])[:, None]
         # Per-channel density weight; outward number-flux operator per boundary edge.
         self._ncoef = material.get_observables(0.0)[0]  # (Nk,)
         self._cur_b = (g.blen[:, None] * self._ncoef[None, :]) * self._a_bnd  # (Nb,Nk)
@@ -580,7 +581,7 @@ class Geometry(TreeNode):
         cells; a feedback contact's capacity (``den``/``base``) is summed across
         ranks so every rank solves the same global level."""
         g = self.geom
-        names = g.marker_names
+        names = self.mesh.boundary_names
         name_of = [
             names[m] if 0 <= m < len(names) else "wall" for m in g.bmark.tolist()
         ]

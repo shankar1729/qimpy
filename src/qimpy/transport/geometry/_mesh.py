@@ -264,11 +264,8 @@ class FVGeom:
     """
 
     area: torch.Tensor
-    inv_area: torch.Tensor
     inradius: torch.Tensor  # (K,)
     centroid_np: np.ndarray
-    vertices_np: np.ndarray
-    triangles_np: np.ndarray
     eL: torch.Tensor
     eR: torch.Tensor
     eLF: torch.Tensor
@@ -280,7 +277,6 @@ class FVGeom:
     bmark: torch.Tensor  # (Nb,)
     bn: torch.Tensor
     blen: torch.Tensor  # (Nb,2),(Nb,)
-    marker_names: list
     nbr: torch.Tensor  # (K, Nmax) vertex-neighbor cells (self-padded)
     recon: torch.Tensor  # (K, 3, Nmax) face-increment op: d_face = recon @ (u_nbr - u)
 
@@ -409,11 +405,8 @@ def build_fv_geom(mesh: Mesh, *, dtype: torch.dtype = torch.float64) -> FVGeom:
     area_t = t(area)
     return FVGeom(
         area=area_t,
-        inv_area=1.0 / area_t,
         inradius=t(inradius),
         centroid_np=centroid,
-        vertices_np=V,
-        triangles_np=tri,
         eL=t(kL, long=True),
         eR=t(kR, long=True),
         eLF=t(kL * 3 + fL, long=True),
@@ -425,7 +418,6 @@ def build_fv_geom(mesh: Mesh, *, dtype: torch.dtype = torch.float64) -> FVGeom:
         bmark=t(bmark, long=True),
         bn=t(fnrm[bk, bf]),
         blen=t(flen[bk, bf]),
-        marker_names=mesh.boundary_names,
         nbr=t(nbr, long=True),
         recon=t(recon),
     )
@@ -512,11 +504,8 @@ def _build_fv_geom_1d(mesh: Mesh, *, dtype: torch.dtype = torch.float64) -> FVGe
     area_t = t(area)
     return FVGeom(
         area=area_t,
-        inv_area=1.0 / area_t,
         inradius=t(inradius),
         centroid_np=centroid,
-        vertices_np=V,
-        triangles_np=seg,
         eL=t(kL, long=True),
         eR=t(kR, long=True),
         eLF=t(kL * 2 + fL, long=True),
@@ -528,7 +517,6 @@ def _build_fv_geom_1d(mesh: Mesh, *, dtype: torch.dtype = torch.float64) -> FVGe
         bmark=t(bmark, long=True),
         bn=t(fnrm[bk, bf]),
         blen=t(flen[bk, bf]),
-        marker_names=mesh.boundary_names,
         nbr=t(nbr, long=True),
         recon=t(recon),
     )
