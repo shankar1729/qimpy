@@ -8,13 +8,13 @@ from qimpy.io import Checkpoint, CheckpointPath, CheckpointContext
 
 
 class Mesh(TreeNode):
-    """Definition of mesh geometry (2D or 1D)"""
+    """Definition of mesh geometry (dimension, d = 2 or 1)"""
 
     source: File | Line | Rect  #: Method by which mesh is constructed
     vertices: np.ndarray  #: vertex coordinates (Nv, 2)
-    cells: np.ndarray  #: vertex indices and region ID in cells: (Nc, 3 if 1D else 4)
-    edges: np.ndarray  #: sorted vertex indices and ID of boundary edges: (Ne, 3)
+    cells: np.ndarray  #: vertex indices and region ID in cells (Nc, d+2)
     region_names: list[str]  #: names of interior regions (for cell IDs >= 0)
+    boundary_edges: np.ndarray  #: sorted vertex indices, ID of boundary edges (Ne, d+1)
     boundary_names: list[str]  #: names of boundary regions (for edge IDs >= 0)
     lattice_vectors: np.ndarray | None  #: lattice vectors in rows if periodic
 
@@ -56,8 +56,8 @@ class Mesh(TreeNode):
     def load(self, cp: CheckpointPath) -> None:
         self.vertices = cp.read_np("vertices")
         self.cells = cp.read_np("cells")
-        self.edges = cp.read_np("edges")
         self.region_names = cp.read_str_list("region_names")
+        self.boundary_edges = cp.read_np("boundary_edges")
         self.boundary_names = cp.read_str_list("boundary_names")
         self.lattice_vectors = cp.read_optional_np("lattice_vectors")
 
@@ -66,8 +66,8 @@ class Mesh(TreeNode):
         saved_list = [
             cp.write("vertices", self.vertices),
             cp.write("cells", self.cells),
-            cp.write("edges", self.edges),
             cp.write_str("region_names", ",".join(self.region_names)),
+            cp.write("boundary_edges", self.boundary_edges),
             cp.write_str("boundary_names", ",".join(self.boundary_names)),
         ]
         if self.lattice_vectors is not None:
@@ -134,7 +134,7 @@ class Mesh(TreeNode):
             mesh.cells = np.column_stack(
                 (np.arange(N), np.arange(1, N + 1), np.full(N, -1))
             )
-            mesh.edges = np.array([[0, 0, 0], [N, N, 1]])
+            mesh.boundary_edges = np.array([[0, 0], [N, 1]])
             mesh.region_names = []
             mesh.boundary_names = ["source", "drain"]
             mesh.lattice_vectors = None
@@ -216,7 +216,7 @@ class Mesh(TreeNode):
             # Add boundaries and label contacts:
             null_x = np.full(Nx, -1)
             null_y = np.full(Ny, -1)
-            mesh.edges = np.concatenate(
+            mesh.boundary_edges = np.concatenate(
                 (
                     np.stack((i_corners[:-1, 0], i_corners[1:, 0], null_x), axis=-1),
                     np.stack((i_corners[:-1, -1], i_corners[1:, -1], null_x), axis=-1),
@@ -225,12 +225,12 @@ class Mesh(TreeNode):
                 ),
                 axis=0,
             )
-            edge_centers = mesh.vertices[mesh.edges[:, :-1]].mean(axis=1)
+            edge_centers = mesh.vertices[mesh.boundary_edges[:, :-1]].mean(axis=1)
             mesh.boundary_names = []
             for i_contact, (contact_name, (x0, y0, r)) in enumerate(contacts.items()):
                 mesh.boundary_names.append(contact_name)
                 within = np.linalg.norm(edge_centers - (x0, y0), axis=1) <= r
-                mesh.edges[within, -1] = i_contact
+                mesh.boundary_edges[within, -1] = i_contact
 
             mesh.lattice_vectors = None
 
@@ -242,9 +242,6 @@ class Mesh(TreeNode):
             cp_path.attrs["Nx"] = self.Nx
             cp_path.attrs["Ny"] = self.Ny
             return list(cp_path.attrs.keys())
-
-
-_FACE = np.array([[0, 1], [1, 2], [2, 0]])  # local vertex pairs of the 3 faces (CCW)
 
 
 @dataclass
@@ -299,7 +296,7 @@ def build_fv_geom(mesh: Mesh, *, dtype: torch.dtype = torch.float64) -> FVGeom:
         raise ValueError("triangle mesh must be CCW with positive area")
     centroid = p.mean(axis=1)
 
-    fa, fb = _FACE[:, 0], _FACE[:, 1]
+    fa, fb = np.array([0, 1, 2]), np.array([1, 2, 0])
     Pa, Pb = p[:, fa], p[:, fb]
     fmid = 0.5 * (Pa + Pb)
     tvec = Pb - Pa
@@ -317,7 +314,7 @@ def build_fv_geom(mesh: Mesh, *, dtype: torch.dtype = torch.float64) -> FVGeom:
             )
             edge_map.setdefault(key, []).append((k, f))
     interior, boundary = [], []
-    edge_marker = {(v1, v2): m for v1, v2, m in mesh.edges}
+    edge_marker = {(v1, v2): m for v1, v2, m in mesh.boundary_edges}
     for key, hits in edge_map.items():
         if len(hits) == 2:
             (kL, fL), (kR, fR) = hits
@@ -455,7 +452,7 @@ def _build_fv_geom_1d(mesh: Mesh, *, dtype: torch.dtype = torch.float64) -> FVGe
     flen = np.ones((K, 2))  # point face: unit measure
 
     # Interior / boundary by shared-vertex dedup.
-    edge_marker = {(v1, v2): m for v1, v2, m in mesh.edges}
+    edge_marker = {v: m for v, m in mesh.boundary_edges}
     vmap: dict[int, list[tuple[int, int]]] = {}
     for k in range(K):
         for f in range(2):
@@ -467,7 +464,7 @@ def _build_fv_geom_1d(mesh: Mesh, *, dtype: torch.dtype = torch.float64) -> FVGe
             interior.append((kL, fL, kR, fR))
         else:
             ((k, f),) = hits
-            boundary.append((k, f, edge_marker.get((v, v), 0)))
+            boundary.append((k, f, edge_marker.get(v, 0)))
     interior = np.array(interior, int).reshape(-1, 4)
     boundary = np.array(boundary, int).reshape(-1, 3)
     kL, fL, kR, fR = interior.T if len(interior) else (np.empty(0, int),) * 4

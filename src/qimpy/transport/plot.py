@@ -362,7 +362,7 @@ def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> Non
         g = cp["/geometry"]
         verts = np.array(g["mesh/vertices"])  # (Nv, 2)
         tris = np.array(g["mesh/cells"])[:, :-1]  # (K, 3)
-        boundary_edges = np.array(g["mesh/edges"])
+        boundary_edges = np.array(g["mesh/boundary_edges"])
         boundary_names = CheckpointPath(cp, "/geometry/mesh").read_str_list(
             "boundary_names"
         )
