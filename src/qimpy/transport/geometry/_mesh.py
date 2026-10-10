@@ -79,6 +79,69 @@ class Mesh(TreeNode):
     ) -> list[str]:
         return self.save(cp_path)
 
+    @property
+    def is1D(self) -> bool:
+        return self.cells.shape[1] == 3  # cells coontain d + 1 vertices, 1 region index
+
+    def map_edges(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Find interior and boundary edges, and map them to the cells.
+
+        Returns
+        -------
+        edges
+            Nc x (d + 1) x d indices of the 2 vertices per edge in 2D and 1 in 1D,
+            for each of the 3 edges per cell in 2D and 2 edges per cell in 1D.
+        interior
+            Ni x 2 x 2 indices: cell number and edge number within cell (last dimension)
+            for each of two cells (middle dimension) that each interior edge belongs to.
+        boundary
+            Nb x 3 indices: cell number, edge number within cell for the single cell
+            that each boundary edge belongs to, along with the boundary ID of the edge.
+        """
+        if self.is1D:
+            edges = self.cells[:, :-1, None]
+            edge_ids = edges[..., 0]  # edge defined by single vertex in 1D
+            boundary_edge_ids = self.boundary_edges[..., 0]
+        else:
+            edges = self.cells[:, np.array([(0, 1), (1, 2), (2, 0)])]
+            # Construct edge ID that is equal for edge with different vertex orders:
+            n_vertices = len(self.vertices)
+            edge_ids = edges.min(axis=-1) * n_vertices + edges.max(axis=-1)
+            boundary_edge_ids = self.boundary_edges[:, :2].min(
+                axis=-1
+            ) * n_vertices + self.boundary_edges[:, :2].max(axis=-1)
+
+        # Find unique edge IDs and counts:
+        unique_ids, unique_indices, unique_inverse, counts = np.unique(
+            edge_ids, return_index=True, return_inverse=True, return_counts=True
+        )
+        assert counts.max() <= 2
+        unique_rank = np.ones_like(unique_inverse)  # rank within equivalence class
+        unique_rank[unique_indices] = 0  # and others are 1 because count <= 2
+        edge_map = np.zeros_like(unique_inverse, shape=(len(unique_ids), 2, 2))
+        edge_map[unique_inverse, unique_rank] = np.stack(
+            np.meshgrid(
+                np.arange(edges.shape[0]), np.arange(edges.shape[1]), indexing="ij"
+            ),
+            axis=-1,
+        ).reshape(
+            -1, 2
+        )  # cell and edge within cell, for each copy of each unique edge
+
+        # Split edge map into interior and boundary
+        interior = edge_map[np.where(counts == 2)[0]]
+        sel_boundary = np.where(counts == 1)[0]
+        # boundary = edge_map[, 0]  # only one copy of each edge
+
+        # Find boundary region index for each boundary edge:
+        i_unique_boundary = np.searchsorted(unique_ids, boundary_edge_ids)
+        boundary_region_ids = np.full(len(unique_ids), -1)
+        boundary_region_ids[i_unique_boundary] = self.boundary_edges[:, -1]
+        boundary = np.hstack(
+            (edge_map[sel_boundary, 0], boundary_region_ids[sel_boundary, None])
+        )
+        return edges, interior, boundary
+
     class File(TreeNode):
         def __init__(
             self,
@@ -305,25 +368,7 @@ def build_fv_geom(mesh: Mesh, *, dtype: torch.dtype = torch.float64) -> FVGeom:
     inradius = area / (0.5 * flen.sum(axis=1))
 
     # Deduplicate physical edges -> interior (two cells) / boundary (one).
-    edge_map: dict[tuple[int, int], list[tuple[int, int]]] = {}
-    for k in range(K):
-        for f in range(3):
-            key = (
-                min(int(tri[k, fa[f]]), int(tri[k, fb[f]])),
-                max(int(tri[k, fa[f]]), int(tri[k, fb[f]])),
-            )
-            edge_map.setdefault(key, []).append((k, f))
-    interior, boundary = [], []
-    edge_marker = {(v1, v2): m for v1, v2, m in mesh.boundary_edges}
-    for key, hits in edge_map.items():
-        if len(hits) == 2:
-            (kL, fL), (kR, fR) = hits
-            interior.append((kL, fL, kR, fR))
-        else:
-            ((k, f),) = hits
-            boundary.append((k, f, edge_marker.get(key, 0)))
-    interior = np.array(interior, int).reshape(-1, 4)
-    boundary = np.array(boundary, int).reshape(-1, 3)
+    _, interior, boundary = mesh.map_edges()
 
     # Periodic faces: pair leftover boundary edges across each lattice vector and
     # promote them to interior edges (streaming neighbour = periodic image). Match
@@ -350,18 +395,16 @@ def build_fv_geom(mesh: Mesh, *, dtype: torch.dtype = torch.float64) -> FVGeom:
                     used[i] = used[ji] = True
                     paired.append(
                         (
-                            boundary[i, 0],
-                            boundary[i, 1],
-                            boundary[ji, 0],
-                            boundary[ji, 1],
+                            (boundary[i, 0], boundary[i, 1]),
+                            (boundary[ji, 0], boundary[ji, 1]),
                         )
                     )
         if paired:
-            interior = np.vstack([interior, np.array(paired, int)])
+            interior = np.stack([interior, np.array(paired, int)], axis=0)
             boundary = boundary[~used]
 
-    kL, fL, kR, fR = interior.T if len(interior) else (np.empty(0, int),) * 4
-    bk, bf, bmark = boundary.T if len(boundary) else (np.empty(0, int),) * 3
+    (kL, fL), (kR, fR) = np.transpose(interior, (1, 2, 0))
+    bk, bf, bmark = boundary.T
 
     # Reconstruction stencil: vertex-neighbors (every cell sharing a vertex), which
     # stays full-rank and well-conditioned on distorted/irregular/boundary cells
@@ -452,23 +495,9 @@ def _build_fv_geom_1d(mesh: Mesh, *, dtype: torch.dtype = torch.float64) -> FVGe
     flen = np.ones((K, 2))  # point face: unit measure
 
     # Interior / boundary by shared-vertex dedup.
-    edge_marker = {v: m for v, m in mesh.boundary_edges}
-    vmap: dict[int, list[tuple[int, int]]] = {}
-    for k in range(K):
-        for f in range(2):
-            vmap.setdefault(int(seg[k, f]), []).append((k, f))
-    interior, boundary = [], []
-    for v, hits in vmap.items():
-        if len(hits) == 2:
-            (kL, fL), (kR, fR) = hits
-            interior.append((kL, fL, kR, fR))
-        else:
-            ((k, f),) = hits
-            boundary.append((k, f, edge_marker.get(v, 0)))
-    interior = np.array(interior, int).reshape(-1, 4)
-    boundary = np.array(boundary, int).reshape(-1, 3)
-    kL, fL, kR, fR = interior.T if len(interior) else (np.empty(0, int),) * 4
-    bk, bf, bmark = boundary.T if len(boundary) else (np.empty(0, int),) * 3
+    _, interior, boundary = mesh.map_edges()
+    (kL, fL), (kR, fR) = np.transpose(interior, (1, 2, 0))
+    bk, bf, bmark = boundary.T
 
     # Inverse-distance least-squares gradient over shared-vertex neighbors.
     v2c: dict[int, list[int]] = {}
