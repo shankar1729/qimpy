@@ -166,129 +166,120 @@ class Mesh(TreeNode):
         )
         return edges, interior, boundary
 
+    def get_fv_geom(self, *, dtype: torch.dtype = torch.float64) -> FVGeom:
+        """Initialize finite-volume parameters for mesh."""
+        # Compute cell area and centroid:
+        cells = self.cells[:, :-1]  # ignore region ID
+        n_cells = len(cells)
+        cell_vertices = self.vertices[cells]
+        if self.is1D:
+            area = np.linalg.norm(cell_vertices[:, 1] - cell_vertices[:, 0], axis=-1)
+        else:
+            area = 0.5 * np.linalg.det(cell_vertices[:, 1:] - cell_vertices[:, :1])
+            if np.any(area <= 0.0):
+                raise ValueError("Areas must be positive (counter-clockwise triangles)")
+        centroid = cell_vertices.mean(axis=1)
+
+        # Identify interior and boundary edges:
+        edges, interior, boundary = self.map_edges()
+        (kL, fL), (kR, fR) = np.transpose(interior, (1, 2, 0))
+        bk, bf, bmark = boundary.T
+
+        # Compute edge properties:
+        edge_vertices = self.vertices[edges]
+        edge_offset = (
+            edge_vertices.mean(axis=2) - centroid[:, None]
+        )  # cell to edge center
+        if self.is1D:
+            edge_lengths = np.ones_like(edge_offset[..., 0])
+            edge_normals = edge_offset / np.linalg.norm(
+                edge_offset, axis=-1, keepdims=True
+            )
+            inradius = area  # as used for dt determination with Courant condition
+        else:
+            edge_vectors = edge_vertices[:, :, 1] - edge_vertices[:, :, 0]
+            edge_lengths = np.linalg.norm(edge_vectors, axis=2)
+            edge_normals = (
+                np.stack([edge_vectors[..., 1], -edge_vectors[..., 0]], axis=2)
+                / edge_lengths[..., None]
+            )
+            inradius = area / (0.5 * edge_lengths.sum(axis=1))
+
+        # Reconstruction stencil: vertex-neighbors (every cell sharing a vertex), which
+        # stays full-rank and well-conditioned on distorted/irregular/boundary cells
+        # where the 3 face-neighbors alone are too few or near-collinear.
+        v2c: dict[int, list[int]] = {}
+        for k in range(n_cells):
+            for vtx in cells[k]:
+                v2c.setdefault(int(vtx), []).append(k)
+        vnbr = [
+            sorted({c for vtx in cells[k] for c in v2c[int(vtx)]} - {k})
+            for k in range(n_cells)
+        ]
+        Nmax = max((len(s) for s in vnbr), default=1)
+        nbr = np.arange(n_cells)[:, None].repeat(Nmax, axis=1)  # pad slots with self
+        # Inverse-distance-weighted least-squares gradient operator per cell:
+        #   grad_i = (D^T W D)^{-1} D^T W (u_nbr - u_i),  w_j = 1 / |c_j - c_i|^2.
+        # pinv handles any residual rank-deficiency gracefully (min-norm gradient).
+        grad_op = np.zeros((n_cells, 2, Nmax))
+        Nmin = 1 if self.is1D else 2
+        for i, js in enumerate(vnbr):
+            if len(js) < Nmin:
+                continue
+            nbr[i, : len(js)] = js
+            D = centroid[js] - centroid[i]  # (n, 2)
+            w = 1.0 / np.maximum((D**2).sum(1), 1e-300)  # inverse-distance^2
+            sw = np.sqrt(w)
+            grad_op[i, :, : len(js)] = np.linalg.pinv(sw[:, None] * D) * sw[None, :]
+        # Fuse gradient + centroid->face offsets so a step reconstructs face
+        # increments with one (3 x Nmax) @ (Nmax x Nk) matmul per cell.
+        recon = np.einsum("kfx,kxg->kfg", edge_offset, grad_op)  # (K, 3, Nmax)
+
+        def t(a, long=False):
+            return torch.tensor(
+                np.ascontiguousarray(a),
+                device=rc.device,
+                dtype=torch.long if long else dtype,
+            )
+
+        n_cell_edges = 2 if self.is1D else 3
+        return FVGeom(
+            area=t(area),
+            inradius=t(inradius),
+            centroid_np=centroid,
+            eL=t(kL, long=True),
+            eR=t(kR, long=True),
+            eLF=t(kL * n_cell_edges + fL, long=True),
+            eRF=t(kR * n_cell_edges + fR, long=True),
+            en=t(edge_normals[kL, fL]),
+            elen=t(edge_lengths[kL, fL]),
+            bcell=t(bk, long=True),
+            bF=t(bk * n_cell_edges + bf, long=True),
+            bmark=t(bmark, long=True),
+            bn=t(edge_normals[bk, bf]),
+            blen=t(edge_lengths[bk, bf]),
+            nbr=t(nbr, long=True),
+            recon=t(recon),
+        )
+
 
 @dataclass
 class FVGeom:
-    """Static FV geometry from a triangle (2D) or line (1D) mesh; hot-path arrays
-    are torch tensors.  ``area`` is the cell measure (triangle area / interval
-    length) and ``elen``/``blen`` the face measure (edge length / 1 for a 1D
-    point face).
+    """Finite-volume geometry parameters for mesh."""
 
-    Faces split into interior (shared by cells ``eL``/``eR``, normal ``en`` points
-    out of ``eL``) and boundary (cell ``bcell``, outward normal ``bn``, ``bmark``
-    names the wall/contact). ``eLF``/``eRF``/``bF`` are flat ``cell*n_face +
-    localface`` indices (``n_face`` = 3 triangles, 2 line cells) used to gather
-    the reconstructed face value of the adjacent cell.
-    Periodic faces are paired through the lattice and stored as interior edges
-    (the streaming neighbour is the periodic image).
-    """
-
-    area: torch.Tensor
-    inradius: torch.Tensor  # (K,)
-    centroid_np: np.ndarray
-    eL: torch.Tensor
-    eR: torch.Tensor
-    eLF: torch.Tensor
-    eRF: torch.Tensor  # (Ne,)
-    en: torch.Tensor
-    elen: torch.Tensor  # (Ne,2),(Ne,)
-    bcell: torch.Tensor
-    bF: torch.Tensor
-    bmark: torch.Tensor  # (Nb,)
-    bn: torch.Tensor
-    blen: torch.Tensor  # (Nb,2),(Nb,)
-    nbr: torch.Tensor  # (K, Nmax) vertex-neighbor cells (self-padded)
-    recon: torch.Tensor  # (K, 3, Nmax) face-increment op: d_face = recon @ (u_nbr - u)
-
-
-def build_fv_geom(mesh: Mesh, *, dtype: torch.dtype = torch.float64) -> FVGeom:
-    """Build the FV geometry from a loaded mesh (``_mesh.MeshResult``)."""
-    # Compute cell area and centroid:
-    cells = mesh.cells[:, :-1]  # ignore region ID
-    n_cells = len(cells)
-    cell_vertices = mesh.vertices[cells]
-    if mesh.is1D:
-        area = np.linalg.norm(cell_vertices[:, 1] - cell_vertices[:, 0], axis=-1)
-    else:
-        area = 0.5 * np.linalg.det(cell_vertices[:, 1:] - cell_vertices[:, :1])
-        if np.any(area <= 0.0):
-            raise ValueError("Areas must be positive (counter-clockwise triangles)")
-    centroid = cell_vertices.mean(axis=1)
-
-    # Identify interior and boundary edges:
-    edges, interior, boundary = mesh.map_edges()
-    (kL, fL), (kR, fR) = np.transpose(interior, (1, 2, 0))
-    bk, bf, bmark = boundary.T
-
-    # Compute edge properties:
-    edge_vertices = mesh.vertices[edges]
-    edge_offset = edge_vertices.mean(axis=2) - centroid[:, None]  # cell to edge center
-    if mesh.is1D:
-        edge_lengths = np.ones_like(edge_offset[..., 0])
-        edge_normals = edge_offset / np.linalg.norm(edge_offset, axis=-1, keepdims=True)
-        inradius = area  # as used for dt determination with Courant condition
-    else:
-        edge_vectors = edge_vertices[:, :, 1] - edge_vertices[:, :, 0]
-        edge_lengths = np.linalg.norm(edge_vectors, axis=2)
-        edge_normals = (
-            np.stack([edge_vectors[..., 1], -edge_vectors[..., 0]], axis=2)
-            / edge_lengths[..., None]
-        )
-        inradius = area / (0.5 * edge_lengths.sum(axis=1))
-
-    # Reconstruction stencil: vertex-neighbors (every cell sharing a vertex), which
-    # stays full-rank and well-conditioned on distorted/irregular/boundary cells
-    # where the 3 face-neighbors alone are too few or near-collinear.
-    v2c: dict[int, list[int]] = {}
-    for k in range(n_cells):
-        for vtx in cells[k]:
-            v2c.setdefault(int(vtx), []).append(k)
-    vnbr = [
-        sorted({c for vtx in cells[k] for c in v2c[int(vtx)]} - {k})
-        for k in range(n_cells)
-    ]
-    Nmax = max((len(s) for s in vnbr), default=1)
-    nbr = np.arange(n_cells)[:, None].repeat(Nmax, axis=1)  # pad slots with self
-    # Inverse-distance-weighted least-squares gradient operator per cell:
-    #   grad_i = (D^T W D)^{-1} D^T W (u_nbr - u_i),  w_j = 1 / |c_j - c_i|^2.
-    # pinv handles any residual rank-deficiency gracefully (min-norm gradient).
-    grad_op = np.zeros((n_cells, 2, Nmax))
-    Nmin = 1 if mesh.is1D else 2
-    for i, js in enumerate(vnbr):
-        if len(js) < Nmin:
-            continue
-        nbr[i, : len(js)] = js
-        D = centroid[js] - centroid[i]  # (n, 2)
-        w = 1.0 / np.maximum((D**2).sum(1), 1e-300)  # inverse-distance^2
-        sw = np.sqrt(w)
-        grad_op[i, :, : len(js)] = np.linalg.pinv(sw[:, None] * D) * sw[None, :]
-    # Fuse gradient + centroid->face offsets so a step reconstructs face
-    # increments with one (3 x Nmax) @ (Nmax x Nk) matmul per cell.
-    recon = np.einsum("kfx,kxg->kfg", edge_offset, grad_op)  # (K, 3, Nmax)
-
-    def t(a, long=False):
-        return torch.tensor(
-            np.ascontiguousarray(a),
-            device=rc.device,
-            dtype=torch.long if long else dtype,
-        )
-
-    n_cell_edges = 2 if mesh.is1D else 3
-    return FVGeom(
-        area=t(area),
-        inradius=t(inradius),
-        centroid_np=centroid,
-        eL=t(kL, long=True),
-        eR=t(kR, long=True),
-        eLF=t(kL * n_cell_edges + fL, long=True),
-        eRF=t(kR * n_cell_edges + fR, long=True),
-        en=t(edge_normals[kL, fL]),
-        elen=t(edge_lengths[kL, fL]),
-        bcell=t(bk, long=True),
-        bF=t(bk * n_cell_edges + bf, long=True),
-        bmark=t(bmark, long=True),
-        bn=t(edge_normals[bk, bf]),
-        blen=t(edge_lengths[bk, bf]),
-        nbr=t(nbr, long=True),
-        recon=t(recon),
-    )
+    area: torch.Tensor  #: Cell areas (interval lengths in 1D)
+    inradius: torch.Tensor  #: Corresponding in-radii for time step determination
+    centroid_np: np.ndarray  #: Cell centroids
+    eL: torch.Tensor  #: First cell index for interior edges
+    eR: torch.Tensor  #: Second cell index for interior edges
+    eLF: torch.Tensor  #: Flattened first cell-edge index for interior edges
+    eRF: torch.Tensor  #: Flattened second cell-edge index for interior edges
+    en: torch.Tensor  #: Outward normal directions for each edge (in first cell)
+    elen: torch.Tensor  #: Edge lengths
+    bcell: torch.Tensor  #: Cell index for boundary edges
+    bF: torch.Tensor  #: Flattened cell-edge index for boundary edges
+    bmark: torch.Tensor  #: Boundary region IDs for boundary edges
+    bn: torch.Tensor  #: Outward normal directions for boundary edges
+    blen: torch.Tensor  #: Boundary edge lengths
+    nbr: torch.Tensor  #: Neighbor-indices by cell (n_cells, Nmax)
+    recon: torch.Tensor  #: Face-increment  operator (n_cells, 3, Nmax)

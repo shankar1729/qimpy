@@ -32,7 +32,7 @@ from qimpy import rc, log, TreeNode
 from qimpy.io import CheckpointPath, InvalidInputException, CheckpointContext
 from qimpy.mpi import ProcessGrid, all_reduce_scalars
 from ..material import Material
-from ._mesh import Mesh, build_fv_geom
+from . import Mesh
 
 
 # --------------------------------------------------------------------------- #
@@ -282,7 +282,7 @@ class Geometry(TreeNode):
             self.mesh.cells = self.mesh.cells[self._perm]
         else:
             self._perm, bounds = None, None
-        g = build_fv_geom(self.mesh, dtype=material.transport_velocity.dtype)
+        g = self.mesh.get_fv_geom(dtype=material.transport_velocity.dtype)
         self.geom = g
         v = material.transport_velocity  # (Nk, 2)
         self.Nk = v.shape[0]
