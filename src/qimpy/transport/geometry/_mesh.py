@@ -1,9 +1,11 @@
 from __future__ import annotations
 from dataclasses import dataclass
+
+from scipy.spatial import KDTree
 import numpy as np
 import torch
 
-from qimpy import rc, TreeNode
+from qimpy import rc, log, TreeNode
 from qimpy.io import CheckpointPath, CheckpointContext
 from . import mesh_source
 
@@ -105,12 +107,34 @@ class Mesh(TreeNode):
             boundary_edge_ids = self.boundary_edges[..., 0]
         else:
             edges = self.cells[:, np.array([(0, 1), (1, 2), (2, 0)])]
+
+            if self.lattice_vectors is None:
+                edges_weld = edges
+                boundary_edges_weld = self.boundary_edges[:, :2]
+                n_vertices_weld = len(self.vertices)
+            else:
+                # Identify vertices separated by lattice vectors:
+                frac_coords = self.vertices @ np.linalg.inv(self.lattice_vectors)
+                frac_coords -= np.floor(frac_coords)  # wrap to [0, 1)
+                tree = KDTree(frac_coords, boxsize=(1.0, 1.0))  # periodic lookup
+                MAX_EQUIVALENT = 4
+                _, i_equivalents = tree.query(
+                    frac_coords, k=MAX_EQUIVALENT, distance_upper_bound=1.0e-5
+                )
+                lowest_equivalent_index = np.minimum(
+                    i_equivalents.min(axis=1), np.arange(len(self.vertices))
+                )
+                _, vertex_map = np.unique(lowest_equivalent_index, return_inverse=True)
+                edges_weld = vertex_map[edges]
+                boundary_edges_weld = vertex_map[self.boundary_edges[:, :2]]
+                n_vertices_weld = vertex_map.max() + 1
+                if n_vertices_weld == len(self.vertices):
+                    log.info("Lattice vectors have no effect: no equivalent vertices.")
+
             # Construct edge ID that is equal for edge with different vertex orders:
-            n_vertices = len(self.vertices)
-            edge_ids = edges.min(axis=-1) * n_vertices + edges.max(axis=-1)
-            boundary_edge_ids = self.boundary_edges[:, :2].min(
-                axis=-1
-            ) * n_vertices + self.boundary_edges[:, :2].max(axis=-1)
+            stride = np.array((n_vertices_weld, 1))
+            edge_ids = np.sort(edges_weld, axis=-1) @ stride
+            boundary_edge_ids = np.sort(boundary_edges_weld, axis=-1) @ stride
 
         # Find unique edge IDs and counts:
         unique_ids, unique_indices, unique_inverse, counts = np.unique(
@@ -132,7 +156,6 @@ class Mesh(TreeNode):
         # Split edge map into interior and boundary
         interior = edge_map[np.where(counts == 2)[0]]
         sel_boundary = np.where(counts == 1)[0]
-        # boundary = edge_map[, 0]  # only one copy of each edge
 
         # Find boundary region index for each boundary edge:
         i_unique_boundary = np.searchsorted(unique_ids, boundary_edge_ids)
@@ -206,40 +229,6 @@ def build_fv_geom(mesh: Mesh, *, dtype: torch.dtype = torch.float64) -> FVGeom:
 
     # Deduplicate physical edges -> interior (two cells) / boundary (one).
     _, interior, boundary = mesh.map_edges()
-
-    # Periodic faces: pair leftover boundary edges across each lattice vector and
-    # promote them to interior edges (streaming neighbour = periodic image). Match
-    # face midpoints with a KD-tree for robustness on distorted/irregular meshes.
-    lattice = getattr(mesh, "_lattice", None)
-    if lattice is not None and len(boundary):
-        from scipy.spatial import cKDTree
-
-        bmid = fmid[boundary[:, 0], boundary[:, 1]]  # (Nb, 2)
-        tol = 1e-6 * float(max(flen.max(), 1.0))
-        tree = cKDTree(bmid)
-        used = np.zeros(len(boundary), bool)
-        paired = []
-        for L in np.atleast_2d(np.asarray(lattice, float)):
-            dist, j = tree.query(bmid + L, distance_upper_bound=tol)
-            for i, (di, ji) in enumerate(zip(dist, j)):
-                if (
-                    di <= tol
-                    and ji < len(bmid)
-                    and i != ji
-                    and not used[i]
-                    and not used[ji]
-                ):
-                    used[i] = used[ji] = True
-                    paired.append(
-                        (
-                            (boundary[i, 0], boundary[i, 1]),
-                            (boundary[ji, 0], boundary[ji, 1]),
-                        )
-                    )
-        if paired:
-            interior = np.stack([interior, np.array(paired, int)], axis=0)
-            boundary = boundary[~used]
-
     (kL, fL), (kR, fR) = np.transpose(interior, (1, 2, 0))
     bk, bf, bmark = boundary.T
 

@@ -88,6 +88,7 @@ class Rect(TreeNode):
         Nx: int,
         Ny: int,
         contacts: dict[str, tuple[float, float, float]],
+        lattice_vectors: list[list[float]] | None = None,
         mesh: geometry.Mesh,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
@@ -109,6 +110,11 @@ class Rect(TreeNode):
             :yaml:`Named regions on the rectangle boundary to use as contacts.`
             Each name is associated with a circle (x0, y0, r): any edges on the
             boundary with center within this circle is associated to that name.
+        lattice
+            :yaml:`Lattice vectors for periodic boundary conditions.`
+            If specified, it should be a 2 x 2 matrix with each row corresponding
+            to a lattice vector. If desirable to only have one periodic direction,
+            just make the second lattice vector longer than the geometry.
         """
         super().__init__()
         self.Lx = Lx
@@ -165,7 +171,9 @@ class Rect(TreeNode):
             within = np.linalg.norm(edge_centers - (x0, y0), axis=1) <= r
             mesh.boundary_edges[within, -1] = i_contact
 
-        mesh.lattice_vectors = None
+        mesh.lattice_vectors = (
+            None if lattice_vectors is None else np.array(lattice_vectors)
+        )
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
