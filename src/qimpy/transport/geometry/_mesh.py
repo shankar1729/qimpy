@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from scipy.spatial import KDTree
+from scipy.sparse import csr_array
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -109,10 +110,9 @@ class Mesh(TreeNode):
             try:
                 import pymetis
 
-                partition = np.asarray(
-                    pymetis.part_graph(size, adjacency=self.cell_adjacency())[1],
-                    np.int32,
-                )
+                adj = self.cell_adjacency()
+                csr_adj = pymetis.CSRAdjacency(adj.indptr, adj.indices)
+                partition = np.asarray(pymetis.part_graph(size, csr_adj)[1], np.int32)
             except ImportError:
                 # Fallback: divide equally along longest axis:
                 centroids = self.vertices[self.cells[:, :-1]].mean(axis=1)
@@ -141,22 +141,19 @@ class Mesh(TreeNode):
             self.cell_permutation = self.cell_permutation[permutation]
         return bounds.astype(int)
 
-    def cell_adjacency(self) -> list[list[int]]:
-        """Face-neighbour adjacency (the FV dual graph): cells sharing an edge."""
-        from collections import defaultdict
-
-        EtoV = self.cells[:, :-1]
-        e2c: dict[tuple[int, int], list[int]] = defaultdict(list)
-        for k, tri in enumerate(EtoV):
-            for a, b in ((0, 1), (1, 2), (2, 0)):
-                e2c[tuple(sorted((int(tri[a]), int(tri[b]))))].append(k)
-        nbr: list[set[int]] = [set() for _ in range(len(EtoV))]
-        for cells in e2c.values():
-            if len(cells) == 2:
-                i, j = cells
-                nbr[i].add(j)
-                nbr[j].add(i)
-        return [sorted(s) for s in nbr]
+    def cell_adjacency(self) -> csr_array:
+        """Adjacency matrix of cells that share a vertex."""
+        cells = self.cells[:, :-1]
+        cell_to_vertex = csr_array(
+            (
+                np.ones_like(cells).flatten(),
+                (np.repeat(np.arange(len(cells)), cells.shape[1]), cells.flatten()),
+            ),
+        )
+        adjacency = cell_to_vertex @ cell_to_vertex.T
+        adjacency.data = np.ones_like(adjacency.data)
+        adjacency.sort_indices()
+        return adjacency
 
     def map_edges(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Find interior and boundary edges, and map them to the cells.
