@@ -682,20 +682,21 @@ class Geometry(TreeNode):
         gemm.  Faster EAGER (140.6 ms vs 243.5 ms for the whole RHS), slower
         compiled (48.2 vs 28.8) -- selected in __init__ by the compile flag.
         Agrees with the slot form to 2.9e-16."""
-        un = u[nbr]  # (n, Nmax, Nk)
-        d = torch.einsum("nfg,ngc->nfc", recon, un - uc[:, None])
-        hi = (torch.maximum(uc, un.amax(1)) - uc)[:, None]
-        lo = (torch.minimum(uc, un.amin(1)) - uc)[:, None]
+        du = u[nbr] - uc[:, None]
+        d = recon @ du
+        # Compute limiter (in [0, 1]) for the gradients on each face:
+        lo, hi = du.aminmax(dim=1, keepdim=True)
+        lo.clip_(max=0.0)
+        hi.clip_(min=0.0)
         D1 = torch.where(d >= 0, hi, lo)
         e = self._vk_eps2
-        num = D1 * D1 + 2 * D1 * d + e
-        den = D1 * D1 + D1 * d + 2 * d * d + e
-        phi = torch.where(
-            den > torch.finfo(d.dtype).tiny,
-            (num / den).clamp(max=1.0),
-            torch.ones_like(d),
-        ).amin(1)[:, None]
-        return uc[:, None] + phi * d
+        common = D1.square() + e
+        dD1 = d * D1
+        phi = (common + 2 * dD1) / (common + dD1 + 2 * d.square())
+        phi.nan_to_num_(1.0)  # Handle possible NANs from d underflow
+        phi.clamp_(max=1.0)
+        limiter = phi.amin(dim=1, keepdim=True)
+        return uc[:, None] + limiter * d
 
     def _faces(self, u: torch.Tensor) -> torch.Tensor:
         """Reconstructed face values, (K, n_face, Nk). Serial reconstructs every
