@@ -6,8 +6,8 @@ density:
   interpolation: bilinear
   linthresh: 0.1
 
-streamlines:
-  transparency: no
-  density: 2
-  linewidth: 0.7
-  arrowsize: 0.5
+# streamlines:
+#   transparency: no
+#   density: 2
+#   linewidth: 0.7
+#   arrowsize: 0.5

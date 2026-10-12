@@ -31,6 +31,7 @@ import torch.distributed as dist
 from qimpy import rc, log, TreeNode
 from qimpy.io import CheckpointPath, InvalidInputException, CheckpointContext
 from qimpy.mpi import ProcessGrid, all_reduce_scalars
+from qimpy.profiler import StopWatch
 from ..material import Material
 from . import Mesh
 
@@ -135,68 +136,41 @@ class SpatialDecomp:
         self.recon_rows = np.array(sorted(ring1), int)
         ghosts = np.array(sorted(ring2 - own), int)
 
-        # Halo plans: receive each ghost from its owning rank; send the owned
-        # cells that another rank needs (its 2-ring minus its own block).
-        self.recv: dict[int, np.ndarray] = {}
-        for q in range(self.size):
-            sel = ghosts[(ghosts >= self.offset[q]) & (ghosts < self.offset[q + 1])]
-            if len(sel) and q != self.rank:
-                self.recv[q] = sel
-        self.send: dict[int, np.ndarray] = {}
+        # Plan communications:
+        recv: list[np.ndarray] = []
+        send: list[np.ndarray] = []
         for q in range(self.size):
             if q == self.rank:
-                continue
-            owned_q = set(range(int(self.offset[q]), int(self.offset[q + 1])))
-            need_q = ring(ring(owned_q)) - owned_q
-            sel = self.owned[np.isin(self.owned, np.fromiter(need_q, int, len(need_q)))]
-            if len(sel):
-                self.send[q] = sel
+                recv.append(np.empty(0, dtype=int))
+                send.append(np.empty(0, dtype=int))
+            else:
+                # Receive each ghost from its owning rank:
+                recv.append(
+                    ghosts[(ghosts >= self.offset[q]) & (ghosts < self.offset[q + 1])]
+                )
+                # Send the owned cells that other ranks need:
+                owned_q = set(range(int(self.offset[q]), int(self.offset[q + 1])))
+                need_q = ring(ring(owned_q)) - owned_q
+                send.append(
+                    self.owned[
+                        np.isin(self.owned, np.fromiter(need_q, int, len(need_q)))
+                    ]
+                )
+        self.recv_index = torch.from_numpy(np.concatenate(recv)).to(rc.device)
+        self.send_index = torch.from_numpy(np.concatenate(send)).to(rc.device)
+        self.recv_counts = [len(idx) for idx in recv]
+        self.send_counts = [len(idx) for idx in send]
 
     def exchange(self, u: torch.Tensor) -> None:
         """Fill this rank's ghost rows of ``u`` (K, Nk) with their owners' values."""
-        if not self.recv and not self.send:
-            return
-        # torch.distributed point-to-point.  ⛔ Unlike mpi4py's Irecv/Isend on
-        # numpy buffers, dist.irecv/isend take TENSORS and (for nccl) they must
-        # live on the GPU, so the halo stays on u.device instead of round-
-        # tripping through numpy.  Ranks are GROUP-relative, matching
-        # self.recv/self.send which were built from group ranks.
-        recv_bufs = {}
-        ops = []
-        for q, idx in self.recv.items():
-            buf = torch.empty((len(idx), u.shape[1]), dtype=u.dtype, device=u.device)
-            recv_bufs[q] = (buf, idx)
-            ops.append((dist.irecv, buf, q))
-        send_bufs = []
-        for q, idx in self.send.items():
-            sb = u[torch.as_tensor(idx, device=u.device)].contiguous()
-            send_bufs.append(sb)
-            ops.append((dist.isend, sb, q))
-
-        # ⛔⛔ NCCL POINT-TO-POINT MUST BE GROUPED OR IT DEADLOCKS.
-        # mpi4py's Irecv/Isend are genuinely asynchronous, so posting every
-        # receive and then every send is fine.  NCCL's isend/irecv are not:
-        # each enqueues a ncclSend/ncclRecv that is matched and serialized on
-        # the stream, so a rank that posts all of its receives first blocks
-        # before issuing the sends its peers are waiting for -- symmetric
-        # deadlock, every rank stuck, no error.  dist.batch_isend_irecv wraps
-        # the whole set in ncclGroupStart/ncclGroupEnd so NCCL matches them
-        # together.
-        # ⛔ And this is invisible on CPU: gloo tolerates the ungrouped form,
-        # so the 36-run rank sweep passed 27/27 on gloo while every cross-node
-        # NCCL run hung at the first exchange.  A CPU-only parallel test cannot
-        # validate this path.
-        # ⛔ batch_isend_irecv is NCCL-only, hence the branch rather than using
-        # it unconditionally.
-        if dist.get_backend(self.group) == "nccl":
-            p2p = [dist.P2POp(fn, t, peer, group=self.group) for fn, t, peer in ops]
-            for r in dist.batch_isend_irecv(p2p):
-                r.wait()
-        else:
-            for r in [fn(t, peer, group=self.group, tag=11) for fn, t, peer in ops]:
-                r.wait()
-        for q, (buf, idx) in recv_bufs.items():
-            u[torch.as_tensor(idx, device=u.device)] = buf
+        send_buf = u[self.send_index].contiguous()
+        recv_buf = torch.empty(
+            (len(self.recv_index), u.shape[1]), dtype=u.dtype, device=u.device
+        )
+        dist.all_to_all_single(
+            recv_buf, send_buf, self.recv_counts, self.send_counts, group=self.group
+        )
+        u[self.recv_index] = recv_buf
 
 
 @dataclass
@@ -944,9 +918,11 @@ class Geometry(TreeNode):
         return u - (u @ self._dl_A) @ self._dl_B.T
 
     def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
+        watch = StopWatch("Geometry.rho_dot")
         if self._decomp is not None:
             self._decomp.exchange(rho)  # fill halo ghost rows
         out = self._srhs_fn(rho, t)  # de-alias + spatial RHS (fused)
+        watch.stop()
         if self.collision_enabled and not self._skip_collision:  # ballistic: exactly 0
             # collision = from_modes(-rates * to_modes(.)); its to_modes already
             # annihilates the ghost, so the raw (un-de-aliased) u is exact here.
