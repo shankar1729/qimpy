@@ -144,14 +144,21 @@ class Mesh(TreeNode):
     def cell_adjacency(self) -> csr_array:
         """Adjacency matrix of cells that share a vertex."""
         cells = self.cells[:, :-1]
+        n_cells = len(cells)
         cell_to_vertex = csr_array(
             (
                 np.ones_like(cells).flatten(),
-                (np.repeat(np.arange(len(cells)), cells.shape[1]), cells.flatten()),
+                (np.repeat(np.arange(n_cells), cells.shape[1]), cells.flatten()),
             ),
         )
-        adjacency = cell_to_vertex @ cell_to_vertex.T
-        adjacency.data = np.ones_like(adjacency.data)
+        # Cell-cell adjacency = cell-vertex @ vertex-cell adjacency
+        adjacency_coo = (cell_to_vertex @ cell_to_vertex.T).tocoo()
+        row = adjacency_coo.row
+        col = adjacency_coo.col
+        sel = np.where(row != col)[0]  # ignore trivial diagonals
+        adjacency = csr_array(
+            (np.ones_like(sel), (row[sel], col[sel])), (n_cells, n_cells)
+        )
         adjacency.sort_indices()
         return adjacency
 
@@ -280,35 +287,25 @@ class Mesh(TreeNode):
             )
             inradius = area / (0.5 * edge_lengths.sum(axis=1))
 
-        # Reconstruction stencil: vertex-neighbors (every cell sharing a vertex), which
-        # stays full-rank and well-conditioned on distorted/irregular/boundary cells
-        # where the 3 face-neighbors alone are too few or near-collinear.
-        v2c: dict[int, list[int]] = {}
-        for k in range(n_cells):
-            for vtx in cells[k]:
-                v2c.setdefault(int(vtx), []).append(k)
-        vnbr = [
-            sorted({c for vtx in cells[k] for c in v2c[int(vtx)]} - {k})
-            for k in range(n_cells)
-        ]
-        Nmax = max((len(s) for s in vnbr), default=1)
-        nbr = np.arange(n_cells)[:, None].repeat(Nmax, axis=1)  # pad slots with self
         # Inverse-distance-weighted least-squares gradient operator per cell:
-        #   grad_i = (D^T W D)^{-1} D^T W (u_nbr - u_i),  w_j = 1 / |c_j - c_i|^2.
-        # pinv handles any residual rank-deficiency gracefully (min-norm gradient).
+        adjacency = self.cell_adjacency()
+        neighbor_indices = adjacency.indices
+        index_ranges = adjacency.indptr
+        Nmax = np.diff(index_ranges).max()
+        nbr = np.arange(n_cells)[:, None].repeat(Nmax, axis=1)  # pad slots with self
         grad_op = np.zeros((n_cells, 2, Nmax))
         Nmin = 1 if self.is1D else 2
-        for i, js in enumerate(vnbr):
+        for i in range(n_cells):
+            js = neighbor_indices[index_ranges[i] : index_ranges[i + 1]]
             if len(js) < Nmin:
                 continue
             nbr[i, : len(js)] = js
-            D = centroid[js] - centroid[i]  # (n, 2)
-            w = 1.0 / np.maximum((D**2).sum(1), 1e-300)  # inverse-distance^2
-            sw = np.sqrt(w)
-            grad_op[i, :, : len(js)] = np.linalg.pinv(sw[:, None] * D) * sw[None, :]
-        # Fuse gradient + centroid->face offsets so a step reconstructs face
-        # increments with one (3 x Nmax) @ (Nmax x Nk) matmul per cell.
-        recon = np.einsum("kfx,kxg->kfg", edge_offset, grad_op)  # (K, 3, Nmax)
+            D = centroid[js] - centroid[i]
+            w = 1.0 / np.linalg.norm(D, axis=1)
+            grad_op[i, :, : len(js)] = np.linalg.pinv(w[:, None] * D) * w[None, :]
+
+        # Fuse gradient + centroid -> face offsets to a single matrix multiply:
+        recon = np.einsum("kfx, kxg -> kfg", edge_offset, grad_op)
 
         def t(a, long=False):
             return torch.tensor(
