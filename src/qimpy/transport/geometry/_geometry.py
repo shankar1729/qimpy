@@ -20,7 +20,6 @@ one limited-reconstruction pass, two gathers, and three scatters.
 
 from __future__ import annotations
 import os
-from collections import defaultdict
 from dataclasses import dataclass
 from typing import Optional
 
@@ -34,71 +33,6 @@ from qimpy.mpi import ProcessGrid, all_reduce_scalars
 from qimpy.profiler import StopWatch
 from ..material import Material
 from . import Mesh
-
-
-# --------------------------------------------------------------------------- #
-#  Spatial domain decomposition: each rank owns a contiguous block of cells and
-#  does O(local) work per step, exchanging only a thin 2-ring halo of ghost-cell
-#  averages. Cells are partitioned by METIS (min-cut on the face-neighbour dual
-#  graph) and renumbered so every rank's block -- and its checkpoint slice -- is
-#  contiguous. The MUSCL stencil needs two rings (a cell's face value uses its
-#  1-ring gradient; the flux on its face also uses the neighbour's reconstructed
-#  value, hence the neighbour's 1-ring), so the halo is the 2-ring vertex closure.
-# --------------------------------------------------------------------------- #
-def _dual_graph(EToV) -> list[list[int]]:
-    """Face-neighbour adjacency (the FV dual graph): cells sharing an edge."""
-    e2c: dict[tuple[int, int], list[int]] = defaultdict(list)
-    for k, tri in enumerate(EToV):
-        for a, b in ((0, 1), (1, 2), (2, 0)):
-            e2c[tuple(sorted((int(tri[a]), int(tri[b]))))].append(k)
-    nbr: list[set[int]] = [set() for _ in range(len(EToV))]
-    for cells in e2c.values():
-        if len(cells) == 2:
-            i, j = cells
-            nbr[i].add(j)
-            nbr[j].add(i)
-    return [sorted(s) for s in nbr]
-
-
-def _coordinate_part(mesh, nparts: int) -> np.ndarray:
-    """Fallback partition (no METIS): sort cells along the longer axis into
-    equal-count blocks. Correct but with poorer locality on branchy meshes."""
-    centroids = mesh.vertices[mesh.cells[:, :-1]].mean(axis=1)
-    axis = np.ptp(centroids, axis=0).argmin()
-    order = np.argsort(centroids[:, axis], kind="stable")
-    part = np.empty(len(order), np.int32)
-    part[order] = np.minimum((np.arange(len(order)) * nparts) // len(order), nparts - 1)
-    return part
-
-
-def partition(mesh, group: dist.ProcessGroup) -> tuple[np.ndarray, np.ndarray]:
-    """Renumber cells into contiguous per-rank blocks.
-
-    Returns ``(perm, bounds)``: applying ``EToV[perm]`` places rank ``r``'s cells
-    in the contiguous slice ``[bounds[r], bounds[r+1])``. The partition is a METIS
-    min-cut of the face-neighbour dual graph, computed on the head and broadcast
-    so every rank agrees exactly; falls back to a coordinate sort if pymetis is
-    not installed.
-    """
-    K = len(mesh.cells)
-    nparts = group.size()
-    if nparts == 1:
-        return np.arange(K), np.array([0, K], int)
-    part = np.arange(K, dtype=np.int32)
-    if dist.get_rank(group) == 0:
-        try:
-            import pymetis
-
-            _, p = pymetis.part_graph(nparts, adjacency=_dual_graph(mesh.cells[:, :-1]))
-            part = np.asarray(p, np.int32)
-        except ImportError:
-            part = _coordinate_part(mesh, nparts)
-    part_t = torch.from_numpy(part).to(rc.device)
-    dist.broadcast(part_t, src=0, group=group)
-    part = part_t.to(rc.cpu).numpy()
-    perm = np.argsort(part, kind="stable")  # group cells by rank
-    bounds = np.concatenate([[0], np.cumsum(np.bincount(part, minlength=nparts))])
-    return perm, bounds.astype(int)
 
 
 class SpatialDecomp:
@@ -248,14 +182,7 @@ class Geometry(TreeNode):
         self._vk_eps2 = float(vk_eps2)
 
         self._mpi = self.group.size() > 1
-        if self._mpi:
-            # METIS min-cut partition, renumbered so each rank owns a contiguous
-            # block (compact halos + direct checkpoint slices). Keep the
-            # permutation so the renumbered solution maps back to the input order.
-            self._perm, bounds = partition(self.mesh, self.group)
-            self.mesh.cells = self.mesh.cells[self._perm]
-        else:
-            self._perm, bounds = None, None
+        bounds = self.mesh.partition_cells(self.group)
         g = self.mesh.get_fv_geom(dtype=material.transport_velocity.dtype)
         self.geom = g
         v = material.transport_velocity  # (Nk, 2)

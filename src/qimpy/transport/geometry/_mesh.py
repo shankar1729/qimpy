@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from scipy.spatial import KDTree
 import numpy as np
 import torch
+import torch.distributed as dist
 
 from qimpy import rc, log, TreeNode
 from qimpy.io import CheckpointPath, CheckpointContext
@@ -20,6 +21,7 @@ class Mesh(TreeNode):
     boundary_edges: np.ndarray  #: sorted vertex indices, ID of boundary edges (Ne, d+1)
     boundary_names: list[str]  #: names of boundary regions (for edge IDs >= 0)
     lattice_vectors: np.ndarray | None  #: lattice vectors in rows if periodic
+    cell_permutation: np.ndarray | None  #: Reordering of cells relative to the source
 
     def __init__(
         self,
@@ -45,6 +47,7 @@ class Mesh(TreeNode):
             Only one source for the mesh must be specified.
         """
         super().__init__()
+        self.cell_permutation = None
         self.add_child_one_of(
             "source",
             checkpoint_in,
@@ -63,6 +66,7 @@ class Mesh(TreeNode):
         self.boundary_edges = cp.read_np("boundary_edges")
         self.boundary_names = cp.read_str_list("boundary_names")
         self.lattice_vectors = cp.read_optional_np("lattice_vectors")
+        self.cell_permutation = cp.read_optional_np("cell_permutation")
 
     def save(self, cp: CheckpointPath) -> list[str]:
         """Save within h5 file and return names of saved variables."""
@@ -75,6 +79,8 @@ class Mesh(TreeNode):
         ]
         if self.lattice_vectors is not None:
             saved_list.append(cp.write("lattice_vectors", self.lattice_vectors))
+        if self.cell_permutation is not None:
+            saved_list.append(cp.write("cell_permutation", self.cell_permutation))
         return saved_list
 
     def _save_checkpoint(
@@ -85,6 +91,72 @@ class Mesh(TreeNode):
     @property
     def is1D(self) -> bool:
         return self.cells.shape[1] == 3  # cells coontain d + 1 vertices, 1 region index
+
+    def partition_cells(self, group: dist.ProcessGroup) -> np.ndarray:
+        """Optimally partition the mesh cells for communication over `group`.
+        This reorders `cells` such that contiguous ranges of cells can be owned by
+        each process within `group`, and returns the bounds of cell indices on each
+        process (cells[bounds[rank] : bounds[rank + 1]] belong to rank).
+        Correspondingly, `cell_permutation` tracks any reordering of the cells."""
+        size = group.size()
+        if size == 1:
+            return np.array([0, len(self.cells)])  # no partitioning required
+
+        # Compute partition on overall head process:
+        # (Partition must be stable across process grid, not just the "r" dimension.)
+        partition = np.empty(len(self.cells), dtype=np.int32)
+        if rc.is_head:
+            try:
+                import pymetis
+
+                partition = np.asarray(
+                    pymetis.part_graph(size, adjacency=self.cell_adjacency())[1],
+                    np.int32,
+                )
+            except ImportError:
+                # Fallback: divide equally along longest axis:
+                centroids = self.vertices[self.cells[:, :-1]].mean(axis=1)
+                long_axis = np.ptp(centroids, axis=0).argmin()
+                order = np.argsort(centroids[:, long_axis], kind="stable")
+                partition[order] = np.minimum(
+                    (np.arange(len(order)) * size) // len(order), size - 1
+                )
+
+        # Synchronize partition across all processes:
+        partition_t = torch.from_numpy(partition).to(rc.device)
+        dist.broadcast(partition_t, src=0)  # on world, not just on group
+        partition = partition_t.to(rc.cpu).numpy()
+
+        # Determine permutation and bounds:
+        permutation = np.argsort(partition, kind="stable")  # group cells by rank
+        bounds = np.concatenate(
+            [[0], np.cumsum(np.bincount(partition, minlength=size))]
+        )
+
+        # Apply and track permutation:
+        self.cells = self.cells[permutation]
+        if self.cell_permutation is None:
+            self.cell_permutation = permutation
+        else:
+            self.cell_permutation = self.cell_permutation[permutation]
+        return bounds.astype(int)
+
+    def cell_adjacency(self) -> list[list[int]]:
+        """Face-neighbour adjacency (the FV dual graph): cells sharing an edge."""
+        from collections import defaultdict
+
+        EtoV = self.cells[:, :-1]
+        e2c: dict[tuple[int, int], list[int]] = defaultdict(list)
+        for k, tri in enumerate(EtoV):
+            for a, b in ((0, 1), (1, 2), (2, 0)):
+                e2c[tuple(sorted((int(tri[a]), int(tri[b]))))].append(k)
+        nbr: list[set[int]] = [set() for _ in range(len(EtoV))]
+        for cells in e2c.values():
+            if len(cells) == 2:
+                i, j = cells
+                nbr[i].add(j)
+                nbr[j].add(i)
+        return [sorted(s) for s in nbr]
 
     def map_edges(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Find interior and boundary edges, and map them to the cells.
@@ -108,23 +180,12 @@ class Mesh(TreeNode):
         else:
             edges = self.cells[:, np.array([(0, 1), (1, 2), (2, 0)])]
 
-            if self.lattice_vectors is None:
+            if vertex_map := self.lattice_vertex_map() is None:
                 edges_weld = edges
                 boundary_edges_weld = self.boundary_edges[:, :2]
                 n_vertices_weld = len(self.vertices)
             else:
                 # Identify vertices separated by lattice vectors:
-                frac_coords = self.vertices @ np.linalg.inv(self.lattice_vectors)
-                frac_coords -= np.floor(frac_coords)  # wrap to [0, 1)
-                tree = KDTree(frac_coords, boxsize=(1.0, 1.0))  # periodic lookup
-                MAX_EQUIVALENT = 4
-                _, i_equivalents = tree.query(
-                    frac_coords, k=MAX_EQUIVALENT, distance_upper_bound=1.0e-5
-                )
-                lowest_equivalent_index = np.minimum(
-                    i_equivalents.min(axis=1), np.arange(len(self.vertices))
-                )
-                _, vertex_map = np.unique(lowest_equivalent_index, return_inverse=True)
                 edges_weld = vertex_map[edges]
                 boundary_edges_weld = vertex_map[self.boundary_edges[:, :2]]
                 n_vertices_weld = vertex_map.max() + 1
@@ -165,6 +226,23 @@ class Mesh(TreeNode):
             (edge_map[sel_boundary, 0], boundary_region_ids[sel_boundary, None])
         )
         return edges, interior, boundary
+
+    def lattice_vertex_map(self) -> np.ndarray | None:
+        """Get mapping of vertices to reduced set under periodic boundary conditions,
+        if any. Returns None if no periodicity."""
+        if self.is1D or self.lattice_vectors is None:
+            return None
+        frac_coords = self.vertices @ np.linalg.inv(self.lattice_vectors)
+        frac_coords -= np.floor(frac_coords)  # wrap to [0, 1)
+        tree = KDTree(frac_coords, boxsize=(1.0, 1.0))  # periodic lookup
+        MAX_EQUIVALENT = 4
+        _, i_equivalents = tree.query(
+            frac_coords, k=MAX_EQUIVALENT, distance_upper_bound=1.0e-5
+        )
+        lowest_equivalent_index = np.minimum(
+            i_equivalents.min(axis=1), np.arange(len(self.vertices))
+        )
+        return np.unique(lowest_equivalent_index, return_inverse=True)[1]
 
     def get_fv_geom(self, *, dtype: torch.dtype = torch.float64) -> FVGeom:
         """Initialize finite-volume parameters for mesh."""
