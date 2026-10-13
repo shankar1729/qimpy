@@ -30,10 +30,10 @@ import torch.distributed as dist
 from qimpy import rc, log, TreeNode
 from qimpy.io import CheckpointPath, InvalidInputException, CheckpointContext
 from qimpy.mpi import ProcessGrid, all_reduce_scalars
+from qimpy.math import ceildiv
 from qimpy.profiler import StopWatch
 from ..material import Material
 from . import Mesh
-from ...math import ceildiv
 
 
 class SpatialDecomp:
@@ -274,39 +274,6 @@ class Geometry(TreeNode):
             self._eloc = None
             self._bloc = None
         self._setup_boundary(material)
-
-        # De-aliasing projector.  When the material's angular quadrature oversamples
-        # its modes -- FermiSurface uses an even N_theta > 2M+1 so the velocity set
-        # is mirror-symmetric (left-right contact symmetry) -- there are nodal DOFs
-        # carrying no represented harmonic.  The per-channel MUSCL limiter is
-        # nonlinear and excites them; the modal collision operator cannot damp them,
-        # so under strong collisions they grow without bound.  Projecting the state
-        # onto the represented modes each evaluation removes that aliased content;
-        # it is exactly the identity on n, the current, and every retained harmonic.
-        # No-op for square transforms or materials without modal transforms
-        # (single_band, ab_initio).  Applied as  u @ self._proj.
-        # The unrepresented ("ghost") subspace has tiny rank r = N_theta - (2M+1)
-        # (1-3), so we remove it with a rank-r update  u -= (u @ A) @ B^T  rather
-        # than a dense Nk*Nk matmul -- numerically identical, ~Nk/r times cheaper.
-        # Always on: the ghost lies in ker(to_modes) (collision cannot damp it) yet
-        # the nonlinear limiter excites it, so it must be projected out each step.
-        self._dl_A = self._dl_B = None
-        if hasattr(material, "to_modes") and hasattr(material, "from_modes"):
-            eye = torch.eye(self.Nk, device=rc.device, dtype=v.dtype)
-            proj = material.from_modes(material.to_modes(eye))  # (Nk, Nk) projector
-            ghost = eye - proj  # onto unrepresented DOFs
-            if ghost.abs().max() > 1e-10:  # only if oversampled
-                U, S, Vh = torch.linalg.svd(ghost)
-                # Numerical-rank cutoff scaled to the working precision. An
-                # absolute threshold (1e-8) sits below the fp32 modal round-trip
-                # floor (~1e-6), so in fp32 it counts ~Nk noise singular values as
-                # ghost directions. sqrt(eps) lands safely between the noise floor
-                # and the O(1) genuine ghost in both fp32 and fp64 (fp64: ~1.5e-8,
-                # matching the old cutoff; fp32: ~3.4e-4).
-                tol = float(S[0]) * torch.finfo(v.dtype).eps ** 0.5
-                r = int((S > tol).sum())
-                self._dl_A = (U[:, :r] * S[:r]).contiguous()  # (Nk, r)
-                self._dl_B = Vh[:r].T.contiguous()  # (Nk, r)
 
         # Following should be made consistent with the existing observables mechanism
         # ---- dense in-run probe (every probe_interval steps) -------------
@@ -662,7 +629,7 @@ class Geometry(TreeNode):
 
     def _spatial_rhs(self, u: torch.Tensor, t: float) -> torch.Tensor:
         g = self.geom
-        u = self._dealias(u)  # de-alias (fused into graph)
+        self.material.constrain(u)
         uf = self._faces_fn(u).reshape(-1, self.Nk)  # (K*3, Nk)
         dudt = torch.zeros_like(u)
         e = self._eloc  # owned-incident edges
@@ -687,21 +654,13 @@ class Geometry(TreeNode):
                 dudt.index_add_(0, g.bcell[b], wbu[b])
         return dudt
 
-    def _dealias(self, u: torch.Tensor) -> torch.Tensor:
-        """Project onto the represented angular modes (rank-r ghost removal)."""
-        if self._dl_A is None:
-            return u
-        return u - (u @ self._dl_A) @ self._dl_B.T
-
     def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         watch = StopWatch("Geometry.rho_dot")
         if self._decomp is not None:
             self._decomp.exchange(rho)  # fill halo ghost rows
-        out = self._srhs_fn(rho, t)  # de-alias + spatial RHS (fused)
+        out = self._srhs_fn(rho, t)  # spatial RHS (fused)
         watch.stop()
-        if self.collision_enabled and not self._skip_collision:  # ballistic: exactly 0
-            # collision = from_modes(-rates * to_modes(.)); its to_modes already
-            # annihilates the ghost, so the raw (un-de-aliased) u is exact here.
+        if self.collision_enabled and not self._skip_collision:
             lo, hi = self._own_start, self._own_stop
             out[lo:hi] = out[lo:hi] + self.material.rho_dot(rho[lo:hi], t, id(self))
         if self._owned_mask is not None:
@@ -712,9 +671,7 @@ class Geometry(TreeNode):
         """The material collision term ALONE, with no spatial RHS.
 
         Used by operator splitting (``collision_interval > 1``).  The collision
-        is local to a cell, so unlike :meth:`rho_dot` this needs no halo
-        exchange, and no de-aliasing either -- the representation's
-        ``to_modes`` already annihilates the rank-r ghost.
+        is local to a cell, so unlike :meth:`rho_dot` this needs no halo exchange.
         """
         out = torch.zeros_like(rho)
         if not self._skip_collision:
@@ -730,7 +687,8 @@ class Geometry(TreeNode):
 
     @rho.setter
     def rho(self, rho_new: torch.Tensor) -> None:
-        self._u = self._dealias(rho_new)
+        self._u = rho_new
+        self.material.constrain(self._u)
 
     @property
     def density(self) -> torch.Tensor:

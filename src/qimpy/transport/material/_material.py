@@ -105,6 +105,10 @@ class Material(TreeNode):
         each material. (No x Nkbb_mine) where No is number of observables.  Row 0
         is the density weight (used for the boundary contact-current operator)."""
 
+    def constrain(self, rho: torch.Tensor) -> None:
+        """Override to apply any per-material constraints on `rho`
+        that may be violated during spatial transport or dynamics."""
+
     def get_cell_scalar_names(self) -> list[str]:
         """Names of the CELL-CENTRED scalar fields written per saved frame.
         Default: the linear observable names.  A material may override to emit
@@ -140,6 +144,8 @@ class Material(TreeNode):
             result = result.contiguous()
             dist.all_reduce(result, group=self.group)
         return result
+
+
 def fermi(E, mu, T):
     return torch.special.expit((mu - E) / T)
 
