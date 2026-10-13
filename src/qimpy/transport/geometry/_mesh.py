@@ -324,7 +324,6 @@ class Mesh(TreeNode):
         return FVGeom(
             area=t(area),
             inradius=t(inradius),
-            centroid_np=centroid,
             eL=t(kL, long=True),
             eR=t(kR, long=True),
             eLF=t(kL * n_cell_edges + fL, long=True),
@@ -347,7 +346,6 @@ class FVGeom:
 
     area: torch.Tensor  #: Cell areas (interval lengths in 1D)
     inradius: torch.Tensor  #: Corresponding in-radii for time step determination
-    centroid_np: np.ndarray  #: Cell centroids
     eL: torch.Tensor  #: First cell index for interior edges
     eR: torch.Tensor  #: Second cell index for interior edges
     eLF: torch.Tensor  #: Flattened first cell-edge index for interior edges

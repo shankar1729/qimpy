@@ -640,25 +640,14 @@ class Geometry(TreeNode):
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
-        g = self.geom
         names = self.material.get_cell_scalar_names()
-        # NOTE: checkpoint attrs are fed back as constructor kwargs on restart
-        # (qimpy convention: attrs == constructor params), so only real
-        # constructor arguments may be written here.
-        saved = [
-            cp_path.write("cell_centroid", torch.from_numpy(g.centroid_np)),
-            "fv_observables",
-        ]
+        saved = ["fv_observables"]
         cp_path.write_str("contact_names", ",".join(self.contacts.keys()))
         cp_path.write_str("observable_names", ",".join(names))
         cp_path["t"] = np.array(self._stash_t)
         cp_path["i_step"] = np.array(self._stash_i)
         checkpoint, path = cp_path
         n_stash = len(self._stash_t)
-        # Collective: every rank creates the global dataset, then writes the
-        # slice of cells it owns ([own_start, own_stop)). Serially this is the
-        # whole array; under MPI it is each rank's contiguous block (needs an
-        # mpio-enabled h5py to run multi-rank).
         CheckpointPath(checkpoint, path).create_dataset(
             "fv_observables", (n_stash, self.K, len(names)), np.float64
         )
