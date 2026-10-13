@@ -23,7 +23,6 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-from scipy.sparse import csr_array
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -34,79 +33,6 @@ from qimpy.mpi import ProcessGrid, all_reduce_scalars
 from qimpy.profiler import StopWatch
 from ..material import Material
 from . import Mesh
-
-
-class SpatialDecomp:
-    """Owned/ghost bookkeeping and halo exchange over a renumbered cell mesh.
-
-    Construct after the cells have been renumbered by :func:`partition` and the
-    geometry built, passing the vertex-neighbour table ``nbr`` (global, in the
-    renumbered order) and the per-rank ``bounds``. Owned cells of rank ``r`` are
-    the contiguous slice ``[bounds[r], bounds[r+1])``.
-    """
-
-    def __init__(
-        self, mesh: Mesh, bounds: np.ndarray, group: dist.ProcessGroup
-    ) -> None:
-        self.group = group
-        self.size = group.size()
-        self.rank = dist.get_rank(group)
-        self.K = len(mesh.cells)
-        self.offset = np.asarray(bounds, int)
-        self.start = int(self.offset[self.rank])
-        self.stop = int(self.offset[self.rank + 1])
-        self.owned = np.arange(self.start, self.stop)
-        adj_vert = mesh.cell_adjacency_vertex
-        adj_edge = mesh.cell_adjacency_edge
-
-        def ring(cells: np.ndarray, adj: csr_array) -> np.ndarray:
-            """1-ring vertex closure of a set of cells (cells + their neighbours)."""
-            v = np.zeros(self.K)
-            v[cells] = 1
-            v += adj @ v
-            return np.where(v)[0]
-
-        ring1 = ring(self.owned, adj_edge)  # cells to reconstruct (+edge-neighbors)
-        ring2 = ring(ring1, adj_vert)  # cells accessed overall (+vertex-neighbors)
-        self.recon_rows = ring1
-        ghosts = ring2[np.where((ring2 < self.start) | (ring2 >= self.stop))]
-
-        # Plan communications:
-        recv: list[np.ndarray] = []
-        send: list[np.ndarray] = []
-        for q in range(self.size):
-            if q == self.rank:
-                recv.append(np.empty(0, dtype=int))
-                send.append(np.empty(0, dtype=int))
-            else:
-                # Receive each ghost from its owning rank:
-                recv.append(
-                    ghosts[(ghosts >= self.offset[q]) & (ghosts < self.offset[q + 1])]
-                )
-                # Send the owned cells that other ranks need:
-                owned_q = np.arange(self.offset[q], self.offset[q + 1])
-                ring2_q = ring(ring(owned_q, adj_edge), adj_vert)
-                need_q = ring2_q[
-                    np.where(
-                        (ring2_q < self.offset[q]) | (ring2_q >= self.offset[q + 1])
-                    )
-                ]
-                send.append(self.owned[np.isin(self.owned, need_q)])
-        self.recv_index = torch.from_numpy(np.concatenate(recv)).to(rc.device)
-        self.send_index = torch.from_numpy(np.concatenate(send)).to(rc.device)
-        self.recv_counts = [len(idx) for idx in recv]
-        self.send_counts = [len(idx) for idx in send]
-
-    def exchange(self, u: torch.Tensor) -> None:
-        """Fill this rank's ghost rows of ``u`` (K, Nk) with their owners' values."""
-        send_buf = u[self.send_index].contiguous()
-        recv_buf = torch.empty(
-            (len(self.recv_index), u.shape[1]), dtype=u.dtype, device=u.device
-        )
-        dist.all_to_all_single(
-            recv_buf, send_buf, self.recv_counts, self.send_counts, group=self.group
-        )
-        u[self.recv_index] = recv_buf
 
 
 @dataclass
@@ -190,7 +116,7 @@ class Geometry(TreeNode):
         self.faces_block_size = faces_block_size
 
         self._mpi = self.group.size() > 1
-        bounds = self.mesh.partition_cells(self.group)
+        self.cell_division = self.mesh.partition_cells(self.group)
         geom = self.mesh.get_fv_geom(dtype=material.transport_velocity.dtype)
         self.geom = geom
         v = material.transport_velocity  # (Nk, 2)
@@ -198,23 +124,14 @@ class Geometry(TreeNode):
         self.K = int(geom.area.shape[0])
         self._nf = int(geom.recon.shape[1])  # faces/cell: 3 (tri) or 2 (1D)
 
-        # Spatial decomposition: owned cell block, reconstruction rows (owned +
-        # 1-ring), owned-incident edges and the halo exchange (see SpatialDecomp).
-        if self._mpi:
-            self._decomp = SpatialDecomp(self.mesh, bounds, self.group)
-            self._own_start, self._own_stop = self._decomp.start, self._decomp.stop
-            self._R = torch.as_tensor(
-                self._decomp.recon_rows, device=rc.device, dtype=torch.long
-            )
-            self._owned_mask = torch.zeros(
-                self.K, 1, dtype=torch.bool, device=rc.device
-            )
-            self._owned_mask[self._own_start : self._own_stop] = True
-        else:
-            self._decomp = None
-            self._own_start, self._own_stop = 0, self.K
-            self._R = None
-            self._owned_mask = None
+        # Spatial decomposition related:
+        self._own_start = self.cell_division.i_start
+        self._own_stop = self.cell_division.i_stop
+        self._R = torch.as_tensor(
+            self.cell_division.recon_rows, device=rc.device, dtype=torch.long
+        )
+        self._owned_mask = torch.zeros(self.K, 1, dtype=torch.bool, device=rc.device)
+        self._owned_mask[self._own_start : self._own_stop] = True
 
         # Precompute velocity-weighted, area-scaled edge operators (constant):
         #   into eL: -a*elen/area_L,  into eR: +a*elen/area_R,  a = v_c.n
@@ -238,7 +155,7 @@ class Geometry(TreeNode):
         # through specular walls).  Scalars stay cell-centred.  (Serial only.)
         self._flux_names = list(material.get_flux_names())
         self._flux_g = material.get_flux_weights()  # (Nflux, Nk) or None
-        self._do_flux = (self._flux_g is not None) and (self._decomp is None)
+        self._do_flux = (self._flux_g is not None) and (self.cell_division is None)
         if self._do_flux:
             self._a_int = a_int  # (Ne, Nk) interior v.n
             eLc = geom.eL.detach().cpu().numpy()
@@ -353,7 +270,11 @@ class Geometry(TreeNode):
         self.dt_max = all_reduce_scalars(dt_local, dist.ReduceOp.MIN, self.group)
 
         rho0 = getattr(material, "rho0", None)
-        if (self._decomp is None) and checkpoint_in and checkpoint_in.member("rho"):
+        if (
+            (self.cell_division is None)
+            and checkpoint_in
+            and checkpoint_in.member("rho")
+        ):
             cp, path = checkpoint_in  # warm start (serial)
             self._u = torch.as_tensor(
                 np.array(cp[f"{path}/rho"]), device=rc.device, dtype=v.dtype
@@ -562,8 +483,8 @@ class Geometry(TreeNode):
 
     def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         watch = StopWatch("Geometry.rho_dot")
-        if self._decomp is not None:
-            self._decomp.exchange(rho)  # fill halo ghost rows
+        if self.cell_division is not None:
+            self.cell_division.exchange(rho)  # fill halo ghost rows
         out = self._spatial_rhs(rho, t)
         watch.stop()
         if self.collision_enabled and not self._skip_collision:
@@ -605,8 +526,8 @@ class Geometry(TreeNode):
         """Net outward number-current through each contact (positive = out of the
         device). Floating probes read ~0; current sources read their I_set; fixed
         contacts read a response. Sum over all boundaries = -d/dt of mass."""
-        if self._decomp is not None:
-            self._decomp.exchange(self._u)
+        if self.cell_division is not None:
+            self.cell_division.exchange(self._u)
         uf = self._faces(self._u).reshape(-1, self.Nk)
         uMb = uf[self.geom.bF]
         uup_b = torch.where(self._maskB, uMb, self._exterior(uMb, t))

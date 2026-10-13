@@ -10,6 +10,7 @@ import torch.distributed as dist
 
 from qimpy import rc, log, TreeNode
 from qimpy.io import CheckpointPath, CheckpointContext
+from qimpy.mpi import TaskDivisionCustom
 from . import mesh_source
 
 
@@ -94,15 +95,16 @@ class Mesh(TreeNode):
     def is1D(self) -> bool:
         return self.cells.shape[1] == 3  # cells coontain d + 1 vertices, 1 region index
 
-    def partition_cells(self, group: dist.ProcessGroup) -> np.ndarray:
+    def partition_cells(self, group: dist.ProcessGroup) -> CellDivision:
         """Optimally partition the mesh cells for communication over `group`.
         This reorders `cells` such that contiguous ranges of cells can be owned by
-        each process within `group`, and returns the bounds of cell indices on each
-        process (cells[bounds[rank] : bounds[rank + 1]] belong to rank).
+        each process within `group`, and returns a helper class to track the
+        division and communicate ghost cells across processes.
         Correspondingly, `cell_permutation` tracks any reordering of the cells."""
         size = group.size()
         if size == 1:
-            return np.array([0, len(self.cells)])  # no partitioning required
+            counts = np.array([len(self.cells)])  # no partitioning required
+            return CellDivision(self, counts, group)
 
         # Compute partition on overall head process:
         # (Partition must be stable across process grid, not just the "r" dimension.)
@@ -130,9 +132,7 @@ class Mesh(TreeNode):
 
         # Determine permutation and bounds:
         permutation = np.argsort(partition, kind="stable")  # group cells by rank
-        bounds = np.concatenate(
-            [[0], np.cumsum(np.bincount(partition, minlength=size))]
-        )
+        counts = np.bincount(partition, minlength=size)
 
         # Apply and track permutation:
         self.cells = self.cells[permutation]
@@ -144,7 +144,7 @@ class Mesh(TreeNode):
         # Invalidate cached maps involving cells:
         self.__dict__.pop("cell_adjacency_vertex", None)
         self.__dict__.pop("edge_maps", None)
-        return bounds.astype(int)
+        return CellDivision(self, counts, group)
 
     @cached_property
     def cell_adjacency_vertex(self) -> csr_array:
@@ -374,3 +374,59 @@ def make_adjacency(x_to_y: csr_array) -> csr_array:
     adjacency = csr_array((np.ones_like(sel), (row[sel], col[sel])), (n_x, n_x))
     adjacency.sort_indices()
     return adjacency
+
+
+class CellDivision(TaskDivisionCustom):
+    """Divide cells and communicate ghosts between processes."""
+
+    def __init__(
+        self, mesh: Mesh, counts: np.ndarray, group: dist.ProcessGroup
+    ) -> None:
+        super().__init__(n_mine=counts[group.rank()], group=group)
+        self.group = group
+        adj_vert = mesh.cell_adjacency_vertex
+        adj_edge = mesh.cell_adjacency_edge
+
+        def ring(cells: np.ndarray, adj: csr_array) -> np.ndarray:
+            """1-ring vertex closure of a set of cells (cells + their neighbours)."""
+            v = np.zeros(self.n_tot)
+            v[cells] = 1
+            v += adj @ v
+            return np.where(v)[0]
+
+        owned = np.arange(self.i_start, self.i_stop)
+        ring1 = ring(owned, adj_edge)  # cells to reconstruct (+edge-neighbors)
+        ring2 = ring(ring1, adj_vert)  # cells accessed overall (+vertex-neighbors)
+        self.recon_rows = ring1
+        ghosts = ring2[~self.belongs(self.i_proc, ring2)]
+
+        # Plan communications:
+        recv: list[np.ndarray] = []
+        send: list[np.ndarray] = []
+        for j_proc in range(self.n_procs):
+            if j_proc == self.i_proc:
+                recv.append(np.empty(0, dtype=int))
+                send.append(np.empty(0, dtype=int))
+            else:
+                # Receive each ghost from its owning rank:
+                recv.append(ghosts[self.belongs(j_proc, ghosts)])
+                # Send the owned cells that other ranks need:
+                owned_q = np.arange(self.n_prev[j_proc], self.n_prev[j_proc + 1])
+                ring2_q = ring(ring(owned_q, adj_edge), adj_vert)
+                ghost_q = ring2_q[~self.belongs(j_proc, ring2_q)]
+                send.append(owned[np.isin(owned, ghost_q)])
+        self.recv_index = torch.from_numpy(np.concatenate(recv)).to(rc.device)
+        self.send_index = torch.from_numpy(np.concatenate(send)).to(rc.device)
+        self.recv_counts = [len(idx) for idx in recv]
+        self.send_counts = [len(idx) for idx in send]
+
+    def exchange(self, u: torch.Tensor) -> None:
+        """Fill this rank's ghost rows of ``u`` (K, Nk) with their owners' values."""
+        send_buf = u[self.send_index].contiguous()
+        recv_buf = torch.empty(
+            (len(self.recv_index), u.shape[1]), dtype=u.dtype, device=u.device
+        )
+        dist.all_to_all_single(
+            recv_buf, send_buf, self.recv_counts, self.send_counts, group=self.group
+        )
+        u[self.recv_index] = recv_buf

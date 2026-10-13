@@ -56,6 +56,10 @@ class TaskDivision:
         """Return whether current process is responsible for task i"""
         return self.i_start <= i < self.i_stop
 
+    def belongs(self, j_proc: int, i: np.ndarray) -> np.ndarray:
+        """Whether each index in `i` belongs to process `j_proc`."""
+        return (i >= self.n_prev[j_proc]) & (i < self.n_prev[j_proc + 1])
+
 
 class TaskDivisionCustom(TaskDivision):
     """Customized division of a number of tasks over a process group."""
