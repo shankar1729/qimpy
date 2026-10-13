@@ -145,7 +145,7 @@ class Geometry(TreeNode):
         mesh: Mesh | dict | None = None,
         contacts: dict[str, Optional[dict]],
         cfl: float = 0.4,
-        vk_eps2: float = 0.0,
+        epsilon_sq: float = 0.0,
         compile: bool = False,
         save_rho: bool = False,
         save_terms: bool = False,
@@ -166,10 +166,10 @@ class Geometry(TreeNode):
             ``{I_set: <current>}`` a current source (with optional ``vD``).
         cfl
             :yaml:`CFL number for the explicit step (dt = cfl * inradius / vmax).`
-        vk_eps2
-            :yaml:`Venkatakrishnan threshold in field^2 units (0 = pure smooth limiter).`
-            Set to ~(mesh-scale variation)^2 to stop limiting smooth/low-amplitude
-            data and recover strict linearity preservation.
+        epsilon_sq
+            :yaml:`Flux-squared threshold on flux limiter.`
+            Default of 0 yields a pure smooth limiter. Set to ~(mesh-scale variation)^2
+            to not limit smooth variations and recover strict linearity preservation.
         compile
             :yaml:`torch.compile the limited reconstruction (fuses the per-step
             limiter kernels).` ~3x faster steps on GPU at the cost of a one-time
@@ -182,7 +182,7 @@ class Geometry(TreeNode):
         self.contacts = contacts
         self.save_rho = save_rho
         self.save_terms = save_terms
-        self._vk_eps2 = float(vk_eps2)
+        self.epsilon_sq = float(epsilon_sq)
 
         self._mpi = self.group.size() > 1
         bounds = self.mesh.partition_cells(self.group)
@@ -336,40 +336,15 @@ class Geometry(TreeNode):
             and not has_ee
         )
 
-        # Optionally fuse the per-step kernels with torch.compile.  Serial: compile
-        # the whole spatial RHS (reconstruction + limiter + flux scatter + boundary)
-        # so the flux glue fuses into the reconstruction graph and the kernel-launch
-        # overhead collapses.  MPI: shapes are dynamic (owned-edge gathers), so only
-        # the reconstruction is compiled.
-        self._faces_fn = self._faces
-        self._srhs_fn = self._spatial_rhs
+        # Compile the face limiter which involves several elemntwise operations:
         if compile:
-            # This workload is kernel-launch- and bandwidth-bound (a long chain of
-            # small elementwise ops). Benchmarked on a T4: "max-autotune" (kernel
-            # fusion + tuning) is fastest; "reduce-overhead" (CUDA graphs) is a touch
-            # slower here because the RK2 stages feed changing inputs, so the
-            # cudagraph input copies offset the launch-overhead savings. Override
-            # with QIMPY_COMPILE_MODE if a workload benefits from a different mode.
             mode = os.environ.get("QIMPY_COMPILE_MODE", "max-autotune")
-            # Whole-RHS compilation is fastest when the working set fits; at
-            # device-scale Cartesian (K*nf*Nk state ~ GB) Inductor's extra
-            # buffers OOM small cards, so compile only the limiter hotspot
-            # (85% of the step) there.  Threshold via QIMPY_COMPILE_WHOLE_GB.
-            whole_gb = float(os.environ.get("QIMPY_COMPILE_WHOLE_GB", "1.0"))
-            state_gb = self.K * self._nf * self.Nk * 8 / 2**30
-            try:
-                if self._mpi:
-                    self._faces_fn = torch.compile(self._faces, mode=mode)
-                elif state_gb <= whole_gb:
-                    self._srhs_fn = torch.compile(self._spatial_rhs, mode=mode)
-                else:
-                    self._limited_faces = torch.compile(self._limited_faces, mode=mode)
-                    log.info(
-                        f"compile: limiter-only (face state {state_gb:.1f} GB >"
-                        f" {whole_gb:.1f} GB whole-RHS threshold)"
-                    )
-            except Exception:  # older torch / no backend -> eager
-                self._faces_fn, self._srhs_fn = self._faces, self._spatial_rhs
+            if mode == "jit-script":
+                self._face_limiter = torch.jit.script(_face_limiter)
+            else:
+                self._face_limiter = torch.compile(_face_limiter, mode=mode)
+        else:
+            self._face_limiter = _face_limiter  # eager mode
 
         vmax = float(v.norm(dim=1).max())
         dt_local = float(cfl) * float(geom.inradius.min()) / max(vmax, 1e-300)
@@ -489,30 +464,6 @@ class Geometry(TreeNode):
                     _Contact(name=nm, idx=ci, cur=cur, kind="fixed", ghost=ghost)
                 )
 
-    def _limited_faces(
-        self, uc: torch.Tensor, u: torch.Tensor, nbr: torch.Tensor, recon: torch.Tensor
-    ) -> torch.Tensor:
-        """Venkatakrishnan-limited face values for a subset of cells with values `uc`,
-        where `u` is the full data, `nbr` is the neighbor list and `recon` is the
-        fused gradient->face operator. Limiter function applied per face is:
-            phi = (D1^2 + 2 D1 d + e) / (D1^2 + D1 d + 2 d^2 + e),  e = vk_eps2,
-        where d = u_face - u, and D1 is the same-sign headroom to the u differences."""
-        du = u[nbr] - uc[:, None]
-        d = recon @ du
-        # Compute limiter (in [0, 1]) for the gradients on each face:
-        lo, hi = du.aminmax(dim=1, keepdim=True)
-        lo.clip_(max=0.0)
-        hi.clip_(min=0.0)
-        D1 = torch.where(d >= 0, hi, lo)
-        e = self._vk_eps2
-        common = D1.square() + e
-        dD1 = d * D1
-        phi = (common + 2 * dD1) / (common + dD1 + 2 * d.square())
-        phi.nan_to_num_(1.0)  # Handle possible NANs from d underflow
-        phi.clamp_(max=1.0)
-        limiter = phi.amin(dim=1, keepdim=True)
-        return uc[:, None] + limiter * d
-
     def _faces(self, u: torch.Tensor) -> torch.Tensor:
         """Reconstructed face values, (K, n_face, Nk). Serial reconstructs every
         cell; under decomposition only the rows this rank needs (owned + 1-ring)
@@ -525,7 +476,9 @@ class Geometry(TreeNode):
         chunk = self._faces_chunk_size
         for lo in range(0, len(idx), chunk):
             ci = idx[lo : lo + chunk]
-            uf[ci] = self._limited_faces(u[ci], u, g.nbr[ci], g.recon[ci])
+            uf[ci] = self._face_limiter(
+                u[ci], u, g.nbr[ci], g.recon[ci], self.epsilon_sq
+            )
         return uf
 
     def _exterior(self, uMb: torch.Tensor, t: float) -> torch.Tensor:
@@ -582,7 +535,7 @@ class Geometry(TreeNode):
     def _spatial_rhs(self, u: torch.Tensor, t: float) -> torch.Tensor:
         g = self.geom
         self.material.constrain(u)
-        uf = self._faces_fn(u).reshape(-1, self.Nk)  # (K*3, Nk)
+        uf = self._faces(u).reshape(-1, self.Nk)  # (K*3, Nk)
         dudt = torch.zeros_like(u)
         e = self._eloc  # owned-incident edges
         eL = g.eL if e is None else g.eL[e]
@@ -610,7 +563,7 @@ class Geometry(TreeNode):
         watch = StopWatch("Geometry.rho_dot")
         if self._decomp is not None:
             self._decomp.exchange(rho)  # fill halo ghost rows
-        out = self._srhs_fn(rho, t)  # spatial RHS (fused)
+        out = self._spatial_rhs(rho, t)
         watch.stop()
         if self.collision_enabled and not self._skip_collision:
             lo, hi = self._own_start, self._own_stop
@@ -855,3 +808,31 @@ class Geometry(TreeNode):
         if self._do_flux:
             self._stash_flux = []
         return saved
+
+
+def _face_limiter(
+    uc: torch.Tensor,
+    u: torch.Tensor,
+    nbr: torch.Tensor,
+    recon: torch.Tensor,
+    epsilon_sq: float,
+) -> torch.Tensor:
+    """Venkatakrishnan-limited face values for a subset of cells with values `uc`,
+    where `u` is the full data, `nbr` is the neighbor list and `recon` is the
+    fused gradient->face operator. Limiter function applied per face is:
+        phi = (D1^2 + 2 D1 d + epsilon^2) / (D1^2 + D1 d + 2 d^2 + epsilon^2),
+    where d = u_face - u, and D1 is the same-sign headroom to the u differences."""
+    du = u[nbr] - uc[:, None]
+    d = recon @ du
+    # Compute limiter (in [0, 1]) for the gradients on each face:
+    lo, hi = du.aminmax(dim=1, keepdim=True)
+    lo.clip_(max=0.0)
+    hi.clip_(min=0.0)
+    D1 = torch.where(d >= 0, hi, lo)
+    common = D1.square() + epsilon_sq
+    dD1 = d * D1
+    phi = (common + 2 * dD1) / (common + dD1 + 2 * d.square())
+    phi.nan_to_num_(1.0)  # Handle possible NANs from d underflow
+    phi.clamp_(max=1.0)
+    limiter = phi.amin(dim=1, keepdim=True)
+    return uc[:, None] + limiter * d
