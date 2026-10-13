@@ -159,6 +159,15 @@ class Mesh(TreeNode):
         return make_adjacency(cell_to_vertex)
 
     @cached_property
+    def cell_adjacency_edge(self) -> csr_array:
+        """Adjacency matrix of cells that share an edge."""
+        _, interior, _ = self.edge_maps
+        cell_pairs = interior[..., 0]
+        i_cell, j_cell = np.vstack((cell_pairs, cell_pairs[:, ::-1])).T  # both orders
+        n_cells = len(self.cells)
+        return csr_array((np.ones_like(i_cell), (i_cell, j_cell)), (n_cells, n_cells))
+
+    @cached_property
     def edge_maps(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Interior and boundary edges, mapped to cells.
 

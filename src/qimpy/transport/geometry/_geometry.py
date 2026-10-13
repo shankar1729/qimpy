@@ -23,6 +23,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
+from scipy.sparse import csr_array
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -56,16 +57,18 @@ class SpatialDecomp:
         self.start = int(self.offset[self.rank])
         self.stop = int(self.offset[self.rank + 1])
         self.owned = np.arange(self.start, self.stop)
+        adj_vert = mesh.cell_adjacency_vertex
+        adj_edge = mesh.cell_adjacency_edge
 
-        def ring(cells: np.ndarray) -> np.ndarray:
+        def ring(cells: np.ndarray, adj: csr_array) -> np.ndarray:
             """1-ring vertex closure of a set of cells (cells + their neighbours)."""
             v = np.zeros(self.K)
             v[cells] = 1
-            v += mesh.cell_adjacency_vertex @ v
+            v += adj @ v
             return np.where(v)[0]
 
-        ring1 = ring(self.owned)  # cells to reconstruct (owned + 1-ring)
-        ring2 = ring(ring1)  # cells whose u must be current (2-ring)
+        ring1 = ring(self.owned, adj_edge)  # cells to reconstruct (+edge-neighbors)
+        ring2 = ring(ring1, adj_vert)  # cells accessed overall (+vertex-neighbors)
         self.recon_rows = ring1
         ghosts = ring2[np.where((ring2 < self.start) | (ring2 >= self.stop))]
 
@@ -83,7 +86,7 @@ class SpatialDecomp:
                 )
                 # Send the owned cells that other ranks need:
                 owned_q = np.arange(self.offset[q], self.offset[q + 1])
-                ring2_q = ring(ring(owned_q))
+                ring2_q = ring(ring(owned_q, adj_edge), adj_vert)
                 need_q = ring2_q[
                     np.where(
                         (ring2_q < self.offset[q]) | (ring2_q >= self.offset[q + 1])
