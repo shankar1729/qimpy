@@ -57,19 +57,16 @@ class SpatialDecomp:
         self.stop = int(self.offset[self.rank + 1])
         self.owned = np.arange(self.start, self.stop)
 
-        def ring(cells):
+        def ring(cells: np.ndarray) -> np.ndarray:
             """1-ring vertex closure of a set of cells (cells + their neighbours)."""
-            if not cells:
-                return set()
-            return set(cells) | set(
-                nbr_np[np.asarray(sorted(cells), int)].ravel().tolist()
-            )
+            if not len(cells):
+                return np.zeros(0, dtype=int)
+            return np.unique(np.concatenate((cells, nbr_np[cells].ravel())))
 
-        own = set(self.owned.tolist())
-        ring1 = ring(own)  # cells to reconstruct (owned + 1-ring)
+        ring1 = ring(self.owned)  # cells to reconstruct (owned + 1-ring)
         ring2 = ring(ring1)  # cells whose u must be current (2-ring)
-        self.recon_rows = np.array(sorted(ring1), int)
-        ghosts = np.array(sorted(ring2 - own), int)
+        self.recon_rows = ring1
+        ghosts = ring2[np.where((ring2 < self.start) | (ring2 >= self.stop))]
 
         # Plan communications:
         recv: list[np.ndarray] = []
@@ -84,13 +81,14 @@ class SpatialDecomp:
                     ghosts[(ghosts >= self.offset[q]) & (ghosts < self.offset[q + 1])]
                 )
                 # Send the owned cells that other ranks need:
-                owned_q = set(range(int(self.offset[q]), int(self.offset[q + 1])))
-                need_q = ring(ring(owned_q)) - owned_q
-                send.append(
-                    self.owned[
-                        np.isin(self.owned, np.fromiter(need_q, int, len(need_q)))
-                    ]
-                )
+                owned_q = np.arange(self.offset[q], self.offset[q + 1])
+                ring2_q = ring(ring(owned_q))
+                need_q = ring2_q[
+                    np.where(
+                        (ring2_q < self.offset[q]) | (ring2_q >= self.offset[q + 1])
+                    )
+                ]
+                send.append(self.owned[np.isin(self.owned, need_q)])
         self.recv_index = torch.from_numpy(np.concatenate(recv)).to(rc.device)
         self.send_index = torch.from_numpy(np.concatenate(send)).to(rc.device)
         self.recv_counts = [len(idx) for idx in recv]
