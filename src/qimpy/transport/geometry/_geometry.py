@@ -184,18 +184,18 @@ class Geometry(TreeNode):
 
         self._mpi = self.group.size() > 1
         bounds = self.mesh.partition_cells(self.group)
-        g = self.mesh.get_fv_geom(dtype=material.transport_velocity.dtype)
-        self.geom = g
+        geom = self.mesh.get_fv_geom(dtype=material.transport_velocity.dtype)
+        self.geom = geom
         v = material.transport_velocity  # (Nk, 2)
         self.Nk = v.shape[0]
-        self.K = int(g.area.shape[0])
-        self._nf = int(g.recon.shape[1])  # faces/cell: 3 (tri) or 2 (1D)
+        self.K = int(geom.area.shape[0])
+        self._nf = int(geom.recon.shape[1])  # faces/cell: 3 (tri) or 2 (1D)
 
         # Spatial decomposition: owned cell block, reconstruction rows (owned +
         # 1-ring), owned-incident edges and the halo exchange (see SpatialDecomp).
         if self._mpi:
             self._decomp = SpatialDecomp(
-                g.nbr.detach().cpu().numpy(), bounds, self.group
+                geom.nbr.detach().cpu().numpy(), bounds, self.group
             )
             self._own_start, self._own_stop = self._decomp.start, self._decomp.stop
             self._R = torch.as_tensor(
@@ -212,21 +212,23 @@ class Geometry(TreeNode):
             self._owned_mask = None
 
         n_cells_mine = self._own_stop - self._own_start
-        self._faces_chunk_size = ceildiv(n_cells_mine * self._nf, g.recon.shape[2])
+        self._faces_chunk_size = ceildiv(n_cells_mine * self._nf, geom.recon.shape[2])
 
         # Precompute velocity-weighted, area-scaled edge operators (constant):
         #   into eL: -a*elen/area_L,  into eR: +a*elen/area_R,  a = v_c.n
-        a_int = g.en @ v.t()  # (Ne, Nk)
-        inv_area = 1 / g.area
+        a_int = geom.en @ v.t()  # (Ne, Nk)
+        inv_area = 1 / geom.area
         self._maskL = a_int > 0
-        self._wL = -a_int * (g.elen * inv_area[g.eL])[:, None]
-        self._wR = a_int * (g.elen * inv_area[g.eR])[:, None]
-        self._a_bnd = g.bn @ v.t()  # (Nb, Nk)
+        self._wL = -a_int * (geom.elen * inv_area[geom.eL])[:, None]
+        self._wR = a_int * (geom.elen * inv_area[geom.eR])[:, None]
+        self._a_bnd = geom.bn @ v.t()  # (Nb, Nk)
         self._maskB = self._a_bnd > 0
-        self._wB = -self._a_bnd * (g.blen * inv_area[g.bcell])[:, None]
+        self._wB = -self._a_bnd * (geom.blen * inv_area[geom.bcell])[:, None]
         # Per-channel density weight; outward number-flux operator per boundary edge.
         self._ncoef = material.get_observables(0.0)[0]  # (Nk,)
-        self._cur_b = (g.blen[:, None] * self._ncoef[None, :]) * self._a_bnd  # (Nb,Nk)
+        self._cur_b = (
+            geom.blen[:, None] * self._ncoef[None, :]
+        ) * self._a_bnd  # (Nb,Nk)
 
         # Face-flux output: fluxes (currents, heat) are emitted on edges as the
         # face-normal flux F = elen * sum_k u_face_k (v_k.n) g_k -- the SAME upwind
@@ -237,9 +239,9 @@ class Geometry(TreeNode):
         self._do_flux = (self._flux_g is not None) and (self._decomp is None)
         if self._do_flux:
             self._a_int = a_int  # (Ne, Nk) interior v.n
-            eLc = g.eL.detach().cpu().numpy()
-            eRc = g.eR.detach().cpu().numpy()
-            bc = g.bcell.detach().cpu().numpy()
+            eLc = geom.eL.detach().cpu().numpy()
+            eRc = geom.eR.detach().cpu().numpy()
+            bc = geom.bcell.detach().cpu().numpy()
             self._edge_cells = np.concatenate(
                 [  # (n_edge, 2), eR=-1 on bnd
                     np.stack([eLc, eRc], 1),
@@ -248,52 +250,26 @@ class Geometry(TreeNode):
             ).astype(np.int64)
             self._edge_normal = np.concatenate(
                 [  # (n_edge, 2) out of first cell
-                    g.en.detach().cpu().numpy(),
-                    g.bn.detach().cpu().numpy(),
+                    geom.en.detach().cpu().numpy(),
+                    geom.bn.detach().cpu().numpy(),
                 ]
             )
             self._edge_len = np.concatenate(
                 [  # (n_edge,)
-                    g.elen.detach().cpu().numpy(),
-                    g.blen.detach().cpu().numpy(),
+                    geom.elen.detach().cpu().numpy(),
+                    geom.blen.detach().cpu().numpy(),
                 ]
             )
             self._stash_flux = []
-        # Deterministic flux assembly (serial): every face of every cell is
-        # exactly one (interior-edge, side) or boundary-edge contribution, so
-        # divergence = fixed-order sum over the cell's _nf face slots of a
-        # concatenated contribution array [wL*uup; wR*uup; wB*uup_b].  This
-        # replaces the atomic index_add_ scatter, whose accumulation order is
-        # nondeterministic on CUDA (repeated evals differed at ~1 ulp).
-        self._slot = None
-        if not self._mpi:
-            Ne = int(g.eL.shape[0])
-            Nb = int(g.bcell.shape[0])
-            slot = torch.full((self.K * self._nf,), -1, dtype=torch.long)
-            eLF = g.eLF.cpu()
-            eRF = g.eRF.cpu()
-            slot[eLF] = torch.arange(Ne)  # side L -> row e
-            slot[eRF] = torch.arange(Ne) + Ne  # side R -> row Ne+e
-            if Nb:
-                slot[g.bF.cpu()] = torch.arange(Nb) + 2 * Ne
-            if int((slot < 0).sum()):
-                raise RuntimeError("deterministic flux slots incomplete")
-            self._slot = slot.view(self.K, self._nf).to(rc.device)
-            # Persistent contribution buffer (fully overwritten every eval;
-            # per-call torch.empty of this GB-scale block fragments small GPUs):
-            self._contrib = torch.empty(
-                2 * Ne + Nb,
-                self.Nk,
-                device=rc.device,
-                dtype=material.transport_velocity.dtype,
-            )
 
         # Restrict per-step work to cells/edges this rank owns (all of them serially).
         lo, hi = self._own_start, self._own_stop
         if self._mpi:
-            own_e = ((g.eL >= lo) & (g.eL < hi)) | ((g.eR >= lo) & (g.eR < hi))
+            own_e = ((geom.eL >= lo) & (geom.eL < hi)) | (
+                (geom.eR >= lo) & (geom.eR < hi)
+            )
             self._eloc = torch.where(own_e)[0]
-            self._bloc = torch.where((g.bcell >= lo) & (g.bcell < hi))[0]
+            self._bloc = torch.where((geom.bcell >= lo) & (geom.bcell < hi))[0]
         else:
             self._eloc = None
             self._bloc = None
@@ -332,10 +308,7 @@ class Geometry(TreeNode):
                 self._dl_A = (U[:, :r] * S[:r]).contiguous()  # (Nk, r)
                 self._dl_B = Vh[:r].T.contiguous()  # (Nk, r)
 
-        # Ballistic short-circuit: when the material's collision+field operator is
-        # identically zero (rates and cyclotron speed both zero) its rho_dot is a
-        # no-op, so skip the per-step call entirely -- it otherwise allocates a
-        # zero tensor and (via the rates check) forces a GPU->CPU sync each step.
+        # Following should be made consistent with the existing observables mechanism
         # ---- dense in-run probe (every probe_interval steps) -------------
         # dt_save is sized by checkpoint cost (rho is ~0.4 GB/frame), so the
         # only V(t) / I(t) record a CLI run leaves behind is one point per
@@ -432,7 +405,7 @@ class Geometry(TreeNode):
                 self._faces_fn, self._srhs_fn = self._faces, self._spatial_rhs
 
         vmax = float(v.norm(dim=1).max())
-        dt_local = float(cfl) * float(g.inradius.min()) / max(vmax, 1e-300)
+        dt_local = float(cfl) * float(geom.inradius.min()) / max(vmax, 1e-300)
         self.dt_max = all_reduce_scalars(dt_local, dist.ReduceOp.MIN, self.group)
 
         rho0 = getattr(material, "rho0", None)
@@ -691,7 +664,7 @@ class Geometry(TreeNode):
         g = self.geom
         u = self._dealias(u)  # de-alias (fused into graph)
         uf = self._faces_fn(u).reshape(-1, self.Nk)  # (K*3, Nk)
-        dudt = None if self._slot is not None else torch.zeros_like(u)
+        dudt = torch.zeros_like(u)
         e = self._eloc  # owned-incident edges
         eL = g.eL if e is None else g.eL[e]
         eR = g.eR if e is None else g.eR[e]
@@ -700,32 +673,6 @@ class Geometry(TreeNode):
         maskL = self._maskL if e is None else self._maskL[e]
         wL = self._wL if e is None else self._wL[e]
         wR = self._wR if e is None else self._wR[e]
-        if self._slot is not None:
-            # Deterministic fixed-order assembly: gather each cell's _nf face
-            # contributions and sum in face order (no atomics).  Contributions
-            # are written in place, chunked over edges: elementwise ops are
-            # chunk-invariant (bit-exact) and the peak transient stays small
-            # (full uup + cat copies OOM device-scale Cartesian on 20 GB).
-            Ne = int(eLF.shape[0])
-            Nb = int(g.bcell.numel())
-            contrib = self._contrib
-            ecs = max(1, int(self._face_budget_gb * (2**30) / max(6 * self.Nk * 8, 1)))
-            for s0 in range(0, Ne, ecs):
-                sl = slice(s0, min(s0 + ecs, Ne))
-                uupc = torch.where(maskL[sl], uf[eLF[sl]], uf[eRF[sl]])
-                torch.mul(wL[sl], uupc, out=contrib[s0 : s0 + uupc.shape[0]])
-                torch.mul(wR[sl], uupc, out=contrib[Ne + s0 : Ne + s0 + uupc.shape[0]])
-                del uupc
-            if Nb:
-                uMb = uf[g.bF]
-                uup_b = torch.where(self._maskB, uMb, self._exterior(uMb, t))
-                torch.mul(self._wB, uup_b, out=contrib[2 * Ne :])
-                del uup_b
-            del uf
-            acc = contrib[self._slot[:, 0]]
-            for f in range(1, self._nf):
-                acc = acc + contrib[self._slot[:, f]]
-            return acc
         uup = torch.where(maskL, uf[eLF], uf[eRF])  # interior upwind trace
         dudt.index_add_(0, eL, wL * uup)
         dudt.index_add_(0, eR, wR * uup)
