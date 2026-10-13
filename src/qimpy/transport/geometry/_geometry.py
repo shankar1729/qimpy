@@ -418,52 +418,6 @@ class Geometry(TreeNode):
         self._reflector = (
             material.get_reflector(g.bn[self._wall]) if wall.size else None
         )
-        # The reflector is linear in the wall trace, so collapse its per-step,
-        # O(M_theta)-Python-loop modal transforms into a single per-edge matrix
-        # applied as one batched matmul. Build it once by reflecting the Nk basis
-        # vectors: refl_mat[e, i, c] = reflector(e_c)[e, i].
-        # Dense (nw, Nk, Nk) reflection matrix collapses the reflector to one matmul.
-        # Measured tradeoff (mixer, A100X-20C): at small Nk the dense matrix is tiny
-        # and either path is fast; at large Nk the dense matmul is BANDWIDTH-bound
-        # (it re-reads nw*Nk^2 every step: 5.4 GB at M_theta=1024 -> 0.019 s/step)
-        # and the vectorized per-step reflector, which touches only the (nw, Nk)
-        # wall trace, is faster (0.015 s/step).  For grid materials dense is
-        # infeasible outright (nw*Nk^2 ~ PB).  Budget via QIMPY_REFL_BUDGET_GB
-        # (default 4 GB) -- large-M modal materials land on the per-step path,
-        # which is the right choice there since its harmonic loop was vectorized.
-        self._refl_mat = None
-        refl_budget = float(os.environ.get("QIMPY_REFL_BUDGET_GB", "4.0")) * 2**30
-        if self._reflector is not None:
-            dense_gb = self._wall.numel() * self.Nk**2 * 8 / 2**30
-            if dense_gb * 2**30 <= refl_budget:
-                nw = self._wall.numel()
-                bn_wall = g.bn[self._wall]
-                eye = torch.eye(self.Nk, device=rc.device, dtype=g.area.dtype)
-                # Build the per-edge matrix in chunks over wall edges into a
-                # preallocated buffer: fully materializing the (Nk, nw, Nk) basis at
-                # once OOMs at large Nk (the matrix itself is nw*Nk^2).  Cap the
-                # transient at ~200 MB.
-                chunk = max(1, int(2.0e8 // (self.Nk * self.Nk * 8)))
-                self._refl_mat = torch.empty(
-                    nw, self.Nk, self.Nk, device=rc.device, dtype=g.area.dtype
-                )
-                for s in range(0, nw, chunk):
-                    cs = min(chunk, nw - s)
-                    refl_c = material.get_reflector(bn_wall[s : s + cs])
-                    basis_c = eye[:, None, :].expand(self.Nk, cs, self.Nk)
-                    self._refl_mat[s : s + cs] = refl_c(basis_c).permute(1, 2, 0)
-                log.info(
-                    f"Wall reflector: dense matrix ({dense_gb:.2f} GB, "
-                    f"{nw} edges x {self.Nk}^2) -> one batched matmul per step"
-                )
-            else:
-                log.info(
-                    f"Wall reflector: PER-STEP apply -- dense matrix would need "
-                    f"{dense_gb:.1f} GB > QIMPY_REFL_BUDGET_GB "
-                    f"({refl_budget / 2 ** 30:.1f} GB). This path is launch-bound "
-                    f"for modal materials at large M_theta; raise the budget if "
-                    f"the dense matrix fits GPU memory."
-                )
 
         def allreduce(x: float) -> float:
             return (
@@ -580,9 +534,7 @@ class Geometry(TreeNode):
         level so the net current equals their target; only inflow channels are
         consumed downstream by the upwind flux."""
         uP = uMb.clone()
-        if self._refl_mat is not None:
-            uP[self._wall] = torch.einsum("eic,ec->ei", self._refl_mat, uMb[self._wall])
-        elif self._reflector is not None:  # sparse reflector (large Nk)
+        if self._reflector is not None:
             uP[self._wall] = self._reflector(uMb[self._wall][None])[0]
         for c in self._contacts:
             if c.kind == "fixed":

@@ -20,6 +20,9 @@ the drift-centred per-cell projection (cartesian).
 
 from __future__ import annotations
 from typing import Callable, Optional, Union
+from dataclasses import dataclass
+import os
+
 import numpy as np
 import torch
 
@@ -579,11 +582,8 @@ class FermiSurface(Material):
         return self.representation.get_contactor(n, **kwargs)
 
     def get_reflector(self, n: torch.Tensor) -> Callable:
-        # Both representations honour `specularity`. (It used to be read by the
-        # modal path only, while Cartesian.get_reflector silently built a fully
-        # specular wall regardless -- so a Cartesian run configured with
-        # specularity < 1 reported diffuse-wall physics it never ran.)
-        return self.representation.get_reflector(n)
+        rep = self.representation
+        return wrap_dense_reflector(rep.get_reflector(n), n, rep.Nk)
 
     def initialize_fields(self, rho, params, patch_id) -> None:
         pass
@@ -600,3 +600,29 @@ class FermiSurface(Material):
         a["r_c"], a["specularity"] = self.r_c, self.specularity
         a["residual_damping"] = bool(self._gamma_res_ee or self._gamma_res_phen)
         return list(a.keys())
+
+
+def wrap_dense_reflector(
+    reflector: Callable[[torch.Tensor], torch.Tensor], n: torch.Tensor, Nk: int
+) -> Callable[[torch.Tensor], torch.Tensor]:
+    """Wrap linear reflection operator with a dense matrix (if memory allows)."""
+    n_wall = len(n)
+    refl_budget = float(os.environ.get("QIMPY_REFL_BUDGET_GB", "4.0")) * 2**30
+    if n_wall * (Nk**2) * 8 <= refl_budget:
+        eye = torch.eye(Nk, device=rc.device, dtype=n.dtype)
+        matrix = torch.empty(n_wall, Nk, Nk, device=rc.device, dtype=n.dtype)
+        for i_basis, basis in enumerate(eye):
+            matrix[..., i_basis] = reflector(basis[None, None, :].expand(1, n_wall, Nk))
+        log.info(f"Wall reflector: dense matrix ({n_wall} edges x {Nk}^2)")
+        return DenseReflector(matrix)
+    else:
+        log.info("Wall reflector: apply per step (dense matrix too large)")
+        return reflector
+
+
+@dataclass
+class DenseReflector:
+    matrix: torch.Tensor
+
+    def __call__(self, rho: torch.Tensor) -> torch.Tensor:
+        return torch.einsum("eic, xec -> xei", self.matrix, rho)
