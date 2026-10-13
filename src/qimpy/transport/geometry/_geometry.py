@@ -31,7 +31,6 @@ import torch.distributed as dist
 from qimpy import rc, log, TreeNode
 from qimpy.io import CheckpointPath, InvalidInputException, CheckpointContext
 from qimpy.mpi import ProcessGrid, all_reduce_scalars
-from qimpy.math import ceildiv
 from qimpy.profiler import StopWatch
 from ..material import Material
 from . import Mesh
@@ -146,6 +145,7 @@ class Geometry(TreeNode):
         contacts: dict[str, Optional[dict]],
         cfl: float = 0.4,
         epsilon_sq: float = 0.0,
+        faces_block_size: int = 0,
         compile: bool = False,
         save_rho: bool = False,
         save_terms: bool = False,
@@ -170,10 +170,14 @@ class Geometry(TreeNode):
             :yaml:`Flux-squared threshold on flux limiter.`
             Default of 0 yields a pure smooth limiter. Set to ~(mesh-scale variation)^2
             to not limit smooth variations and recover strict linearity preservation.
+        faces_block_size
+            :yaml:`Number of faces to process per block in the face flux limiter.`
+            By default, process all the faces together, which is fastest on large-enough
+            GPUs, but consumes more memory. Set to a smaller chunk size to reduce memory
+            footprint, or to speed up on CPUs, where that may help with memory locality.
         compile
-            :yaml:`torch.compile the limited reconstruction (fuses the per-step
-            limiter kernels).` ~3x faster steps on GPU at the cost of a one-time
-            compile; leave off for short runs and the test suite.
+            :yaml:`Whether to compile the face flux limiter kernel.`
+            Speeds up sequential elemntise operations by kernel fusion when possible.
         """
         TreeNode.__init__(self)
         self.material = material
@@ -183,6 +187,7 @@ class Geometry(TreeNode):
         self.save_rho = save_rho
         self.save_terms = save_terms
         self.epsilon_sq = float(epsilon_sq)
+        self.faces_block_size = faces_block_size
 
         self._mpi = self.group.size() > 1
         bounds = self.mesh.partition_cells(self.group)
@@ -210,9 +215,6 @@ class Geometry(TreeNode):
             self._own_start, self._own_stop = 0, self.K
             self._R = None
             self._owned_mask = None
-
-        n_cells_mine = self._own_stop - self._own_start
-        self._faces_chunk_size = ceildiv(n_cells_mine * self._nf, geom.recon.shape[2])
 
         # Precompute velocity-weighted, area-scaled edge operators (constant):
         #   into eL: -a*elen/area_L,  into eR: +a*elen/area_R,  a = v_c.n
@@ -467,15 +469,14 @@ class Geometry(TreeNode):
     def _faces(self, u: torch.Tensor) -> torch.Tensor:
         """Reconstructed face values, (K, n_face, Nk). Serial reconstructs every
         cell; under decomposition only the rows this rank needs (owned + 1-ring)
-        are filled, the rest left zero (their faces are never read).
-        Chunked over cells with `_faces_chunk_size`."""
+        are filled, the rest left zero (their faces are never read)."""
         g = self.geom
         rows = self._R  # None (serial) or owned+1ring
         idx = torch.arange(self.K, device=u.device) if rows is None else rows
         uf = u.new_zeros(self.K, self._nf, self.Nk)
-        chunk = self._faces_chunk_size
-        for lo in range(0, len(idx), chunk):
-            ci = idx[lo : lo + chunk]
+        block_size = self.faces_block_size if self.faces_block_size else len(idx)
+        for lo in range(0, len(idx), block_size):
+            ci = idx[lo : lo + block_size]
             uf[ci] = self._face_limiter(
                 u[ci], u, g.nbr[ci], g.recon[ci], self.epsilon_sq
             )
