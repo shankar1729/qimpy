@@ -400,28 +400,6 @@ class Geometry(TreeNode):
         # the reconstruction is compiled.
         self._faces_fn = self._faces
         self._srhs_fn = self._spatial_rhs
-        # ★ Two reconstruction kernels, and which one wins depends ENTIRELY on
-        # whether Inductor gets to fuse it.  `_limited_faces_slot` accumulates
-        # the neighbour contributions slot by slot and never builds the
-        # (n, Nmax, Nk) tensor; `_limited_faces_gather` builds it and hands it
-        # to a batched gemm.  Measured on the production mixer
-        # (K=1792, Nk=40320, Nmax=16), whole spatial RHS:
-        #     compiled   gather 48.2 ms   slot 28.8 ms   (slot 1.67x FASTER)
-        #     eager      gather 140.6 ms  slot 243.5 ms  (slot 1.73x SLOWER)
-        # so the choice has to follow the compile flag, not be picked once.
-        # QIMPY_LIMITER=gather|slot forces one path, for A/B timing.
-        _lim = os.environ.get("QIMPY_LIMITER", "")
-        self._limited_faces = (
-            self._limited_faces_slot
-            if _lim == "slot"
-            else (
-                self._limited_faces_gather
-                if _lim == "gather"
-                else (
-                    self._limited_faces_slot if compile else self._limited_faces_gather
-                )
-            )
-        )
         if compile:
             # This workload is kernel-launch- and bandwidth-bound (a long chain of
             # small elementwise ops). Benchmarked on a T4: "max-autotune" (kernel
@@ -614,74 +592,14 @@ class Geometry(TreeNode):
                     _Contact(name=nm, idx=ci, cur=cur, kind="fixed", ghost=ghost)
                 )
 
-    def _limited_faces_slot(
+    def _limited_faces(
         self, uc: torch.Tensor, u: torch.Tensor, nbr: torch.Tensor, recon: torch.Tensor
     ) -> torch.Tensor:
-        """Venkatakrishnan-limited face values for a set of cells.
-
-        ``uc`` (n, Nk) cell averages, ``u`` (K, Nk) the full state, ``nbr``
-        (n, Nmax) their vertex-neighbour cell indices, ``recon`` (n, 3, Nmax) the
-        fused gradient->face operator. Smooth (differentiable) limiter -> clean
-        steady-state convergence; per face, with increment d = u_face-u and
-        same-sign headroom D1 (to the neighbor max/min):
+        """Venkatakrishnan-limited face values for a subset of cells with values `uc`,
+        where `u` is the full data, `nbr` is the neighbor list and `recon` is the
+        fused gradient->face operator. Limiter function applied per face is:
             phi = (D1^2 + 2 D1 d + e) / (D1^2 + D1 d + 2 d^2 + e),  e = vk_eps2,
-        capped at 1 (never amplify the LSQ gradient) and min-ed over the 3 faces.
-
-        ★ The neighbour values are accumulated SLOT BY SLOT rather than gathered
-        into an (n, Nmax, Nk) tensor.  That tensor is 9.2 GB at device scale and
-        exists only to be consumed three times (the einsum, amax, amin); summing
-        over the slot index instead needs the same total traffic but never
-        materialises it, and leaves d/hi/lo as one fusable pass.  Measured on the
-        production mixer (K=1792, Nk=40320, Nmax=16): compiled 52.5 -> 18.5 ms,
-        a 2.84x speedup, agreeing with the gathered form to 2.9e-16.
-        ⛔ EAGER it is 87% SLOWER (16 Python iterations, ~5 kernels each) -- this
-        form is only worth it under torch.compile, which is the shipped default.
-        """
-        d = torch.zeros(
-            uc.shape[0], recon.shape[1], uc.shape[1], device=uc.device, dtype=uc.dtype
-        )
-        hi_n = uc
-        lo_n = uc
-        for gi in range(nbr.shape[1]):
-            ung = u[nbr[:, gi]]  # (n, Nk)
-            # ⛔ Accumulate recon * (ung - uc), NOT recon * ung with a single
-            # `- uc sum_g recon` at the end.  The two are algebraically equal,
-            # but the deferred form subtracts two large nearly-equal sums and
-            # loses the cancellation: measured 1.7e-11 relative on the full
-            # rho_dot against 2.9e-16 for this form, which would break the
-            # 1e-12 conservation assertions.  Differencing per slot costs one
-            # extra (n, Nk) subtract and keeps the accuracy of the gathered
-            # einsum exactly.
-            d = d + recon[:, :, gi].unsqueeze(-1) * (ung - uc).unsqueeze(1)
-            hi_n = torch.maximum(hi_n, ung)
-            lo_n = torch.minimum(lo_n, ung)
-        hi = (hi_n - uc)[:, None]  # headroom up   (>= 0)
-        lo = (lo_n - uc)[:, None]  # headroom down (<= 0)
-        D1 = torch.where(d >= 0, hi, lo)  # same sign as d
-        e = self._vk_eps2
-        # Denominator is D1^2 + D1 d + 2 d^2 + e >= 2 d^2 > 0 for d != 0 in exact
-        # arithmetic, but in fp32 it can underflow to a subnormal/zero at locally
-        # flat cells (d a denormal-tiny roundoff with D1 == 0), giving 0/0 = NaN.
-        # Guard on the denominator being a normal float rather than on d != 0:
-        # where it isn't, the cell is flat and the limiter is 1 (no limiting).
-        num = D1 * D1 + 2 * D1 * d + e
-        den = D1 * D1 + D1 * d + 2 * d * d + e
-        phi = torch.where(
-            den > torch.finfo(d.dtype).tiny,
-            (num / den).clamp(max=1.0),
-            torch.ones_like(d),
-        ).amin(1)[
-            :, None
-        ]  # (n, 1, Nk)
-        return uc[:, None] + phi * d
-
-    def _limited_faces_gather(
-        self, uc: torch.Tensor, u: torch.Tensor, nbr: torch.Tensor, recon: torch.Tensor
-    ) -> torch.Tensor:
-        """The same limiter, but gathering (n, Nmax, Nk) and using one batched
-        gemm.  Faster EAGER (140.6 ms vs 243.5 ms for the whole RHS), slower
-        compiled (48.2 vs 28.8) -- selected in __init__ by the compile flag.
-        Agrees with the slot form to 2.9e-16."""
+        where d = u_face - u, and D1 is the same-sign headroom to the u differences."""
         du = u[nbr] - uc[:, None]
         d = recon @ du
         # Compute limiter (in [0, 1]) for the gradients on each face:
