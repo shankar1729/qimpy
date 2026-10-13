@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
+from functools import cached_property
 
 from scipy.spatial import KDTree
 from scipy.sparse import csr_array
@@ -110,7 +111,7 @@ class Mesh(TreeNode):
             try:
                 import pymetis
 
-                adj = self.cell_adjacency()
+                adj = self.cell_adjacency_vertex
                 csr_adj = pymetis.CSRAdjacency(adj.indptr, adj.indices)
                 partition = np.asarray(pymetis.part_graph(size, csr_adj)[1], np.int32)
             except ImportError:
@@ -139,31 +140,27 @@ class Mesh(TreeNode):
             self.cell_permutation = permutation
         else:
             self.cell_permutation = self.cell_permutation[permutation]
+
+        # Invalidate cached maps involving cells:
+        self.__dict__.pop("cell_adjacency_vertex", None)
+        self.__dict__.pop("edge_maps", None)
         return bounds.astype(int)
 
-    def cell_adjacency(self) -> csr_array:
+    @cached_property
+    def cell_adjacency_vertex(self) -> csr_array:
         """Adjacency matrix of cells that share a vertex."""
         cells = self.cells[:, :-1]
-        n_cells = len(cells)
         cell_to_vertex = csr_array(
             (
                 np.ones_like(cells).flatten(),
-                (np.repeat(np.arange(n_cells), cells.shape[1]), cells.flatten()),
+                (np.repeat(np.arange(len(cells)), cells.shape[1]), cells.flatten()),
             ),
         )
-        # Cell-cell adjacency = cell-vertex @ vertex-cell adjacency
-        adjacency_coo = (cell_to_vertex @ cell_to_vertex.T).tocoo()
-        row = adjacency_coo.row
-        col = adjacency_coo.col
-        sel = np.where(row != col)[0]  # ignore trivial diagonals
-        adjacency = csr_array(
-            (np.ones_like(sel), (row[sel], col[sel])), (n_cells, n_cells)
-        )
-        adjacency.sort_indices()
-        return adjacency
+        return make_adjacency(cell_to_vertex)
 
-    def map_edges(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Find interior and boundary edges, and map them to the cells.
+    @cached_property
+    def edge_maps(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Interior and boundary edges, mapped to cells.
 
         Returns
         -------
@@ -263,7 +260,7 @@ class Mesh(TreeNode):
         centroid = cell_vertices.mean(axis=1)
 
         # Identify interior and boundary edges:
-        edges, interior, boundary = self.map_edges()
+        edges, interior, boundary = self.edge_maps
         (kL, fL), (kR, fR) = np.transpose(interior, (1, 2, 0))
         bk, bf, bmark = boundary.T
 
@@ -288,7 +285,7 @@ class Mesh(TreeNode):
             inradius = area / (0.5 * edge_lengths.sum(axis=1))
 
         # Inverse-distance-weighted least-squares gradient operator per cell:
-        adjacency = self.cell_adjacency()
+        adjacency = self.cell_adjacency_vertex
         neighbor_indices = adjacency.indices
         index_ranges = adjacency.indptr
         Nmax = np.diff(index_ranges).max()
@@ -355,3 +352,16 @@ class FVGeom:
     blen: torch.Tensor  #: Boundary edge lengths
     nbr: torch.Tensor  #: Neighbor-indices by cell (n_cells, Nmax)
     recon: torch.Tensor  #: Face-increment  operator (n_cells, 3, Nmax)
+
+
+def make_adjacency(x_to_y: csr_array) -> csr_array:
+    """Construct adjacency matrix of x based on shared property y,
+    given the mapping from x to y."""
+    n_x = x_to_y.shape[0]
+    adjacency_coo = (x_to_y @ x_to_y.T).tocoo()
+    row = adjacency_coo.row
+    col = adjacency_coo.col
+    sel = np.where(row != col)[0]  # ignore trivial diagonals
+    adjacency = csr_array((np.ones_like(sel), (row[sel], col[sel])), (n_x, n_x))
+    adjacency.sort_indices()
+    return adjacency

@@ -46,12 +46,12 @@ class SpatialDecomp:
     """
 
     def __init__(
-        self, nbr_np: np.ndarray, bounds: np.ndarray, group: "dist.ProcessGroup"
+        self, mesh: Mesh, bounds: np.ndarray, group: dist.ProcessGroup
     ) -> None:
         self.group = group
         self.size = group.size()
         self.rank = dist.get_rank(group)
-        self.K = nbr_np.shape[0]
+        self.K = len(mesh.cells)
         self.offset = np.asarray(bounds, int)
         self.start = int(self.offset[self.rank])
         self.stop = int(self.offset[self.rank + 1])
@@ -59,9 +59,10 @@ class SpatialDecomp:
 
         def ring(cells: np.ndarray) -> np.ndarray:
             """1-ring vertex closure of a set of cells (cells + their neighbours)."""
-            if not len(cells):
-                return np.zeros(0, dtype=int)
-            return np.unique(np.concatenate((cells, nbr_np[cells].ravel())))
+            v = np.zeros(self.K)
+            v[cells] = 1
+            v += mesh.cell_adjacency_vertex @ v
+            return np.where(v)[0]
 
         ring1 = ring(self.owned)  # cells to reconstruct (owned + 1-ring)
         ring2 = ring(ring1)  # cells whose u must be current (2-ring)
@@ -192,9 +193,7 @@ class Geometry(TreeNode):
         # Spatial decomposition: owned cell block, reconstruction rows (owned +
         # 1-ring), owned-incident edges and the halo exchange (see SpatialDecomp).
         if self._mpi:
-            self._decomp = SpatialDecomp(
-                geom.nbr.detach().cpu().numpy(), bounds, self.group
-            )
+            self._decomp = SpatialDecomp(self.mesh, bounds, self.group)
             self._own_start, self._own_stop = self._decomp.start, self._decomp.stop
             self._R = torch.as_tensor(
                 self._decomp.recon_rows, device=rc.device, dtype=torch.long
