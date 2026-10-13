@@ -33,6 +33,7 @@ from qimpy.mpi import ProcessGrid, all_reduce_scalars
 from qimpy.profiler import StopWatch
 from ..material import Material
 from . import Mesh
+from ...math import ceildiv
 
 
 class SpatialDecomp:
@@ -189,7 +190,6 @@ class Geometry(TreeNode):
         self.Nk = v.shape[0]
         self.K = int(g.area.shape[0])
         self._nf = int(g.recon.shape[1])  # faces/cell: 3 (tri) or 2 (1D)
-        self._face_budget_gb = float(os.environ.get("QIMPY_FACE_BUDGET_GB", "3.0"))
 
         # Spatial decomposition: owned cell block, reconstruction rows (owned +
         # 1-ring), owned-incident edges and the halo exchange (see SpatialDecomp).
@@ -210,6 +210,9 @@ class Geometry(TreeNode):
             self._own_start, self._own_stop = 0, self.K
             self._R = None
             self._owned_mask = None
+
+        n_cells_mine = self._own_stop - self._own_start
+        self._faces_chunk_size = ceildiv(n_cells_mine * self._nf, g.recon.shape[2])
 
         # Precompute velocity-weighted, area-scaled edge operators (constant):
         #   into eL: -a*elen/area_L,  into eR: +a*elen/area_R,  a = v_c.n
@@ -620,33 +623,13 @@ class Geometry(TreeNode):
         """Reconstructed face values, (K, n_face, Nk). Serial reconstructs every
         cell; under decomposition only the rows this rank needs (owned + 1-ring)
         are filled, the rest left zero (their faces are never read).
-
-        Chunked over cells so the peak transient stays within
-        ``_face_budget_gb``.  ``_limited_faces`` no longer materialises the
-        (rows, Nmax, Nk) neighbour tensor, so the budget now bounds the
-        per-slot working set rather than one huge gather; the chunking is kept
-        because the (n, 3, Nk) accumulators still scale with the row count.
-        Small-Nk runs take the single-shot path (chunk >= K)."""
+        Chunked over cells with `_faces_chunk_size`."""
         g = self.geom
         rows = self._R  # None (serial) or owned+1ring
-        n_rows = self.K if rows is None else int(rows.shape[0])
-        per_row = g.nbr.shape[1] * self.Nk * 8  # neighbour-gather bytes/cell
-        chunk = max(1, int(self._face_budget_gb * (2**30) / max(per_row, 1)))
-        if rows is None and chunk >= self.K:
-            return self._limited_faces(u, u, g.nbr, g.recon)  # single-shot
         idx = torch.arange(self.K, device=u.device) if rows is None else rows
-        # Serial chunked path fills every row -> skip the (K, nf, Nk) zero-fill
-        # (3.6 GB/eval at device-scale Cartesian); MPI leaves unused rows unread
-        # but must keep them defined, so retain zeros there.
-        if rows is None:
-            if not hasattr(self, "_uf_buf"):
-                self._uf_buf = torch.empty(
-                    self.K, self._nf, self.Nk, device=u.device, dtype=u.dtype
-                )
-            uf = self._uf_buf
-        else:
-            uf = u.new_zeros(self.K, self._nf, self.Nk)
-        for lo in range(0, n_rows, chunk):
+        uf = u.new_zeros(self.K, self._nf, self.Nk)
+        chunk = self._faces_chunk_size
+        for lo in range(0, len(idx), chunk):
             ci = idx[lo : lo + chunk]
             uf[ci] = self._limited_faces(u[ci], u, g.nbr[ci], g.recon[ci])
         return uf
