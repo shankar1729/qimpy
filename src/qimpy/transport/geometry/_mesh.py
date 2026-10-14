@@ -254,11 +254,12 @@ class Mesh(TreeNode):
         )
         return np.unique(lowest_equivalent_index, return_inverse=True)[1]
 
-    def get_fv_geom(self, *, dtype: torch.dtype = torch.float64) -> FVGeom:
+    def get_fv_geom(
+        self, cell_division: CellDivision, *, dtype: torch.dtype = torch.float64
+    ) -> FVGeom:
         """Initialize finite-volume parameters for mesh."""
         # Compute cell area and centroid:
-        cells = self.cells[:, :-1]  # ignore region ID
-        n_cells = len(cells)
+        cells = self.cells[cell_division.global_index, :-1]  # local, ignore region ID
         cell_vertices = self.vertices[cells]
         if self.is1D:
             area = np.linalg.norm(cell_vertices[:, 1] - cell_vertices[:, 0], axis=-1)
@@ -268,9 +269,20 @@ class Mesh(TreeNode):
                 raise ValueError("Areas must be positive (counter-clockwise triangles)")
         centroid = cell_vertices.mean(axis=1)
 
-        # Identify interior and boundary edges:
+        # Identify interior and boundary edges, and map to local cell indices:
         edges, interior, boundary = self.edge_maps
+        edges = edges[cell_division.global_index]  # local cells only (with padding)
+        interior[..., 0] = cell_division.local_index[interior[..., 0]]
+        boundary[:, 0] = cell_division.local_index[boundary[:, 0]]
+
+        # Filter interior edges so that both cells local and at least one owned:
+        interior = interior[(interior[..., 0] >= 0).all(axis=1)]  # both cells local
+        interior = interior[(interior[..., 0] < cell_division.n_mine).any(axis=1)]
         (kL, fL), (kR, fR) = np.transpose(interior, (1, 2, 0))
+
+        # Filter boundary edges so that corresponding cell is owned:
+        sel = (boundary[:, 0] >= 0) & (boundary[:, 0] < cell_division.n_mine)
+        boundary = boundary[sel]
         bk, bf, bmark = boundary.T
 
         # Compute edge properties:
@@ -295,14 +307,15 @@ class Mesh(TreeNode):
 
         # Inverse-distance-weighted least-squares gradient operator per cell:
         adjacency = self.cell_adjacency_vertex
-        neighbor_indices = adjacency.indices
-        index_ranges = adjacency.indptr
+        neighbor_indices = cell_division.local_index[adjacency.indices]  # local index
+        index_ranges = adjacency.indptr  # but index ranges by global index
         Nmax = np.diff(index_ranges).max()
-        nbr = np.arange(n_cells)[:, None].repeat(Nmax, axis=1)  # pad slots with self
-        grad_op = np.zeros((n_cells, 2, Nmax))
+        n_cells_recon = cell_division.n_recon
+        nbr = np.arange(n_cells_recon)[:, None].repeat(Nmax, axis=1)  # pad with self
+        grad_op = np.zeros((n_cells_recon, 2, Nmax))
         Nmin = 1 if self.is1D else 2
-        for i in range(n_cells):
-            js = neighbor_indices[index_ranges[i] : index_ranges[i + 1]]
+        for i, i_global in enumerate(cell_division.global_index[:n_cells_recon]):
+            js = neighbor_indices[index_ranges[i_global] : index_ranges[i_global + 1]]
             if len(js) < Nmin:
                 continue
             nbr[i, : len(js)] = js
@@ -311,7 +324,7 @@ class Mesh(TreeNode):
             grad_op[i, :, : len(js)] = np.linalg.pinv(w[:, None] * D) * w[None, :]
 
         # Fuse gradient + centroid -> face offsets to a single matrix multiply:
-        recon = np.einsum("kfx, kxg -> kfg", edge_offset, grad_op)
+        recon = np.einsum("kfx, kxg -> kfg", edge_offset[:n_cells_recon], grad_op)
 
         def t(a, long=False):
             return torch.tensor(
@@ -395,8 +408,22 @@ class CellDivision(TaskDivisionCustom):
         owned = np.arange(self.i_start, self.i_stop)
         ring1 = ring(owned, adj_edge)  # cells to reconstruct (+edge-neighbors)
         ring2 = ring(ring1, adj_vert)  # cells accessed overall (+vertex-neighbors)
-        self.recon_rows = ring1
-        ghosts = ring2[~self.belongs(self.i_proc, ring2)]
+        ghosts = ring2[~self.belongs(self.i_proc, ring2)]  # global indices from others
+        self.n_recon = len(ring1)  # number of local cells to reconstruct
+
+        # Collect global cell indices of owned, ring1 and ring2 on current process
+        ring1_only = ring1[~np.isin(ring1, owned)]
+        ring2_only = ring2[~np.isin(ring2, ring1)]
+        self.global_index = np.concatenate((owned, ring1_only, ring2_only))
+
+        # Inverse map from all global cell indices to local ones (-1 for untouched ones)
+        self.local_index = np.full(self.n_tot, -1)
+        self.local_index[self.global_index] = np.arange(len(ring2))
+
+        # import sys
+        # np.set_printoptions(threshold=sys.maxsize)
+        # print(self.i_proc, local_index[ghosts])
+        # exit()
 
         # Plan communications:
         recv: list[np.ndarray] = []
@@ -407,12 +434,12 @@ class CellDivision(TaskDivisionCustom):
                 send.append(np.empty(0, dtype=int))
             else:
                 # Receive each ghost from its owning rank:
-                recv.append(ghosts[self.belongs(j_proc, ghosts)])
+                recv.append(self.local_index[ghosts[self.belongs(j_proc, ghosts)]])
                 # Send the owned cells that other ranks need:
                 owned_q = np.arange(self.n_prev[j_proc], self.n_prev[j_proc + 1])
                 ring2_q = ring(ring(owned_q, adj_edge), adj_vert)
                 ghost_q = ring2_q[~self.belongs(j_proc, ring2_q)]
-                send.append(owned[np.isin(owned, ghost_q)])
+                send.append(self.local_index[owned[np.isin(owned, ghost_q)]])
         self.recv_index = torch.from_numpy(np.concatenate(recv)).to(rc.device)
         self.send_index = torch.from_numpy(np.concatenate(send)).to(rc.device)
         self.recv_counts = [len(idx) for idx in recv]

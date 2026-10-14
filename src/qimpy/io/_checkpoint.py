@@ -221,7 +221,7 @@ class CheckpointPath(NamedTuple):
     ) -> Any:
         """Create dataset with `name` within current checkpoint path."""
         assert self.checkpoint is not None
-        self.checkpoint.create_dataset(
+        return self.checkpoint.create_dataset(
             "/".join((self.path, name)), shape, dtype, **kwargs
         )
 

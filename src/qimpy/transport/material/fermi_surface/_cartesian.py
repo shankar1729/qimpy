@@ -782,6 +782,7 @@ class Cartesian(KRepresentation):
         """Full local fields from the drifted-heated frame recovery of f = f0 + df:
         [density, energy_density, temperature, chemical_potential, velocity_x,
         velocity_y], (K, 6), physical (phase-space weight wk included)."""
+        self.check_envelope(rho)
         df_lab = rho.reshape(-1, self.Nk)
         C = df_lab.shape[0]
         w = self.wk
