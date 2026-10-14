@@ -1,27 +1,7 @@
-"""Cell-centered 2nd-order finite-volume transport on an unstructured triangle mesh.
-
-One cell average per triangle per momentum channel, ``u: (K, Nk)``. MUSCL
-reconstruction (least-squares cell gradient, Venkatakrishnan limited) feeds a
-scalar per-channel upwind flux ``F_c = (v_c.n) u_upwind`` -- each delta-k channel
-streams with its own Fermi velocity, so the upwind side of each edge is fixed by
-sign(v_c.n). Walls/contacts supply the exterior trace via the (reused)
-FermiSurface reflector/contactor; collisions come from the material. Time
-stepping is plain RK2 (see _time_evolution).
-
-Boundary conditions: reflective walls, fixed-voltage/drift contacts, floating
-(zero-current) probes and current sources (per-step scalar level solve), and
-periodic faces paired through the mesh lattice. A METIS spatial decomposition
-splits cells across the ``r`` comm with a thin halo exchange (FermiSurface
-couples k-channels, so k is never split); see :class:`SpatialDecomp` below.
-
-All velocity-independent per-edge weights are precomputed once, so a step is just
-one limited-reconstruction pass, two gathers, and three scatters.
-"""
-
 from __future__ import annotations
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Callable
 
 import numpy as np
 import torch
@@ -35,33 +15,8 @@ from ..material import Material
 from . import Mesh
 
 
-@dataclass
-class _Contact:
-    """One boundary contact. ``fixed`` holds a prescribed ghost; a feedback
-    contact (``floating`` probe or ``current`` source) solves a scalar level
-    each evaluation so its net current hits ``target`` (0 for floating)."""
-
-    name: str
-    idx: torch.Tensor  # boundary-edge indices of this contact
-    cur: torch.Tensor  # (Nsel, Nk) outward number-flux operator
-    kind: str = "fixed"
-    ghost: Optional[torch.Tensor] = None  # fixed: prescribed exterior trace
-    unit: Optional[torch.Tensor] = None  # feedback: ghost per unit level
-    drift: Optional[torch.Tensor] = None  # feedback: prescribed drift part
-    cur_out: Optional[torch.Tensor] = None  # feedback: outflow-only flux op
-    den: float = 1.0  # feedback: inflow capacity / level
-    base: float = 0.0  # feedback: drift inflow current
-    target: float = 0.0  # feedback: desired net current
-    level: float = 0.0  # feedback: last solved level
-    cur_in: Optional[torch.Tensor] = None  # feedback(nonlinear): inflow-only flux op
-    bn: Optional[torch.Tensor] = None  # feedback(nonlinear): boundary normals
-    vD: float = 0.0  # feedback: contact drift velocity
-    nonlinear: bool = False  # feedback: full-FD Newton (vs affine)
-    hmu: float = 1e-3  # feedback(nonlinear): Newton FD step in dmu
-
-
 class Geometry(TreeNode):
-    """Cell-centered finite-volume geometry on an external triangle mesh."""
+    """Cell-centered finite-volume geometry on a 1D/2D `Mesh`."""
 
     def __init__(
         self,
@@ -109,7 +64,6 @@ class Geometry(TreeNode):
         self.material = material
         self.add_child("mesh", Mesh, mesh, checkpoint_in)
         self.group = process_grid.get_group("r")
-        self.contacts = contacts
         self.save_rho = save_rho
         self.save_terms = save_terms
         self.epsilon_sq = float(epsilon_sq)
@@ -172,8 +126,8 @@ class Geometry(TreeNode):
             )
             self._stash_flux = []
 
-        # Restrict per-step work to cells/edges this rank owns (all of them serially).
-        self._setup_boundary(material)
+        self._setup_boundary(material, contacts)
+        self.collision_enabled = True
 
         # Following should be made consistent with the existing observables mechanism
         # ---- dense in-run probe (every probe_interval steps) -------------
@@ -220,22 +174,6 @@ class Geometry(TreeNode):
                 f"{self.probe_interval} steps -> {self.probe_file}"
             )
 
-        # Operator-splitting support: TimeEvolution suppresses the collision
-        # during the streaming stages when collision_interval > 1, and applies
-        # it separately over the longer sub-step via collision_dot below.
-        self.collision_enabled = True
-        rm = getattr(material, "rates_modal", None)
-        ks = getattr(material, "k_speed", 0.0)
-        has_ee = hasattr(
-            material, "ee_scattering"
-        )  # microscopic e-e: NOT in rates_modal
-        self._skip_collision = bool(
-            rm is not None
-            and float(rm.abs().sum()) == 0.0
-            and float(ks) == 0.0
-            and not has_ee
-        )
-
         # Compile the face limiter which involves several elemntwise operations:
         if compile:
             mode = os.environ.get("QIMPY_COMPILE_MODE", "max-autotune")
@@ -262,8 +200,8 @@ class Geometry(TreeNode):
             )
             if tuple(self._u.shape) != (self.K, self.Nk):
                 raise InvalidInputException(
-                    f"checkpoint rho shape {tuple(self._u.shape)} != (K, Nk) ="
-                    f" ({self.K}, {self.Nk}): k-representation config (n_k /"
+                    f"checkpoint rho shape {tuple(self._u.shape)} does not"
+                    f" match({self.K}, {self.Nk}): k-representation config (n_k /"
                     f" circular / annulus_xi) must match the checkpoint"
                 )
         elif rho0 is not None:
@@ -274,88 +212,35 @@ class Geometry(TreeNode):
         self._stash_terms = []  # per-frame (4, K_own, Nr*dim): [a, lin, quad, cub]
         self.material.initialize_fields(self._u, {}, id(self))
 
-    def _setup_boundary(self, material: Material) -> None:
-        """Group boundary edges by marker into a wall (reflector) set and one
-        contact object per parametrized marker; unparametrized markers reflect.
+    @dataclass
+    class Contact:
+        """Contact boundary conditions, along with the edges they apply to."""
 
-        Under decomposition each rank keeps only the boundary edges on its owned
-        cells; a feedback contact's capacity (``den``/``base``) is summed across
-        ranks so every rank solves the same global level."""
+        indices: torch.Tensor  #: boundary-edge indices of this contact
+        flux_operator: torch.Tensor  #: outward number-flux operator (len(indices), Nk)
+        contactor: Callable[[float], torch.Tensor]  #: material-specific contact
+
+    def _setup_boundary(self, material: Material, contacts: dict[str, dict]) -> None:
+        """Group boundary edges by marker into a wall (reflector) set and one
+        contact object per parametrized marker; unparametrized markers reflect."""
         g = self.geom
         names = self.mesh.boundary_names
-
-        def allreduce(x: float) -> float:
-            return (
-                all_reduce_scalars(x, dist.ReduceOp.SUM, self.group) if self._mpi else x
-            )
-
         edge_used = torch.full(
             (len(g.bmark),), False, device=rc.device, dtype=torch.bool
         )
-        self._contacts: list[_Contact] = []
-        for name, params in self.contacts.items():
+        self.contacts: dict[str, Geometry.Contact] = {}
+        for name, params in contacts.items():
             if params is None:
                 continue
             if name not in names:
                 continue
-            sel = torch.where(g.bmark == names.index(name))[0]
-            edge_used[sel] = True
-            cur = self._cur_b[sel]  # (Nsel, Nk) (maybe empty)
-            params = dict(params)
-            floating = bool(params.pop("floating", False))
-            i_set = params.pop("I_set", None)
-            # nonlinear: for feedback (I_set/floating) contacts it selects the
-            # Newton-on-exact-FD level solve; for fixed contacts it passes
-            # through to the representation's contactor (exact reservoir vs its
-            # linearization).  None = each contactor's own default.
-            nl_key = params.pop("nonlinear", None)
-            nonlinear = bool(nl_key)
-            vD = float(params.get("vD", 0.0))
-            if floating or (i_set is not None):
-                # Feedback ghost is affine in dmu: g(dmu) = dmu*unit + drift, so the
-                # unit is d(ghost)/d(dmu).  Take it as the LINEAR slope from a small
-                # dmu: exact for the (linear-in-dmu) delta-k contactor, and the correct
-                # df0/dmu for the Cartesian full-f Fermi-Dirac -- where dmu=1 would
-                # saturate the FD and inject current into the inert empty high-energy
-                # tail instead of the Fermi surface (no drive at all).
-                bn_sel = g.bn[sel]
-                eps = 0.1 * float(getattr(material, "T_temp", 1.0))
-                unit = material.get_contactor(bn_sel, dmu=eps)(0.0) / eps
-                drift = (
-                    material.get_contactor(bn_sel, vD=vD)(0.0)
-                    if vD
-                    else torch.zeros_like(unit)
-                )
-                cur_in = torch.where(self._a_bnd[sel] < 0, cur, torch.zeros_like(cur))
-                cur_out = torch.where(self._a_bnd[sel] > 0, cur, torch.zeros_like(cur))
-                den = allreduce(float(-(cur_in * unit).sum()))  # global inflow capacity
-                base = allreduce(float((cur_in * drift).sum()))  # global drift inflow
-                self._contacts.append(
-                    _Contact(
-                        name=name,
-                        idx=sel,
-                        cur=cur,
-                        kind="current",
-                        unit=unit,
-                        drift=drift,
-                        cur_out=cur_out,
-                        den=(den if abs(den) > 1e-300 else 1e-300),
-                        base=base,
-                        target=(0.0 if floating else float(i_set)),
-                        cur_in=cur_in,
-                        bn=bn_sel,
-                        vD=vD,
-                        nonlinear=nonlinear,
-                        hmu=0.01 * float(getattr(material, "T_temp", 1.0)),
-                    )
-                )
-            else:
-                if nl_key is not None:
-                    params["nonlinear"] = bool(nl_key)
-                ghost = material.get_contactor(g.bn[sel], **params)(0.0)
-                self._contacts.append(
-                    _Contact(name=name, idx=sel, cur=cur, kind="fixed", ghost=ghost)
-                )
+            indices = torch.where(g.bmark == names.index(name))[0]
+            n = g.bn[indices]
+            flux_operator = self._cur_b[indices]
+            self.contacts[name] = Geometry.Contact(
+                indices, flux_operator, material.get_contactor(n, **params)
+            )
+            edge_used[indices] = True
 
         # Mark all boundary edges not in a contact as reflecting:
         self._wall = torch.where(~edge_used)[0]
@@ -365,9 +250,7 @@ class Geometry(TreeNode):
             self._reflector = None
 
     def _faces(self, u: torch.Tensor) -> torch.Tensor:
-        """Reconstructed face values, (K, n_face, Nk). Serial reconstructs every
-        cell; under decomposition only the rows this rank needs (owned + 1-ring)
-        are filled, the rest left zero (their faces are never read)."""
+        """Reconstruct face values, (K, n_face, Nk)."""
         g = self.geom
         n_recon = self.cell_division.n_recon
         uf = u.new_zeros(n_recon, self._nf, self.Nk)
@@ -378,57 +261,6 @@ class Geometry(TreeNode):
             )
         return uf
 
-    def _exterior(self, uMb: torch.Tensor, t: float) -> torch.Tensor:
-        """Exterior ghost at boundary edges: reflector on walls, prescribed or
-        feedback-solved contactor on contacts. Feedback contacts solve a scalar
-        level so the net current equals their target; only inflow channels are
-        consumed downstream by the upwind flux."""
-        uP = uMb.clone()
-        if self._reflector is not None:
-            uP[self._wall] = self._reflector(uMb[self._wall][None])[0]
-        for c in self._contacts:
-            if c.kind == "fixed":
-                uP[c.idx] = c.ghost.to(uP)
-            else:
-                # Feedback: solve the contact level so the net current hits target.
-                # I_net = num_out + inflow(ghost); num_out is the interior outflow.
-                num = float((c.cur_out * uMb[c.idx]).sum())
-                if self._mpi:
-                    num = all_reduce_scalars(num, dist.ReduceOp.SUM, self.group)
-                if c.nonlinear:
-                    # Full physical contact: ghost is the exact Pauli-bounded Fermi-
-                    # Dirac deviation FD(mu0+dmu)-f0, NONLINEAR in dmu.  Newton-solve
-                    # dmu (warm-started from last step) so I_net(dmu)=target -- captures
-                    # the contact nonlinearity the affine linear-response feedback drops.
-                    dmu = c.level
-                    for _ in range(8):
-                        inflow = self.material.get_contactor(c.bn, dmu=dmu, vD=c.vD)(
-                            0.0
-                        )
-                        i0 = float((c.cur_in * inflow).sum())
-                        gh = self.material.get_contactor(
-                            c.bn, dmu=dmu + c.hmu, vD=c.vD
-                        )(0.0)
-                        ih = float((c.cur_in * gh).sum())
-                        if self._mpi:
-                            i0 = all_reduce_scalars(i0, dist.ReduceOp.SUM, self.group)
-                            ih = all_reduce_scalars(ih, dist.ReduceOp.SUM, self.group)
-                        dIdmu = (ih - i0) / c.hmu
-                        if abs(dIdmu) < 1e-300:
-                            break
-                        d = (num + i0 - c.target) / dIdmu
-                        dmu = dmu - d
-                        if abs(d) <= 1e-6 * (abs(dmu) + c.hmu):
-                            break
-                    c.level = dmu
-                    uP[c.idx] = self.material.get_contactor(c.bn, dmu=dmu, vD=c.vD)(
-                        0.0
-                    ).to(uP)
-                else:
-                    c.level = (num + c.base - c.target) / c.den
-                    uP[c.idx] = (c.level * c.unit + c.drift).to(uP)
-        return uP
-
     def _spatial_rhs(self, u: torch.Tensor, t: float) -> torch.Tensor:
         g = self.geom
         self.material.constrain(u)
@@ -438,10 +270,15 @@ class Geometry(TreeNode):
         dudt.index_add_(0, g.eL, self._wL * uup)
         dudt.index_add_(0, g.eR, self._wR * uup)
         if g.bcell.numel():
-            uMb = uf[g.bF]
-            uup_b = torch.where(self._maskB, uMb, self._exterior(uMb, t))
-            wbu = self._wB * uup_b
-            dudt.index_add_(0, g.bcell, wbu)
+            ub = uf[g.bF]
+            # Apply reflections and contacts:
+            ub_in = ub.detach().clone()
+            if self._reflector is not None:
+                ub_in[self._wall] = self._reflector(ub[self._wall][None])[0]
+            for contact in self.contacts.values():
+                ub_in[contact.indices] = contact.contactor(t)
+            # Propagate incoming modes from boundary to relevant cells:
+            dudt.index_add_(0, g.bcell, self._wB * torch.where(self._maskB, ub, ub_in))
         return dudt
 
     def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
@@ -451,23 +288,17 @@ class Geometry(TreeNode):
         out = self._spatial_rhs(rho, t)
         watch.stop()
         n_mine = self.cell_division.n_mine
-        if self.collision_enabled and not self._skip_collision:
+        if self.collision_enabled:
             out[:n_mine] += self.material.rho_dot(rho[:n_mine], t, id(self))
         out[n_mine:].zero_()  # mask out ghost zhones
         return out
 
-    def collision_dot(self, rho: torch.Tensor) -> torch.Tensor:
+    def collision_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         """The material collision term ALONE, with no spatial RHS.
-
-        Used by operator splitting (``collision_interval > 1``).  The collision
-        is local to a cell, so unlike :meth:`rho_dot` this needs no halo exchange.
-        """
+        Used by operator splitting (``collision_interval > 1``)."""
         out = torch.zeros_like(rho)
-        if not self._skip_collision:
-            lo, hi = self._own_start, self._own_stop
-            out[lo:hi] = self.material.rho_dot(rho[lo:hi], 0.0, id(self))
-        if self._owned_mask is not None:
-            out = out * self._owned_mask
+        n_mine = self.cell_division.n_mine
+        out[:n_mine] += self.material.rho_dot(rho[:n_mine], t, id(self))
         return out
 
     @property
