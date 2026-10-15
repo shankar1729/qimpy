@@ -12,6 +12,7 @@ variables MASTER_ADDR and MASTER_PORT. None of these environment variables are r
 from typing import NamedTuple
 from itertools import groupby
 from operator import itemgetter
+import warnings
 import socket
 import datetime
 import time
@@ -52,6 +53,7 @@ t_start: float = time.time()  #: Start time used for `clock` (set by `init`)
 # Set reasonable pre-init defaults for torch:
 torch.set_default_dtype(torch.double)
 torch.set_num_threads(1)  # to prevent overcommit between MPI processes
+warnings.filterwarnings("ignore", message=".*Sparse CSR tensor support*")
 
 # Declare type mappings from torch to numpy:
 np_type: dict[torch.dtype, type] = {

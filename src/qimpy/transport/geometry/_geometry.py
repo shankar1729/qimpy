@@ -78,9 +78,19 @@ class Geometry(TreeNode):
         #   into eL: -a*elen/area_L,  into eR: +a*elen/area_R,  a = v_c.n
         a_int = geom.en @ v.t()  # (Ne, Nk)
         inv_area = 1 / geom.area
-        self._maskL = a_int > 0
-        self._wL = -a_int * (geom.elen * inv_area[geom.eL])[:, None]
-        self._wR = a_int * (geom.elen * inv_area[geom.eR])[:, None]
+        maskL = a_int > 0
+        wL = -a_int * (geom.elen * inv_area[geom.eL])[:, None]
+        wR = a_int * (geom.elen * inv_area[geom.eR])[:, None]
+        ik = torch.arange(self.Nk, device=rc.device)
+        idx_in = self.Nk * torch.where(maskL, geom.eLF[:, None], geom.eRF[:, None]) + ik
+        idx_out = self.Nk * torch.cat((geom.eL, geom.eR))[:, None] + ik
+        n_recon = self.cell_division.n_recon
+        self.interior_advect_mat = torch.sparse_coo_tensor(
+            indices=torch.stack((idx_out.flatten(), idx_in.flatten().tile(2))),
+            values=torch.cat((wL.flatten(), wR.flatten())),
+            size=(len(geom.area) * self.Nk, n_recon * self._nf * self.Nk),
+        ).to_sparse_csr()
+
         self._a_bnd = geom.bn @ v.t()  # (Nb, Nk)
         self._maskB = self._a_bnd > 0
         self._wB = -self._a_bnd * (geom.blen * inv_area[geom.bcell])[:, None]
@@ -97,7 +107,6 @@ class Geometry(TreeNode):
         self._flux_indices = material.get_flux_indices()
         self._do_flux = self._flux_indices and (self.cell_division is None)
         if self._do_flux:
-            self._a_int = a_int  # (Ne, Nk) interior v.n
             eLc = geom.eL.detach().cpu().numpy()
             eRc = geom.eR.detach().cpu().numpy()
             bc = geom.bcell.detach().cpu().numpy()
@@ -133,14 +142,13 @@ class Geometry(TreeNode):
             i_region_all[self.cell_division.global_index[:n_mine]] % n_regions
         ).to(rc.device)
         w_tot = torch.zeros(n_regions, dtype=w_cells.dtype, device=rc.device)
-        print(n_regions, i_region)
         w_tot.index_add_(0, i_region, w_cells)
         dist.all_reduce(w_tot, group=self.group)
         self.probe_mat_cell = torch.sparse_coo_tensor(
             indices=torch.stack((i_region, torch.arange(n_mine, device=rc.device))),
             values=w_cells / w_tot[i_region],
             size=(n_regions, n_mine),
-        )  # multiply this by per-cell observables to get region averages
+        ).to_sparse_csr()  # multiply by per-cell observables to get region averages
 
         # Compile the face limiter which involves several elemntwise operations:
         if compile:
@@ -233,10 +241,7 @@ class Geometry(TreeNode):
         g = self.geom
         self.material.constrain(u)
         uf = self._faces(u).reshape(-1, self.Nk)  # (K*3, Nk)
-        dudt = torch.zeros_like(u)
-        uup = torch.where(self._maskL, uf[g.eLF], uf[g.eRF])  # interior upwind trace
-        dudt.index_add_(0, g.eL, self._wL * uup)
-        dudt.index_add_(0, g.eR, self._wR * uup)
+        dudt = (self.interior_advect_mat @ uf.view(-1)).view(-1, self.Nk)
         if g.bcell.numel():
             ub = uf[g.bF]
             # Apply reflections and contacts:

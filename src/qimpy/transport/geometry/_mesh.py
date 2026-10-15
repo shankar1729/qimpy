@@ -420,11 +420,6 @@ class CellDivision(TaskDivisionCustom):
         self.local_index = np.full(self.n_tot, -1)
         self.local_index[self.global_index] = np.arange(len(ring2))
 
-        # import sys
-        # np.set_printoptions(threshold=sys.maxsize)
-        # print(self.i_proc, local_index[ghosts])
-        # exit()
-
         # Plan communications:
         recv: list[np.ndarray] = []
         send: list[np.ndarray] = []
