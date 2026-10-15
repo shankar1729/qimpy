@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os
-from dataclasses import dataclass
-from typing import Optional, Callable
+from dataclasses import dataclass, field
+from typing import Callable
 
 import numpy as np
 import torch
@@ -23,7 +23,7 @@ class Geometry(TreeNode):
         *,
         material: Material,
         mesh: Mesh | dict | None = None,
-        contacts: dict[str, Optional[dict]],
+        contacts: dict[str, dict],
         cfl: float = 0.4,
         epsilon_sq: float = 0.0,
         faces_block_size: int = 0,
@@ -121,7 +121,6 @@ class Geometry(TreeNode):
                     geom.blen.detach().cpu().numpy(),
                 ]
             )
-            self._stash_flux = []
 
         self._setup_boundary(material, contacts)
         self.collision_enabled = True
@@ -205,7 +204,7 @@ class Geometry(TreeNode):
             self._u = rho0.flatten().to(rc.device, v.dtype)[None, :].repeat(self.K, 1)
         else:
             self._u = torch.zeros(self.K, self.Nk, device=rc.device, dtype=v.dtype)
-        self._stash_t, self._stash_i, self._stash_obs = [], [], []
+        self.stash = Geometry.Stash()
         self.material.initialize_fields(self._u, {}, id(self))
 
     @dataclass
@@ -378,13 +377,22 @@ class Geometry(TreeNode):
         """Self-adjusting level of each feedback contact, from the last evaluation."""
         return {c.name: c.level for c in self._contacts if c.kind != "fixed"}
 
+    @dataclass
+    class Stash:
+        """Stash for observables (and related) that are collated into checkpoints."""
+
+        i_step: list[int] = field(default_factory=list)
+        t: list[float] = field(default_factory=list)
+        observables: list[torch.Tensor] = field(default_factory=list)
+        flux: list[torch.Tensor] = field(default_factory=list)
+
     def update_stash(self, i_step: int, t: float) -> None:
         """Stash observables (and related) for output in next checkpoint."""
         u_own = self._u[: self.cell_division.n_mine]
-        obs = self.material.measure_observables(u_own, t)
-        self._stash_i.append(i_step)
-        self._stash_t.append(t)
-        self._stash_obs.append(obs.detach().cpu())
+        obserables = self.material.measure_observables(u_own, t)
+        self.stash.i_step.append(i_step)
+        self.stash.t.append(t)
+        self.stash.observables.append(obserables.detach().cpu())
         if self._do_flux:
             # Face-normal fluxes on every edge, from the upwind face trace.
             uf = self._faces(self._u).reshape(-1, self.Nk)
@@ -396,7 +404,7 @@ class Geometry(TreeNode):
             Fi = g.elen[None, :] * (flux_g @ (uup_i * self._a_int).t())  # (Nflux, Ne)
             Fb = g.blen[None, :] * (flux_g @ (uup_b * self._a_bnd).t())  # (Nflux, Nb)
             F = torch.cat([Fi, Fb], dim=1).t()  # (n_edge, Nflux)
-            self._stash_flux.append(F.detach().cpu())
+            self.stash.flux.append(F.detach().cpu())
         self.material.update_stash(u_own, self.cell_division)
 
     def _save_checkpoint(
@@ -410,17 +418,19 @@ class Geometry(TreeNode):
             cp_path.write("flux_indices", np.array(self._flux_indices)),
             cp_path.write_str("contact_names", ",".join(self.contacts.keys())),
             cp_path.write_str("observable_names", ",".join(names)),
-            cp_path.write("t", np.array(self._stash_t)),
-            cp_path.write("i_step", np.array(self._stash_i)),
+            cp_path.write("t", np.array(self.stash.t)),
+            cp_path.write("i_step", np.array(self.stash.i_step)),
         ]
-        n_stash = len(self._stash_t)
+        n_stash = len(self.stash.t)
         dset = cp_path.create_dataset(
             "observables",
             (n_stash, self.cell_division.n_tot, len(names)),
             np.float64,
         )
         checkpoint.write_slice(
-            dset, (0, self.cell_division.i_start, 0), torch.stack(self._stash_obs)
+            dset,
+            (0, self.cell_division.i_start, 0),
+            torch.stack(self.stash.observables),
         )
         if self._do_flux and n_stash:
             # Flux observables live on edges: geometry + face-normal flux per frame.
@@ -434,7 +444,7 @@ class Geometry(TreeNode):
             dset = cp_path.create_dataset(
                 "edge_flux", (n_stash, n_edge, len(self._flux_indices)), np.float64
             )
-            checkpoint.write_slice(dset, (0, 0, 0), torch.stack(self._stash_flux))
+            checkpoint.write_slice(dset, (0, 0, 0), torch.stack(self.stash.flux))
         if self.save_rho:
             # Raw per-cell state (n_cells, n_channels), for exact restart /
             # steady-state warm start. Each rank writes its owned cell block.
@@ -444,9 +454,7 @@ class Geometry(TreeNode):
             )
             checkpoint.write_slice(dset, (self.cell_division.i_start, 0), u_own)
             saved.append("rho")
-        self._stash_t, self._stash_i, self._stash_obs = [], [], []
-        if self._do_flux:
-            self._stash_flux = []
+        self.stash = Geometry.Stash()
         return saved
 
 
