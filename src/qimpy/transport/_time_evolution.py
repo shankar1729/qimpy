@@ -85,8 +85,7 @@ class TimeEvolution(TreeNode):
             corresponding to the number of collated steps.
         integrator
             :yaml:`Integrator for time-stepping: RK2, RK4 or SSPRK3.`
-            SSPRK3 is the 3-stage strong-stability-preserving Runge-Kutta
-            scheme, in Shu-Osher form.
+            SSPRK3 is 3-stage strong-stability-preserving RK3 (Shu-Osher form).
         collision_fuse
             :yaml:`Merge adjacent half-kicks across Strang windows.`
             Halves the number of collision applies per window. Note the merged
@@ -520,13 +519,11 @@ class TimeEvolution(TreeNode):
             k4 = geometry.rho_dot(rho0 + dt * k3, t + dt)
             geometry.rho = rho0 + (dt / 6.0) * (k1 + 2 * (k2 + k3) + k4)
         elif self.integrator == "SSPRK3":
-            # Shu-Osher form: every stage is a convex combination of
-            # forward-Euler steps.
+            # Shu-Osher form: each stage is a convex combination of forward-Euler steps:
             rho1 = rho0 + dt * geometry.rho_dot(rho0, t)
             rho2 = 0.75 * rho0 + 0.25 * (rho1 + dt * geometry.rho_dot(rho1, t + dt))
-            geometry.rho = (1.0 / 3.0) * rho0 + (2.0 / 3.0) * (
-                rho2 + dt * geometry.rho_dot(rho2, t + 0.5 * dt)
-            )
+            rho3 = rho2 + dt * geometry.rho_dot(rho2, t + 0.5 * dt)
+            geometry.rho = (1.0 / 3.0) * rho0 + (2.0 / 3.0) * rho3
         else:
             raise KeyError(f"Unrecognized integrator = {self.integrator}")
 
