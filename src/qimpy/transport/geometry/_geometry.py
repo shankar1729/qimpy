@@ -138,7 +138,7 @@ class Geometry(TreeNode):
         dist.all_reduce(w_tot, group=self.group)
         self.probe_mat_cell = torch.sparse_coo_tensor(
             indices=torch.stack((i_region, torch.arange(n_mine, device=rc.device))),
-            values=w_cells / w_tot,
+            values=w_cells / w_tot[i_region],
             size=(n_regions, n_mine),
         )  # multiply this by per-cell observables to get region averages
 

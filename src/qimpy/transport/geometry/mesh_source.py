@@ -87,7 +87,8 @@ class Rect(TreeNode):
         Ly: float,
         Nx: int,
         Ny: int,
-        contacts: dict[str, tuple[float, float, float]],
+        contacts: dict[str, tuple[float, ...]],
+        regions: dict[str, tuple[float, ...]] | None = None,
         lattice_vectors: list[list[float]] | None = None,
         mesh: geometry.Mesh,
         checkpoint_in: CheckpointPath = CheckpointPath(),
@@ -108,8 +109,12 @@ class Rect(TreeNode):
             :yaml:`Number of intervals to divide the second dimension into.`
         contacts
             :yaml:`Named regions on the rectangle boundary to use as contacts.`
-            Each name is associated with a circle (x0, y0, r): any edges on the
-            boundary with center within this circle is associated to that name.
+            Each name is associated with a circle (x0, y0, r) or axis-aligned
+            ellipse (x0, y0, rx, ry): any edges on the boundary with center
+            within this circle or ellipse is associated to that name.
+        regions
+            :yaml:`Named regions in the interior to use as probes.`
+            Each name is associated with a circle or ellipse as in `contacts`.
         lattice
             :yaml:`Lattice vectors for periodic boundary conditions.`
             If specified, it should be a 2 x 2 matrix with each row corresponding
@@ -150,7 +155,14 @@ class Rect(TreeNode):
             ),
             axis=1,
         ).reshape(-1, 4)
+
+        # Label interior regions if available:
         mesh.region_names = []
+        if regions is not None:
+            cell_centers = mesh.vertices[mesh.cells[:, :-1]].mean(axis=1)
+            for i_region, (region_name, ellipse) in enumerate(regions.items()):
+                mesh.region_names.append(region_name)
+                mesh.cells[within_ellipse(cell_centers, ellipse), -1] = i_region
 
         # Add boundaries and label contacts:
         null_x = np.full(Nx, -1)
@@ -166,10 +178,9 @@ class Rect(TreeNode):
         )
         edge_centers = mesh.vertices[mesh.boundary_edges[:, :-1]].mean(axis=1)
         mesh.boundary_names = []
-        for i_contact, (contact_name, (x0, y0, r)) in enumerate(contacts.items()):
+        for i_contact, (contact_name, ellipse) in enumerate(contacts.items()):
             mesh.boundary_names.append(contact_name)
-            within = np.linalg.norm(edge_centers - (x0, y0), axis=1) <= r
-            mesh.boundary_edges[within, -1] = i_contact
+            mesh.boundary_edges[within_ellipse(edge_centers, ellipse), -1] = i_contact
 
         mesh.lattice_vectors = (
             None if lattice_vectors is None else np.array(lattice_vectors)
@@ -183,6 +194,12 @@ class Rect(TreeNode):
         cp_path.attrs["Nx"] = self.Nx
         cp_path.attrs["Ny"] = self.Ny
         return list(cp_path.attrs.keys())
+
+
+def within_ellipse(points: np.ndarray, ellipse: tuple[float, ...]) -> np.ndarray:
+    center = ellipse[:2]
+    r = ellipse[2:]  # 1 or 2 values, broadcasts to get circle or ellipse
+    return np.linalg.norm((points - center) / r, axis=1) <= 1.0
 
 
 Options: TypeAlias = File | Line | Rect
