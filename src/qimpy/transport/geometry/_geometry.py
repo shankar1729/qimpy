@@ -29,7 +29,6 @@ class Geometry(TreeNode):
         faces_block_size: int = 0,
         compile: bool = False,
         save_rho: bool = False,
-        save_terms: bool = False,
         probe_interval: int = 0,
         probe_file: str = "",
         process_grid: ProcessGrid,
@@ -65,7 +64,6 @@ class Geometry(TreeNode):
         self.add_child("mesh", Mesh, mesh, checkpoint_in)
         self.group = process_grid.get_group("r")
         self.save_rho = save_rho
-        self.save_terms = save_terms
         self.epsilon_sq = float(epsilon_sq)
         self.faces_block_size = faces_block_size
 
@@ -208,7 +206,6 @@ class Geometry(TreeNode):
         else:
             self._u = torch.zeros(self.K, self.Nk, device=rc.device, dtype=v.dtype)
         self._stash_t, self._stash_i, self._stash_obs = [], [], []
-        self._stash_terms = []  # per-frame (4, K_own, Nr*dim): [a, lin, quad, cub]
         self.material.initialize_fields(self._u, {}, id(self))
 
     @dataclass
@@ -382,7 +379,7 @@ class Geometry(TreeNode):
         return {c.name: c.level for c in self._contacts if c.kind != "fixed"}
 
     def update_stash(self, i_step: int, t: float) -> None:
-        # Stash cell-centred scalar fields for this rank's owned cells.
+        """Stash observables (and related) for output in next checkpoint."""
         u_own = self._u[: self.cell_division.n_mine]
         obs = self.material.measure_observables(u_own, t)
         self._stash_i.append(i_step)
@@ -400,26 +397,7 @@ class Geometry(TreeNode):
             Fb = g.blen[None, :] * (flux_g @ (uup_b * self._a_bnd).t())  # (Nflux, Nb)
             F = torch.cat([Fi, Fb], dim=1).t()  # (n_edge, Nflux)
             self._stash_flux.append(F.detach().cpu())
-        if self.save_terms and hasattr(self.material, "ee_scattering"):
-            # Per-(m,l) collision breakdown, computed WARM in the evolution loop
-            # (the same context as the in-run apply) to dodge the cold
-            # standalone-apply slow path. a is the modal distribution; lin/quad/
-            # cub are the linear, quadratic-in-deltaf and cubic-in-deltaf parts
-            # of the e-e operator. All are modal, flattenable to (Nr, dim).
-            with torch.no_grad():
-                a = self.material.to_modes(u_own)  # (K_own, Nr*dim)
-                lin, quad, cub = self.material.ee_scattering.a_dot_breakdown(a)
-                self._stash_terms.append(
-                    torch.stack(
-                        [
-                            a.detach().cpu(),
-                            lin.detach().cpu(),
-                            quad.detach().cpu(),
-                            cub.detach().cpu(),
-                        ],
-                        dim=0,
-                    )
-                )  # (4, K_own, Nr*dim)
+        self.material.update_stash(u_own, self.cell_division)
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
@@ -466,31 +444,7 @@ class Geometry(TreeNode):
             )
             checkpoint.write_slice(dset, (self.cell_division.i_start, 0), u_own)
             saved.append("rho")
-        if self.save_terms and len(self._stash_terms):
-            # Per-(m,l) collision breakdown stacked over saved frames:
-            # (n_stash, 4, K, Nr*dim) with channel order [a, lin, quad, cub].
-            # Reshape the last axis to (Nr, dim) offline for the radial/angular
-            # (l, m) contributions. dim = 2*M_theta+1 (m = -M..M).
-            fs = self.material
-            Nr_m = int(fs.Nr)
-            dim_m = int(fs.angular.dim)
-            n_modal = Nr_m * dim_m
-            # (Nr, dim) as a dataset, NOT attrs -- attrs round-trip into
-            # constructor kwargs on restart and these are not constructor args.
-            cp_path.write("terms_shape", torch.tensor([Nr_m, dim_m], dtype=torch.int64))
-            cp_path.write_str("terms_channels", "a,lin,quad,cub")
-            terms_own = torch.stack(self._stash_terms)  # (n_stash,4,K_own,n_modal)
-            dset = cp_path.create_dataset(
-                "fv_terms",
-                (n_stash, 4, self.cell_division.n_tot, n_modal),
-                terms_own.dtype,
-            )
-            checkpoint.write_slice(
-                dset, (0, 0, self.cell_division.i_start, 0), terms_own
-            )
-            saved.append("fv_terms")
         self._stash_t, self._stash_i, self._stash_obs = [], [], []
-        self._stash_terms = []
         if self._do_flux:
             self._stash_flux = []
         return saved

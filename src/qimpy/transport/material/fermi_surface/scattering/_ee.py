@@ -1,6 +1,6 @@
 """Microscopic e-e collision operator for the FermiSurface material."""
+
 from __future__ import annotations
-from typing import TYPE_CHECKING, Optional
 
 import os
 import time
@@ -9,10 +9,9 @@ import torch
 
 from qimpy import log, rc, TreeNode
 from qimpy.io import CheckpointPath, CheckpointContext, InvalidInputException
+from qimpy.mpi import TaskDivision
+from qimpy.transport import material
 from . import _kernels
-
-if TYPE_CHECKING:
-    from qimpy.transport.material import FermiSurface
 
 
 class EEScattering(TreeNode):
@@ -52,7 +51,7 @@ class EEScattering(TreeNode):
     matrix.
     """
 
-    fermi_surface: FermiSurface
+    fermi_surface: material.FermiSurface
     epsilon_bg: float  #: background dielectric constant
     kappa: float  #: 2D Thomas-Fermi screening wavevector
     m_star: float  #: effective mass
@@ -67,7 +66,7 @@ class EEScattering(TreeNode):
     def __init__(
         self,
         *,
-        fermi_surface: FermiSurface,
+        fermi_surface: material.FermiSurface,
         epsilon_bg: float,
         kappa: float = 0.0,
         g_s: float = 2.0,
@@ -88,6 +87,7 @@ class EEScattering(TreeNode):
         dense_cache_dir: str = "",
         dense_chunk: int = 0,
         recon: str = "auto",
+        save_terms: bool = False,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """
@@ -170,6 +170,11 @@ class EEScattering(TreeNode):
             tuning, and it adapts to M, dtype and CPU-vs-GPU.  All three are
             mathematically identical (agree to float64 roundoff); the choice
             only trades speed.
+        save_terms
+            Save per-(m,l) collision breakdown to checkpoint files.
+            For each time step, saves (a, lin, quad, cub), where a
+            is the modal distribution; lin/quad/cub are the linear,
+            quadratic-in-deltaf and cubic-in-deltaf parts of the e-e operator.
         """
         super().__init__()
         fs = fermi_surface
@@ -196,12 +201,12 @@ class EEScattering(TreeNode):
         self.tol = tol
         self.dense_budget_gb = float(dense_budget_gb)
         self.dense_cache_dir = str(dense_cache_dir) or os.path.expanduser(
-            "~/.cache/qimpy/ee_dense")
+            "~/.cache/qimpy/ee_dense"
+        )
         self.dense_chunk = int(dense_chunk)
         if backend not in ("auto", "dense", "matrix_free"):
             raise InvalidInputException(
-                f"backend must be 'auto', 'dense' or 'matrix_free',"
-                f" got {backend!r}"
+                f"backend must be 'auto', 'dense' or 'matrix_free'," f" got {backend!r}"
             )
         self.backend = backend
         if recon not in ("auto", "gemm", "fft"):
@@ -256,9 +261,8 @@ class EEScattering(TreeNode):
         # needs 32, not 8.  This is a build-time cost only (the apply is
         # unaffected) and the vertices are disk-cached, so it is paid once.
         edge_pts = 32.0 if nonlinear else 8.0
-        nphi_auto = max(6 * M + 2,
-                        int(np.ceil(edge_pts * s / max(t_ratio, 1e-3))))
-        self._n_phi_auto = not n_phi        # was it the library's choice?
+        nphi_auto = max(6 * M + 2, int(np.ceil(edge_pts * s / max(t_ratio, 1e-3))))
+        self._n_phi_auto = not n_phi  # was it the library's choice?
         self.n_phi = n_phi if n_phi else nphi_auto + (nphi_auto % 2)
         self.xi_cut = xi_cut if xi_cut else 10.0
         self.n_alpha = n_alpha if n_alpha else 4096
@@ -278,12 +282,13 @@ class EEScattering(TreeNode):
             n_alpha=self.n_alpha,
         )
         gamma_cf = _kernels.gamma_linear(
-            self.K, m_star=self.m_star, T=T, E_F=self.E_F,
+            self.K,
+            m_star=self.m_star,
+            T=T,
+            E_F=self.E_F,
             g_s=self.g_s,
         )
-        log.info(
-            f"K_2 = {self.K[2]:.4g}, gamma_2 (closed form) = {gamma_cf[2]:.4g}"
-        )
+        log.info(f"K_2 = {self.K[2]:.4g}, gamma_2 (closed form) = {gamma_cf[2]:.4g}")
 
         # ---- Linear rates: closed-form surface (on_shell) or exact shell ----
         if on_shell:
@@ -304,15 +309,15 @@ class EEScattering(TreeNode):
         if gam2 > 0.0:
             # Characteristic transport scales from the m=2 shear rate gamma_2.
             # qimpy works in atomic units; convert to SI transport units:
-            PS = 2.4188843e-5       # a.u. time           -> ps
-            UM = 5.29177211e-5      # a.u. length (Bohr)  -> um
-            UMPS = 2.18769126       # a.u. velocity       -> um/ps
-            MEV = 27211.386         # Hartree -> meV       (= mV for e = 1)
-            UA_UM = 1.25170e8       # a.u. current/length -> uA/um
+            PS = 2.4188843e-5  # a.u. time           -> ps
+            UM = 5.29177211e-5  # a.u. length (Bohr)  -> um
+            UMPS = 2.18769126  # a.u. velocity       -> um/ps
+            MEV = 27211.386  # Hartree -> meV       (= mV for e = 1)
+            UA_UM = 1.25170e8  # a.u. current/length -> uA/um
             tau_ee = 1.0 / gam2
             l_ee = fs.vF * tau_ee
-            v_nl = T / (self.m_star * fs.vF)            # drift where Phi ~ 1
-            j_nl = (fs.kF**2 / (2.0 * np.pi)) * v_nl    # 2D current/width, spin 2
+            v_nl = T / (self.m_star * fs.vF)  # drift where Phi ~ 1
+            j_nl = (fs.kF**2 / (2.0 * np.pi)) * v_nl  # 2D current/width, spin 2
             rule = "  " + "─" * 52
 
             def _row(name: str, sym: str, val: str) -> str:
@@ -361,11 +366,11 @@ class EEScattering(TreeNode):
             Pf = Nr * dim
             N_tri = max(1, Pf**3 // 16)
             citem = 8 if dtype == torch.float32 else 16  # complex build itemsize
-            kernel_bytes = Nr * N_tri * citem            # build accumulator peak
+            kernel_bytes = Nr * N_tri * citem  # build accumulator peak
             nq = 2 * self.n_xi**2 * self.n_phi
-            build_flops = self.n_xi_proj * Pf**3 * nq    # slab-matmul work
-            mem_cap = 512 * 1024**2   # ~0.5 GiB packed-kernel build cap
-            flop_cap = 1.0e13         # ~ build that finishes in <~ a minute
+            build_flops = self.n_xi_proj * Pf**3 * nq  # slab-matmul work
+            mem_cap = 512 * 1024**2  # ~0.5 GiB packed-kernel build cap
+            flop_cap = 1.0e13  # ~ build that finishes in <~ a minute
             if self.backend == "auto":
                 self.backend = (
                     "dense"
@@ -374,8 +379,10 @@ class EEScattering(TreeNode):
                 )
             if self.backend == "dense":
                 self._build_dense_vertices_cached(T)
-                vb = (self._sp_S.numel() * self._sp_S.element_size()
-                      + self._sq_S.numel() * self._sq_S.element_size())
+                vb = (
+                    self._sp_S.numel() * self._sp_S.element_size()
+                    + self._sq_S.numel() * self._sq_S.element_size()
+                )
                 log.info(
                     "Nonlinear e-e operator enabled (dense sparse-symmetric"
                     f" kernel): backend=dense, {self._sp_S.shape[1]} cubic +"
@@ -395,6 +402,9 @@ class EEScattering(TreeNode):
                     f" generator (independent of Nr beyond the psi table),"
                     f" recon={self.recon}"
                 )
+        self.save_terms = save_terms
+        if save_terms:
+            self._stash_terms = []  # per-frame (4, K_own, Nr*dim): [a, lin, quad, cub]
 
     def _radial_galerkin(self, T: float):
         """Shared radial Galerkin machinery for the exact-kinematics path.
@@ -421,9 +431,11 @@ class EEScattering(TreeNode):
             cols = [torch.ones_like(x), x]
             pe, po = 2, 1
             while len(cols) < Nr:
-                cols.append(v ** pe); pe += 2
+                cols.append(v**pe)
+                pe += 2
                 if len(cols) < Nr:
-                    cols.append(v ** po); po += 2
+                    cols.append(v**po)
+                    po += 2
             return torch.stack(cols[:Nr], dim=-1)
 
         psi_coeff = (
@@ -454,7 +466,7 @@ class EEScattering(TreeNode):
         if float(xi_c.abs().max()) >= 0.95 / t_ratio:
             raise InvalidInputException(
                 f"Radial truncation xi_max = {float(xi_c.abs().max()):g} T"
-                f" reaches the band bottom (E_F/T = {1/t_ratio:g});"
+                f" reaches the band bottom (E_F/T = {1 / t_ratio:g});"
                 " reduce xi_max or T"
             )
         # Bare-x Gauss rule with n >= 96: x-block entries of the hybrid Gram
@@ -464,7 +476,8 @@ class EEScattering(TreeNode):
         # x-entries at rho ~ 1.01-1.10.)
         x_fine = torch.tensor(x_span * xg, dtype=torch.float64)
         w_meas = torch.tensor(x_span * xw, dtype=torch.float64) * (
-            0.25 / torch.cosh(x_fine / 2) ** 2 / T)
+            0.25 / torch.cosh(x_fine / 2) ** 2 / T
+        )
 
         def psi_eval(x):
             return _feats(x) @ psi_coeff
@@ -520,10 +533,19 @@ class EEScattering(TreeNode):
 
         def block_norms(n_phi: int) -> torch.Tensor:
             R = _kernels.L_blocks(
-                x_nodes=x_fine, psi_coeff=psi_coeff, m_list=m_chk,
-                kF=fs.kF, m_star=self.m_star, T=T, epsilon_bg=self.epsilon_bg,
-                kappa=self.kappa, well_width=self.well_width,
-                n_xi=self.n_xi, xi_cut=self.xi_cut, n_phi=n_phi, g_s=self.g_s,
+                x_nodes=x_fine,
+                psi_coeff=psi_coeff,
+                m_list=m_chk,
+                kF=fs.kF,
+                m_star=self.m_star,
+                T=T,
+                epsilon_bg=self.epsilon_bg,
+                kappa=self.kappa,
+                well_width=self.well_width,
+                n_xi=self.n_xi,
+                xi_cut=self.xi_cut,
+                n_phi=n_phi,
+                g_s=self.g_s,
             )  # (len(m_chk), n_fine, Nr)
             L = torch.einsum("ij,jf,mfl->mil", Ginv, P, R)  # (len, Nr, Nr)
             return torch.stack([torch.linalg.norm(L[i]) for i in range(len(m_chk))])
@@ -533,30 +555,43 @@ class EEScattering(TreeNode):
             node (xi_1 = 0, the thermal shell) -- enough to resolve the angular
             convergence, which is node-independent, at 1/n_xi_proj of the cost."""
             kin = dict(
-                x_nodes=x_fine[len(x_fine) // 2].reshape(1), psi_coeff=psi_coeff,
-                M=M, kF=fs.kF, m_star=self.m_star, T=T,
-                epsilon_bg=self.epsilon_bg, kappa=self.kappa,
-                well_width=self.well_width, n_xi=self.n_xi,
-                xi_cut=self.xi_cut, n_phi=n_phi, g_s=self.g_s,
+                x_nodes=x_fine[len(x_fine) // 2].reshape(1),
+                psi_coeff=psi_coeff,
+                M=M,
+                kF=fs.kF,
+                m_star=self.m_star,
+                T=T,
+                epsilon_bg=self.epsilon_bg,
+                kappa=self.kappa,
+                well_width=self.well_width,
+                n_xi=self.n_xi,
+                xi_cut=self.xi_cut,
+                n_phi=n_phi,
+                g_s=self.g_s,
             )
             Qc, _ = _kernels.quadratic_kernel_complex(**kin)
             Tc, Tc1, _ = _kernels._cubic_complex(**kin)
-            return torch.stack([torch.linalg.norm(v.reshape(-1).abs().double())
-                                for v in (Qc, Tc, Tc1)])
+            return torch.stack(
+                [torch.linalg.norm(v.reshape(-1).abs().double()) for v in (Qc, Tc, Tc1)]
+            )
 
         n_phi_ref = int(np.ceil(1.5 * self.n_phi))
         parts = {"gamma_m": (block_norms(self.n_phi), block_norms(n_phi_ref))}
         if self.nonlinear:
             parts["vertex"] = (vertex_norms(self.n_phi), vertex_norms(n_phi_ref))
-        moves = {k: ((b - a).abs() / a.clamp_min(1e-300)).max().item()
-                 for k, (a, b) in parts.items()}
+        moves = {
+            k: ((b - a).abs() / a.clamp_min(1e-300)).max().item()
+            for k, (a, b) in parts.items()
+        }
         rel = max(moves.values())
         detail = ", ".join(f"d({k}) = {v:.1e}" for k, v in moves.items())
         if rel > self.tol:
-            msg = (f"e-e quadrature under-resolved -- {detail} when n_phi"
-                   f" {self.n_phi} -> {n_phi_ref} (tol = {self.tol:.0e})."
-                   f" Raise `n_phi`, lower `tol`, or set check_convergence=False"
-                   f" to proceed deliberately.")
+            msg = (
+                f"e-e quadrature under-resolved -- {detail} when n_phi"
+                f" {self.n_phi} -> {n_phi_ref} (tol = {self.tol:.0e})."
+                f" Raise `n_phi`, lower `tol`, or set check_convergence=False"
+                f" to proceed deliberately."
+            )
             # A silently under-resolved NONLINEAR vertex is not a warning-level
             # event: it was measured 17% low on the production mixer and ran for
             # a day as a log line nobody read.  Fail the build -- but ONLY when
@@ -578,8 +613,6 @@ class EEScattering(TreeNode):
         """Exact-kinematics linear blocks, Galerkin in the code's radial basis."""
         fs = self.fermi_surface
         M, Nr = fs.M_theta, fs.Nr
-        t_ratio = T / self.E_F
-        xi_c = fs.radial.xi.to(torch.float64).cpu()
         psi_coeff, x_fine, P, Ginv, _ = self._radial_galerkin(T)
 
         log.info(
@@ -598,7 +631,8 @@ class EEScattering(TreeNode):
             well_width=self.well_width,
             n_xi=self.n_xi,
             xi_cut=self.xi_cut,
-            n_phi=self.n_phi, g_s=self.g_s,
+            n_phi=self.n_phi,
+            g_s=self.g_s,
         )  # (M+1, n_fine, Nr): minus Phi_dot at fine nodes
 
         L_m = torch.einsum("ij,jf,mfl->mil", Ginv, P, R)  # (M+1, Nr, Nr)
@@ -669,7 +703,7 @@ class EEScattering(TreeNode):
             if vecs:
                 Vn = torch.stack(vecs, dim=1)  # (Nr, n_null)
                 Q, _ = torch.linalg.qr(Vn)
-                Pm = (torch.eye(Nr, dtype=torch.float64) - Q @ Q.T)
+                Pm = torch.eye(Nr, dtype=torch.float64) - Q @ Q.T
                 proj[m] = Pm.to(torch.complex128)
                 if m >= 1:  # momentum projector also gates mo = -m
                     proj[-m] = proj[m]
@@ -699,9 +733,18 @@ class EEScattering(TreeNode):
         self._ps = torch.arange(-M, M + 1).to(device)
 
     # tensors produced by _build_dense_vertices; the whole cached payload
-    _DENSE_TENSORS = ("_sp_S", "_sp_p1", "_sp_p2", "_sp_p3", "_sp_mo",
-                      "_sq_S", "_sq_q1", "_sq_q2", "_sq_mo")
-    _DENSE_CACHE_VERSION = 2   # BUMP whenever the vertex math changes
+    _DENSE_TENSORS = (
+        "_sp_S",
+        "_sp_p1",
+        "_sp_p2",
+        "_sp_p3",
+        "_sp_mo",
+        "_sq_S",
+        "_sq_q1",
+        "_sq_q2",
+        "_sq_mo",
+    )
+    _DENSE_CACHE_VERSION = 2  # BUMP whenever the vertex math changes
 
     def _dense_cache_key(self, T: float) -> str:
         """Hash of everything the packed vertices depend on.
@@ -720,17 +763,35 @@ class EEScattering(TreeNode):
         the thing it caches, not on a promise to remember.
         """
         import hashlib
+
         fs = self.fermi_surface
         psi_coeff = self._radial_galerkin(T)[0]
         h = hashlib.sha256()
-        h.update(repr((
-            self._DENSE_CACHE_VERSION, float(fs.kF), float(fs.vF),
-            float(self.m_star), float(T), int(fs.M_theta), int(fs.Nr),
-            float(fs.xi_max), float(self.epsilon_bg), float(self.kappa),
-            float(self.well_width), float(self.g_s), int(self.n_alpha),
-            int(self.n_xi), int(self.n_phi), int(self.n_xi_proj),
-            float(self.xi_cut), bool(self.on_shell), str(fs.v.dtype),
-        )).encode())
+        h.update(
+            repr(
+                (
+                    self._DENSE_CACHE_VERSION,
+                    float(fs.kF),
+                    float(fs.vF),
+                    float(self.m_star),
+                    float(T),
+                    int(fs.M_theta),
+                    int(fs.Nr),
+                    float(fs.xi_max),
+                    float(self.epsilon_bg),
+                    float(self.kappa),
+                    float(self.well_width),
+                    float(self.g_s),
+                    int(self.n_alpha),
+                    int(self.n_xi),
+                    int(self.n_phi),
+                    int(self.n_xi_proj),
+                    float(self.xi_cut),
+                    bool(self.on_shell),
+                    str(fs.v.dtype),
+                )
+            ).encode()
+        )
         h.update(psi_coeff.detach().cpu().contiguous().numpy().tobytes())
         # the azimuthal rule itself: captures n_phi, t, AND the grid construction
         beta, wbeta = _kernels._beta_grid(self.n_phi, float(T) / self.E_F)
@@ -756,15 +817,14 @@ class EEScattering(TreeNode):
         path = os.path.join(self.dense_cache_dir, f"{key}.pt")
         if os.path.isfile(path):
             try:
-                blob = torch.load(path, map_location=rc.device,
-                                  weights_only=True)
+                blob = torch.load(path, map_location=rc.device, weights_only=True)
                 for name in self._DENSE_TENSORS:
                     setattr(self, name, blob[name])
                 self._dc_M, self._dc_nh = blob["_dc_M"], blob["_dc_nh"]
-                self._build_harmonic_tables()      # cheap; sets _U/_R/_null_proj
+                self._build_harmonic_tables()  # cheap; sets _U/_R/_null_proj
                 log.info(f"e-e dense vertices loaded from cache {path}")
                 return
-            except Exception as exc:               # corrupt/stale -> rebuild
+            except Exception as exc:  # corrupt/stale -> rebuild
                 log.info(f"e-e dense cache unusable ({exc}); rebuilding")
         t0 = time.time()
         self._build_dense_vertices(T)
@@ -772,11 +832,13 @@ class EEScattering(TreeNode):
             os.makedirs(self.dense_cache_dir, exist_ok=True)
             blob = {n: getattr(self, n) for n in self._DENSE_TENSORS}
             blob["_dc_M"], blob["_dc_nh"] = self._dc_M, self._dc_nh
-            tmp = path + f".tmp{os.getpid()}"      # atomic: never a partial file
+            tmp = path + f".tmp{os.getpid()}"  # atomic: never a partial file
             torch.save(blob, tmp)
             os.replace(tmp, path)
-            log.info(f"e-e dense vertices built in {time.time()-t0:.0f}s,"
-                     f" cached to {path}")
+            log.info(
+                f"e-e dense vertices built in {time.time() - t0:.0f}s,"
+                f" cached to {path}"
+            )
         except Exception as exc:
             log.info(f"e-e dense cache write failed ({exc}); continuing")
 
@@ -819,10 +881,18 @@ class EEScattering(TreeNode):
         # on the GPU (kinematics stay fp64 on host for accuracy).
         wdt = torch.complex64 if fs.v.dtype == torch.float32 else torch.complex128
         kin = dict(
-            M=M, kF=fs.kF, m_star=self.m_star, T=T, epsilon_bg=self.epsilon_bg,
-            kappa=self.kappa, well_width=self.well_width, n_xi=self.n_xi,
-            xi_cut=self.xi_cut, n_phi=self.n_phi,
-            work_dtype=wdt, work_device=device,
+            M=M,
+            kF=fs.kF,
+            m_star=self.m_star,
+            T=T,
+            epsilon_bg=self.epsilon_bg,
+            kappa=self.kappa,
+            well_width=self.well_width,
+            n_xi=self.n_xi,
+            xi_cut=self.xi_cut,
+            n_phi=self.n_phi,
+            work_dtype=wdt,
+            work_device=device,
         )
         pm = (torch.arange(Pflat, device=device) % nh) - M  # m of each leg index
 
@@ -830,7 +900,8 @@ class EEScattering(TreeNode):
         # independent): selection + output truncation + reality (0 <= sum m <= M)
         # AND permutation packing (p1 <= p2 <= p3).
         tri = torch.combinations(
-            torch.arange(Pflat, device=device), r=3, with_replacement=True)
+            torch.arange(Pflat, device=device), r=3, with_replacement=True
+        )
         sm = pm[tri[:, 0]] + pm[tri[:, 1]] + pm[tri[:, 2]]
         keep = (sm >= 0) & (sm <= M)
         tri, sm = tri[keep], sm[keep]
@@ -838,7 +909,8 @@ class EEScattering(TreeNode):
         e1, e2 = (p1 == p2), (p2 == p3)
         mult = torch.where(e1 & e2, 1, torch.where(e1 | e2, 3, 6))
         pr = torch.combinations(
-            torch.arange(Pflat, device=device), r=2, with_replacement=True)
+            torch.arange(Pflat, device=device), r=2, with_replacement=True
+        )
         smq = pm[pr[:, 0]] + pm[pr[:, 1]]
         keepq = (smq >= 0) & (smq <= M)
         pr, smq = pr[keepq], smq[keepq]
@@ -871,15 +943,22 @@ class EEScattering(TreeNode):
         # exactly (verified to roundoff against the cubic_kernel_complex gather).
         for f in range(Nx1):
             s0 = _kernels.cubic_packed_node(
-                x_node=x_fine[f], psi_coeff=psi_coeff,
-                ti=p1, tj=p2, tk=p3, **kin, g_s=self.g_s)
-            Sc += GPc[:, f:f + 1].to(s0.dtype) * s0[None, :]
+                x_node=x_fine[f],
+                psi_coeff=psi_coeff,
+                ti=p1,
+                tj=p2,
+                tk=p3,
+                **kin,
+                g_s=self.g_s,
+            )
+            Sc += GPc[:, f : f + 1].to(s0.dtype) * s0[None, :]
             del s0
             Qc1, _c = _kernels.quadratic_kernel_complex(
-                x_nodes=x_fine[f:f + 1], psi_coeff=psi_coeff, **kin, g_s=self.g_s)
+                x_nodes=x_fine[f : f + 1], psi_coeff=psi_coeff, **kin, g_s=self.g_s
+            )
             Qc1 = Qc1.reshape(Pflat, Pflat)
             q0 = 0.5 * (Qc1[q1, q2] + Qc1[q2, q1])
-            Sq += GPc[:, f:f + 1].to(q0.dtype) * q0[None, :]
+            Sq += GPc[:, f : f + 1].to(q0.dtype) * q0[None, :]
             del Qc1, q0
         # reflection (phi -> -phi) symmetry of the isotropic operator + reality
         # make the complex-harmonic kernel REAL (verified to ~1e-14) -> store real
@@ -919,15 +998,17 @@ class EEScattering(TreeNode):
         chunk = self.dense_chunk
         if chunk <= 0:
             ntrip = int(self._sp_p1.numel() + self._sq_q1.numel())
-            itemsize = self._U.element_size()          # complex: 16 (fp64)
+            itemsize = self._U.element_size()  # complex: 16 (fp64)
             # x3 headroom for the live gather/scatter temporaries
             per = max(1, 3 * int(a4.shape[-2]) * ntrip * itemsize)
-            chunk = max(1, int(self.dense_budget_gb * (2 ** 30) // per))
+            chunk = max(1, int(self.dense_budget_gb * (2**30) // per))
         if chunk >= n:
             return self._apply_dense_core(a4)
         flat = a4.reshape(n, *a4.shape[-2:])
-        out = torch.cat([self._apply_dense_core(flat[i:i + chunk])
-                         for i in range(0, n, chunk)], dim=0)
+        out = torch.cat(
+            [self._apply_dense_core(flat[i : i + chunk]) for i in range(0, n, chunk)],
+            dim=0,
+        )
         return out.reshape(*lead, *out.shape[-2:])
 
     def _apply_dense_core(self, a4: torch.Tensor) -> torch.Tensor:
@@ -951,7 +1032,7 @@ class EEScattering(TreeNode):
         Fhalf.index_add_(-1, self._sq_mo, self._sq_S * vv[..., None, :])
         # assemble full Hermitian Fhat[.., Nr, nh]: mo>=0 direct, mo<0 conjugate:
         Fhat = ahat.new_zeros(*Fhalf.shape[:-1], nh)
-        Fhat[..., M:] = Fhalf                       # mo = 0..M -> idx M..2M
+        Fhat[..., M:] = Fhalf  # mo = 0..M -> idx M..2M
         Fhat[..., :M] = Fhalf[..., 1:].flip(-1).conj()  # mo = -M..-1
         return self._finalize_nonlinear(Fhat)
 
@@ -971,8 +1052,11 @@ class EEScattering(TreeNode):
             # Add the exact cubic + quadratic operator via the selected backend
             # (dense precontracted vertex, or matrix-free quadrature).  The
             # linear part stays in L_coeff above.
-            nl = (self._apply_dense(a4) if self.backend == "dense"
-                  else self._apply_matrix_free(a4))
+            nl = (
+                self._apply_dense(a4)
+                if self.backend == "dense"
+                else self._apply_matrix_free(a4)
+            )
             out = out + nl.to(out.dtype)
         return out.reshape(shape_in)
 
@@ -1012,9 +1096,7 @@ class EEScattering(TreeNode):
         else:
             cub = torch.zeros_like(lin)
             quad = torch.zeros_like(lin)
-        return (lin.reshape(shape_in),
-                quad.reshape(shape_in),
-                cub.reshape(shape_in))
+        return (lin.reshape(shape_in), quad.reshape(shape_in), cub.reshape(shape_in))
 
     def _finalize_nonlinear(self, Fhat: torch.Tensor) -> torch.Tensor:
         """Apply the per-output-harmonic null projection on the binned complex
@@ -1070,9 +1152,16 @@ class EEScattering(TreeNode):
             T, self.E_F, self.n_xi, self.xi_cut, self.n_phi
         )
         kin = dict(
-            T=T, t=t, kF=fs.kF, m_star=self.m_star, epsilon_bg=self.epsilon_bg,
-            kappa=self.kappa, well_width=self.well_width,
-            n_xi=self.n_xi, n_phi=self.n_phi, g_s=self.g_s,
+            T=T,
+            t=t,
+            kF=fs.kF,
+            m_star=self.m_star,
+            epsilon_bg=self.epsilon_bg,
+            kappa=self.kappa,
+            well_width=self.well_width,
+            n_xi=self.n_xi,
+            n_phi=self.n_phi,
+            g_s=self.g_s,
         )
         Nf = len(x_fine)
         ng = self.n_xi * self.n_phi
@@ -1088,8 +1177,18 @@ class EEScattering(TreeNode):
                 x3v = x2[i3]
                 w3v = w2[i3]
                 weight_phase, X4 = _kernels._shell_geometry(
-                    x1v=x1v, X2=X2, k1=k1, k2=k2, x3v=x3v, w2=w2, w3v=w3v,
-                    beta=beta, wbeta=wbeta, cosB=cosB, sinB=sinB, **kin,
+                    x1v=x1v,
+                    X2=X2,
+                    k1=k1,
+                    k2=k2,
+                    x3v=x3v,
+                    w2=w2,
+                    w3v=w3v,
+                    beta=beta,
+                    wbeta=wbeta,
+                    cosB=cosB,
+                    sinB=sinB,
+                    **kin,
                 )
                 for sgn in (+1.0, -1.0):
                     Wk, phi2, phi4 = weight_phase(sgn)  # (n_xi, n_phi)
@@ -1167,9 +1266,9 @@ class EEScattering(TreeNode):
         # complex-harmonic analysis covector: Fhat[mo] = (1/Nout) sum_n
         # out(phi1_n) e^{-i mo phi1_n}, matching the dense binned Fhat[lo, mo]:
         self._mf_phi1 = phi1.to(device)
-        self._mf_expmn = (
-            torch.exp(-1j * phi1[None, :] * ps[:, None]) / Nout
-        ).to(dtype=cdtype, device=device)  # (nh, Nout)
+        self._mf_expmn = (torch.exp(-1j * phi1[None, :] * ps[:, None]) / Nout).to(
+            dtype=cdtype, device=device
+        )  # (nh, Nout)
         # Real (Hermitian) SYNTHESIS of the leg field at the output-angle grid.
         # The modal field is real, so ahat[-m] = conj(ahat[m]); the leg phase
         # e^{i m dphi} preserves this (B[-m] = conj(B[m])) and the reconstructed
@@ -1188,9 +1287,11 @@ class EEScattering(TreeNode):
         cfac[0] = 1.0
         ang = ps_pos[:, None] * phi1[None, :]  # (M+1, Nout)
         self._mf_cos = (cfac[:, None] * torch.cos(ang)).to(
-            dtype=dtype, device=device)  # (M+1, Nout) real
+            dtype=dtype, device=device
+        )  # (M+1, Nout) real
         self._mf_sin = (cfac[:, None] * torch.sin(ang)).to(
-            dtype=dtype, device=device)  # (M+1, Nout) real
+            dtype=dtype, device=device
+        )  # (M+1, Nout) real
         self._mf_ps_pos = ps_pos.to(dtype=dtype, device=device)  # (M+1,) phase
         self._mf_Nout = Nout
         # Only the light harmonic transforms + null projectors -- NOT the dense
@@ -1208,9 +1309,11 @@ class EEScattering(TreeNode):
         cols = [torch.ones_like(x), x]
         pe, po = 2, 1
         while len(cols) < n:
-            cols.append(v ** pe); pe += 2
+            cols.append(v**pe)
+            pe += 2
             if len(cols) < n:
-                cols.append(v ** po); po += 2
+                cols.append(v**po)
+                po += 2
         return torch.stack(cols[:n], dim=-1).to(pc.dtype) @ pc
 
     def _benchmark_recon(self) -> str:
@@ -1234,14 +1337,16 @@ class EEScattering(TreeNode):
             ImB = torch.randn(1, Nf, qb, M + 1, dtype=rdt, device=dev)
 
             def gemm():  # two real (M+1, Nout) synthesis GEMMs
-                return (torch.einsum("...fqm,mn->...nfq", ReB, cos_syn)
-                        - torch.einsum("...fqm,mn->...nfq", ImB, sin_syn))
+                return torch.einsum("...fqm,mn->...nfq", ReB, cos_syn) - torch.einsum(
+                    "...fqm,mn->...nfq", ImB, sin_syn
+                )
 
             def fft():  # half-spectrum irfft on the m >= 0 harmonics
                 spec = torch.zeros(1, Nf, qb, Nfreq, dtype=cdt, device=dev)
                 spec[..., : M + 1] = torch.complex(ReB, ImB)
                 return torch.movedim(
-                    torch.fft.irfft(spec, n=Nout, dim=-1) * Nout, -1, -3)
+                    torch.fft.irfft(spec, n=Nout, dim=-1) * Nout, -1, -3
+                )
 
             def clock(fn, reps=5):
                 fn()  # warm up (allocations, FFT plan, caches)
@@ -1275,8 +1380,10 @@ class EEScattering(TreeNode):
         if chunk >= B:  # fits in one pass -- no loop / concat overhead
             return self._apply_matrix_free_chunk(a4)
         a_flat = a4.reshape(B, Nr, dim)
-        outs = [self._apply_matrix_free_chunk(a_flat[i:i + chunk])
-                for i in range(0, B, chunk)]
+        outs = [
+            self._apply_matrix_free_chunk(a_flat[i : i + chunk])
+            for i in range(0, B, chunk)
+        ]
         return torch.cat(outs, dim=0).reshape(*batch_shape, Nr, dim)
 
     def _apply_matrix_free_chunk(self, a4: torch.Tensor) -> torch.Tensor:
@@ -1314,7 +1421,7 @@ class EEScattering(TreeNode):
         energy-parity selection in the dense path, it is therefore left out.
         """
         fs = self.fermi_surface
-        M, Nr = fs.M_theta, fs.Nr
+        M = fs.M_theta
         cdt = self._U.dtype
         # complex harmonics of the modal field; only the m >= 0 half enters the
         # Hermitian (real) reconstruction:
@@ -1328,10 +1435,14 @@ class EEScattering(TreeNode):
         legs = ("x2", "x3", "x4")  # leg x1 is hoisted out (q-independent)
         psi_r = {leg: self._mf_psi[leg].expand(Nf, nq, -1) for leg in legs}
         weq_q = {leg: self._mf_weq[leg].expand(Nf, nq) for leg in legs}
-        f0_q = {leg: self._mf_f0[leg].expand(Nf, nq)
-                for leg in ("x1", "x2", "x3", "x4")}
-        dphi_q = {"x2": self._mf_dphi2, "x3": self._mf_dphi3.expand(Nf, nq),
-                  "x4": self._mf_dphi4}
+        f0_q = {
+            leg: self._mf_f0[leg].expand(Nf, nq) for leg in ("x1", "x2", "x3", "x4")
+        }
+        dphi_q = {
+            "x2": self._mf_dphi2,
+            "x3": self._mf_dphi3.expand(Nf, nq),
+            "x4": self._mf_dphi4,
+        }
         cos_syn, sin_syn = self._mf_cos, self._mf_sin  # (M+1, Nout) real
         ps_pos = self._mf_ps_pos  # (M+1,) = 0..M
         use_fft = self.recon == "fft"
@@ -1346,14 +1457,13 @@ class EEScattering(TreeNode):
                 spec[..., : M + 1] = torch.complex(ReB, ImB)
                 Phi = torch.fft.irfft(spec, n=Nout, dim=-1) * Nout
                 return torch.movedim(Phi, -1, mv)
-            return (torch.einsum(axes, ReB, cos_syn)
-                    - torch.einsum(axes, ImB, sin_syn))
+            return torch.einsum(axes, ReB, cos_syn) - torch.einsum(axes, ImB, sin_syn)
 
         # ---- leg 1 (output-energy leg): q-independent, dphi1 = 0, build once --
         psi1 = self._mf_psi["x1"][:, 0, :]  # (Nf, Nr) real
         cR1 = torch.einsum("...lm,fl->...fm", aRe, psi1)  # (.., Nf, M+1)
         cI1 = torch.einsum("...lm,fl->...fm", aIm, psi1)
-        spec1 = (ahat.new_zeros(*batch, Nf, Nfreq) if use_fft else None)
+        spec1 = ahat.new_zeros(*batch, Nf, Nfreq) if use_fft else None
         Phi1 = synth(cR1, cI1, spec1, "...fm,mn->...nf", -2)  # (.., Nout, Nf)
         d1 = (self._mf_weq["x1"][:, 0] * Phi1).unsqueeze(-1)  # (.., Nout, Nf, 1)
         f1_all = f0_q["x1"]  # (Nf, nq)
@@ -1370,7 +1480,7 @@ class EEScattering(TreeNode):
         for q0 in range(0, nq, qchunk):
             q1 = min(q0 + qchunk, nq)
             qb = q1 - q0
-            spec = (ahat.new_zeros(*batch, Nf, qb, Nfreq) if use_fft else None)
+            spec = ahat.new_zeros(*batch, Nf, qb, Nfreq) if use_fft else None
             d = []
             for leg in legs:
                 psi_leg = psi_r[leg][:, q0:q1]  # (Nf, qb, Nr)
@@ -1387,18 +1497,43 @@ class EEScattering(TreeNode):
             f2, f3, f4 = (f0_q[leg][:, q0:q1] for leg in legs)
             # cubic (f0-independent) + particle-hole-odd quadratic of (B-F):
             C3 = d1 * d2 * (d3 + d4) - d3 * d4 * (d1 + d2)
-            Q2 = (d1 * d2 * (f3 + f4 - 1.0) + d1 * d3 * (f2 - f4)
-                  + d1 * d4 * (f2 - f3) + d2 * d3 * (f1 - f4)
-                  + d2 * d4 * (f1 - f3) - d3 * d4 * (f1 + f2 - 1.0))
+            Q2 = (
+                d1 * d2 * (f3 + f4 - 1.0)
+                + d1 * d3 * (f2 - f4)
+                + d1 * d4 * (f2 - f3)
+                + d2 * d3 * (f1 - f4)
+                + d2 * d4 * (f1 - f3)
+                - d3 * d4 * (f1 + f2 - 1.0)
+            )
             fdot = fdot + torch.einsum(
-                "...nfq,fq->...nf", C3 + Q2, self._mf_Wk[:, q0:q1])
+                "...nfq,fq->...nf", C3 + Q2, self._mf_Wk[:, q0:q1]
+            )
         # Galerkin-project the output-energy node axis onto radial modes (GPc
         # folds the +conv solver-field scaling); then DFT in phi1 to harmonics:
         out_rad = torch.einsum(
-            "of,...nf->...no", self._mf_GPc, fdot.to(self._mf_GPc.dtype))
+            "of,...nf->...no", self._mf_GPc, fdot.to(self._mf_GPc.dtype)
+        )
         Fhat = torch.einsum("mn,...no->...om", self._mf_expmn, out_rad)
         # SAME per-mo null projection + real fold as the dense path:
         return self._finalize_nonlinear(Fhat)
+
+    def update_stash(self, rho: torch.Tensor, r_division: TaskDivision) -> None:
+        if self.save_terms:
+            self.r_division = r_division
+            with torch.no_grad():
+                a = self.fermi_surface.to_modes(rho)
+                lin, quad, cub = self.a_dot_breakdown(a)
+                self._stash_terms.append(
+                    torch.stack(
+                        [
+                            a.detach().cpu(),
+                            lin.detach().cpu(),
+                            quad.detach().cpu(),
+                            cub.detach().cpu(),
+                        ],
+                        dim=0,
+                    )
+                )
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
@@ -1416,4 +1551,30 @@ class EEScattering(TreeNode):
         attrs["xi_cut"] = self.xi_cut
         attrs["n_phi"] = self.n_phi
         attrs["n_xi_proj"] = self.n_xi_proj
-        return list(attrs.keys())
+        saved = list(attrs.keys())
+        if self.save_terms and len(self._stash_terms):
+            # Per-(m,l) collision breakdown stacked over saved frames:
+            # (n_stash, 4, K, Nr*dim) with channel order [a, lin, quad, cub].
+            # Reshape the last axis to (Nr, dim) offline for the radial/angular
+            # (l, m) contributions. dim = 2*M_theta+1 (m = -M..M).
+            fs = self.fermi_surface
+            Nr_m = int(fs.Nr)
+            dim_m = int(fs.angular.dim)
+            n_modal = Nr_m * dim_m
+            # (Nr, dim) as a dataset, NOT attrs -- attrs round-trip into
+            # constructor kwargs on restart and these are not constructor args.
+            cp_path.write("terms_shape", torch.tensor([Nr_m, dim_m], dtype=torch.int64))
+            cp_path.write_str("terms_channels", "a,lin,quad,cub")
+            terms_own = torch.stack(self._stash_terms)  # (n_stash,4,K_own,n_modal)
+            n_stash = len(terms_own)
+            dset = cp_path.create_dataset(
+                "terms",
+                (n_stash, 4, self.r_division.n_tot, n_modal),
+                terms_own.dtype,
+            )
+            checkpoint, path = cp_path
+            assert checkpoint is not None
+            checkpoint.write_slice(dset, (0, 0, self.r_division.i_start, 0), terms_own)
+            saved.append("terms")
+            self._stash_terms = []
+        return saved

@@ -27,7 +27,7 @@ import numpy as np
 import torch
 
 from qimpy import log, rc, TreeNode
-from qimpy.mpi import ProcessGrid
+from qimpy.mpi import ProcessGrid, TaskDivision
 from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext, InvalidInputException
 from .scattering import EEScattering
@@ -271,6 +271,7 @@ class FermiSurface(Material):
         if isinstance(ee_scattering, dict):
             ee_scattering = dict(ee_scattering)
             local_te = ee_scattering.pop("local_te", None)
+        self.ee_scattering = None
         if (ee_scattering is not None) or checkpoint_in.member("ee_scattering"):
             if np.isfinite(tau_ee):
                 raise InvalidInputException(
@@ -398,7 +399,7 @@ class FermiSurface(Material):
         # The slowest-decaying radial channel is the smallest eigenvalue of its
         # symmetric part -- the correct dissipativity bound, and it keeps the
         # "never over-damps" guarantee without assuming L is exactly symmetric.
-        if hasattr(self, "ee_scattering"):
+        if self.ee_scattering is not None:
             L = self.ee_scattering.L_coeff[c_top].to(torch.float64).cpu()
             ev = torch.linalg.eigvalsh(0.5 * (L + L.transpose(-1, -2)))
             self._gamma_res_ee = max(float(ev.min()), 0.0)
@@ -509,7 +510,7 @@ class FermiSurface(Material):
         (T_e/T)^3 is O(T/E_F)-small).  Phenomenological tau_p/tau_ee are
         user-set constants and are NOT rescaled; cyclotron is magnetic."""
         a_dot = -self.rates_modal * a
-        if hasattr(self, "ee_scattering"):
+        if self.ee_scattering is not None:
             if te is not None and self._ee_ensemble is not None:
                 a_dot = a_dot + self._ee_local_te(a, te)
             else:
@@ -536,7 +537,7 @@ class FermiSurface(Material):
         """
         if getattr(self, "_gamma_max", None) is None:
             g = float(self.rates_modal.max())
-            ee = getattr(self, "ee_scattering", None)
+            ee = self.ee_scattering
             if ee is not None:
                 L = ee.L_coeff
                 Lsym = 0.5 * (L + L.transpose(-1, -2))
@@ -552,7 +553,7 @@ class FermiSurface(Material):
         if (
             self.rates_modal.abs().sum() == 0
             and self.k_speed == 0.0
-            and not hasattr(self, "ee_scattering")
+            and self.ee_scattering is None
         ):
             return torch.zeros_like(rho)  # ballistic, no field
         return self.representation.apply_collision(rho, self._modal_collision)
@@ -582,6 +583,10 @@ class FermiSurface(Material):
 
     def initialize_fields(self, rho, params, patch_id) -> None:
         pass
+
+    def update_stash(self, rho: torch.Tensor, r_division: TaskDivision) -> None:
+        if self.ee_scattering is not None:
+            self.ee_scattering.update_stash(rho, r_division)
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext

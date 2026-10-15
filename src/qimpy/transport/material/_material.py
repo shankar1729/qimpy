@@ -129,6 +129,12 @@ class Material(TreeNode):
             dist.all_reduce(result, group=self.group)
         return result
 
+    def update_stash(self, rho: torch.Tensor, r_division: TaskDivision) -> None:
+        """Override to stash extra objects to output with the next checkpoint.
+        Use real-space division `r_division` to coordinate slices in the checkpoint.
+        `Geometry` already handles this for observables, so this is only for
+        any extra diagnostics not captured in the obersvables list above."""
+
 
 def fermi(E, mu, T):
     return torch.special.expit((mu - E) / T)
