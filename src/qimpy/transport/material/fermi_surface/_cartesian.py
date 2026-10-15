@@ -20,7 +20,7 @@ import torch
 from qimpy import log, rc
 from qimpy.mpi import ProcessGrid
 from qimpy.io import CheckpointPath, InvalidInputException
-from ._representation import KRepresentation, CELL_SCALAR_NAMES, FLUX_NAMES
+from ._representation import KRepresentation
 
 
 class Cartesian(KRepresentation):
@@ -221,7 +221,9 @@ class Cartesian(KRepresentation):
         # Physical BZ phase-space weight: n = spin * int d^2k/(2pi)^2 f  ->  per-k
         # weight spin*dk^2/(2pi)^2.  (Gives n = kF^2/2pi at equilibrium, and makes
         # contact currents physical so I_set is in a.u. current, 20uA=3.02e-3.)
-        self.wk = float(spin) * self.dk_area / (2.0 * np.pi) ** 2
+        self.wk = torch.tensor(
+            spin * self.dk_area / (2.0 * np.pi) ** 2, device=rc.device, dtype=dtype
+        )
         self.k = k
         self.eps_k = (k.square().sum(-1) / (2 * m_star)).to(dtype)
         self.v = (k / m_star).to(dtype)  # (Nk, 2) transport velocity
@@ -769,16 +771,18 @@ class Cartesian(KRepresentation):
                     )
                 self._env_warn_count += 1
 
-    def get_density_weight(self) -> torch.Tensor:
-        return torch.full_like(
-            self.eps_k, self.wk
-        )  # (Nk,) BZ weight -> physical current
+    def get_observable_names(self) -> list[str]:
+        return ["n", "vx", "vy", "e", "Te", "mu"]
 
-    def get_cell_scalar_names(self) -> list[str]:
-        return CELL_SCALAR_NAMES
+    def get_observables(self) -> torch.Tensor:
+        # Used only for the flux, since `measure_observables` overridden below
+        return torch.ones((1, self.Nk), device=rc.device)
+
+    def get_flux_indices(self) -> list[int]:
+        return [0]
 
     @torch.no_grad()
-    def get_cell_scalars(self, rho: torch.Tensor) -> torch.Tensor:
+    def measure_observables(self, rho: torch.Tensor) -> torch.Tensor:
         """Full local fields from the drifted-heated frame recovery of f = f0 + df:
         [density, energy_density, temperature, chemical_potential, velocity_x,
         velocity_y], (K, 6), physical (phase-space weight wk included)."""
@@ -797,20 +801,9 @@ class Cartesian(KRepresentation):
             kD, Te, mu = self._recover_frame(f)
             n = f.sum(-1) * w + self._n_frozen
             E = torch.einsum("ck,k->c", f, self.eps_k) * w + self._E_frozen
-            u = kD / self.m_star  # drift velocity <v>
-            out[lo:hi] = torch.stack([n, E, Te, mu, u[:, 0], u[:, 1]], dim=1)
+            v = kD / self.m_star  # drift velocity
+            out[lo:hi] = torch.stack([n, v[:, 0], v[:, 1], E, Te, mu], dim=1)
         return out
-
-    def get_flux_names(self) -> list[str]:
-        return FLUX_NAMES
-
-    def get_flux_weights(self) -> torch.Tensor:
-        # Physical face fluxes (phase-space weight wk): particle j=int f v,
-        # momentum flux Pi_i = int f (m* v_i) v = int f k_i v, heat q = int f eps v.
-        w = self.wk
-        one = torch.ones_like(self.eps_k)
-        kx, ky = self.k[:, 0], self.k[:, 1]  # m* v = k (momentum)
-        return w * torch.stack([one, kx, ky, self.eps_k], dim=0)  # (4, Nk)
 
     def get_contactor(self, n: torch.Tensor, **kwargs) -> Callable:
         return _CartesianContactor(self, n, **kwargs)

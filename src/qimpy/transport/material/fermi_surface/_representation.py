@@ -25,19 +25,6 @@ from qimpy import rc, TreeNode
 from qimpy.mpi import ProcessGrid
 from qimpy.io import CheckpointPath
 
-# Shared output schema (same names for every representation, so the checkpoint
-# and plotter are backend-independent).  Cell scalars are local fields; fluxes
-# are vector moments emitted as face-normal fluxes on edges.
-CELL_SCALAR_NAMES = [
-    "density",
-    "energy_density",
-    "temperature",
-    "chemical_potential",
-    "velocity_x",
-    "velocity_y",
-]
-FLUX_NAMES = ["particle_current", "momentum_flux_x", "momentum_flux_y", "energy_flux"]
-
 
 class KRepresentation(TreeNode):
     """Numerical k-space backend for `FermiSurface`.
@@ -48,7 +35,7 @@ class KRepresentation(TreeNode):
     """
 
     Nk: int
-    wk: float
+    wk: torch.Tensor  # (Nk,) Brillouin-zone/mode integration weights
     v: torch.Tensor  # (Nk, 2) transport velocity
     constraint_factors: tuple[torch.Tensor, torch.Tensor] | None
 
@@ -62,19 +49,16 @@ class KRepresentation(TreeNode):
         raise NotImplementedError
 
     # ---- observables: scalars on cells, vector moments as face fluxes ----
-    def get_density_weight(self) -> torch.Tensor:  # (Nk,) per-k density measure
+    def get_observables(self) -> torch.Tensor:  # (Nk,) per-k density measure
         raise NotImplementedError
 
-    def get_cell_scalar_names(self) -> list[str]:
+    def get_observable_names(self) -> list[str]:
         raise NotImplementedError
 
-    def get_cell_scalars(self, rho: torch.Tensor) -> torch.Tensor:  # (K, n_scalar)
+    def measure_observables(self, rho: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
 
-    def get_flux_names(self) -> list[str]:
-        raise NotImplementedError
-
-    def get_flux_weights(self) -> torch.Tensor:  # (n_flux, Nk) per-channel weight g
+    def get_flux_indices(self) -> list[int]:
         raise NotImplementedError
 
 
@@ -98,7 +82,7 @@ class DeltaK(KRepresentation):
         self.fs = fs
         Ntheta = fs.angular.N_theta
         self.Nk = fs.Nr * Ntheta
-        self.wk = 1.0
+        self.wk = self._density_weight()
         # per-collocation velocity: |v| = vF for every radial point (shell linearization)
         theta_q = fs.angular.theta
         v_per_theta = fs.vF * torch.stack(
@@ -162,36 +146,15 @@ class DeltaK(KRepresentation):
         fs = self.fs  # per-node energy
         return (fs.mu + fs.radial.xi * fs.T_temp).repeat_interleave(fs.angular.N_theta)
 
-    def get_density_weight(self) -> torch.Tensor:
-        return self._density_weight()  # (Nk,)
+    def get_observable_names(self) -> list[str]:
+        return ["n", "vx", "vy", "e"]
 
-    def get_cell_scalar_names(self) -> list[str]:
-        return CELL_SCALAR_NAMES
+    def get_observables(self) -> torch.Tensor:
+        ones = torch.ones((1, self.Nk), device=rc.device)
+        return torch.cat((ones, self.v.T, self._eps_node()[None]), dim=0)
 
-    def get_cell_scalars(self, rho: torch.Tensor) -> torch.Tensor:
-        # Linearized shell model (delta-f about the uniform Fermi sea): density and
-        # energy are DEVIATIONS from the uniform reference, velocity is the linear
-        # drift <v delta-f> (the density weight sums to 1), and T/mu are uniform.
-        fs = self.fs
-        df = rho.reshape(-1, self.Nk)
-        n_op = self._density_weight()
-        dn = df @ n_op
-        dE = df @ (self._eps_node() * n_op)
-        ux = df @ (n_op * self.v[:, 0])
-        uy = df @ (n_op * self.v[:, 1])
-        Te = torch.full_like(dn, fs.T_temp)
-        mu = torch.full_like(dn, fs.mu)
-        return torch.stack([dn, dE, Te, mu, ux, uy], dim=1)  # (K, 6)
-
-    def get_flux_names(self) -> list[str]:
-        return FLUX_NAMES
-
-    def get_flux_weights(self) -> torch.Tensor:
-        fs = self.fs
-        n_op = self._density_weight()  # particle weight
-        px = fs.m_star * self.v[:, 0] * n_op  # x-momentum weight
-        py = fs.m_star * self.v[:, 1] * n_op  # y-momentum weight
-        return torch.stack([n_op, px, py, self._eps_node() * n_op], dim=0)  # (4, Nk)
+    def get_flux_indices(self) -> list[int]:
+        return [0]
 
     def get_contactor(self, n: torch.Tensor, **kwargs) -> Callable:
         return _DeltaKContactor(self.fs, n, **kwargs)

@@ -408,15 +408,14 @@ def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> Non
             g = cp["/geometry"]
             i_step_list = np.array(g["i_step"])[mine]
             t_list = np.array(g["t"])[mine]
-            obs = np.array(g["fv_observables"][mine])  # (nframe, K, n_scalar)
+            obs = np.array(g["observables"][mine])  # (nframe, K, n_scalar)
             scalar_names = _read_str_list(g, "observable_names")
-            flux_names = _read_str_list(g, "flux_names")
+            flux_indices = np.array(g["flux_indices"])
+            flux_names = [scalar_names[index] for index in flux_indices]
             if streamlines is not None:
                 edge_cells = np.array(g["edge_cells"])
                 edge_normal = np.array(g["edge_normal"])
-                edge_flux = np.array(
-                    g["fv_edge_flux"][mine]
-                )  # (nframe, n_edge, n_flux)
+                edge_flux = np.array(g["edge_flux"][mine])  # (nframe, n_edge, n_flux)
         i_dens = scalar_names.index("density") if "density" in scalar_names else 0
         i_cur = (
             flux_names.index("particle_current")

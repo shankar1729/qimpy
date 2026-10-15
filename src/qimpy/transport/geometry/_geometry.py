@@ -98,9 +98,8 @@ class Geometry(TreeNode):
         # face-normal flux F = elen * sum_k u_face_k (v_k.n) g_k -- the SAME upwind
         # trace the scheme streams with, so F is the conserved flux (exactly 0
         # through specular walls).  Scalars stay cell-centred.  (Serial only.)
-        self._flux_names = list(material.get_flux_names())
-        self._flux_g = material.get_flux_weights()  # (Nflux, Nk) or None
-        self._do_flux = (self._flux_g is not None) and (self.cell_division is None)
+        self._flux_indices = material.get_flux_indices()
+        self._do_flux = self._flux_indices and (self.cell_division is None)
         if self._do_flux:
             self._a_int = a_int  # (Ne, Nk) interior v.n
             eLc = geom.eL.detach().cpu().numpy()
@@ -385,7 +384,7 @@ class Geometry(TreeNode):
     def update_stash(self, i_step: int, t: float) -> None:
         # Stash cell-centred scalar fields for this rank's owned cells.
         u_own = self._u[: self.cell_division.n_mine]
-        obs = self.material.get_cell_scalars(u_own, t)
+        obs = self.material.measure_observables(u_own, t)
         self._stash_i.append(i_step)
         self._stash_t.append(t)
         self._stash_obs.append(obs.detach().cpu())
@@ -396,12 +395,9 @@ class Geometry(TreeNode):
             uup_i = torch.where(self._maskL, uf[g.eLF], uf[g.eRF])  # (Ne, Nk)
             uMb = uf[g.bF]
             uup_b = torch.where(self._maskB, uMb, self._exterior(uMb, t))  # (Nb, Nk)
-            Fi = g.elen[None, :] * (
-                self._flux_g @ (uup_i * self._a_int).t()
-            )  # (Nflux, Ne)
-            Fb = g.blen[None, :] * (
-                self._flux_g @ (uup_b * self._a_bnd).t()
-            )  # (Nflux, Nb)
+            flux_g = self.material.get_observables(t)[self._flux_indices]
+            Fi = g.elen[None, :] * (flux_g @ (uup_i * self._a_int).t())  # (Nflux, Ne)
+            Fb = g.blen[None, :] * (flux_g @ (uup_b * self._a_bnd).t())  # (Nflux, Nb)
             F = torch.cat([Fi, Fb], dim=1).t()  # (n_edge, Nflux)
             self._stash_flux.append(F.detach().cpu())
         if self.save_terms and hasattr(self.material, "ee_scattering"):
@@ -428,17 +424,20 @@ class Geometry(TreeNode):
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
-        names = self.material.get_cell_scalar_names()
-        saved = ["fv_observables"]
-        cp_path.write_str("contact_names", ",".join(self.contacts.keys()))
-        cp_path.write_str("observable_names", ",".join(names))
-        cp_path["t"] = np.array(self._stash_t)
-        cp_path["i_step"] = np.array(self._stash_i)
         checkpoint, path = cp_path
         assert checkpoint is not None
+        names = self.material.get_observable_names()
+        saved = [
+            "observables",
+            cp_path.write("flux_indices", np.array(self._flux_indices)),
+            cp_path.write_str("contact_names", ",".join(self.contacts.keys())),
+            cp_path.write_str("observable_names", ",".join(names)),
+            cp_path.write("t", np.array(self._stash_t)),
+            cp_path.write("i_step", np.array(self._stash_i)),
+        ]
         n_stash = len(self._stash_t)
         dset = cp_path.create_dataset(
-            "fv_observables",
+            "observables",
             (n_stash, self.cell_division.n_tot, len(names)),
             np.float64,
         )
@@ -451,12 +450,11 @@ class Geometry(TreeNode):
                 cp_path.write("edge_cells", self._edge_cells),
                 cp_path.write("edge_normal", self._edge_normal),
                 cp_path.write("edge_len", self._edge_len),
-                "fv_edge_flux",
+                "edge_flux",
             ]
-            cp_path.write_str("flux_names", ",".join(self._flux_names))
             n_edge = self._edge_len.shape[0]
             dset = cp_path.create_dataset(
-                "fv_edge_flux", (n_stash, n_edge, len(self._flux_names)), np.float64
+                "edge_flux", (n_stash, n_edge, len(self._flux_indices)), np.float64
             )
             checkpoint.write_slice(dset, (0, 0, 0), torch.stack(self._stash_flux))
         if self.save_rho:

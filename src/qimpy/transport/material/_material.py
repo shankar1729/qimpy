@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Callable, Optional
+from typing import Callable
 from abc import abstractmethod
 
 import torch
@@ -20,7 +20,7 @@ class Material(TreeNode):
     nk_mine: int  #: number of k-points on current process
     n_bands: int  #: number of bands at each k
     n_dim: int  #: dimensionality of material (2 or 3)
-    wk: float  #: Brillouin zone integration weight
+    wk: torch.Tensor  #: Brillouin zone integration weight
     k: torch.Tensor  #: nk_mine x n_dim wave vectors
     E: torch.Tensor  #: nk_mine x n_bands energies
     v: torch.Tensor  #: nk_mine x n_bands x n_dim velocities in plane
@@ -33,7 +33,7 @@ class Material(TreeNode):
     def initialize(
         self,
         *,
-        wk: float,
+        wk: torch.Tensor,
         nk: int,
         n_bands: int,
         n_dim: int,
@@ -101,45 +101,29 @@ class Material(TreeNode):
 
     @abstractmethod
     def get_observables(self, t: float) -> torch.Tensor:
-        """Return tensor of SCALAR (cell-centred) observable weights specific to
-        each material. (No x Nkbb_mine) where No is number of observables.  Row 0
-        is the density weight (used for the boundary contact-current operator)."""
+        """Return tensor of complex conjugates of all observables specific to each
+        material. (No x Nkbb_mine) where No is number of observables."""
+
+    @abstractmethod
+    def get_flux_indices(self) -> list[int]:
+        """Return list of flux names and observable indices, specific to each material.
+        Fluxes are computed on edges (faces) of the mesh, rather than on the cell
+        centers, as done for the observables. These are useful for plotting accurate
+        streamlines of fluxes, and are most useful for conserved quantities such
+        as particle number. Hence, specify indices to a subset of observables from
+        `get_observables` to compute fluxes for."""
 
     def constrain(self, rho: torch.Tensor) -> None:
         """Override to apply any per-material constraints on `rho`
         that may be violated during spatial transport or dynamics."""
 
-    def get_cell_scalar_names(self) -> list[str]:
-        """Names of the CELL-CENTRED scalar fields written per saved frame.
-        Default: the linear observable names.  A material may override to emit
-        richer local fields (density, energy, temperature, ...) computed
-        nonlinearly from the distribution."""
-        return self.get_observable_names()
-
-    def get_cell_scalars(self, rho: torch.Tensor, t: float) -> torch.Tensor:
-        """Cell-centred scalar fields for the owned cells, (K x n_scalar).
-        Default: the linear moments ``sum_k rho_ck g_ok`` of the scalar
-        observables.  ``rho`` is the (K x Nkbb_mine) per-cell distribution.
-        Overridden by materials whose fields are nonlinear in the distribution."""
-        return torch.einsum("ok,ck->co", self.get_observables(t), rho)
-
-    def get_flux_names(self) -> list[str]:
-        """Names of FLUX observables (vector fluxes: currents, heat fluxes) that
-        the geometry outputs at face/edge centres as face-normal fluxes rather
-        than cell-centred averages.  Default: none."""
-        return []
-
-    def get_flux_weights(self) -> Optional[torch.Tensor]:
-        """Per-channel scalar weights ``g`` (Nflux x Nkbb_mine) for the flux
-        observables: the face-normal flux of channel-summed ``g`` through an edge
-        with outward unit normal ``n`` is ``sum_k u_face_k (v_k . n) g_k``.  For
-        the particle current ``g`` is the density weight; for a heat flux it is
-        energy x density weight.  Default: None (no flux observables)."""
-        return None
-
     def measure_observables(self, rho: torch.Tensor, t: float) -> torch.Tensor:
-        """Return expectation value of observables, (Nx x Ny x No)."""
-        result = self.wk * torch.einsum("xya, oa -> xyo", rho, self.get_observables(t))
+        """Return expectation value of observables, (Nx x Ny x No).
+        Optionally, override to add/replace observables that cannot be expressed
+        as a linear operator `get_observables` on the occupations / density-matrices.
+        Include the names of these added/replaced observables in `get_observable_names`.
+        """
+        result = torch.einsum("a, ra, oa -> ro", self.wk, rho, self.get_observables(t))
         if self.group.size() > 1:
             result = result.contiguous()
             dist.all_reduce(result, group=self.group)
