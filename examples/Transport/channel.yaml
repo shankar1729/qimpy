@@ -30,6 +30,7 @@ geometry:
 time_evolution: 
   t_max: 10.0
   dt_save: 10.0
+  dt_probe: 0.1
   n_collate: 4
   integrator: RK2
 

@@ -10,7 +10,7 @@ import torch.distributed as dist
 from qimpy import rc, TreeNode
 from qimpy.io import CheckpointPath, InvalidInputException, CheckpointContext
 from qimpy.mpi import ProcessGrid, all_reduce_scalars, get_block_slices
-from qimpy.profiler import StopWatch
+from qimpy.profiler import StopWatch, stopwatch
 from ..material import Material
 from . import Mesh
 
@@ -309,6 +309,7 @@ class Geometry(TreeNode):
         observables: list[torch.Tensor] = field(default_factory=list)
         flux: list[torch.Tensor] = field(default_factory=list)
 
+    @stopwatch
     def update_probes(self, i_step: int, t: float) -> None:
         """Stash coarse-grained probes on defined cell regions and contacts."""
         u_own = self._u[: self.cell_division.n_mine]
@@ -320,7 +321,8 @@ class Geometry(TreeNode):
         self.stash_probe.observables.append(region_averages.detach().cpu())
         # TO DO: boundary region fluxes
 
-    def update_stash(self, i_step: int, t: float) -> None:
+    @stopwatch
+    def update_observables(self, i_step: int, t: float) -> None:
         """Stash observables (and related) for output in next checkpoint."""
         u_own = self._u[: self.cell_division.n_mine]
         obserables = self.material.measure_observables(u_own, t)

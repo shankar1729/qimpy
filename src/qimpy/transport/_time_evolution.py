@@ -595,7 +595,7 @@ class TimeEvolution(TreeNode):
     def run(self, transport: qimpy.transport.Transport) -> None:
         """Run time evolution loop, checkpointing at regular intervals."""
         if self.steady_state:
-            transport.geometry.update_stash(0, self.t)
+            transport.geometry.update_observables(0, self.t)
             log.info("Stashed results of iteration 0")
             if isinstance(
                 transport.material, qimpy.transport.material.ab_initio.AbInitio
@@ -603,24 +603,32 @@ class TimeEvolution(TreeNode):
                 transport.material.include_coherent = True
             self.steady_state_sol(transport, transport.geometry)
             if self.nit % self.nit_save > 0:
-                transport.geometry.update_stash(self.nit, self.t)
+                transport.geometry.update_observables(self.nit, self.t)
                 log.info(f"Stashed results of iteration {self.nit}")
             transport.save(self.nit)
         else:
             i_collate = 0
             while self.i_step <= self.n_steps:
                 should_save = (self.i_step > self.i_step_initial) or (self.i_step == 0)
+                tasks = []
                 if self.i_step % self.probe_interval == 0 and should_save:
                     self.flush_collision(transport.geometry)
                     transport.geometry.update_probes(self.i_step, self.t)
+                    tasks.append("probes")
                 if self.i_step % self.save_interval == 0 and should_save:
                     self.flush_collision(transport.geometry)
-                    transport.geometry.update_stash(self.i_step, self.t)
+                    transport.geometry.update_observables(self.i_step, self.t)
+                    tasks.append("observables")
                     i_collate += 1
-                    log.info(f"Stashed results of step {self.i_step}")
                     if i_collate == self.n_collate or self.i_step == 0:
                         transport.save(self.i_step)
                         i_collate = 0
+
+                tasks_str = f' ({", ".join(tasks)})' if tasks else ""
+                log.info(
+                    f"Step {self.i_step} done of {self.n_steps}"
+                    f" at t[s]: {rc.clock():.2f}{tasks_str}"
+                )
 
                 if self.i_step == self.n_steps:
                     self.flush_collision(transport.geometry)
@@ -629,10 +637,6 @@ class TimeEvolution(TreeNode):
                     break
 
                 self.time_step(transport.geometry)
-
-                log.info(
-                    f"Step {self.i_step} done of {self.n_steps} at t[s]: {rc.clock():.2f}"
-                )
                 self.i_step += 1
                 self.t += self.dt
 
@@ -690,5 +694,5 @@ class SteadyStateRootFunction:
         self.iter += 1
         if (self.iter % self.nit_save) == 0:
             self.geometry.rho = self._rho(x)
-            self.geometry.update_stash(self.iter, 0.0)
+            self.geometry.update_observables(self.iter, 0.0)
             log.info(f"Stashed results of iteration {self.iter}")
