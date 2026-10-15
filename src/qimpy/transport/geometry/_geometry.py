@@ -273,7 +273,7 @@ class Geometry(TreeNode):
             # Apply reflections and contacts:
             ub_in = ub.detach().clone()
             if self._reflector is not None:
-                ub_in[self._wall] = self._reflector(ub[self._wall][None])[0]
+                ub_in[self._wall] = self._reflector(ub[self._wall])
             for contact in self.contacts.values():
                 ub_in[contact.indices] = contact.contactor(t)
             # Propagate incoming modes from boundary to relevant cells:

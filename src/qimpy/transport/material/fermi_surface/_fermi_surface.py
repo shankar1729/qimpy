@@ -620,4 +620,4 @@ class DenseReflector:
     matrix: torch.Tensor
 
     def __call__(self, rho: torch.Tensor) -> torch.Tensor:
-        return torch.einsum("eic, xec -> xei", self.matrix, rho)
+        return torch.einsum("eic, ec -> ei", self.matrix, rho)
