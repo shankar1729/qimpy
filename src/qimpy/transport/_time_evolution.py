@@ -22,7 +22,8 @@ class TimeEvolution(TreeNode):
     i_step: int  #: Current step number
     i_step_initial: int  #: Initial step number for current job (not zero if continued)
     n_steps: int  #: Number of steps
-    save_interval: int  #: Save results every so many steps
+    save_interval: int  #: Save spatially-resolved results every so many steps
+    probe_interval: int  #: Save coarse-grained probes every so many steps
     n_collate: int  #: Collect these many save steps into a single checkpoint
     integrator: str  #: Time-step style used for integration
     collision_interval: (
@@ -73,6 +74,7 @@ class TimeEvolution(TreeNode):
             This will be rounded to the nearest multiple of `dt` to ensure that
             the results are written at uniform intervals. Probes are collated to
             the next checkpoint written, as determined by `dt_save` and `n_collate`.
+            If unspecified (zero), this is set equal to `dt_save`.
         t_max
             :yaml:`Stop evolution at this time.`
         n_collate
@@ -177,6 +179,7 @@ class TimeEvolution(TreeNode):
                     raise InvalidInputException(f"{dt=} must be less than {dt_max=}")
             self.dt = float(dt)
             self.n_steps = max(1, int(np.round(t_max / self.dt)))
+            dt_probe = dt_probe if dt_probe else dt_save
             self.save_interval = max(1, int(np.round(dt_save / self.dt)))
             self.probe_interval = max(1, int(np.round(dt_probe / self.dt)))
             self.n_collate = int(n_collate)
