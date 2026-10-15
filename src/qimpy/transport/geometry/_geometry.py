@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 
-from qimpy import rc, log, TreeNode
+from qimpy import rc, TreeNode
 from qimpy.io import CheckpointPath, InvalidInputException, CheckpointContext
 from qimpy.mpi import ProcessGrid, all_reduce_scalars, get_block_slices
 from qimpy.profiler import StopWatch
@@ -29,8 +29,6 @@ class Geometry(TreeNode):
         faces_block_size: int = 0,
         compile: bool = False,
         save_rho: bool = False,
-        probe_interval: int = 0,
-        probe_file: str = "",
         process_grid: ProcessGrid,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ):
@@ -125,50 +123,24 @@ class Geometry(TreeNode):
         self._setup_boundary(material, contacts)
         self.collision_enabled = True
 
-        # Following should be made consistent with the existing observables mechanism
-        # ---- dense in-run probe (every probe_interval steps) -------------
-        # dt_save is sized by checkpoint cost (rho is ~0.4 GB/frame), so the
-        # only V(t) / I(t) record a CLI run leaves behind is one point per
-        # checkpoint.  That is far too sparse to watch a transient relax.  This
-        # writes a small CSV every probe_interval steps instead: per-contact
-        # currents plus the mean chemical potential over each named region.
-        # Cost is bounded by evaluating get_cell_scalars on the PROBE CELLS
-        # ONLY (the per-cell frame Newton is the expensive part), so a typical
-        # 4-region mixer probe every 10 steps is ~1% of a collision step.
-        self.probe_interval = int(probe_interval)
-        self.probe_file = str(probe_file)
-        self._probe_regions = {}
-        self._probe_idx = None
-        self._probe_header = False
-        if self.probe_interval > 0:
-            names = self.mesh.cell_regions
-            if names is None:
-                raise InvalidInputException(
-                    f"probe_interval > 0 but {self.mesh_file} defines no"
-                    " cell_regions; label the probe cells in the mesh"
-                    " generator (regions are geometry, not run config)"
-                )
-            lo, hi = self._own_start, self._own_stop
-            local = np.asarray(names)[lo:hi]
-            uniq = sorted({n for n in local.tolist() if n})
-            sel_all = np.zeros(hi - lo, dtype=bool)
-            for n in uniq:
-                m = local == n
-                self._probe_regions[n] = m
-                sel_all |= m
-            idx = np.flatnonzero(sel_all)
-            # self._u does not exist yet at this point in __init__; realise the
-            # index tensor lazily on the first probe instead.
-            self._probe_idx = idx
-            pos = {int(g): i for i, g in enumerate(idx)}
-            self._probe_regions = {
-                n: np.array([pos[int(g)] for g in np.flatnonzero(m)], dtype=int)
-                for n, m in self._probe_regions.items()
-            }
-            log.info(
-                f"Probing regions {uniq} ({len(idx)} cells) every "
-                f"{self.probe_interval} steps -> {self.probe_file}"
-            )
+        # Set up cell region (interior) probes:
+        n_mine = self.cell_division.n_mine
+        w_cells = geom.area[:n_mine]
+        i_region_all = self.mesh.cells[:, -1]
+        assert i_region_all.min() >= -1
+        n_regions = int(np.ptp(i_region_all)) + 1
+        i_region = torch.from_numpy(
+            i_region_all[self.cell_division.global_index[:n_mine]] % n_regions
+        ).to(rc.device)
+        w_tot = torch.zeros(n_regions, dtype=w_cells.dtype, device=rc.device)
+        print(n_regions, i_region)
+        w_tot.index_add_(0, i_region, w_cells)
+        dist.all_reduce(w_tot, group=self.group)
+        self.probe_mat_cell = torch.sparse_coo_tensor(
+            indices=torch.stack((i_region, torch.arange(n_mine, device=rc.device))),
+            values=w_cells / w_tot,
+            size=(n_regions, n_mine),
+        )  # multiply this by per-cell observables to get region averages
 
         # Compile the face limiter which involves several elemntwise operations:
         if compile:
@@ -205,6 +177,7 @@ class Geometry(TreeNode):
         else:
             self._u = torch.zeros(self.K, self.Nk, device=rc.device, dtype=v.dtype)
         self.stash = Geometry.Stash()
+        self.stash_probe = Geometry.Stash()  # coarse-grained, more frequent version
         self.material.initialize_fields(self._u, {}, id(self))
 
     @dataclass
@@ -327,64 +300,25 @@ class Geometry(TreeNode):
             )
         return out
 
-    def maybe_probe(self, i_step: int, t: float) -> None:
-        """Append one probe row every ``probe_interval`` steps (else a no-op)."""
-        if self.probe_interval <= 0 or self._probe_idx is None:
-            return
-        if i_step % self.probe_interval:
-            return
-        if not torch.is_tensor(self._probe_idx):
-            self._probe_idx = torch.as_tensor(
-                np.asarray(self._probe_idx), dtype=torch.long, device=self._u.device
-            )
-        with torch.no_grad():
-            cur = self.contact_currents(t)
-            names = self.material.get_cell_scalar_names()
-            i_mu = names.index("chemical_potential")
-            sc = (
-                self.material.get_cell_scalars(self._u[self._probe_idx], t)[:, i_mu]
-                .detach()
-                .cpu()
-                .numpy()
-            )
-        row = {"i_step": i_step, "t": t}
-        row.update({f"I_{k}": v for k, v in cur.items()})
-        for name, sel in self._probe_regions.items():
-            if self._mpi:
-                tot = all_reduce_scalars(
-                    float(sc[sel].sum()), dist.ReduceOp.SUM, self.group
-                )
-                cnt = all_reduce_scalars(int(sel.size), dist.ReduceOp.SUM, self.group)
-            else:
-                tot, cnt = float(sc[sel].sum()), int(sel.size)
-            row[f"V_{name}"] = tot / max(cnt, 1)
-        if self._mpi and dist.get_rank(self.group):
-            return
-        new = not self._probe_header
-        with open(self.probe_file, "a") as fh:
-            if new:
-                fh.write(",".join(row.keys()) + "\n")
-                self._probe_header = True
-            fh.write(
-                ",".join(
-                    f"{v!r}" if isinstance(v, int) else f"{v:.10e}"
-                    for v in row.values()
-                )
-                + "\n"
-            )
-
-    def contact_potentials(self) -> dict[str, float]:
-        """Self-adjusting level of each feedback contact, from the last evaluation."""
-        return {c.name: c.level for c in self._contacts if c.kind != "fixed"}
-
     @dataclass
     class Stash:
-        """Stash for observables (and related) that are collated into checkpoints."""
+        """Stash for probes and observables that are collated into checkpoints."""
 
         i_step: list[int] = field(default_factory=list)
         t: list[float] = field(default_factory=list)
         observables: list[torch.Tensor] = field(default_factory=list)
         flux: list[torch.Tensor] = field(default_factory=list)
+
+    def update_probes(self, i_step: int, t: float) -> None:
+        """Stash coarse-grained probes on defined cell regions and contacts."""
+        u_own = self._u[: self.cell_division.n_mine]
+        obserables = self.material.measure_observables(u_own, t)
+        region_averages = (self.probe_mat_cell @ obserables).contiguous()
+        dist.all_reduce(region_averages, group=self.group)
+        self.stash_probe.i_step.append(i_step)
+        self.stash_probe.t.append(t)
+        self.stash_probe.observables.append(region_averages.detach().cpu())
+        # TO DO: boundary region fluxes
 
     def update_stash(self, i_step: int, t: float) -> None:
         """Stash observables (and related) for output in next checkpoint."""
@@ -420,18 +354,26 @@ class Geometry(TreeNode):
             cp_path.write_str("observable_names", ",".join(names)),
             cp_path.write("t", np.array(self.stash.t)),
             cp_path.write("i_step", np.array(self.stash.i_step)),
+            cp_path.write("t_probe", np.array(self.stash_probe.t)),
+            cp_path.write("i_step_probe", np.array(self.stash_probe.i_step)),
         ]
+
+        # Observables:
         n_stash = len(self.stash.t)
+        div = self.cell_division
         dset = cp_path.create_dataset(
-            "observables",
-            (n_stash, self.cell_division.n_tot, len(names)),
-            np.float64,
+            "observables", (n_stash, div.n_tot, len(names)), np.float64
         )
         checkpoint.write_slice(
-            dset,
-            (0, self.cell_division.i_start, 0),
-            torch.stack(self.stash.observables),
+            dset, (0, div.i_start, 0), torch.stack(self.stash.observables)
         )
+        self.stash = Geometry.Stash()  # reset now-written cached observables
+
+        # Probes:
+        cp_path.write("probes", torch.stack(self.stash_probe.observables))
+        self.stash_probe = Geometry.Stash()  # reset now-written cached probes
+
+        # TO DO: revamp this:
         if self._do_flux and n_stash:
             # Flux observables live on edges: geometry + face-normal flux per frame.
             saved += [
@@ -445,16 +387,14 @@ class Geometry(TreeNode):
                 "edge_flux", (n_stash, n_edge, len(self._flux_indices)), np.float64
             )
             checkpoint.write_slice(dset, (0, 0, 0), torch.stack(self.stash.flux))
+
         if self.save_rho:
-            # Raw per-cell state (n_cells, n_channels), for exact restart /
-            # steady-state warm start. Each rank writes its owned cell block.
-            u_own = self._u[: self.cell_division.n_mine].detach()
-            dset = cp_path.create_dataset(
-                "rho", (self.cell_division.n_tot, self.Nk), u_own.dtype
-            )
-            checkpoint.write_slice(dset, (self.cell_division.i_start, 0), u_own)
+            # Optional full state output (large) for continuing calculations:
+            u_own = self._u[: div.n_mine].detach()
+            dset = cp_path.create_dataset("rho", (div.n_tot, self.Nk), u_own.dtype)
+            checkpoint.write_slice(dset, (div.i_start, 0), u_own)
             saved.append("rho")
-        self.stash = Geometry.Stash()
+
         return saved
 
 

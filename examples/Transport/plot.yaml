@@ -1,6 +1,6 @@
 checkpoints: animation/*.h5
 output: animation/frame{:04d}.png
-
+probes: animation/probes-{}.pdf
 density:
   cmap: bwr
   interpolation: bilinear

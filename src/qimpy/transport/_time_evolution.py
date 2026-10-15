@@ -40,6 +40,7 @@ class TimeEvolution(TreeNode):
         t: float = 0.0,
         dt: float = 0.0,
         dt_save: float = 0.0,
+        dt_probe: float = 0.0,
         t_max: float = 0.0,
         n_collate: int = 0,
         integrator: str = "RK2",
@@ -64,9 +65,14 @@ class TimeEvolution(TreeNode):
             :yaml:`Time step for evolution.`
             If zero, this is set to the maximum stable time step for advection.
         dt_save
-            :yaml:`Time interval at which to save results.`
+            :yaml:`Time interval at which to save spatially-dependent results.`
             This will be rounded to the nearest multiple of `dt` to ensure
             that the results are written at uniform intervals.
+        dt_probe
+            :yaml:`Time interval at which to save coarse-grained probes.`
+            This will be rounded to the nearest multiple of `dt` to ensure that
+            the results are written at uniform intervals. Probes are collated to
+            the next checkpoint written, as determined by `dt_save` and `n_collate`.
         t_max
             :yaml:`Stop evolution at this time.`
         n_collate
@@ -172,6 +178,7 @@ class TimeEvolution(TreeNode):
             self.dt = float(dt)
             self.n_steps = max(1, int(np.round(t_max / self.dt)))
             self.save_interval = max(1, int(np.round(dt_save / self.dt)))
+            self.probe_interval = max(1, int(np.round(dt_probe / self.dt)))
             self.n_collate = int(n_collate)
             self.integrator = integrator
             if integrator not in {"RK2", "RK4", "SSPRK3"}:
@@ -603,6 +610,9 @@ class TimeEvolution(TreeNode):
             i_collate = 0
             while self.i_step <= self.n_steps:
                 should_save = (self.i_step > self.i_step_initial) or (self.i_step == 0)
+                if self.i_step % self.probe_interval == 0 and should_save:
+                    self.flush_collision(transport.geometry)
+                    transport.geometry.update_probes(self.i_step, self.t)
                 if self.i_step % self.save_interval == 0 and should_save:
                     self.flush_collision(transport.geometry)
                     transport.geometry.update_stash(self.i_step, self.t)
@@ -619,9 +629,6 @@ class TimeEvolution(TreeNode):
                     break
 
                 self.time_step(transport.geometry)
-                probe = getattr(transport.geometry, "maybe_probe", None)
-                if probe is not None:
-                    probe(self.i_step + 1, self.t + self.dt)
 
                 log.info(
                     f"Step {self.i_step} done of {self.n_steps} at t[s]: {rc.clock():.2f}"
@@ -643,6 +650,7 @@ class TimeEvolution(TreeNode):
             attrs["i_step"] = self.i_step
             attrs["dt"] = self.dt
             attrs["dt_save"] = self.save_interval * self.dt
+            attrs["dt_probe"] = self.probe_interval * self.dt
             attrs["t_max"] = self.n_steps * self.dt
             attrs["n_collate"] = self.n_collate
             attrs["integrator"] = self.integrator

@@ -45,21 +45,18 @@ def run(
     *,
     checkpoints: str,
     output: str,
+    probes: str,
     density: Optional[dict] = None,
     streamlines: Optional[dict] = None,
     dpi: int = 200,
-    **ignored,
 ) -> None:
-    """Render finite-volume (FiniteVolume) transport checkpoints.
-
-    ``**ignored`` absorbs legacy keys from older input files for compatibility.
-    """
+    """Render transport checkpoints."""
     if density is None:
         density = {}
     # Distribute frames over MPI:
     file_list = rc.comm.bcast(sorted(glob.glob(checkpoints)))
     mine = slice(rc.i_proc, None, rc.n_procs)
-    run_finite_volume(file_list, mine, output, density, streamlines, dpi)
+    run_finite_volume(file_list, mine, output, probes, density, streamlines, dpi)
 
 
 def fv_edge_geometry(verts, tris):
@@ -342,7 +339,9 @@ def _rt0_sample(rt0, F, tid, inside, Xs, Ys):
     return U, V
 
 
-def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> None:
+def run_finite_volume(
+    file_list, mine, output, probes, density, streamlines, dpi
+) -> None:
     """Frame-parallel, mesh-native rendering of FiniteVolume (finite-volume) output.
 
     Scalars (density, ...) are cell-centred, drawn as a flat-shaded
@@ -403,13 +402,18 @@ def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> Non
         rt0 = None  # built once from edge data
     orig_level = log.getEffectiveLevel()
     log.setLevel(logging.INFO)
+    t_probes = []
+    probes_region = []
     for checkpoint_file in file_list:
         with Checkpoint(checkpoint_file) as cp:
             g = cp["/geometry"]
             i_step_list = np.array(g["i_step"])[mine]
             t_list = np.array(g["t"])[mine]
+            t_probes.append(np.array(g["t_probe"]))
+            probes_region.append(np.array(g["probes"]))
             obs = np.array(g["observables"][mine])  # (nframe, K, n_scalar)
             scalar_names = _read_str_list(g, "observable_names")
+            region_names = _read_str_list(g["mesh"], "region_names")
             flux_indices = np.array(g["flux_indices"])
             flux_names = [scalar_names[index] for index in flux_indices]
             if streamlines is not None:
@@ -429,10 +433,6 @@ def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> Non
             if not np.isfinite(vmax) or vmax == 0.0:
                 vmax = 1.0
             fig, ax = plt.subplots(figsize=(6, 6))
-            # linthresh (fraction of the color max, default 1 = linear): below it
-            # the scale is linear, above it logarithmic (SymLogNorm) -- makes
-            # weak-response regions (e.g. probe stubs ~100x below the driven
-            # arms) visible on the same panel without saturating the strong ones.
             lt = float(density.get("linthresh", 1.0))
             if lt < 1.0:
                 from matplotlib.colors import SymLogNorm
@@ -515,6 +515,25 @@ def run_finite_volume(file_list, mine, output, density, streamlines, dpi) -> Non
             log.info(f"Saved {plot_file}")
     log.setLevel(orig_level)
     rc.comm.Barrier()
+
+    # Plot probes:
+    if probes and rc.is_head:
+        t = np.concatenate(t_probes)
+        probes_region = np.concatenate(probes_region, axis=0)
+        order = t.argsort()
+        t = t[order]
+        probes_region = probes_region[order]
+        if len(region_names) < probes_region.shape[1]:
+            region_names.append("remainder")
+        for i_name, name in enumerate(scalar_names):
+            plt.figure()
+            plt.xlabel("t")
+            plt.ylabel(name)
+            for i_region, region_name in enumerate(region_names):
+                plt.plot(t, probes_region[:, i_region, i_name], label=region_name)
+            plt.legend()
+            plt.savefig(probes.format(name), bbox_inches="tight")
+        plt.show()
 
 
 def split_names(input: str) -> list[str]:
