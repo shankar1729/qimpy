@@ -80,7 +80,7 @@ class Geometry(TreeNode):
         a_bnd = geom.bn @ v.t()  # (Nb, Nk)
         inv_area = 1 / geom.area
         maskL = a_int > 0
-        self._maskB = a_bnd > 0
+        self.is_outward = a_bnd > 0
         wL = -a_int * (geom.elen * inv_area[geom.eL])[:, None]
         wR = a_int * (geom.elen * inv_area[geom.eR])[:, None]
         wB = -a_bnd * (geom.blen * inv_area[geom.bcell])[:, None]
@@ -179,22 +179,21 @@ class Geometry(TreeNode):
             and checkpoint_in.member("rho")
         ):
             cp, path = checkpoint_in  # warm start (serial)
-            self._u = torch.as_tensor(
+            rho = torch.as_tensor(
                 np.array(cp[f"{path}/rho"]), device=rc.device, dtype=v.dtype
             )
-            if tuple(self._u.shape) != (self.K, self.Nk):
+            if tuple(rho.shape) != (self.K, self.Nk):
                 raise InvalidInputException(
-                    f"checkpoint rho shape {tuple(self._u.shape)} does not"
-                    f" match({self.K}, {self.Nk}): k-representation config (n_k /"
-                    f" circular / annulus_xi) must match the checkpoint"
+                    f"checkpoint rho shape {tuple(rho.shape)} != ({self.K}, {self.Nk})"
                 )
         elif rho0 is not None:
-            self._u = rho0.flatten().to(rc.device, v.dtype)[None, :].repeat(self.K, 1)
+            rho = rho0.flatten().to(rc.device, v.dtype)[None, :].repeat(self.K, 1)
         else:
-            self._u = torch.zeros(self.K, self.Nk, device=rc.device, dtype=v.dtype)
+            rho = torch.zeros(self.K, self.Nk, device=rc.device, dtype=v.dtype)
+        self.rho = rho
         self.stash = Geometry.Stash()
         self.stash_probe = Geometry.Stash()  # coarse-grained, more frequent version
-        self.material.initialize_fields(self._u, {}, id(self))
+        self.material.initialize_fields(self.rho, {}, id(self))
 
     @dataclass
     class Contact:
@@ -233,33 +232,33 @@ class Geometry(TreeNode):
         else:
             self._reflector = None
 
-    def _faces(self, u: torch.Tensor) -> torch.Tensor:
-        """Reconstruct face values, (K, n_face, Nk)."""
+    def to_faces(self, rho: torch.Tensor) -> torch.Tensor:
+        """Reconstruct face values from cell-centred values."""
         g = self.geom
         n_recon = self.cell_division.n_recon
-        uf = u.new_zeros(n_recon, self._nf, self.Nk)
+        rho_faces = rho.new_zeros(n_recon, self._nf, self.Nk)
         block_size = self.faces_block_size if self.faces_block_size else n_recon
         for sel in get_block_slices(n_recon, block_size):
-            uf[sel] = self._face_limiter(
-                u[sel], u, g.nbr[sel], g.recon[sel], self.epsilon_sq
+            rho_faces[sel] = self._face_limiter(
+                rho[sel], rho, g.nbr[sel], g.recon[sel], self.epsilon_sq
             )
-        return uf
+        return rho_faces
 
-    def _spatial_rhs(self, u: torch.Tensor, t: float) -> torch.Tensor:
+    def _spatial_rhs(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         g = self.geom
-        self.material.constrain(u)
-        uf = self._faces(u).reshape(-1, self.Nk)  # (K*3, Nk)
+        self.material.constrain(rho)
+        rho_faces = self.to_faces(rho).reshape(-1, self.Nk)
         if g.bcell.numel():
-            ub = uf[g.bF]
+            rho_outward = rho_faces[g.bF]  # boundary faces, valid outwards
             # Apply reflections and contacts:
-            ub_in = ub.detach().clone()
+            rho_inward = rho_outward.detach().clone()  # prepare inward valid version
             if self._reflector is not None:
-                ub_in[self._wall] = self._reflector(ub[self._wall])
+                rho_inward[self._wall] = self._reflector(rho_outward[self._wall])
             for contact in self.contacts.values():
-                ub_in[contact.indices] = contact.contactor(t)
+                rho_inward[contact.indices] = contact.contactor(t)
             # Set back to faces:
-            uf[g.bF] = torch.where(self._maskB, ub, ub_in)
-        return (self.v_dot_del @ uf.view(-1)).view(-1, self.Nk)
+            rho_faces[g.bF] = torch.where(self.is_outward, rho_outward, rho_inward)
+        return (self.v_dot_del @ rho_faces.view(-1)).view(-1, self.Nk)
 
     def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         watch = StopWatch("Geometry.rho_dot")
@@ -283,16 +282,12 @@ class Geometry(TreeNode):
 
     @property
     def rho(self) -> torch.Tensor:
-        return self._u
+        return self._rho
 
     @rho.setter
     def rho(self, rho_new: torch.Tensor) -> None:
-        self._u = rho_new
-        self.material.constrain(self._u)
-
-    @property
-    def density(self) -> torch.Tensor:
-        return self._u
+        self._rho = rho_new
+        self.material.constrain(self._rho)
 
     # ---- contact diagnostics ----
     def contact_currents(self, t: float = 0.0) -> dict[str, float]:
@@ -300,10 +295,10 @@ class Geometry(TreeNode):
         device). Floating probes read ~0; current sources read their I_set; fixed
         contacts read a response. Sum over all boundaries = -d/dt of mass."""
         if self.cell_division is not None:
-            self.cell_division.exchange(self._u)
-        uf = self._faces(self._u).reshape(-1, self.Nk)
+            self.cell_division.exchange(self.rho)
+        uf = self.to_faces(self.rho).reshape(-1, self.Nk)
         uMb = uf[self.geom.bF]
-        uup_b = torch.where(self._maskB, uMb, self._exterior(uMb, t))
+        uup_b = torch.where(self.is_outward, uMb, self._exterior(uMb, t))
         out = {}
         for c in self._contacts:
             I = float((c.cur * uup_b[c.idx]).sum())  # this rank's edges
@@ -327,7 +322,7 @@ class Geometry(TreeNode):
         self.stash_probe.i_step.append(i_step)
         self.stash_probe.t.append(t)
         # Interior cell regions:
-        obserables = self.material.measure_observables(self._u[self.probe_cells], t)
+        obserables = self.material.measure_observables(self.rho[self.probe_cells], t)
         region_averages = (self.probe_mat_cell @ obserables).contiguous()
         dist.all_reduce(region_averages, group=self.group)
         self.stash_probe.observables.append(region_averages.detach().cpu())
@@ -336,24 +331,26 @@ class Geometry(TreeNode):
     @stopwatch
     def update_observables(self, i_step: int, t: float) -> None:
         """Stash observables (and related) for output in next checkpoint."""
-        u_own = self._u[: self.cell_division.n_mine]
-        obserables = self.material.measure_observables(u_own, t)
+        rho_mine = self.rho[: self.cell_division.n_mine]
+        obserables = self.material.measure_observables(rho_mine, t)
         self.stash.i_step.append(i_step)
         self.stash.t.append(t)
         self.stash.observables.append(obserables.detach().cpu())
         if self._do_flux:
             # Face-normal fluxes on every edge, from the upwind face trace.
-            uf = self._faces(self._u).reshape(-1, self.Nk)
+            uf = self.to_faces(self.rho).reshape(-1, self.Nk)
             g = self.geom
             uup_i = torch.where(self._maskL, uf[g.eLF], uf[g.eRF])  # (Ne, Nk)
             uMb = uf[g.bF]
-            uup_b = torch.where(self._maskB, uMb, self._exterior(uMb, t))  # (Nb, Nk)
+            uup_b = torch.where(
+                self.is_outward, uMb, self._exterior(uMb, t)
+            )  # (Nb, Nk)
             flux_g = self.material.get_observables(t)[self._flux_indices]
             Fi = g.elen[None, :] * (flux_g @ (uup_i * self._a_int).t())  # (Nflux, Ne)
             Fb = g.blen[None, :] * (flux_g @ (uup_b * self._a_bnd).t())  # (Nflux, Nb)
             F = torch.cat([Fi, Fb], dim=1).t()  # (n_edge, Nflux)
             self.stash.flux.append(F.detach().cpu())
-        self.material.update_stash(u_own, self.cell_division)
+        self.material.update_stash(rho_mine, self.cell_division)
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
@@ -405,30 +402,31 @@ class Geometry(TreeNode):
 
         if self.save_rho:
             # Optional full state output (large) for continuing calculations:
-            u_own = self._u[: div.n_mine].detach()
-            dset = cp_path.create_dataset("rho", (div.n_tot, self.Nk), u_own.dtype)
-            checkpoint.write_slice(dset, (div.i_start, 0), u_own)
+            rho_mine = self.rho[: div.n_mine].detach()
+            dset = cp_path.create_dataset("rho", (div.n_tot, self.Nk), rho_mine.dtype)
+            checkpoint.write_slice(dset, (div.i_start, 0), rho_mine)
             saved.append("rho")
 
         return saved
 
 
 def _face_limiter(
-    uc: torch.Tensor,
-    u: torch.Tensor,
-    nbr: torch.Tensor,
+    rho_sel: torch.Tensor,
+    rho: torch.Tensor,
+    neighbors: torch.Tensor,
     recon: torch.Tensor,
     epsilon_sq: float,
 ) -> torch.Tensor:
-    """Venkatakrishnan-limited face values for a subset of cells with values `uc`,
-    where `u` is the full data, `nbr` is the neighbor list and `recon` is the
-    fused gradient->face operator. Limiter function applied per face is:
+    """Venkatakrishnan-limited face values for a subset of cells with values `rho_sel`,
+    where `rho` is the full data, `neighbors` lists the neighboring cell indices for
+    the selected cells, and `reconstruct` is the fused gradient->face operator.
+    Limiter function applied per face is:
         phi = (D1^2 + 2 D1 d + epsilon^2) / (D1^2 + D1 d + 2 d^2 + epsilon^2),
-    where d = u_face - u, and D1 is the same-sign headroom to the u differences."""
-    du = u[nbr] - uc[:, None]
-    d = recon @ du
+    where d = rho_face - rho, and D1 is the same-sign headroom to rho differences."""
+    drho = rho[neighbors] - rho_sel[:, None]
+    d = recon @ drho
     # Compute limiter (in [0, 1]) for the gradients on each face:
-    lo, hi = du.aminmax(dim=1, keepdim=True)
+    lo, hi = drho.aminmax(dim=1, keepdim=True)
     lo.clip_(max=0.0)
     hi.clip_(min=0.0)
     D1 = torch.where(d >= 0, hi, lo)
@@ -438,4 +436,4 @@ def _face_limiter(
     phi.nan_to_num_(1.0)  # Handle possible NANs from d underflow
     phi.clamp_(max=1.0)
     limiter = phi.amin(dim=1, keepdim=True)
-    return uc[:, None] + limiter * d
+    return rho_sel[:, None] + limiter * d
