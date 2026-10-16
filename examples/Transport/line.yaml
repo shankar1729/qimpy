@@ -1,0 +1,26 @@
+ab_initio:
+  file: ldbd-CsPbBr3-dft.h5  # change this file, and T and mu accordingly
+  T: 300 K
+  mu: 0.528824 eV
+
+spatial_transport:
+  mesh:
+    line:
+      L: 20 nm
+      N: 200
+
+  cfl: 1.0
+  contacts:
+    source:
+      dmu: 0.1
+      Bfield: [0., 1. T, 0.]
+    drain:
+      dmu: -0.1
+      Bfield: [0., -1. T, 0.]
+
+time_evolution:
+  t_max: 40.0 ps
+  dt_save: 0.2 ps
+  n_collate: 32
+
+checkpoint_out: animation/advect_{:04d}.h5

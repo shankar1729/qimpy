@@ -41,7 +41,25 @@ class Checkpoint(h5py.File):
             filename_open = filename  # Directly open the target filename,
             self.filename_move = ""  # and don't move at the end
         mode = "w" if writable else "r"  # don't allow r+, a etc. for safety
-        super().__init__(filename_open, mode, driver="mpio", comm=rc.comm)
+        # Gather mode: multiple processes but an h5py without parallel-HDF5
+        # (mpio) support. Only the head holds the on-disk file; other ranks open
+        # a throwaway in-memory file and `write_slice` gathers their slices to
+        # the head. This lets multi-process runs checkpoint on a serial h5py
+        # build (collective metadata still works locally on every rank).
+        self.gather = (rc.n_procs > 1) and (not h5py.get_config().mpi)
+        if rc.n_procs == 1:
+            # Serial run: avoid the parallel-HDF5 (mpio) driver, which requires
+            # an MPI-enabled h5py build. Plain h5py is sufficient on one process.
+            super().__init__(filename_open, mode)
+        elif self.gather:
+            if rc.is_head:
+                super().__init__(filename_open, mode)
+            else:
+                super().__init__(
+                    filename_open, mode, driver="core", backing_store=False
+                )
+        else:
+            super().__init__(filename_open, mode, driver="mpio", comm=rc.comm)
         mode_name = "writing:" if writable else "reading"
         log.info(f"\nOpened checkpoint file '{filename_open}' for {mode_name}")
 
@@ -65,10 +83,22 @@ class Checkpoint(h5py.File):
         written from current process.
         This may be called from any subset of MPI processes independently,
         as no metadata modification such as dataset creation is done here.
+        In gather mode (serial h5py + MPI) every rank's slice is collected on
+        the head, which performs the writes into the single on-disk file.
         """
         assert self.writable
         assert len(offset) == len(data.shape)
         assert len(offset) == len(dset.shape)
+        if self.gather:
+            payloads = rc.comm.gather((tuple(offset), data.to(rc.cpu).numpy()), root=0)
+            if rc.is_head:
+                for off, arr in payloads:
+                    dset[
+                        tuple(
+                            slice(off[i], off[i] + s) for i, s in enumerate(arr.shape)
+                        )
+                    ] = arr
+            return
         index = tuple(
             slice(offset[i], offset[i] + s_i) for i, s_i in enumerate(data.shape)
         )
@@ -89,12 +119,19 @@ class Checkpoint(h5py.File):
         return torch.from_numpy(dset[index]).to(rc.device)
 
     def create_dataset_real(
-        self, path: str, shape: tuple[int, ...], dtype: torch.dtype = torch.float64
+        self,
+        path: str,
+        shape: tuple[int, ...],
+        dtype: torch.dtype | np.dtype = torch.float64,
     ) -> Any:
         """Create a dataset at `path` suitable for a real array of size `shape`.
         Additionally, `dtype` is translated
         from torch to numpy for convenience."""
-        return self.create_dataset(path, shape=shape, dtype=rc.np_type[dtype])
+        return self.create_dataset(
+            path,
+            shape=shape,
+            dtype=(rc.np_type[dtype] if isinstance(dtype, torch.dtype) else dtype),
+        )
 
     def create_dataset_complex(
         self, path: str, shape: tuple[int, ...], dtype: torch.dtype = torch.complex128
@@ -184,11 +221,11 @@ class CheckpointPath(NamedTuple):
     ) -> Any:
         """Create dataset with `name` within current checkpoint path."""
         assert self.checkpoint is not None
-        self.checkpoint.create_dataset(
+        return self.checkpoint.create_dataset(
             "/".join((self.path, name)), shape, dtype, **kwargs
         )
 
-    def write(self, name: str, data: torch.Tensor) -> str:
+    def write(self, name: str, data: torch.Tensor | np.ndarray) -> str:
         """Write `data` available on all processes to `name` within current path.
         This is convenient for small tensors that are not split over MPI.
         For complex data, pass a real view that has a final dimension of length 2.
@@ -198,7 +235,9 @@ class CheckpointPath(NamedTuple):
         assert checkpoint is not None
         dset = checkpoint.create_dataset_real(path, data.shape, data.dtype)
         if rc.is_head:
-            dset[...] = data.to(rc.cpu).numpy()
+            dset[...] = (
+                data.to(rc.cpu).numpy() if isinstance(data, torch.Tensor) else data
+            )
         return name
 
     def read(self, name: str, report: bool = True) -> torch.Tensor:
@@ -211,10 +250,27 @@ class CheckpointPath(NamedTuple):
         dset = checkpoint[path]
         return torch.from_numpy(dset[...]).to(rc.device)
 
+    def read_np(self, name: str, report: bool = True) -> np.ndarray:
+        """Read entire dataset from `name`, reporting to log if `report`."""
+        checkpoint, path = self.relative(name)
+        assert checkpoint is not None
+        assert path in checkpoint
+        if report:
+            log.info(f"Loading {name}")
+        dset = checkpoint[path]
+        return np.array(dset)
+
     def read_optional(self, name: str, report: bool = True) -> torch.Tensor | None:
         """Handle optional dataset with `read`, returning None if not found."""
         try:
             return self.read(name, report)
+        except AssertionError:
+            return None
+
+    def read_optional_np(self, name: str, report: bool = True) -> np.ndarray | None:
+        """Handle optional dataset with `read`, returning None if not found."""
+        try:
+            return self.read_np(name, report)
         except AssertionError:
             return None
 
@@ -233,6 +289,12 @@ class CheckpointPath(NamedTuple):
         checkpoint, path = self.relative(name)
         assert checkpoint is not None
         return str(np.bytes_(checkpoint[path]).decode())
+
+    def read_str_list(self, name: str, sep: str = ",") -> list[str]:
+        """Read list of regular strings tokenized from single byte string in checkpoint.
+        This handles the edge case of an empty list (whereas str.split returns [''])."""
+        result = self.read_str(name)
+        return result.split(sep) if result else list[str]()
 
     def __getitem__(self, key) -> Any:
         checkpoint, path = self.relative(key)

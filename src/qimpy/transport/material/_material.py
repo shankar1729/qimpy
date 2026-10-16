@@ -20,7 +20,7 @@ class Material(TreeNode):
     nk_mine: int  #: number of k-points on current process
     n_bands: int  #: number of bands at each k
     n_dim: int  #: dimensionality of material (2 or 3)
-    wk: float  #: Brillouin zone integration weight
+    wk: torch.Tensor  #: Brillouin zone integration weight
     k: torch.Tensor  #: nk_mine x n_dim wave vectors
     E: torch.Tensor  #: nk_mine x n_bands energies
     v: torch.Tensor  #: nk_mine x n_bands x n_dim velocities in plane
@@ -33,7 +33,7 @@ class Material(TreeNode):
     def initialize(
         self,
         *,
-        wk: float,
+        wk: torch.Tensor,
         nk: int,
         n_bands: int,
         n_dim: int,
@@ -78,8 +78,8 @@ class Material(TreeNode):
     def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
         """Return a function (or callable object) to calculate reflections for a
         sequence of surface points with unit normals (Nsurf x 2). This function will
-        be called with a Nghost x Nsurf x Nkbb_mine tensor, and the reflection should
-        be calculated pointwise in real-space with output of the same dimensions."""
+        be called with a Nsurf x Nkbb_mine tensor, and the reflection should be
+        calculated pointwise in real-space with output of the same dimensions."""
 
     @abstractmethod
     def get_contactor(
@@ -104,13 +104,36 @@ class Material(TreeNode):
         """Return tensor of complex conjugates of all observables specific to each
         material. (No x Nkbb_mine) where No is number of observables."""
 
+    @abstractmethod
+    def get_flux_indices(self) -> list[int]:
+        """Return list of flux names and observable indices, specific to each material.
+        Fluxes are computed on edges (faces) of the mesh, rather than on the cell
+        centers, as done for the observables. These are useful for plotting accurate
+        streamlines of fluxes, and are most useful for conserved quantities such
+        as particle number. Hence, specify indices to a subset of observables from
+        `get_observables` to compute fluxes for."""
+
+    def constrain(self, rho: torch.Tensor) -> None:
+        """Override to apply any per-material constraints on `rho`
+        that may be violated during spatial transport or dynamics."""
+
     def measure_observables(self, rho: torch.Tensor, t: float) -> torch.Tensor:
-        """Return expectation value of observables, (Nx x Ny x No)."""
-        result = self.wk * torch.einsum("xya, oa -> xyo", rho, self.get_observables(t))
+        """Return expectation value of observables, (Nx x Ny x No).
+        Optionally, override to add/replace observables that cannot be expressed
+        as a linear operator `get_observables` on the occupations / density-matrices.
+        Include the names of these added/replaced observables in `get_observable_names`.
+        """
+        result = torch.einsum("a, ra, oa -> ro", self.wk, rho, self.get_observables(t))
         if self.group.size() > 1:
             result = result.contiguous()
             dist.all_reduce(result, group=self.group)
         return result
+
+    def update_stash(self, rho: torch.Tensor, r_division: TaskDivision) -> None:
+        """Override to stash extra objects to output with the next checkpoint.
+        Use real-space division `r_division` to coordinate slices in the checkpoint.
+        `Geometry` already handles this for observables, so this is only for
+        any extra diagnostics not captured in the obersvables list above."""
 
 
 def fermi(E, mu, T):

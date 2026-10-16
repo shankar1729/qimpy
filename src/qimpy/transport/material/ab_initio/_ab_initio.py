@@ -141,7 +141,7 @@ class AbInitio(Material):
             nk, n_bands = data_file["E"].shape
             log.info(f"Initializing AbInitio material with {nk=} and {n_bands=}")
             self.initialize(
-                wk=wk,
+                wk=torch.tensor([wk], device=rc.device),
                 nk=nk,
                 n_bands=n_bands,
                 n_dim=3,
@@ -424,6 +424,10 @@ class AbInitio(Material):
         phase_conj = self.schrodingerV(t)[None, :].conj()
         observablesI = self.observables * phase_conj  # switch to interaction picture
         return (ph.pack(observablesI) * ph.w_overlap).flatten(1, 3)
+
+    def get_flux_indices(self) -> list[int]:
+        # Only generate flux for particle number (charge) if present:
+        return [i for i, name in enumerate(self.observable_names) if name == "n"]
 
 
 class Contactor:

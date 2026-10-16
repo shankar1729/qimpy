@@ -1,0 +1,40 @@
+fermi_surface:
+  kF: 1.0
+  vF: 1.0
+  M_theta: 16
+  Nr: 1
+  tau_p: .inf
+  tau_ee: .inf
+  r_c: .inf
+  specularity: 1.0
+
+geometry:
+  mesh:
+    rect:
+      Lx: 1.0
+      Ly: 1.25
+      Nx: 24
+      Ny: 30
+      contacts:
+        source: [0.0, 0.125, 0.125]
+        drain: [1.0, 0.125, 0.125]
+      regions:
+        above-source: [0.1, 0.25, 0.1, 0.125]
+        above-drain: [0.9, 0.25, 0.1, 0.125]
+  cfl: 1.2
+  compile: no
+  contacts:
+    source:
+      dmu: +0.1
+    drain:
+      dmu: -0.1
+
+time_evolution: 
+  t_max: 10.0
+  dt_save: 10.0
+  dt_probe: 0.1
+  n_collate: 4
+  integrator: RK2
+
+checkpoint: null
+checkpoint_out: animation/advect_{:04d}.h5

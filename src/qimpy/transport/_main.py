@@ -2,6 +2,8 @@ import argparse
 import sys
 import os
 
+import torch
+
 import qimpy
 from qimpy import log, rc, io
 from qimpy.rc import MPI
@@ -188,6 +190,20 @@ def main():
     # --- Include processed input in log:
     log.info(f"\n# Processed input:\n{io.yaml.dump(input_dict)}")
     input_dict = io.dict.remove_units(input_dict)  # Remove units
+
+    # Optional working precision. float64 (default) is safest; float32 roughly
+    # halves memory traffic -- a sizable speedup on consumer GPUs -- and the
+    # finite-volume transport is fp32-stable (FermiSurface and single_band run
+    # genuinely in fp32; ab-initio stays fp64 from its complex data). Must be set
+    # before the materials/geometry are built.
+    precision = str(input_dict.pop("precision", "float64")).lower()
+    dtypes = {"float64": torch.float64, "fp64": torch.float64, "double": torch.float64,
+              "float32": torch.float32, "fp32": torch.float32, "single": torch.float32}
+    if precision not in dtypes:
+        raise io.InvalidInputException(
+            f"precision must be one of {sorted(dtypes)}, got {precision!r}")
+    torch.set_default_dtype(dtypes[precision])
+    log.info(f"Working precision: {precision}")
 
     # Initialize system with input parameters:
     transport = Transport(process_grid_shape=args.process_grid, **input_dict)

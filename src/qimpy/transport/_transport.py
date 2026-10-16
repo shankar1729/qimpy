@@ -1,11 +1,11 @@
-from typing import Sequence
+from typing import Optional, Sequence, Union
 
 from qimpy import log, TreeNode
 from qimpy.io import CheckpointPath, Checkpoint, CheckpointContext
 from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
-from .geometry import Geometry, PatchSet, ParameterGrid
-from .material import Material, FermiCircle
+from .geometry import Geometry
+from .material import Material, FermiSurface
 from .material.ab_initio import AbInitio
 from .material.single_band import SingleBand
 from . import TimeEvolution
@@ -19,15 +19,14 @@ class Transport(TreeNode):
     def __init__(
         self,
         *,
-        ab_initio: AbInitio | dict | None = None,
-        fermi_circle: FermiCircle | dict | None = None,
-        single_band: SingleBand | dict | None = None,
-        patch_set: PatchSet | dict | None = None,
-        parameter_grid: ParameterGrid | dict | None = None,
-        time_evolution: TimeEvolution | dict | None = None,
-        checkpoint: str | None = None,
-        checkpoint_out: str | None = None,
-        process_grid_shape: Sequence[int] | None = None,
+        ab_initio: Optional[Union[AbInitio, dict]] = None,
+        fermi_surface: Optional[Union[FermiSurface, dict]] = None,
+        single_band: Optional[Union[SingleBand, dict]] = None,
+        geometry: Optional[Union[Geometry, dict]] = None,
+        time_evolution: Optional[Union[TimeEvolution, dict]] = None,
+        checkpoint: Optional[str] = None,
+        checkpoint_out: Optional[str] = None,
+        process_grid_shape: Optional[Sequence[int]] = None,
     ):
         """Compose a System to calculate from its pieces. Each piece
         could be provided as an object or a dictionary of parameters
@@ -38,18 +37,17 @@ class Transport(TreeNode):
         ab_initio
             :yaml:`Ab-initio material.`
             Exactly one supported material type must be specified.
-        fermi_circle
-            :yaml:`Fermi-circle material for graphene/2DEG.`
+        fermi_surface
+            :yaml:`Unified Fermi-surface (delta-k storage with modal transforms).`
+            Set Nr=1 to recover the Fermi-circle limit.
             Exactly one supported material type must be specified.
         single_band
             :yaml:`Single-band model material for energy-resolved charge transport.`
             Exactly one supported material type must be specified.
-        patch_set
-            :yaml:`Geometry consisting of bicubic patches.`
-            Exactly one supported geometry type must be specified.
-        parameter_grid
-            :yaml:`Virtual geometry of disconnected points for batched dynamics.`
-            Exactly one supported geometry type must be specified.
+        geometry
+            :yaml:`Geometry specification for spatial transport.`
+            Specifies a cell-centered finite-volume transport on a mesh consisting
+            of triangles in 2D and line segments in 1D.
         time_evolution
             :yaml:`Time integration options.`
         checkpoint
@@ -82,9 +80,9 @@ class Transport(TreeNode):
                 "ab-initio", AbInitio, ab_initio, process_grid=self.process_grid
             ),
             TreeNode.ChildOptions(
-                "fermi-circle",
-                FermiCircle,
-                fermi_circle,
+                "fermi-surface",
+                FermiSurface,
+                fermi_surface,
                 process_grid=self.process_grid,
             ),
             TreeNode.ChildOptions(
@@ -92,24 +90,13 @@ class Transport(TreeNode):
             ),
             have_default=False,
         )
-        self.add_child_one_of(
+        self.add_child(
             "geometry",
+            Geometry,
+            geometry,
             checkpoint_in,
-            TreeNode.ChildOptions(
-                "patch_set",
-                PatchSet,
-                patch_set,
-                material=self.material,
-                process_grid=self.process_grid,
-            ),
-            TreeNode.ChildOptions(
-                "parameter_grid",
-                ParameterGrid,
-                parameter_grid,
-                material=self.material,
-                process_grid=self.process_grid,
-            ),
-            have_default=False,
+            material=self.material,
+            process_grid=self.process_grid,
         )
         self.add_child(
             "time_evolution",
