@@ -77,28 +77,31 @@ class Geometry(TreeNode):
         # Precompute velocity-weighted, area-scaled edge operators (constant):
         #   into eL: -a*elen/area_L,  into eR: +a*elen/area_R,  a = v_c.n
         a_int = geom.en @ v.t()  # (Ne, Nk)
+        a_bnd = geom.bn @ v.t()  # (Nb, Nk)
         inv_area = 1 / geom.area
         maskL = a_int > 0
+        self._maskB = a_bnd > 0
         wL = -a_int * (geom.elen * inv_area[geom.eL])[:, None]
         wR = a_int * (geom.elen * inv_area[geom.eR])[:, None]
+        wB = -a_bnd * (geom.blen * inv_area[geom.bcell])[:, None]
         ik = torch.arange(self.Nk, device=rc.device)
-        idx_in = self.Nk * torch.where(maskL, geom.eLF[:, None], geom.eRF[:, None]) + ik
-        idx_out = self.Nk * torch.cat((geom.eL, geom.eR))[:, None] + ik
+        idx_in = ik + self.Nk * torch.cat(
+            (
+                torch.where(maskL, geom.eLF[:, None], geom.eRF[:, None]).tile(2, 1),
+                geom.bF[:, None].expand(-1, self.Nk),
+            )
+        )
+        idx_out = ik + self.Nk * torch.cat((geom.eL, geom.eR, geom.bcell))[:, None]
         n_recon = self.cell_division.n_recon
-        self.interior_advect_mat = torch.sparse_coo_tensor(
-            indices=torch.stack((idx_out.flatten(), idx_in.flatten().tile(2))),
-            values=torch.cat((wL.flatten(), wR.flatten())),
+        self.v_dot_del = torch.sparse_coo_tensor(
+            indices=torch.stack((idx_out.flatten(), idx_in.flatten())),
+            values=torch.cat((wL.flatten(), wR.flatten(), wB.flatten())),
             size=(len(geom.area) * self.Nk, n_recon * self._nf * self.Nk),
         ).to_sparse_csr()
 
-        self._a_bnd = geom.bn @ v.t()  # (Nb, Nk)
-        self._maskB = self._a_bnd > 0
-        self._wB = -self._a_bnd * (geom.blen * inv_area[geom.bcell])[:, None]
         # Per-channel density weight; outward number-flux operator per boundary edge.
         self._ncoef = material.get_observables(0.0)[0]  # (Nk,)
-        self._cur_b = (
-            geom.blen[:, None] * self._ncoef[None, :]
-        ) * self._a_bnd  # (Nb,Nk)
+        self._cur_b = (geom.blen[:, None] * self._ncoef[None, :]) * a_bnd
 
         # Face-flux output: fluxes (currents, heat) are emitted on edges as the
         # face-normal flux F = elen * sum_k u_face_k (v_k.n) g_k -- the SAME upwind
@@ -246,7 +249,6 @@ class Geometry(TreeNode):
         g = self.geom
         self.material.constrain(u)
         uf = self._faces(u).reshape(-1, self.Nk)  # (K*3, Nk)
-        dudt = (self.interior_advect_mat @ uf.view(-1)).view(-1, self.Nk)
         if g.bcell.numel():
             ub = uf[g.bF]
             # Apply reflections and contacts:
@@ -255,9 +257,9 @@ class Geometry(TreeNode):
                 ub_in[self._wall] = self._reflector(ub[self._wall])
             for contact in self.contacts.values():
                 ub_in[contact.indices] = contact.contactor(t)
-            # Propagate incoming modes from boundary to relevant cells:
-            dudt.index_add_(0, g.bcell, self._wB * torch.where(self._maskB, ub, ub_in))
-        return dudt
+            # Set back to faces:
+            uf[g.bF] = torch.where(self._maskB, ub, ub_in)
+        return (self.v_dot_del @ uf.view(-1)).view(-1, self.Nk)
 
     def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         watch = StopWatch("Geometry.rho_dot")
