@@ -137,17 +137,22 @@ class Geometry(TreeNode):
         w_cells = geom.area[:n_mine]
         i_region_all = self.mesh.cells[:, -1]
         assert i_region_all.min() >= -1
-        n_regions = int(np.ptp(i_region_all)) + 1
+        n_regions = int(i_region_all.max()) + 1
         i_region = torch.from_numpy(
-            i_region_all[self.cell_division.global_index[:n_mine]] % n_regions
+            i_region_all[self.cell_division.global_index[:n_mine]]
         ).to(rc.device)
+        probe_cells = torch.where(i_region >= 0)[0]
+        i_region = i_region[probe_cells]
+        w_cells = w_cells[probe_cells]
         w_tot = torch.zeros(n_regions, dtype=w_cells.dtype, device=rc.device)
         w_tot.index_add_(0, i_region, w_cells)
         dist.all_reduce(w_tot, group=self.group)
+        n_probe = len(probe_cells)
+        self.probe_cells = probe_cells
         self.probe_mat_cell = torch.sparse_coo_tensor(
-            indices=torch.stack((i_region, torch.arange(n_mine, device=rc.device))),
+            indices=torch.stack((i_region, torch.arange(n_probe, device=rc.device))),
             values=w_cells / w_tot[i_region],
-            size=(n_regions, n_mine),
+            size=(n_regions, n_probe),
         ).to_sparse_csr()  # multiply by per-cell observables to get region averages
 
         # Compile the face limiter which involves several elemntwise operations:
@@ -317,12 +322,12 @@ class Geometry(TreeNode):
     @stopwatch
     def update_probes(self, i_step: int, t: float) -> None:
         """Stash coarse-grained probes on defined cell regions and contacts."""
-        u_own = self._u[: self.cell_division.n_mine]
-        obserables = self.material.measure_observables(u_own, t)
-        region_averages = (self.probe_mat_cell @ obserables).contiguous()
-        dist.all_reduce(region_averages, group=self.group)
         self.stash_probe.i_step.append(i_step)
         self.stash_probe.t.append(t)
+        # Interior cell regions:
+        obserables = self.material.measure_observables(self._u[self.probe_cells], t)
+        region_averages = (self.probe_mat_cell @ obserables).contiguous()
+        dist.all_reduce(region_averages, group=self.group)
         self.stash_probe.observables.append(region_averages.detach().cpu())
         # TO DO: boundary region fluxes
 
@@ -355,14 +360,15 @@ class Geometry(TreeNode):
         assert checkpoint is not None
         names = self.material.get_observable_names()
         saved = [
-            "observables",
             cp_path.write("flux_indices", np.array(self._flux_indices)),
             cp_path.write_str("contact_names", ",".join(self.contacts.keys())),
             cp_path.write_str("observable_names", ",".join(names)),
             cp_path.write("t", np.array(self.stash.t)),
             cp_path.write("i_step", np.array(self.stash.i_step)),
+            "observables",
             cp_path.write("t_probe", np.array(self.stash_probe.t)),
             cp_path.write("i_step_probe", np.array(self.stash_probe.i_step)),
+            "probes",
         ]
 
         # Observables:
