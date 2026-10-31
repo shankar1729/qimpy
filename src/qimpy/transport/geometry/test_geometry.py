@@ -256,6 +256,7 @@ def test_gaussian_pong(
             torch.stack((x_reflected, y_reflected), dim=-1),
         )
     )
+    rel_err_rates = []
 
     def check_results(i_step: int, t: float) -> None:
         """Intercept Geometry.update_probes to check results"""
@@ -276,11 +277,13 @@ def test_gaussian_pong(
             / globalreduce.sum(n_pred.abs(), group=geometry.group)
         ).item()
         rel_err_rate = rel_err / t
-        log.info(f"{rel_err_rate=:.2g}")
+        rel_err_rates.append(rel_err_rate)
         assert rel_err_rate < rel_err_rate_bound
 
     transport.geometry.update_probes = check_results
     transport.run()
+    errors = np.array(rel_err_rates)
+    log.info(f"Relative error rates: {errors} (max: {errors.max():.2g})")
 
 
 def main():
