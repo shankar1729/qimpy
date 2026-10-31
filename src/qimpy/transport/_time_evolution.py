@@ -45,6 +45,7 @@ class TimeEvolution(TreeNode):
         t_max: float = 0.0,
         n_collate: int = 0,
         integrator: str = "RK2",
+        verbose: bool = False,
         collision_interval: int = 1,
         collision_fuse: bool = True,
         collision_s_max: float = 0.0,
@@ -86,6 +87,8 @@ class TimeEvolution(TreeNode):
         integrator
             :yaml:`Integrator for time-stepping: RK2, RK4 or SSPRK3.`
             SSPRK3 is 3-stage strong-stability-preserving RK3 (Shu-Osher form).
+        verbose
+            :yaml:`Log every step if True, and only probe/observable steps otherwise.`
         collision_fuse
             :yaml:`Merge adjacent half-kicks across Strang windows.`
             Halves the number of collision applies per window. Note the merged
@@ -219,6 +222,7 @@ class TimeEvolution(TreeNode):
                     f"Collision validity gate: max|rho| <= "
                     f"{self.collision_rho_max:g}"
                 )
+        self.verbose = verbose
 
     def time_step(self, geometry: Geometry) -> None:
         """Advance one step of dt.
@@ -625,10 +629,11 @@ class TimeEvolution(TreeNode):
                         i_collate = 0
 
                 tasks_str = f' ({", ".join(tasks)})' if tasks else ""
-                log.info(
-                    f"Step {self.i_step} done of {self.n_steps}"
-                    f" at t[s]: {rc.clock():.2f}{tasks_str}"
-                )
+                if self.verbose or tasks_str:
+                    log.info(
+                        f"Step {self.i_step} done of {self.n_steps}"
+                        f" at t[s]: {rc.clock():.2f}{tasks_str}"
+                    )
 
                 if self.i_step == self.n_steps:
                     self.flush_collision(transport.geometry)
@@ -658,6 +663,7 @@ class TimeEvolution(TreeNode):
             attrs["t_max"] = self.n_steps * self.dt
             attrs["n_collate"] = self.n_collate
             attrs["integrator"] = self.integrator
+        attrs["verbose"] = self.verbose
         return list(attrs.keys())
 
 
