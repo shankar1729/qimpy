@@ -227,40 +227,32 @@ class SpecularReflector:
         theta0: float,
         specularity: float,
     ) -> None:
-        # Find which theta reflects into the first one:
+        # Calculate linearly-interpolated reflection for theta0:
         angle_n = torch.atan2(n[:, 1], n[:, 0])
         dtheta0_reflected = 2 * (angle_n - theta0) + np.pi  # deflection of theta0
         n_theta = v.shape[0]
-        d_theta = 2 * np.pi / n_theta
-        i0_reflected = (dtheta0_reflected / d_theta).floor().to(torch.long) % n_theta
+        x0_reflected = dtheta0_reflected * (n_theta / (2 * np.pi))
+        i0_reflected = x0_reflected.floor().to(torch.long)
+        w1 = x0_reflected - i0_reflected
 
         # Map the rest correspondingly:
         i0 = (i0_reflected[:, None] - torch.arange(n_theta, device=rc.device)) % n_theta
-        i1 = (i0 + 1) % n_theta
+        i01 = torch.stack((i0, (i0 + 1) % n_theta))  # reflected theta interval indices
         v_n = (n[:, None] * v).sum(dim=-1)
-        sel = torch.where(v_n.flatten() > 0)[0]
+        outward = torch.where(v_n.flatten() > 0)[0]  # only need to reflect outward flux
 
-        x = dtheta0_reflected / d_theta
-        w1 = torch.repeat_interleave(x - x.floor(), n_theta)[sel]
+        # Construct sparse matrix for remapping theta with linear interpolation:
+        w1 = torch.repeat_interleave(w1, n_theta)[outward]
         w0 = 1.0 - w1
-
-        # Compute flattened index on Nr x Nk_mine for efficient indexing
-        nr = len(n)
-        ir = torch.arange(nr, device=rc.device)[:, None]
+        n_flattened = v_n.numel()
+        i_boundary = torch.arange(len(n), device=rc.device)[:, None]
+        index_out = torch.cat((outward, outward))
+        index_in = (i_boundary * n_theta + i01).view(2, -1)[:, outward].flatten()
+        inward = torch.where(v_n.flatten()[index_in] < 0)[0]  # only compute inward flux
         self.specular_matrix = torch.sparse_coo_tensor(
-            indices=torch.stack(
-                (
-                    torch.cat(
-                        (
-                            (ir * n_theta + i0).flatten()[sel],
-                            (ir * n_theta + i1).flatten()[sel],
-                        )
-                    ),
-                    torch.cat((sel, sel)),
-                )
-            ),
-            values=torch.cat((w0, w1)) * specularity,
-            size=(nr * n_theta, nr * n_theta),
+            indices=torch.stack((index_in[inward], index_out[inward])),
+            values=torch.cat((w0, w1))[inward] * specularity,
+            size=(n_flattened, n_flattened),
         ).to_sparse_csr()
 
         # Compute flux in and out weights for diffuse scattering and norm correction:
