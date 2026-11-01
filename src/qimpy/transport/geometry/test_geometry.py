@@ -102,7 +102,7 @@ def test_charge_conservation(n_r: int, specularity: float, contacted: bool) -> N
         contacts = dict(source=dict(dmu=0.1), drain=dict(dmu=-0.1))
     geometry = make_geometry(
         dict(mesh=dict(triangulate=poly_kwargs), contacts=contacts),
-        dict(kF=1.5, vF=0.8, n_theta=8, n_r=n_r, specularity=specularity),
+        dict(kF=1.5, vF=0.8, n_theta=6, n_r=n_r, specularity=specularity),
     )
     material = geometry.material
     dV = rc.from_np(geometry.mesh.get_cell_weights())
@@ -198,8 +198,8 @@ def test_wire_equilibration(style: str) -> None:
             (0.025, 8, 0.0, 2.0e-2),  # baseline
             (0.018, 8, 0.0, 1.0e-2),  # quadratic improvement with h
             (0.025, 16, 0.0, 2.0e-2),  # no effect of n_theta when aligned
-            (0.025, 8, 17.9, 4.5e-1),  # reflections worsen when not aligned,
-            (0.025, 32, 17.9, 4.0e-2),  # but improve with n_theta
+            (0.025, 8, 17.9, 4.0e-1),  # reflections worsen when not aligned,
+            (0.025, 32, 17.9, 6.0e-2),  # but improve with n_theta
         ]
     ),
 )

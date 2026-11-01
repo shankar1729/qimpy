@@ -255,10 +255,15 @@ class SpecularReflector:
         nk = k_division.n_tot
         i0 = (i0_reflected[:, None] - torch.arange(n_theta, device=rc.device)) % n_theta
         i1 = (i0 + 1) % n_theta
-        v_n_0 = (n[:, None] * v[i0]).sum(dim=-1)
-        v_n_1 = (n[:, None] * v[i1]).sum(dim=-1)
         v_n_in = (n[:, None] * v).sum(dim=-1)
         sel = torch.where(v_n_in.flatten() > 0)[0]
+
+        x = dtheta0_reflected / d_theta
+        w1 = torch.repeat_interleave(x - x.floor(), n_theta)[sel]
+        w0 = 1.0 - w1
+        """
+        v_n_0 = (n[:, None] * v[i0]).sum(dim=-1)
+        v_n_1 = (n[:, None] * v[i1]).sum(dim=-1)
         w0 = ((v_n_in + v_n_1) / (v_n_1 - v_n_0)).flatten()[sel]
         w1 = 1 - w0
         if len(outwards0 := torch.where(v_n_0.flatten()[sel] > 0)[0]):
@@ -267,6 +272,9 @@ class SpecularReflector:
         if len(outwards1 := torch.where(v_n_1.flatten()[sel] > 0)[0]):
             w0[outwards1] = -(v_n_in / v_n_0).flatten()[sel][outwards1]
             w1[outwards1] = 0.0
+        """
+        self.flux_out = torch.where(v_n_in > 0, v_n_in, 0.0)
+        self.flux_in = torch.where(v_n_in < 0, -v_n_in, 0.0)
 
         # Compute flattened index on Nr x Nk_mine for efficient indexing
         self.k_division = k_division
@@ -336,6 +344,12 @@ class SpecularReflector:
             )
             out_flat = recv_buf[self.recv_index].T
         out = out_flat.reshape(rho.shape)
+
+        # Correct for flux error:
+        flux_error = (out * self.flux_in).sum(dim=-1) - (rho * self.flux_out).sum(
+            dim=-1
+        )
+        out -= (flux_error / self.flux_in.sum(dim=-1))[:, None]
 
         # Optionally account for diffuse contributions:
         if self.specularity != 1.0:
