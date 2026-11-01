@@ -8,7 +8,7 @@ import torch
 import torch.distributed as dist
 
 from qimpy import rc
-from qimpy.mpi import ProcessGrid, TaskDivision
+from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.transport.advect import Advect, N_GHOST
@@ -133,10 +133,8 @@ class FermiCircle(Material):
         return Contactor(self, n, **kwargs)
 
     def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
-        v = self.v_all[:, 0]
-        return SpecularReflector(
-            n, v, self.theta0, self.group, self.k_division, self.specularity
-        )
+        assert self.group.size() == 1
+        return SpecularReflector(n, self.v_all[:, 0], self.theta0, self.specularity)
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
@@ -239,20 +237,16 @@ class SpecularReflector:
         n: torch.Tensor,
         v: torch.Tensor,
         theta0: float,
-        group: dist.ProcessGroup,
-        k_division: TaskDivision,
         specularity: float,
     ) -> None:
         # Find which theta reflects into the first one:
         angle_n = torch.atan2(n[:, 1], n[:, 0])
         dtheta0_reflected = 2 * (angle_n - theta0) + np.pi  # deflection of theta0
-        n_theta = k_division.n_tot
+        n_theta = v.shape[0]
         d_theta = 2 * np.pi / n_theta
         i0_reflected = (dtheta0_reflected / d_theta).floor().to(torch.long) % n_theta
-        dist.broadcast(i0_reflected, group=group, group_src=0)  # ensure consistency
 
         # Map the rest correspondingly:
-        nk = k_division.n_tot
         i0 = (i0_reflected[:, None] - torch.arange(n_theta, device=rc.device)) % n_theta
         i1 = (i0 + 1) % n_theta
         v_n_in = (n[:, None] * v).sum(dim=-1)
@@ -261,59 +255,27 @@ class SpecularReflector:
         x = dtheta0_reflected / d_theta
         w1 = torch.repeat_interleave(x - x.floor(), n_theta)[sel]
         w0 = 1.0 - w1
-        """
-        v_n_0 = (n[:, None] * v[i0]).sum(dim=-1)
-        v_n_1 = (n[:, None] * v[i1]).sum(dim=-1)
-        w0 = ((v_n_in + v_n_1) / (v_n_1 - v_n_0)).flatten()[sel]
-        w1 = 1 - w0
-        if len(outwards0 := torch.where(v_n_0.flatten()[sel] > 0)[0]):
-            w0[outwards0] = 0.0
-            w1[outwards0] = -(v_n_in / v_n_1).flatten()[sel][outwards0]
-        if len(outwards1 := torch.where(v_n_1.flatten()[sel] > 0)[0]):
-            w0[outwards1] = -(v_n_in / v_n_0).flatten()[sel][outwards1]
-            w1[outwards1] = 0.0
-        """
         self.flux_out = torch.where(v_n_in > 0, v_n_in, 0.0)
         self.flux_in = torch.where(v_n_in < 0, -v_n_in, 0.0)
 
         # Compute flattened index on Nr x Nk_mine for efficient indexing
-        self.k_division = k_division
-        self.group = group
         nr = len(n)
         ir = torch.arange(nr, device=rc.device)[:, None]
-        i_proc = group.rank()
-        n_procs = group.size()
-        if n_procs == 1:
-            self.specular_matrix = torch.sparse_coo_tensor(
-                indices=torch.stack(
-                    (
-                        torch.cat(
-                            (
-                                (ir * nk + i0).flatten()[sel],
-                                (ir * nk + i1).flatten()[sel],
-                            )
-                        ),
-                        torch.cat((sel, sel)),
-                    )
-                ),
-                values=torch.cat((w0, w1)),
-                size=(nr * n_theta, nr * n_theta),
-            ).to_sparse_csr()
-            self.i_reflected_flat = (ir * nk + i0).flatten()
-        else:
-            # Determine how to receive data:
-            i_reflected_cur = i0[:, k_division.mine]
-            j_proc = i_reflected_cur.flatten() // k_division.n_each
-            self.recv_counts, self.recv_offsets = get_counts_offsets(j_proc, n_procs)
-            self.recv_index = invert_index(j_proc.argsort(stable=True))
-            # Determine how to send data:
-            send_sel = torch.where(i0 // k_division.n_each == i_proc)
-            send_sel_index_mine = send_sel[0] * k_division.n_mine + (
-                i0[send_sel] - k_division.i_start
-            )
-            j_proc = send_sel[1] // k_division.n_each
-            self.send_counts, self.send_offsets = get_counts_offsets(j_proc, n_procs)
-            self.send_index = send_sel_index_mine[j_proc.argsort(stable=True)]
+        self.specular_matrix = torch.sparse_coo_tensor(
+            indices=torch.stack(
+                (
+                    torch.cat(
+                        (
+                            (ir * n_theta + i0).flatten()[sel],
+                            (ir * n_theta + i1).flatten()[sel],
+                        )
+                    ),
+                    torch.cat((sel, sel)),
+                )
+            ),
+            values=torch.cat((w0, w1)),
+            size=(nr * n_theta, nr * n_theta),
+        ).to_sparse_csr()
 
         # Prepare input and output projectors for diffuse scattering
         self.specularity = specularity
@@ -323,27 +285,10 @@ class SpecularReflector:
             flux_weight_out = torch.where(flux_weight > 0.0, flux_weight, 0.0)
             flux_weight_in = torch.where(flux_weight < 0.0, -flux_weight, 0.0)
             norm_factor = (1.0 - specularity) / flux_weight_in.sum(dim=-1, keepdim=True)
-            self.diffuse_weight = flux_weight_out[:, k_division.mine] * norm_factor
+            self.diffuse_weight = flux_weight_out * norm_factor
 
     def __call__(self, rho: torch.Tensor) -> torch.Tensor:
-        rho_flat = rho.flatten()
-        group = self.group
-        if group.size() == 1:
-            out_flat = self.specular_matrix @ rho_flat
-            # out_flat = rho_flat[self.i_reflected_flat]
-        else:
-            nr, _ = rho.shape  # same on all processes
-            send_buf = rho_flat.T[self.send_index].contiguous()
-            recv_buf = torch.empty_like(send_buf)
-            dist.all_to_all_single(
-                recv_buf.view(-1),
-                send_buf.view(-1),
-                self.recv_counts,
-                self.send_counts,
-                group=group,
-            )
-            out_flat = recv_buf[self.recv_index].T
-        out = out_flat.reshape(rho.shape)
+        out = (self.specular_matrix @ rho.flatten()).reshape(rho.shape)
 
         # Correct for flux error:
         flux_error = (out * self.flux_in).sum(dim=-1) - (rho * self.flux_out).sum(
@@ -354,26 +299,8 @@ class SpecularReflector:
         # Optionally account for diffuse contributions:
         if self.specularity != 1.0:
             out *= self.specularity
-            # Add rho such that incoming flux matches outgoing flux:
-            weighted_flux = (rho * self.diffuse_weight).sum(dim=-1).contiguous()
-            if group.size() > 1:
-                dist.all_reduce(weighted_flux, group=group)
-            out += weighted_flux[:, None]
+            out += (rho * self.diffuse_weight).sum(dim=-1, keepdim=True)
         return out
-
-
-def get_counts_offsets(
-    indices: torch.Tensor, n_bins: int
-) -> tuple[np.ndarray, np.ndarray]:
-    counts = torch.bincount(indices, minlength=n_bins).to(rc.cpu).numpy()
-    offsets = np.concatenate(([0], np.cumsum(counts[:-1])))
-    return counts, offsets
-
-
-def invert_index(indices: torch.Tensor) -> torch.Tensor:
-    inv_indices = torch.empty_like(indices)
-    inv_indices[indices] = torch.arange(len(indices), device=rc.device)
-    return inv_indices
 
 
 def ring_exchange(
