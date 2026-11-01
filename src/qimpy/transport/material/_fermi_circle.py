@@ -269,6 +269,5 @@ class Reflector:
         out = (self.specular_matrix @ rho.flatten()).reshape(rho.shape)
         # Fix difference between in and out fluxes diffusively:
         # (handles specularity < 1, and fixes norm errors for un-aligned walls)
-        out -= (out * self.flux_in).sum(dim=-1, keepdim=True)
-        out += (rho * self.flux_out).sum(dim=-1, keepdim=True)
+        out += (rho * self.flux_out - out * self.flux_in).sum(dim=-1, keepdim=True)
         return out
