@@ -130,7 +130,7 @@ class FermiCircle(Material):
         return Contactor(self, n, **kwargs)
 
     def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
-        return SpecularReflector(n, self.v[:, 0], self.theta0, self.specularity)
+        return Reflector(n, self.v[:, 0], self.theta0, self.specularity)
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
@@ -215,10 +215,12 @@ class Contactor:
         return self.rho_contact
 
 
-class SpecularReflector:
-    """Reflect velocities specularly i.e. with reflection angle = incidence angle.
-    Optionally, account for diffuse scattering by replacing portion of the flux with a
-    uniform distribution at all angles (matching total incoming and outgoing flux)."""
+class Reflector:
+    """Reflect velocities accounting for specular and diffuse contributions.
+    Specular reflections map reflected angle = incident angle (relative to normals),
+    mapping reflected angle to finite grid using linear interpolation. Any small flux
+    mismatch due to inexact angle mapping and diffuse contributions (specularity < 1)
+    are mapped to a uniform incoming distribution to conserve net flux exactly."""
 
     def __init__(
         self,
