@@ -87,7 +87,7 @@ def test_linear_field(N: int) -> None:
 
 
 @pytest.mark.parametrize("n_r", [1])
-@pytest.mark.parametrize("specularity", [0.0, 1.0])
+@pytest.mark.parametrize("specularity", [0.0, 0.5, 1.0])
 @pytest.mark.parametrize("contacted", [False, True])
 def test_charge_conservation(n_r: int, specularity: float, contacted: bool) -> None:
     vertices, segments = random_polygon(5)

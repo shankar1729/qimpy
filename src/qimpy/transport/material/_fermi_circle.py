@@ -237,14 +237,12 @@ class SpecularReflector:
         # Map the rest correspondingly:
         i0 = (i0_reflected[:, None] - torch.arange(n_theta, device=rc.device)) % n_theta
         i1 = (i0 + 1) % n_theta
-        v_n_in = (n[:, None] * v).sum(dim=-1)
-        sel = torch.where(v_n_in.flatten() > 0)[0]
+        v_n = (n[:, None] * v).sum(dim=-1)
+        sel = torch.where(v_n.flatten() > 0)[0]
 
         x = dtheta0_reflected / d_theta
         w1 = torch.repeat_interleave(x - x.floor(), n_theta)[sel]
         w0 = 1.0 - w1
-        self.flux_out = torch.where(v_n_in > 0, v_n_in, 0.0)
-        self.flux_in = torch.where(v_n_in < 0, -v_n_in, 0.0)
 
         # Compute flattened index on Nr x Nk_mine for efficient indexing
         nr = len(n)
@@ -261,31 +259,22 @@ class SpecularReflector:
                     torch.cat((sel, sel)),
                 )
             ),
-            values=torch.cat((w0, w1)),
+            values=torch.cat((w0, w1)) * specularity,
             size=(nr * n_theta, nr * n_theta),
         ).to_sparse_csr()
 
-        # Prepare input and output projectors for diffuse scattering
-        self.specularity = specularity
-        if specularity != 1.0:
-            # Select outgoing and incoming states at each boundary point:
-            flux_weight = torch.einsum("ri, ki -> rk", n, v)
-            flux_weight_out = torch.where(flux_weight > 0.0, flux_weight, 0.0)
-            flux_weight_in = torch.where(flux_weight < 0.0, -flux_weight, 0.0)
-            norm_factor = (1.0 - specularity) / flux_weight_in.sum(dim=-1, keepdim=True)
-            self.diffuse_weight = flux_weight_out * norm_factor
+        # Compute flux in and out weights for diffuse scattering and norm correction:
+        self.flux_out = torch.where(v_n > 0, v_n, 0.0)
+        self.flux_in = torch.where(v_n < 0, -v_n, 0.0)
+        norm_factor = 1 / self.flux_in.sum(dim=-1, keepdim=True)
+        self.flux_in *= norm_factor
+        self.flux_out *= norm_factor
 
     def __call__(self, rho: torch.Tensor) -> torch.Tensor:
+        # Compute specular contribution:
         out = (self.specular_matrix @ rho.flatten()).reshape(rho.shape)
-
-        # Correct for flux error:
-        flux_error = (out * self.flux_in).sum(dim=-1) - (rho * self.flux_out).sum(
-            dim=-1
-        )
-        out -= (flux_error / self.flux_in.sum(dim=-1))[:, None]
-
-        # Optionally account for diffuse contributions:
-        if self.specularity != 1.0:
-            out *= self.specularity
-            out += (rho * self.diffuse_weight).sum(dim=-1, keepdim=True)
+        # Fix difference between in and out fluxes diffusively:
+        # (handles specularity < 1, and fixes norm errors for un-aligned walls)
+        out -= (out * self.flux_in).sum(dim=-1, keepdim=True)
+        out += (rho * self.flux_out).sum(dim=-1, keepdim=True)
         return out
