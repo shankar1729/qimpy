@@ -106,6 +106,7 @@ def test_charge_conservation(n_r: int, specularity: float, contacted: bool) -> N
     )
     material = geometry.material
     dV = rc.from_np(geometry.mesh.get_cell_weights())
+    torch.manual_seed(0)
     geometry.rho = torch.rand_like(geometry.rho)
     drho_dt = geometry.rho_dot(geometry.rho, 0.0)
     dq_dt = dV @ material.measure_observables(drho_dt, 0.0)[:, 0]
