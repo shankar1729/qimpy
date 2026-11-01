@@ -16,7 +16,7 @@ from . import Material
 
 
 class FermiCircle(Material):
-    """Fermi-circle representation suitable for graphene and 2DEGs."""
+    """Fermi-circle model material suitable for graphene and 2DEGs."""
 
     kF: float  #: Fermi wave-vector
     vF: float  #: Fermi velocity
@@ -261,7 +261,7 @@ class SpecularReflector:
             self.i_reflected_flat = (ir * nk + i_reflected).flatten()
         else:
             # Determine how to receive data:
-            i_reflected_cur = i_reflected[:, k_division.i_start : k_division.i_stop]
+            i_reflected_cur = i_reflected[:, k_division.mine]
             j_proc = i_reflected_cur.flatten() // k_division.n_each
             self.recv_counts, self.recv_offsets = get_counts_offsets(j_proc, n_procs)
             self.recv_index = invert_index(j_proc.argsort(stable=True))
@@ -278,6 +278,12 @@ class SpecularReflector:
         self.specularity = specularity
         if specularity != 1.0:
             # Select outgoing and incoming states at each boundary point:
+            flux_weight = torch.einsum("ri, ki -> rk", n, v[:, 0])
+            flux_weight_out = torch.where(flux_weight > 0.0, flux_weight, 0.0)
+            flux_weight_in = torch.where(flux_weight < 0.0, -flux_weight, 0.0)
+            norm_factor = (1.0 - specularity) / flux_weight_in.sum(dim=-1, keepdim=True)
+            self.diffuse_weight = flux_weight_out[:, k_division.mine] * norm_factor
+            """
             outwards = torch.einsum("ri, ki -> rk", n, v[:, 0]) >= 0.0
             out_r, out_k = torch.nonzero(outwards, as_tuple=True)
             in_r, in_k = torch.nonzero(torch.logical_not(outwards), as_tuple=True)
@@ -295,6 +301,7 @@ class SpecularReflector:
             # Compute normalization factor for projections:
             _, in_counts = torch.unique_consecutive(in_r, return_counts=True)
             self.diffuse_normalization = (1.0 - specularity) / in_counts
+            """
 
     def __call__(self, rho: torch.Tensor) -> torch.Tensor:
         rho_flat = rho.flatten()
@@ -313,11 +320,17 @@ class SpecularReflector:
                 group=group,
             )
             out_flat = recv_buf[self.recv_index].T
+        out = out_flat.reshape(rho.shape)
 
         # Optionally account for diffuse contributions:
         if self.specularity != 1.0:
-            out_flat *= self.specularity
-
+            out *= self.specularity
+            # Add rho such that incoming flux matches outgoing flux:
+            weighted_flux = (rho * self.diffuse_weight).sum(dim=-1).contiguous()
+            if group.size() > 1:
+                dist.all_reduce(weighted_flux, group=group)
+            out += weighted_flux[:, None]
+            """
             # Collect total outgoing rho:
             rho_out_sum = torch.zeros(rho.shape[:1], device=rc.device)
             rho_out_sum.index_add_(0, self.diffuse_out_r, rho_flat[self.diffuse_out_rk])
@@ -327,8 +340,8 @@ class SpecularReflector:
             # Accumulate to incoming rho with normalization:
             rho_out_sum *= self.diffuse_normalization
             out_flat.index_add_(0, self.diffuse_in_rk, rho_out_sum[self.diffuse_in_r])
-
-        return out_flat.reshape(rho.shape)
+            """
+        return out
 
 
 def get_counts_offsets(

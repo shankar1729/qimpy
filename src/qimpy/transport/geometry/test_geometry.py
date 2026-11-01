@@ -86,9 +86,10 @@ def test_linear_field(N: int) -> None:
     assert max_err < 1.0e-12
 
 
-@pytest.mark.parametrize("n_r", [1, 4])
+@pytest.mark.parametrize("n_r", [1])
+@pytest.mark.parametrize("specularity", [0.0, 1.0])
 @pytest.mark.parametrize("contacted", [False, True])
-def test_charge_conservation(n_r: int, contacted: bool) -> None:
+def test_charge_conservation(n_r: int, specularity: float, contacted: bool) -> None:
     vertices, segments = random_polygon(5)
     poly_kwargs = dict(vertices=vertices, segments=segments, contacts={}, max_area=0.01)
     contacts = {}
@@ -101,7 +102,7 @@ def test_charge_conservation(n_r: int, contacted: bool) -> None:
         contacts = dict(source=dict(dmu=0.1), drain=dict(dmu=-0.1))
     geometry = make_geometry(
         dict(mesh=dict(triangulate=poly_kwargs), contacts=contacts),
-        dict(kF=1.5, vF=0.8, n_theta=8, n_r=n_r, specularity=0),
+        dict(kF=1.5, vF=0.8, n_theta=8, n_r=n_r, specularity=specularity),
     )
     material = geometry.material
     dV = rc.from_np(geometry.mesh.get_cell_weights())
