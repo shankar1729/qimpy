@@ -1,11 +1,9 @@
 from __future__ import annotations
 from typing import Callable
 from functools import cache
-import operator
 
 import numpy as np
 import torch
-import torch.distributed as dist
 
 from qimpy import rc
 from qimpy.mpi import ProcessGrid
@@ -77,23 +75,22 @@ class FermiCircle(Material):
             n_dim=2,
             process_grid=process_grid,
         )
+        if self.group.size() > 1:
+            raise NotImplementedError("FermiCircle does not parallelize over k")
         assert n_r == 1  # TODO: merge n_r support from FermiSurface
 
         # Create theta grid on Fermi circle:
         dtheta = 2 * np.pi / n_theta
         theta = theta0 + torch.arange(n_theta, device=rc.device) * dtheta
         k_hat = torch.stack([theta.cos(), theta.sin()], dim=-1)
-        self.v_all = k_hat[:, None] * vF
-        self.k[:] = k_hat[self.k_mine] * kF
-        self.v[:] = self.v_all[self.k_mine]
+        self.k[:] = k_hat * kF
+        self.v[:] = k_hat[:, None] * vF
         self.theta0 = theta0
         self.specularity = specularity
 
         # Cached normalizations for collision intergal
         self.nk_inv = 1.0 / n_theta
-        self.vv_inv = torch.linalg.inv(
-            torch.einsum("...i, ...j -> ij", self.v_all, self.v_all)
-        )
+        self.vv_inv = torch.linalg.inv(torch.einsum("...i, ...j -> ij", self.v, self.v))
 
         # Initialize F*drho/dk calculator, if needed:
         if np.isfinite(r_c):
@@ -114,7 +111,7 @@ class FermiCircle(Material):
         attrs = cp_path.attrs
         attrs["kF"] = self.kF
         attrs["vF"] = self.vF
-        attrs["n_theta"] = self.k_division.n_tot
+        attrs["n_theta"] = len(self.v)
         attrs["tau_p"] = (1.0 / self.tau_inv_p) if self.tau_inv_p else np.inf
         attrs["tau_ee"] = (1.0 / self.tau_inv_ee) if self.tau_inv_ee else np.inf
         attrs["r_c"] = self.r_c
@@ -133,8 +130,7 @@ class FermiCircle(Material):
         return Contactor(self, n, **kwargs)
 
     def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
-        assert self.group.size() == 1
-        return SpecularReflector(n, self.v_all[:, 0], self.theta0, self.specularity)
+        return SpecularReflector(n, self.v[:, 0], self.theta0, self.specularity)
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
@@ -154,11 +150,9 @@ class FermiCircle(Material):
 
     def pad_ghost(self, rho: torch.Tensor) -> torch.Tensor:
         """Pad by ghost zones for monetum-space advection."""
-        assert self.nk_mine >= 1
-        rhoL, rhoR = ring_exchange(self.group, rho[..., 0], rho[..., -1])
         rho_padded = torch.nn.functional.pad(rho, (N_GHOST, N_GHOST))
-        rho_padded[..., N_GHOST - 1] = rhoL
-        rho_padded[..., -N_GHOST] = rhoR
+        rho_padded[..., N_GHOST - 1] = rho[..., -1]
+        rho_padded[..., -N_GHOST] = rho[..., 0]
         return rho_padded
 
     def accumulate_edges(
@@ -166,9 +160,8 @@ class FermiCircle(Material):
     ) -> torch.Tensor:
         """Accumulate momentum-space advection edge contributions `outL` and `outR`
         into `out`, and return `out` for convenience."""
-        outL, outR = ring_exchange(self.group, outL, outR)
-        out[..., 0] += outL
-        out[..., -1] += outR
+        out[..., 0] += outR
+        out[..., -1] += outL
         return out
 
     def rho_dot_collisions(self, rho: torch.Tensor) -> torch.Tensor:
@@ -176,18 +169,13 @@ class FermiCircle(Material):
             return torch.zeros_like(rho)  # no scattering
 
         # Compute stationary carrier density:
-        rho_sum = rho.sum(dim=-1).contiguous()
-        if self.group.size() > 1:
-            dist.all_reduce(rho_sum, group=self.group)
-        rho_0 = self.nk_inv * rho_sum[..., None]
+        rho_0 = rho.mean(dim=-1, keepdim=True)
         result = (rho_0 - rho) * (self.tau_inv_p + self.tau_inv_ee)
 
         # Compute moving equlibrium carrier density if needed:
         if self.tau_inv_ee:
             v = self.transport_velocity
-            rho_v_sum = torch.einsum("...k, ki -> ...i", rho, v).contiguous()
-            if self.group.size() > 1:
-                dist.all_reduce(rho_v_sum, group=self.group)
+            rho_v_sum = torch.einsum("...k, ki -> ...i", rho, v)
             rho_v = torch.einsum("...i, ij, kj -> ...k", rho_v_sum, self.vv_inv, v)
             result += rho_v * self.tau_inv_ee  # combines with rho_0 - rho above
 
@@ -301,35 +289,3 @@ class SpecularReflector:
             out *= self.specularity
             out += (rho * self.diffuse_weight).sum(dim=-1, keepdim=True)
         return out
-
-
-def ring_exchange(
-    group: dist.ProcessGroup, buf_l: torch.Tensor, buf_r: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Send `buf_l` and `buf_r` to left and right neighbors of `group`, taken as a ring.
-    Return the results received from the left and right neighbors respectively."""
-    n_procs = group.size()
-    if n_procs == 1:
-        return buf_r, buf_l
-    else:
-        rank = group.rank()
-        rank_l = (rank - 1) % n_procs  # rank to the "left" on ring
-        rank_r = (rank + 1) % n_procs  # rank to the "right" on ring
-        send_buf_l = buf_l.contiguous()
-        send_buf_r = buf_r.contiguous()
-        recv_buf_r = torch.zeros_like(send_buf_l)
-        recv_buf_l = torch.zeros_like(send_buf_r)
-        requests = []
-        for direction in (operator.lt, operator.gt):
-            # Post all low to hi group-rank send/recvs first, and then all hi to lo ones
-            if direction(rank_r, rank):
-                requests.append(dist.irecv(recv_buf_r, group=group, group_src=rank_r))
-            if direction(rank, rank_l):
-                requests.append(dist.isend(send_buf_l, group=group, group_dst=rank_l))
-            if direction(rank_l, rank):
-                requests.append(dist.irecv(recv_buf_l, group=group, group_src=rank_l))
-            if direction(rank, rank_r):
-                requests.append(dist.isend(send_buf_r, group=group, group_dst=rank_r))
-        for request in requests:
-            request.wait()
-        return recv_buf_l, recv_buf_r
