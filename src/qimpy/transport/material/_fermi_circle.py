@@ -283,25 +283,6 @@ class SpecularReflector:
             flux_weight_in = torch.where(flux_weight < 0.0, -flux_weight, 0.0)
             norm_factor = (1.0 - specularity) / flux_weight_in.sum(dim=-1, keepdim=True)
             self.diffuse_weight = flux_weight_out[:, k_division.mine] * norm_factor
-            """
-            outwards = torch.einsum("ri, ki -> rk", n, v[:, 0]) >= 0.0
-            out_r, out_k = torch.nonzero(outwards, as_tuple=True)
-            in_r, in_k = torch.nonzero(torch.logical_not(outwards), as_tuple=True)
-
-            # Select flattened indices local to current process:
-            ik_start = k_division.i_start
-            nk_mine = k_division.n_mine
-            sel = torch.nonzero(out_k // k_division.n_each == i_proc).flatten()
-            self.diffuse_out_r = out_r[sel]
-            self.diffuse_out_rk = self.diffuse_out_r * nk_mine + out_k[sel] - ik_start
-            sel = torch.nonzero(in_k // k_division.n_each == i_proc).flatten()
-            self.diffuse_in_r = in_r[sel]
-            self.diffuse_in_rk = self.diffuse_in_r * nk_mine + in_k[sel] - ik_start
-
-            # Compute normalization factor for projections:
-            _, in_counts = torch.unique_consecutive(in_r, return_counts=True)
-            self.diffuse_normalization = (1.0 - specularity) / in_counts
-            """
 
     def __call__(self, rho: torch.Tensor) -> torch.Tensor:
         rho_flat = rho.flatten()
@@ -330,17 +311,6 @@ class SpecularReflector:
             if group.size() > 1:
                 dist.all_reduce(weighted_flux, group=group)
             out += weighted_flux[:, None]
-            """
-            # Collect total outgoing rho:
-            rho_out_sum = torch.zeros(rho.shape[:1], device=rc.device)
-            rho_out_sum.index_add_(0, self.diffuse_out_r, rho_flat[self.diffuse_out_rk])
-            if group.size() > 1:
-                dist.all_reduce(rho_out_sum, group=group)
-
-            # Accumulate to incoming rho with normalization:
-            rho_out_sum *= self.diffuse_normalization
-            out_flat.index_add_(0, self.diffuse_in_rk, rho_out_sum[self.diffuse_in_r])
-            """
         return out
 
 
