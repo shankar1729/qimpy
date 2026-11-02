@@ -167,7 +167,9 @@ class FermiCircle(Material):
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         result = self.rho_dot_collisions(rho)
         if self.F_theta:  # k-space advection due to magnetic fields:
-            result += advect_theta(rho, self.F_theta)
+            result += advect_theta(
+                rho.unflatten(1, (self.n_theta, self.n_r)), self.F_theta
+            ).flatten(1, 2)
         return result
 
     def rho_dot_collisions(self, rho: torch.Tensor) -> torch.Tensor:
@@ -287,11 +289,12 @@ def advect_theta(
     """Compute theta advection due to magnetic force.
     Applies smooth face-limiter and ensures upstream-only dependence of derivative."""
     # Compute +/- neighbor diffs and reconstruction to +/- faces along dim=0:
-    drho = torch.stack((rho.roll(+1, dims=-1), rho.roll(-1, dims=-1))) - rho
-    d = torch.tensor([+0.25, -0.25], device=rc.device).view(-1, 1, 1) * drho.diff(dim=0)
+    drho = torch.stack((rho.roll(+1, dims=-2), rho.roll(-1, dims=-2))) - rho
+    reconstruct = torch.tensor([+0.25, -0.25], device=rc.device).view(-1, 1, 1, 1)
+    d = reconstruct * drho.diff(dim=0)
     lo, hi = drho.aminmax(dim=0, keepdim=True)
     rho_faces = rho + limiter(d, lo, hi, 0, epsilon_sq) * d
     if F_theta > 0.0:  # Use + face fluxes for +F.del calculation
-        return F_theta * (rho_faces[0].roll(+1, dims=-1) - rho_faces[0])
+        return F_theta * (rho_faces[0].roll(+1, dims=-2) - rho_faces[0])
     else:  # Use - face fluxes for -F.del calculation
-        return F_theta * (rho_faces[1] - rho_faces[1].roll(-1, dims=-1))
+        return F_theta * (rho_faces[1] - rho_faces[1].roll(-1, dims=-2))
