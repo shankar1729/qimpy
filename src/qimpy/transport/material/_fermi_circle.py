@@ -160,7 +160,8 @@ class FermiCircle(Material):
         return Contactor(self, n, **kwargs)
 
     def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
-        return Reflector(n, self.v[:, 0], self.theta0, self.specularity)
+        v = self.v[:, 0].unflatten(0, (self.n_theta, self.n_r))
+        return Reflector(n, v, self.theta0, self.specularity)
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
@@ -187,17 +188,14 @@ class FermiCircle(Material):
         return result
 
     def get_observable_names(self) -> list[str]:
-        return ["n", "jx", "jy"]  # density and fluxes
+        return ["n"] if self.n_r == 1 else ["n", "E"]
 
     @cache
     def get_observables(self, t: float) -> torch.Tensor:
-        return torch.cat(
-            (
-                torch.ones((1, self.nk_mine), device=rc.device),
-                self.transport_velocity.T,
-            ),
-            dim=0,
-        )
+        observables = [torch.ones(self.nk_mine, device=rc.device)]  # for density
+        if self.n_r > 1:
+            observables.append(self.E.flatten())  # add energy
+        return torch.stack(observables)
 
     def get_flux_indices(self) -> list[int]:
         return [0]
@@ -237,7 +235,7 @@ class Reflector:
         # Calculate linearly-interpolated reflection for theta0:
         angle_n = torch.atan2(n[:, 1], n[:, 0])
         dtheta0_reflected = 2 * (angle_n - theta0) + np.pi  # deflection of theta0
-        n_theta = v.shape[0]
+        n_theta, n_r, _ = v.shape
         x0_reflected = dtheta0_reflected * (n_theta / (2 * np.pi))
         i0_reflected = x0_reflected.floor().to(torch.long)
         w1 = x0_reflected - i0_reflected
@@ -245,7 +243,7 @@ class Reflector:
         # Map the rest correspondingly:
         i0 = (i0_reflected[:, None] - torch.arange(n_theta, device=rc.device)) % n_theta
         i01 = torch.stack((i0, (i0 + 1) % n_theta))  # reflected theta interval indices
-        v_n = (n[:, None] * v).sum(dim=-1)
+        v_n = (n[:, None] * v[:, 0]).sum(dim=-1)  # for one radius (len(n) x n_theta)
         outward = torch.where(v_n.flatten() > 0)[0]  # only need to reflect outward flux
 
         # Construct sparse matrix for remapping theta with linear interpolation:
@@ -263,19 +261,24 @@ class Reflector:
         ).to_sparse_csr()
 
         # Compute flux in and out weights for diffuse scattering and norm correction:
-        self.flux_out = torch.where(v_n > 0, v_n, 0.0)
-        self.flux_in = torch.where(v_n < 0, -v_n, 0.0)
-        norm_factor = 1 / self.flux_in.sum(dim=-1, keepdim=True)
+        self.flux_out = torch.where(v_n > 0, v_n, 0.0)[..., None]  # add dim for radial
+        self.flux_in = torch.where(v_n < 0, -v_n, 0.0)[..., None]
+        norm_factor = 1 / self.flux_in.sum(dim=1, keepdim=True)
         self.flux_in *= norm_factor
         self.flux_out *= norm_factor
 
     def __call__(self, rho: torch.Tensor) -> torch.Tensor:
         # Compute specular contribution:
-        out = (self.specular_matrix @ rho.flatten()).reshape(rho.shape)
+        n_boundary, n_theta, _ = self.flux_out.shape
+        shape_nt_r = (n_boundary * n_theta, -1)  # flatten except n_r
+        shape_n_t_r = (n_boundary, n_theta, -1)  # all dimensions separate
+        out = (self.specular_matrix @ rho.reshape(shape_nt_r)).reshape(shape_n_t_r)
         # Fix difference between in and out fluxes diffusively:
         # (handles specularity < 1, and fixes norm errors for un-aligned walls)
-        out += (rho * self.flux_out - out * self.flux_in).sum(dim=-1, keepdim=True)
-        return out
+        out += (rho.reshape(shape_n_t_r) * self.flux_out - out * self.flux_in).sum(
+            dim=1, keepdim=True
+        )
+        return out.flatten(1, 2)  # recombine n_theta and n_r dimensions
 
 
 def advect_theta(
