@@ -86,7 +86,7 @@ def test_linear_field(N: int) -> None:
     assert max_err < 1.0e-12
 
 
-@pytest.mark.parametrize("n_r", [1])
+@pytest.mark.parametrize("n_r", [1, 4])
 @pytest.mark.parametrize("specularity", [0.0, 0.5, 1.0])
 @pytest.mark.parametrize("contacted", [False, True])
 def test_charge_conservation(n_r: int, specularity: float, contacted: bool) -> None:
@@ -102,7 +102,7 @@ def test_charge_conservation(n_r: int, specularity: float, contacted: bool) -> N
         contacts = dict(source=dict(dmu=0.1), drain=dict(dmu=-0.1))
     geometry = make_geometry(
         dict(mesh=dict(triangulate=poly_kwargs), contacts=contacts),
-        dict(kF=1.5, vF=0.8, n_theta=6, n_r=n_r, specularity=specularity),
+        dict(kF=1.5, vF=0.8, n_theta=6, n_r=n_r, dk_r=0.1, specularity=specularity),
     )
     material = geometry.material
     dV = rc.from_np(geometry.mesh.get_cell_weights())
@@ -162,7 +162,7 @@ def test_wire_equilibration(style: str) -> None:
     v_x = geometry.material.transport_velocity[:, 0]
     v_x = v_x[v_x > 0]  # calculate for positive velocities; complete by symmetry
 
-    prefactor = Ly * dmu / n_theta
+    prefactor = Ly * dmu * geometry.material.wk[0].item()
     for t, probe_flux in zip(geometry.stash_probe.t, geometry.stash_probe.flux):
         # Check current against analytical ray-trace prediction:
         I = probe_flux[..., 0]
@@ -178,7 +178,7 @@ def test_wire_equilibration(style: str) -> None:
         assert abs(I.sum().item()) < I_tol  # Symmetry
         assert I_min < I_obs < I_max
 
-    prefactor = dmu / n_theta
+    prefactor = dmu * geometry.material.wk[0].item()
     for t, observables in zip(geometry.stash.t, geometry.stash.observables):
         # Check density profile against analytical ray-trace prediction:
         n = observables[..., 0]

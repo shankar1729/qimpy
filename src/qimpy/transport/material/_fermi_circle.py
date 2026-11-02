@@ -8,7 +8,7 @@ import torch
 from qimpy import rc
 from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
-from qimpy.io import CheckpointPath, CheckpointContext
+from qimpy.io import CheckpointPath, CheckpointContext, InvalidInputException
 from ..advect import limiter
 from . import Material
 
@@ -18,6 +18,10 @@ class FermiCircle(Material):
 
     kF: float  #: Fermi wave-vector
     vF: float  #: Fermi velocity
+    n_theta: int  #: Number of k along Fermi circle
+    n_r: int  #: Number of radial k perpendicular to Fermi circle.`
+    dk_r: float  #: Radial k grid spacing perpendicular to Fermi circle (for n_r > 1)
+    m_star: float  #: Effective mass
     tau_inv_p: float  #: Momentum relaxation rate
     tau_inv_ee: float  #: Electron internal scattering rate (momentum-conserving)
     theta0: float  #: Initial angle in fermi circle grid
@@ -32,6 +36,8 @@ class FermiCircle(Material):
         vF: float,
         n_theta: int,
         n_r: int = 1,
+        dk_r: float = 0.0,
+        m_star: float = np.inf,
         tau_p: float = np.inf,
         tau_ee: float = np.inf,
         r_c: float = np.inf,
@@ -51,6 +57,20 @@ class FermiCircle(Material):
             :yaml:`Fermi velocity in atomic units.`
         n_theta
             :yaml:`Number of k along Fermi circle.`
+        n_r
+            :yaml:`Number of radial k perpendicular to Fermi circle.`
+        dk_r
+            :yaml:`Radial k grid spacing perpendicular to Fermi circle.`
+            This is only relevant if `n_r` > 1.
+        m_star
+            :yaml:`Longitudinal effective mass determining dispersion relation.`
+            If `n_r` > 1, this controls the velocity and energy away from kF.
+            The default infinite value sets a linear dispersion relation.
+            Set to `kF` / `vF` for a parabolic dispersion relation.
+        tau_p
+            :yaml:`Momentum relaxation time.`
+        tau_ee
+            :yaml:`Electron-electron scattering time (momentum-conserving).`
         theta0
             :yaml:`Angle of first k-point.`
         r_c
@@ -67,24 +87,39 @@ class FermiCircle(Material):
         self.r_c = r_c
         self.tau_inv_p = 1.0 / tau_p
         self.tau_inv_ee = 1.0 / tau_ee
+
+        # Initialize angular k grid:
+        self.n_theta = n_theta
+        self.theta0 = theta0
+        dtheta = 2 * np.pi / n_theta
+        theta = theta0 + torch.arange(n_theta, device=rc.device) * dtheta
+        k_hat = torch.stack([theta.cos(), theta.sin()], dim=-1)
+
+        # Initialize radial k grid (centered on kF):
+        self.n_r = n_r
+        self.dk_r = dk_r
+        self.m_star = m_star
+        if n_r > 1 and not dk_r:
+            raise InvalidInputException("dk_r must be > 0 when n_r > 1")
+        k_r = kF + dk_r * (torch.arange(n_r, device=rc.device) - 0.5 * (n_r - 1))
+        v_r = vF + (k_r - kF) / m_star
+        E_r = vF * (k_r - kF) + 0.5 * (k_r - kF).square() / m_star  # Ef = 0 WLOG
+        wk = (2 / (2 * np.pi) ** 2) * (dtheta * k_r.repeat(n_theta))
+
         self.initialize(
-            wk=torch.tensor([1.0 / n_theta], device=rc.device),
-            nk=n_theta,
+            wk=wk,
+            nk=len(wk),
             n_bands=1,
             n_dim=2,
             process_grid=process_grid,
         )
         if self.group.size() > 1:
             raise NotImplementedError("FermiCircle does not parallelize over k")
-        assert n_r == 1  # TODO: merge n_r support from FermiSurface
 
         # Create theta grid on Fermi circle:
-        dtheta = 2 * np.pi / n_theta
-        theta = theta0 + torch.arange(n_theta, device=rc.device) * dtheta
-        k_hat = torch.stack([theta.cos(), theta.sin()], dim=-1)
-        self.k[:] = k_hat * kF
-        self.v[:] = k_hat[:, None] * vF
-        self.theta0 = theta0
+        self.k[:] = (k_hat[:, None] * k_r[:, None]).flatten(0, 1)
+        self.v[:, 0] = (k_hat[:, None] * v_r[:, None]).flatten(0, 1)
+        self.E[:, 0] = E_r.repeat(n_theta)
         self.specularity = specularity
 
         # Cached normalizations for collision intergal
@@ -104,7 +139,9 @@ class FermiCircle(Material):
         attrs = cp_path.attrs
         attrs["kF"] = self.kF
         attrs["vF"] = self.vF
-        attrs["n_theta"] = len(self.v)
+        attrs["n_theta"] = self.n_theta
+        attrs["n_r"] = self.n_r
+        attrs["dk_r"] = self.dk_r
         attrs["tau_p"] = (1.0 / self.tau_inv_p) if self.tau_inv_p else np.inf
         attrs["tau_ee"] = (1.0 / self.tau_inv_ee) if self.tau_inv_ee else np.inf
         attrs["r_c"] = self.r_c
