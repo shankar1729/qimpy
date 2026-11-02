@@ -10,7 +10,7 @@ from matplotlib.colors import SymLogNorm, Normalize
 from matplotlib.collections import LineCollection
 
 from qimpy import rc, log, io
-from qimpy.profiler import StopWatch
+from qimpy.profiler import StopWatch, stopwatch
 from qimpy.io import log_config, Checkpoint, CheckpointPath, Unit
 from qimpy.transport.geometry import Mesh
 
@@ -29,6 +29,7 @@ def main() -> None:
     StopWatch.print_stats()
 
 
+@stopwatch
 def run(
     *,
     checkpoints: str,
@@ -72,7 +73,9 @@ def run(
     # Prepare grid on bounding box (only used for streamlines)
     bbox_min = mesh.vertices.min(axis=0)
     bbox_max = mesh.vertices.max(axis=0)
-    grids_1d = [np.linspace(bbox_min[i], bbox_max[i], 220) for i in range(2)]
+    h_max = np.sqrt(0.1 * cell_weights.min())  # few grid points per triangle
+    n_grid = np.maximum(500, np.ceil((bbox_max - bbox_min) / h_max).astype(int)) + 1
+    grids_1d = [np.linspace(bbox_min[i], bbox_max[i], n_grid[i]) for i in range(2)]
     grid = np.stack(np.meshgrid(*grids_1d))
     grid_cells = triangulation.get_trifinder()(*grid)  # cell index per grid point
 
