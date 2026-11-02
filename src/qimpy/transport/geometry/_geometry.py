@@ -12,6 +12,7 @@ from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import ProcessGrid, get_block_slices, globalreduce
 from qimpy.profiler import StopWatch, stopwatch
 from ..material import Material
+from ..advect import limiter
 from . import Mesh
 
 
@@ -375,26 +376,13 @@ def _face_limiter(
     recon: torch.Tensor,
     epsilon_sq: float,
 ) -> torch.Tensor:
-    """Venkatakrishnan-limited face values for a subset of cells with values `rho_sel`,
+    """Compute limited face values for a subset of cells with values `rho_sel`,
     where `rho` is the full data, `neighbors` lists the neighboring cell indices for
-    the selected cells, and `reconstruct` is the fused gradient->face operator.
-    Limiter function applied per face is:
-        phi = (D1^2 + 2 D1 d + epsilon^2) / (D1^2 + D1 d + 2 d^2 + epsilon^2),
-    where d = rho_face - rho, and D1 is the same-sign headroom to rho differences."""
+    the selected cells, and `reconstruct` is the fused gradient->face operator."""
     drho = rho[neighbors] - rho_sel[:, None]
     d = recon @ drho
-    # Compute limiter (in [0, 1]) for the gradients on each face:
     lo, hi = drho.aminmax(dim=1, keepdim=True)
-    lo.clip_(max=0.0)
-    hi.clip_(min=0.0)
-    D1 = torch.where(d >= 0, hi, lo)
-    common = D1.square() + epsilon_sq
-    dD1 = d * D1
-    phi = (common + 2 * dD1) / (common + dD1 + 2 * d.square())
-    phi.nan_to_num_(1.0)  # Handle possible NANs from d underflow
-    phi.clamp_(max=1.0)
-    limiter = phi.amin(dim=1, keepdim=True)
-    return rho_sel[:, None] + limiter * d
+    return rho_sel[:, None] + limiter(d, lo, hi, 1, epsilon_sq) * d
 
 
 @dataclass

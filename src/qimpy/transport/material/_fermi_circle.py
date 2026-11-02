@@ -9,7 +9,7 @@ from qimpy import rc
 from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext
-from qimpy.transport.advect import Advect, N_GHOST
+from ..advect import limiter
 from . import Material
 
 
@@ -24,7 +24,6 @@ class FermiCircle(Material):
     specularity: float  #: Specularity of reflection at all boundaries
     r_c: float  #: Cyclotron radius for extenral magnetic field (disabled if infinity)
     F_theta: float  #: Angular force in grid coordinates
-    advect: torch.jit.ScriptModule  #: Momentum-space advection logic
 
     def __init__(
         self,
@@ -96,12 +95,6 @@ class FermiCircle(Material):
         if np.isfinite(r_c):
             self.F_theta = self.vF / (self.r_c * dtheta)
             self.dt_max = 0.5 / abs(self.F_theta)
-            self.advect = torch.jit.script(Advect())
-            self.riemann_mask = torch.tensor(
-                (1.0, 0.0) if self.F_theta > 0 else (0.0, 1.0), device=rc.device
-            ).view(
-                1, 1, 1, -1
-            )  # faster constant-F equivalent to get_riemann_mask
         else:
             self.F_theta = 0.0
 
@@ -135,34 +128,9 @@ class FermiCircle(Material):
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
         result = self.rho_dot_collisions(rho)
-        if self.F_theta:
-            # k-space advection due to magnetic fields:
-            result += self.accumulate_edges(
-                *self.advect(
-                    self.pad_ghost(rho) * self.F_theta,
-                    self.riemann_mask,
-                    -1,
-                    True,
-                    (True, True),
-                )
-            )
+        if self.F_theta:  # k-space advection due to magnetic fields:
+            result += advect_theta(rho, self.F_theta)
         return result
-
-    def pad_ghost(self, rho: torch.Tensor) -> torch.Tensor:
-        """Pad by ghost zones for monetum-space advection."""
-        rho_padded = torch.nn.functional.pad(rho, (N_GHOST, N_GHOST))
-        rho_padded[..., N_GHOST - 1] = rho[..., -1]
-        rho_padded[..., -N_GHOST] = rho[..., 0]
-        return rho_padded
-
-    def accumulate_edges(
-        self, out: torch.Tensor, outL: torch.Tensor, outR: torch.Tensor
-    ) -> torch.Tensor:
-        """Accumulate momentum-space advection edge contributions `outL` and `outR`
-        into `out`, and return `out` for convenience."""
-        out[..., 0] += outR
-        out[..., -1] += outL
-        return out
 
     def rho_dot_collisions(self, rho: torch.Tensor) -> torch.Tensor:
         if not (self.tau_inv_p or self.tau_inv_ee):
@@ -271,3 +239,19 @@ class Reflector:
         # (handles specularity < 1, and fixes norm errors for un-aligned walls)
         out += (rho * self.flux_out - out * self.flux_in).sum(dim=-1, keepdim=True)
         return out
+
+
+def advect_theta(
+    rho: torch.Tensor, F_theta: float, epsilon_sq: float = 0.0
+) -> torch.Tensor:
+    """Compute theta advection due to magnetic force.
+    Applies smooth face-limiter and ensures upstream-only dependence of derivative."""
+    # Compute +/- neighbor diffs and reconstruction to +/- faces along dim=0:
+    drho = torch.stack((rho.roll(+1, dims=-1), rho.roll(-1, dims=-1))) - rho
+    d = torch.tensor([+0.25, -0.25], device=rc.device).view(-1, 1, 1) * drho.diff(dim=0)
+    lo, hi = drho.aminmax(dim=0, keepdim=True)
+    rho_faces = rho + limiter(d, lo, hi, 0, epsilon_sq) * d
+    if F_theta > 0.0:  # Use + face fluxes for +F.del calculation
+        return F_theta * (rho_faces[0].roll(+1, dims=-1) - rho_faces[0])
+    else:  # Use - face fluxes for -F.del calculation
+        return F_theta * (rho_faces[1] - rho_faces[1].roll(-1, dims=-1))
