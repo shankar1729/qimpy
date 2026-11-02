@@ -226,11 +226,8 @@ class Contactor:
     def __init__(
         self, fc: FermiCircle, n: torch.Tensor, *, dmu: float = 0.0, vD: float = 0.0
     ) -> None:
-        """Return contact distribution function for specified chemical potential
-        shift and drift velocity. Note that positive vD corresponds to current
-        flowing into the device (along -n), while negative vD flows out (along +n)."""
-        v_hat = fc.transport_velocity / fc.vF
-        self.rho_contact = dmu - (n @ v_hat.T) * (vD / fc.vF)  # TODO: check
+        """Return contact distribution function for chemical potential shift."""
+        self.rho_contact = torch.full((len(n), fc.rho0.numel()), dmu)
 
     def __call__(self, t):
         # TODO: add time dependence options
