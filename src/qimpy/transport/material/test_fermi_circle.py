@@ -56,7 +56,7 @@ def test_scattering_conservation(
     conserve_p: bool,
     conserve_E: bool,
 ) -> None:
-    """Test conservation properties of scattering kernel (and magentic field)"""
+    """Test conservation properties of scattering kernel (and magnetic field)"""
     log.info("\n")
     fc = get_fermi_circle(n_r=n_r, tau_p=tau_p, tau_ee=tau_ee, r_c=r_c)
     torch.manual_seed(0)
@@ -76,17 +76,50 @@ def test_scattering_conservation(
         check_conservation("Momentum", p_dot[:, 1], 1.0e-11)
 
 
-def check_conservation(name: str, value_dot: torch.Tensor, tol: float) -> None:
+@pytest.mark.parametrize("n_r", [1, 4])
+@pytest.mark.parametrize("specularity", [0.37, 1.0])
+def test_reflector_conservation(n_r: int, specularity: float) -> None:
+    log.info("\n")
+    fc = get_fermi_circle(n_r=n_r, n_theta=256, specularity=specularity)
+    torch.manual_seed(0)
+    theta = torch.rand(100, device=rc.device) * (2 * np.pi)  # Random wall orientations
+    n_hat = torch.stack((theta.cos(), theta.sin()), dim=1)
+    t_hat = torch.stack((-n_hat[:, 1], n_hat[:, 0]), dim=1)  # tangential directions
+    v = fc.transport_velocity
+    v_n = n_hat @ v.T
+    v_t = t_hat @ v.T
+    rho_incident = torch.rand(len(theta), fc.nk_mine) * 2 - 1  # Random on [-1, 1]
+    rho_incident[v_t < 0.0] *= -1  # Introduce net tangential bias (else flux ~ 0)
+    rho_reflected = fc.get_reflector(n_hat)(rho_incident)
+
+    # Compare incident and reflected normal fluxes:
+    v_n_i = v_n.clamp(min=0.0)
+    v_n_r = (-v_n).clamp(min=0.0)
+    flux_incident = fc.measure_observables(rho_incident * v_n_i, 0.0)
+    flux_reflected = fc.measure_observables(rho_reflected * v_n_r, 0.0)
+    flux_rel_err = flux_reflected / flux_incident - 1.0
+    check_conservation("Relative charge flux", flux_rel_err[:, 0], 1.0e-11)
+    if n_r > 1:
+        check_conservation("Relative energy flux", flux_rel_err[:, 1], 1.0e-11)
+
+    # Compare incident and reflected tangential fluxes (not exactly conserved):
+    flux_t_incident = fc.measure_observables(rho_incident * v_t * v_n_i, 0.0)
+    flux_t_reflected = fc.measure_observables(rho_reflected * v_t * v_n_r, 0.0)
+    flux_t_rel_err = flux_t_reflected / flux_t_incident - specularity
+    check_conservation("Tangential charge flux", flux_t_rel_err[:, 0], 0.1, False)
+    if n_r > 1:
+        check_conservation("Tangential energy flux", flux_t_rel_err[:, 1], 0.1, False)
+
+
+def check_conservation(
+    name: str, value_dot: torch.Tensor, tol: float, check_max: bool = True
+) -> None:
     err_mean = value_dot.abs().mean().item()
     err_max = value_dot.abs().max().item()
     log.info(f"{name} conservation error: mean={err_mean:.3e} max={err_max:.3e}")
-    if err_max > tol:
-        raise AssertionError(f"{name} conservation error {err_max:.3e} > {tol:.3e}")
-
-
-# TODO: port the following test ideas from test_fermi_surface
-# + scattering conservation of charge, momentum and energy, as appropriate
-# + reflection propertes at all angles: charge, energy, tang. mom. conservation
+    err_check = err_max if check_max else err_mean
+    if err_check > tol:
+        raise AssertionError(f"{name} conservation error {err_check:.3e} > {tol:.3e}")
 
 
 def main():
