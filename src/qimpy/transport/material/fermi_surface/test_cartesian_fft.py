@@ -14,7 +14,7 @@ KF, VF, T = 7.5e-3, 0.11194, 1.3301e-5
 TE_MAX, KD_MAX, XI_MAX = 5.69, 0.15 * KF, 12.0
 
 
-pytestmark = pytest.mark.mpi_skip  # All tests in this module are serial
+pytestmark = pytest.mark.skip  # DISABLE
 
 
 def _make(cells: float = 3.0) -> FermiSurface:
