@@ -10,7 +10,7 @@ from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
 from qimpy.io import CheckpointPath, CheckpointContext, InvalidInputException
 from ..advect import limiter
-from . import Material
+from . import Material, fermi
 
 
 class FermiCircle(Material):
@@ -118,7 +118,7 @@ class FermiCircle(Material):
                 raise InvalidInputException("dk_r must be > 0 when n_r > 1")
             if not T:
                 raise InvalidInputException("T must be > 0 when n_r > 1")
-            assert vF * dk_r <= T  # Energy resolution of radial grid should resolve T
+            assert vF * dk_r <= 2 * T  # Radial grid energy spacing should resolve T
             assert vF * dk_r * n_r >= 2 * T  # Energy range covers multiple T units
 
         self.initialize(
@@ -223,14 +223,15 @@ class FermiCircle(Material):
 class Contactor:
     rho_contact: torch.Tensor  #: Cached constant contact distribution
 
-    def __init__(
-        self, fc: FermiCircle, n: torch.Tensor, *, dmu: float = 0.0, vD: float = 0.0
-    ) -> None:
-        """Return contact distribution function for chemical potential shift."""
-        self.rho_contact = torch.full((len(n), fc.rho0.numel()), dmu)
+    def __init__(self, fc: FermiCircle, n: torch.Tensor, *, dmu: float = 0.0) -> None:
+        """Return contact distribution function for chemical potential shift `dmu`."""
+        self.rho_contact = torch.empty((len(n), fc.rho0.numel()), device=rc.device)
+        if fc.n_r == 1:
+            self.rho_contact[:] = dmu / fc.vF  # include DOS factor for k_r integral
+        else:
+            self.rho_contact[:] = (fermi(fc.E, dmu, fc.T) - fermi(fc.E, 0.0, fc.T)).T
 
     def __call__(self, t):
-        # TODO: add time dependence options
         return self.rho_contact
 
 

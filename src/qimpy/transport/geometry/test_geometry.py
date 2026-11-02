@@ -146,8 +146,9 @@ def test_wire_equilibration(style: str) -> None:
         mesh_kwargs = dict(rect=dict(Lx=Lx, Ly=Ly, Nx=Nx, Ny=Ny, contacts=contacts))
 
     # Run calculation with density and contact current collection:
+    vF = 1.2
     transport = Transport(
-        fermi_circle=dict(kF=1.5, vF=1.2, n_theta=n_theta),
+        fermi_circle=dict(kF=1.5, vF=vF, n_theta=n_theta),
         geometry=dict(
             contacts=dict(source=dict(dmu=dmu), drain=dict(dmu=-dmu)), mesh=mesh_kwargs
         ),
@@ -164,12 +165,12 @@ def test_wire_equilibration(style: str) -> None:
     v_x = geometry.material.transport_velocity[:, 0]
     v_x = v_x[v_x > 0]  # calculate for positive velocities; complete by symmetry
 
-    prefactor = Ly * dmu * geometry.material.wk[0].item()
+    prefactor = (dmu / vF) * geometry.material.wk[0].item()
     for t, probe_flux in zip(geometry.stash_probe.t, geometry.stash_probe.flux):
         # Check current against analytical ray-trace prediction:
         I = probe_flux[..., 0]
         I_ref = [
-            prefactor * (torch.where(v_x * t_check > Lx, 2, 1) * v_x).sum().item()
+            Ly * prefactor * (torch.where(v_x * t_check > Lx, 2, 1) * v_x).sum().item()
             for t_check in t * np.array([0.9, 1.1])
         ]
         I_tol = 1.0e-3 * np.mean(I_ref)
@@ -180,7 +181,6 @@ def test_wire_equilibration(style: str) -> None:
         assert abs(I.sum().item()) < I_tol  # Symmetry
         assert I_min < I_obs < I_max
 
-    prefactor = dmu * geometry.material.wk[0].item()
     for t, observables in zip(geometry.stash.t, geometry.stash.observables):
         # Check density profile against analytical ray-trace prediction:
         n = observables[..., 0]

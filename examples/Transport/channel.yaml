@@ -2,11 +2,12 @@ fermi_circle:
   kF: 1.0
   vF: 1.0
   n_theta: 32
-  n_r: 4
-  dk_r: 0.1
+  # n_r: 4
+  # dk_r: 0.1
+  # T: 0.1
   tau_p: .inf
   tau_ee: .inf
-  r_c: 0.5  # .inf
+  r_c: .inf
   specularity: 1.0
 
 geometry:
