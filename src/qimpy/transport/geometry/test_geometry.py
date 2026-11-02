@@ -102,7 +102,9 @@ def test_charge_conservation(n_r: int, specularity: float, contacted: bool) -> N
         contacts = dict(source=dict(dmu=0.1), drain=dict(dmu=-0.1))
     geometry = make_geometry(
         dict(mesh=dict(triangulate=poly_kwargs), contacts=contacts),
-        dict(kF=1.5, vF=0.8, n_theta=6, n_r=n_r, dk_r=0.1, specularity=specularity),
+        dict(
+            kF=1.5, vF=0.8, n_theta=6, n_r=n_r, dk_r=0.1, T=0.1, specularity=specularity
+        ),
     )
     material = geometry.material
     dV = rc.from_np(geometry.mesh.get_cell_weights())

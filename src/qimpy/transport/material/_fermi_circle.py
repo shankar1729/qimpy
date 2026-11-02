@@ -22,6 +22,7 @@ class FermiCircle(Material):
     n_r: int  #: Number of radial k perpendicular to Fermi circle.`
     dk_r: float  #: Radial k grid spacing perpendicular to Fermi circle (for n_r > 1)
     m_star: float  #: Effective mass
+    T: float  #: Temperature
     tau_inv_p: float  #: Momentum relaxation rate
     tau_inv_ee: float  #: Electron internal scattering rate (momentum-conserving)
     theta0: float  #: Initial angle in fermi circle grid
@@ -38,6 +39,7 @@ class FermiCircle(Material):
         n_r: int = 1,
         dk_r: float = 0.0,
         m_star: float = np.inf,
+        T: float = 0.0,
         tau_p: float = np.inf,
         tau_ee: float = np.inf,
         r_c: float = np.inf,
@@ -61,12 +63,18 @@ class FermiCircle(Material):
             :yaml:`Number of radial k perpendicular to Fermi circle.`
         dk_r
             :yaml:`Radial k grid spacing perpendicular to Fermi circle.`
-            This is only relevant if `n_r` > 1.
+            This is only relevant if `n_r` > 1, and should typically be ~ `T` / `vF`.
         m_star
             :yaml:`Longitudinal effective mass determining dispersion relation.`
             If `n_r` > 1, this controls the velocity and energy away from kF.
             The default infinite value sets a linear dispersion relation.
             Set to `kF` / `vF` for a parabolic dispersion relation.
+        T
+            :yaml:`Temperature of reference equilibrium state.`
+            If `n_r` > 1, this controls the equilibrium Fermi distribution about
+            which the change in occupations are referenced. It also controls the Fermi
+            distributions used in defining the contacts and the `tau_p` relaxation.
+            The `n_r` = 1 case does not resolve energies and is effectively T = 0.
         tau_p
             :yaml:`Momentum relaxation time.`
         tau_ee
@@ -99,12 +107,19 @@ class FermiCircle(Material):
         self.n_r = n_r
         self.dk_r = dk_r
         self.m_star = m_star
-        if n_r > 1 and not dk_r:
-            raise InvalidInputException("dk_r must be > 0 when n_r > 1")
+        self.T = T
         k_r = kF + dk_r * (torch.arange(n_r, device=rc.device) - 0.5 * (n_r - 1))
         v_r = vF + (k_r - kF) / m_star
         E_r = vF * (k_r - kF) + 0.5 * (k_r - kF).square() / m_star  # Ef = 0 WLOG
         wk = (2 / (2 * np.pi) ** 2) * (dtheta * k_r.repeat(n_theta))
+        if n_r > 1:
+            wk *= dk_r  # include radial grid spacing; n_r == 1 case is r-integrated
+            if not dk_r:
+                raise InvalidInputException("dk_r must be > 0 when n_r > 1")
+            if not T:
+                raise InvalidInputException("T must be > 0 when n_r > 1")
+            assert vF * dk_r <= T  # Energy resolution of radial grid should resolve T
+            assert vF * dk_r * n_r >= 2 * T  # Energy range covers multiple T units
 
         self.initialize(
             wk=wk,
@@ -142,6 +157,8 @@ class FermiCircle(Material):
         attrs["n_theta"] = self.n_theta
         attrs["n_r"] = self.n_r
         attrs["dk_r"] = self.dk_r
+        attrs["m_star"] = self.m_star
+        attrs["T"] = self.T
         attrs["tau_p"] = (1.0 / self.tau_inv_p) if self.tau_inv_p else np.inf
         attrs["tau_ee"] = (1.0 / self.tau_inv_ee) if self.tau_inv_ee else np.inf
         attrs["r_c"] = self.r_c
