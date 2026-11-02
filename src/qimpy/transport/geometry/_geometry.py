@@ -217,7 +217,6 @@ class Geometry(TreeNode):
         self.stash = Stash()
         self.stash_probe = Stash()  # coarse-grained, more frequent version
         self.material.initialize_fields(self.rho, {}, id(self))
-        self.collision_enabled = True
 
     def to_faces(
         self, rho: torch.Tensor, t: float, boundary_only: bool = False
@@ -272,15 +271,6 @@ class Geometry(TreeNode):
         watch = StopWatch("Geometry.rho_dot")
         out = (self.minus_v_dot_del @ self.to_faces(rho, t).flatten()).view(rho.shape)
         watch.stop()
-        n_mine = self.mesh.cell_division.n_mine
-        if self.collision_enabled:
-            out[:n_mine] += self.material.rho_dot(rho[:n_mine], t, id(self))
-        return out
-
-    def collision_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
-        """The material collision term ALONE, with no spatial RHS.
-        Used by operator splitting (``collision_interval > 1``)."""
-        out = torch.zeros_like(rho)
         n_mine = self.mesh.cell_division.n_mine
         out[:n_mine] += self.material.rho_dot(rho[:n_mine], t, id(self))
         return out
