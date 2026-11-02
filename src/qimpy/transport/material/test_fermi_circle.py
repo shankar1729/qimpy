@@ -24,6 +24,7 @@ def get_fermi_circle(**kwargs) -> FermiCircle:
 
 def test_contact_n_r_equivalence() -> None:
     """Verify that contact distribution at large n_r > 1 matches n_r = 1."""
+    log.info("\n")
     t = 0.0
     dmu = 1.0e-6
     n_hat = torch.tensor([[1.0, 0.0]], device=rc.device)
@@ -39,18 +40,24 @@ def test_contact_n_r_equivalence() -> None:
 
 @pytest.mark.parametrize("n_r", [1, 4])
 @pytest.mark.parametrize(
-    "tau_p, tau_ee, r_c, conserve_p",
+    "tau_p, tau_ee, r_c, conserve_p, conserve_E",
     [
-        (np.inf, np.inf, np.inf, True),
-        (np.inf, 0.1, np.inf, True),
-        (2.0, 0.1, np.inf, False),
-        (np.inf, np.inf, 0.5, False),
+        (np.inf, np.inf, np.inf, True, True),
+        (np.inf, 0.1, np.inf, True, True),
+        (2.0, 0.1, np.inf, False, False),
+        (np.inf, np.inf, 0.5, False, True),
     ],
 )
 def test_scattering_conservation(
-    n_r: int, tau_p: float, tau_ee: float, r_c: float, conserve_p: bool
+    n_r: int,
+    tau_p: float,
+    tau_ee: float,
+    r_c: float,
+    conserve_p: bool,
+    conserve_E: bool,
 ) -> None:
     """Test conservation properties of scattering kernel (and magentic field)"""
+    log.info("\n")
     fc = get_fermi_circle(n_r=n_r, tau_p=tau_p, tau_ee=tau_ee, r_c=r_c)
     torch.manual_seed(0)
     rho = torch.rand(100, fc.nk_mine) * 2 - 1  # Random on [-1, 1]
@@ -60,7 +67,7 @@ def test_scattering_conservation(
     # Charge (and energy for n_r > 1):
     obs_dot = fc.measure_observables(rho_dot, t)
     check_conservation("Charge", obs_dot[:, 0], 1.0e-11)
-    if n_r > 1:
+    if (n_r > 1) and conserve_E:
         check_conservation("Energy", obs_dot[:, 1], 1.0e-11)
 
     # Momentum:

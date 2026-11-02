@@ -235,33 +235,49 @@ class FermiCircle(Material):
         raise RuntimeError("Failed to converge mu to match density")
 
     def get_rho_comoving(self, rho: torch.Tensor) -> torch.Tensor:
-        """Get the comoving rho that matches `rho` in density and current."""
+        """Get the comoving rho that matches `rho` in energy, density and current."""
         v = self.transport_velocity
         if self.n_r == 1:
             rho_v_sum = torch.einsum("...k, ki -> ...i", rho, v)
             rho_v = torch.einsum("...i, ij, kj -> ...k", rho_v_sum, self.vv_inv, v)
             return rho.mean(dim=-1, keepdim=True) + rho_v
 
-        # Find mu, Efield (for each spatial point) that matches density and current:
+        # Find T, mu, Efield (for each spatial point) to match energy, density, current:
         TOL = 1e-12
         MAX_ITER = 30  # Usually converges in ~ 3 - 4 steps
-        nj_op = torch.cat((torch.ones_like(self.wk)[None], v.T))  # 3 x n_k
-        hessian_op = torch.einsum("ik, jk, k -> kij", nj_op, nj_op, self.wk / self.T)
-        nj0 = ((rho + self.fermi0)[:, None] * nj_op) @ self.wk  # reference (n, jx, jy)
-        mu_e = torch.zeros_like(nj0)  # mu, ex, ey Lagrange multipliers to match nj0
+        enj_op = torch.cat((self.E.T, torch.ones_like(self.wk)[None], v.T))  # 4 x n_k
+        enj0 = ((rho + self.fermi0)[:, None] * enj_op) @ self.wk  # target e, n, jx, jy
+        params = torch.zeros_like(enj0)  # T, mu, ex, ey parameters to match enj0
+        params[:, 0] = self.T
         f = self.fermi0.tile((len(rho), 1))
         for i_iter in range(MAX_ITER):
-            err = (f[:, None] * nj_op) @ self.wk - nj0
+            err = (f[:, None] * enj_op) @ self.wk - enj0
             active = torch.where(err.norm(dim=1) > TOL)[0]  # not yet converged
             if not len(active):
                 return f - self.fermi0  # all converged
             # Newton update:
             f_active = f[active]
-            derr_dmu_e = torch.tensordot((f_active * (1.0 - f_active)), hessian_op, 1)
-            delta_mu_e = torch.linalg.solve(derr_dmu_e, -err[active])
-            mu_e[active] += delta_mu_e.clamp(-self.T, self.T)  # bound for stability
-            f[active] = fermi(self.E[:, 0], mu_e[active] @ nj_op, self.T)
-        raise RuntimeError("Failed to converge mu, ex, ey to match n, jx, jy")
+            mu_eff = params[active, 1:] @ enj_op[1:]
+            T = params[active, 0]
+            derr_dparams = torch.einsum(
+                "rk, ik, rjk, k -> rij",
+                (f_active * (1.0 - f_active)) / T[:, None],
+                enj_op,
+                torch.cat(
+                    (
+                        ((self.E[:, 0] - mu_eff) / T[:, None])[:, None],
+                        enj_op[1:].expand((len(active), -1, -1)),
+                    ),
+                    dim=1,
+                ),
+                self.wk,
+            )
+            delta_params = torch.linalg.solve(derr_dparams, -err[active])
+            params[active] += delta_params.clamp(-self.T, self.T)  # bound for stability
+            mu_eff = params[active, 1:] @ enj_op[1:]
+            T = params[active, 0]
+            f[active] = fermi(self.E[:, 0], mu_eff, T[:, None])
+        raise RuntimeError("Failed to converge T, mu, ex, ey to match E, n, jx, jy")
 
 
 class Contactor:
