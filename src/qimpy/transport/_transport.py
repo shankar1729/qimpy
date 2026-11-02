@@ -5,7 +5,7 @@ from qimpy.io import CheckpointPath, Checkpoint, CheckpointContext
 from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
 from .geometry import Geometry
-from .material import Material, FermiCircle, FermiSurface
+from .material import Material, FermiCircle
 from .material.ab_initio import AbInitio
 from .material.single_band import SingleBand
 from . import TimeEvolution
@@ -21,7 +21,6 @@ class Transport(TreeNode):
         *,
         ab_initio: AbInitio | dict | None = None,
         fermi_circle: FermiCircle | dict | None = None,
-        fermi_surface: FermiSurface | dict | None = None,
         single_band: SingleBand | dict | None = None,
         geometry: Geometry | dict | None = None,
         time_evolution: TimeEvolution | dict | None = None,
@@ -40,9 +39,6 @@ class Transport(TreeNode):
             Exactly one supported material type must be specified.
         fermi_circle
             :yaml:`Fermi-circle material for graphene/2DEG.`
-        fermi_surface
-            :yaml:`Unified Fermi-surface (delta-k storage with modal transforms).`
-            Set Nr=1 to recover the Fermi-circle limit.
             Exactly one supported material type must be specified.
         single_band
             :yaml:`Single-band model material for energy-resolved charge transport.`
@@ -86,12 +82,6 @@ class Transport(TreeNode):
                 "fermi-circle",
                 FermiCircle,
                 fermi_circle,
-                process_grid=self.process_grid,
-            ),
-            TreeNode.ChildOptions(
-                "fermi-surface",
-                FermiSurface,
-                fermi_surface,
                 process_grid=self.process_grid,
             ),
             TreeNode.ChildOptions(

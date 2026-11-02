@@ -1,4 +1,4 @@
-fermi_surface:
+fermi_circle:
   kF: 1.0
   vF: 1.0
   n_theta: 32
