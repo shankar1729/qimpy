@@ -135,6 +135,8 @@ class FermiCircle(Material):
         self.k[:] = (k_hat[:, None] * k_r[:, None]).flatten(0, 1)
         self.v[:, 0] = (k_hat[:, None] * v_r[:, None]).flatten(0, 1)
         self.E[:, 0] = E_r.repeat(n_theta)
+        if n_r > 1:
+            self.fermi0 = fermi(self.E[:, 0], 0.0, T)  # Reference Fermi distribution
         self.specularity = specularity
 
         # Cached normalizations for collision intergal
@@ -182,28 +184,18 @@ class FermiCircle(Material):
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
-        result = self.rho_dot_collisions(rho)
+        # Collisions:
+        result = torch.zeros_like(rho)
+        if self.tau_inv_p:
+            result += self.tau_inv_p * (self.get_rho_stationary(rho) - rho)
+        if self.tau_inv_ee:
+            result += self.tau_inv_ee * (self.get_rho_comoving(rho) - rho)
+
+        # Fields:
         if self.F_theta:  # k-space advection due to magnetic fields:
             result += advect_theta(
                 rho.unflatten(1, (self.n_theta, self.n_r)), self.F_theta
             ).flatten(1, 2)
-        return result
-
-    def rho_dot_collisions(self, rho: torch.Tensor) -> torch.Tensor:
-        if not (self.tau_inv_p or self.tau_inv_ee):
-            return torch.zeros_like(rho)  # no scattering
-
-        # Compute stationary carrier density:
-        rho_0 = rho.mean(dim=-1, keepdim=True)
-        result = (rho_0 - rho) * (self.tau_inv_p + self.tau_inv_ee)
-
-        # Compute moving equlibrium carrier density if needed:
-        if self.tau_inv_ee:
-            v = self.transport_velocity
-            rho_v_sum = torch.einsum("...k, ki -> ...i", rho, v)
-            rho_v = torch.einsum("...i, ij, kj -> ...k", rho_v_sum, self.vv_inv, v)
-            result += rho_v * self.tau_inv_ee  # combines with rho_0 - rho above
-
         return result
 
     def get_observable_names(self) -> list[str]:
@@ -219,6 +211,23 @@ class FermiCircle(Material):
     def get_flux_indices(self) -> list[int]:
         return [0]
 
+    def get_rho_stationary(self, rho: torch.Tensor) -> torch.Tensor:
+        """Get the stationary rho that matches `rho` in density."""
+        if self.n_r == 1:
+            return rho.mean(dim=-1, keepdim=True)  # broadcasts with rho
+        else:
+            return NotImplemented
+
+    def get_rho_comoving(self, rho: torch.Tensor) -> torch.Tensor:
+        """Get the comoving rho that matches `rho` in density and current."""
+        if self.n_r == 1:
+            v = self.transport_velocity
+            rho_v_sum = torch.einsum("...k, ki -> ...i", rho, v)
+            rho_v = torch.einsum("...i, ij, kj -> ...k", rho_v_sum, self.vv_inv, v)
+            return rho.mean(dim=-1, keepdim=True) + rho_v
+        else:
+            return NotImplemented
+
 
 class Contactor:
     rho_contact: torch.Tensor  #: Cached constant contact distribution
@@ -229,7 +238,7 @@ class Contactor:
         if fc.n_r == 1:
             self.rho_contact[:] = dmu / fc.vF  # include DOS factor for k_r integral
         else:
-            self.rho_contact[:] = (fermi(fc.E, dmu, fc.T) - fermi(fc.E, 0.0, fc.T)).T
+            self.rho_contact[:] = fermi(fc.E[:, 0], dmu, fc.T) - fc.fermi0
 
     def __call__(self, t):
         return self.rho_contact
