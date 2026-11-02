@@ -215,8 +215,24 @@ class FermiCircle(Material):
         """Get the stationary rho that matches `rho` in density."""
         if self.n_r == 1:
             return rho.mean(dim=-1, keepdim=True)  # broadcasts with rho
-        else:
-            return NotImplemented
+
+        # Find mu (for each spatial point) that matches density:
+        TOL = 1e-12
+        MAX_ITER = 30  # Usually converges in ~ 3 - 4 steps
+        n0 = (rho + self.fermi0) @ self.wk  # reference densities to match
+        mu = torch.zeros_like(n0)
+        f = fermi(self.E[:, 0], mu[:, None], self.T)
+        for i_iter in range(MAX_ITER):
+            err = f @ self.wk - n0
+            active = torch.where(err.abs() > TOL)[0]  # not yet converged
+            if not len(active):
+                return f - self.fermi0  # all converged
+            # Newton update:
+            f_active = f[active]
+            derr_dmu = (f_active * (1.0 - f_active)) @ self.wk / self.T
+            mu[active] -= (err[active] / derr_dmu).clamp(-self.T, self.T)  # bound step
+            f[active] = fermi(self.E[:, 0], mu[active, None], self.T)
+        raise RuntimeError("Failed to converge mu to match density")
 
     def get_rho_comoving(self, rho: torch.Tensor) -> torch.Tensor:
         """Get the comoving rho that matches `rho` in density and current."""
