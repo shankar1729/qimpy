@@ -216,7 +216,7 @@ class Geometry(TreeNode):
             )
         self.stash = Stash()
         self.stash_probe = Stash()  # coarse-grained, more frequent version
-        self.material.initialize_fields(self.rho, {}, id(self))
+        self.material.initialize_fields(self.rho, {})
 
     def to_faces(
         self, rho: torch.Tensor, t: float, boundary_only: bool = False
@@ -272,7 +272,7 @@ class Geometry(TreeNode):
         out = (self.minus_v_dot_del @ self.to_faces(rho, t).flatten()).view(rho.shape)
         watch.stop()
         n_mine = self.mesh.cell_division.n_mine
-        out[:n_mine] += self.material.rho_dot(rho[:n_mine], t, id(self))
+        out[:n_mine] += self.material.rho_dot(rho[:n_mine], t)
         return out
 
     @stopwatch

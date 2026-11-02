@@ -14,12 +14,12 @@ from qimpy.transport import material
 
 class RelaxationTime(TreeNode):
     ab_initio: material.ab_initio.AbInitio
-    tau_e: dict[int, torch.Tensor]  #: electron relaxation time
-    tau_h: dict[int, torch.Tensor]  #: hole relaxation time
-    tau_s_e: dict[int, torch.Tensor]  #: electron spin relaxation time
-    tau_s_h: dict[int, torch.Tensor]  #: hole spin relaxation time
-    tau_eh: dict[int, torch.Tensor]  #: electron-hole off-diagonal relaxation
-    tau_recomb: dict[int, torch.Tensor]  #: recombination time
+    tau_e: torch.Tensor  #: electron relaxation time
+    tau_h: torch.Tensor  #: hole relaxation time
+    tau_s_e: torch.Tensor  #: electron spin relaxation time
+    tau_s_h: torch.Tensor  #: hole spin relaxation time
+    tau_eh: torch.Tensor  #: electron-hole off-diagonal relaxation
+    tau_recomb: torch.Tensor  #: recombination time
     max_dmu: float  #: maximum change of mu in find_mu
     nv: int  #: number of valance bands
     eps: float
@@ -27,12 +27,12 @@ class RelaxationTime(TreeNode):
     only_diagonal: bool
 
     constant_params: dict[str, torch.Tensor]  #: constant values of parameters
-    exp_betaEe: dict[int, torch.Tensor]  #: TODO: document
-    betamue0: dict[int, torch.Tensor]  #: TODO: document
-    exp_betaEh: dict[int, torch.Tensor]  #: TODO: document
-    betamuh0: dict[int, torch.Tensor]  #: TODO: document
-    exp_betaE: dict[int, torch.Tensor]  #: TODO: document
-    betamuk0: dict[int, torch.Tensor]  #: TODO: document
+    exp_betaEe: torch.Tensor  #: TODO: document
+    betamue0: torch.Tensor  #: TODO: document
+    exp_betaEh: torch.Tensor  #: TODO: document
+    betamuh0: torch.Tensor  #: TODO: document
+    exp_betaE: torch.Tensor  #: TODO: document
+    betamuk0: torch.Tensor  #: TODO: document
     proj_S_e: torch.Tensor  #: spin projectors for electrons
     proj_S_h: torch.Tensor  #: spin projectors for holes
 
@@ -94,16 +94,8 @@ class RelaxationTime(TreeNode):
             tau_recomb=torch.tensor(tau_recomb, device=rc.device),
         )
         self.nv = nv
-        self.tau_e = {}
-        self.tau_h = {}
-        self.tau_s_e = {}
-        self.tau_s_h = {}
-        self.tau_eh = {}
-        self.tau_recomb = {}
         if np.isfinite(tau_e):
             log.info("Enable RTA for conduction bands.")
-            self.exp_betaEe = {}
-            self.betamue0 = {}
             if np.all(np.isfinite(tau_s_e)):
                 log.info("Enable separate spin relaxation time for conduction bands.")
                 self.proj_S_e = get_projector(
@@ -116,8 +108,6 @@ class RelaxationTime(TreeNode):
 
         if np.isfinite(tau_h):
             log.info("Enable RTA for valance bands.")
-            self.exp_betaEh = {}
-            self.betamuh0 = {}
             if np.all(np.isfinite(tau_s_h)):
                 log.info("Enable separate spin relaxation time for valence bands.")
                 self.proj_S_h = get_projector(
@@ -132,8 +122,6 @@ class RelaxationTime(TreeNode):
             log.info("Enable RTA for conduction-valance off-diagonal terms.")
         if np.isfinite(tau_recomb):
             log.info("Enable phenomenon recombination.")
-            self.exp_betaE = {}
-            self.betamuk0 = {}
         self.max_dbetamu = max_dmu / ab_initio.T
         self.max_dmu = max_dmu
         self.eps = float(eps)
@@ -164,12 +152,11 @@ class RelaxationTime(TreeNode):
         attrs["only_diagonal"] = self.only_diagonal
         return list(attrs.keys())
 
-    def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
-        self._initialize_fields(patch_id, **params)
+    def initialize_fields(self, params: dict[str, torch.Tensor]) -> None:
+        self._initialize_fields(**params)
 
     def _initialize_fields(
         self,
-        patch_id: int,
         *,
         tau_e: torch.Tensor,
         tau_h: torch.Tensor,
@@ -182,119 +169,92 @@ class RelaxationTime(TreeNode):
         nv = self.nv
         betamu0 = ab_initio.mu / ab_initio.T
         if torch.isfinite(tau_e):
-            self.tau_e[patch_id] = tau_e
-            self.exp_betaEe[patch_id] = torch.exp(ab_initio.E[:, nv:] / ab_initio.T)[
-                None, None
-            ]
-            self.betamue0[patch_id] = torch.ones([1, 1]).to(rc.device) * betamu0
+            self.tau_e = tau_e
+            self.exp_betaEe = torch.exp(ab_initio.E[:, nv:] / ab_initio.T)[None, None]
+            self.betamue0 = torch.ones([1, 1]).to(rc.device) * betamu0
         if torch.isfinite(tau_h):
-            self.tau_h[patch_id] = tau_h
-            self.exp_betaEh[patch_id] = torch.exp(-ab_initio.E[:, :nv] / ab_initio.T)[
-                None, None
-            ]
-            self.betamuh0[patch_id] = -torch.ones([1, 1]).to(rc.device) * betamu0
+            self.tau_h = tau_h
+            self.exp_betaEh = torch.exp(-ab_initio.E[:, :nv] / ab_initio.T)[None, None]
+            self.betamuh0 = -torch.ones([1, 1]).to(rc.device) * betamu0
         if torch.all(torch.isfinite(tau_s_e)):
-            self.tau_s_e[patch_id] = tau_s_e
+            self.tau_s_e = tau_s_e
         if torch.all(torch.isfinite(tau_s_h)):
-            self.tau_s_h[patch_id] = tau_s_h
+            self.tau_s_h = tau_s_h
         if torch.isfinite(tau_eh):
-            self.tau_eh[patch_id] = tau_eh
+            self.tau_eh = tau_eh
         if torch.isfinite(tau_recomb):
-            self.tau_recomb[patch_id] = tau_recomb
-            self.exp_betaE[patch_id] = torch.exp(ab_initio.E / ab_initio.T)[None, None]
-            self.betamuk0[patch_id] = (
+            self.tau_recomb = tau_recomb
+            self.exp_betaE = torch.exp(ab_initio.E / ab_initio.T)[None, None]
+            self.betamuk0 = (
                 torch.ones([1, 1, ab_initio.E.shape[0]]).to(rc.device) * betamu0
             )
 
-    def replicate_betamu(self, rho: torch.Tensor, patch_id: int) -> None:
+    def replicate_betamu(self, rho: torch.Tensor) -> None:
         # replicate betamu based on the shape of rho at the initial time
         # to avoid reshaping during later running
         if not self.is_initial:
             return
         self.is_initial = False
-        if patch_id in self.tau_e:
-            self.betamue0[patch_id] = torch.tile(
-                self.betamue0[patch_id],
-                rho.shape[:2],
-            )
-        if patch_id in self.tau_h:
-            self.betamuh0[patch_id] = torch.tile(
-                self.betamuh0[patch_id],
-                rho.shape[:2],
-            )
-        if patch_id in self.tau_recomb:
-            self.betamuk0[patch_id] = torch.tile(
-                self.betamuk0[patch_id],
-                rho.shape[:2] + (1,),
-            )
+        if hasattr(self, "tau_e"):
+            self.betamue0 = torch.tile(self.betamue0, rho.shape[:2])
+        if hasattr(self, "tau_h"):
+            self.betamuh0 = torch.tile(self.betamuh0, rho.shape[:2])
+        if hasattr(self, "tau_recomb"):
+            self.betamuk0 = torch.tile(self.betamuk0, rho.shape[:2] + (1,))
 
     @stopwatch
-    def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
+    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         # rho.shape: (x,y,k,b)
         nv = self.nv
         result = torch.zeros_like(rho)
-        self.replicate_betamu(rho, patch_id)
+        self.replicate_betamu(rho)
 
-        if patch_id in self.tau_e:
+        if hasattr(self, "tau_e"):
             nbands = self.nbands
             bslice = slice(nv, nbands)
             brange = range(nv, nbands)
             fe = rho[..., brange, brange].real
-            betamue, fe_eq = self.find_mu(
-                fe,
-                self.exp_betaEe[patch_id],
-                self.betamue0[patch_id],
-            )
+            betamue, fe_eq = self.find_mu(fe, self.exp_betaEe, self.betamue0)
             if self.only_diagonal:
-                result[..., brange, brange] -= (fe - fe_eq) / (2 * self.tau_e[patch_id])
+                result[..., brange, brange] -= (fe - fe_eq) / (2 * self.tau_e)
             else:
                 drho = rho[..., bslice, bslice] - torch.diag_embed(fe_eq)
-                if patch_id in self.tau_s_e:
+                if hasattr(self, "tau_s_e"):
                     drho_S = apply_projector(drho, self.proj_S_e, self.ab_initio.group)
                     drho -= drho_S.sum(dim=-1)  # leave non-spin parts in drho
                     result[..., bslice, bslice] -= (
-                        drho_S / (2 * self.tau_s_e[patch_id][..., None, None, :])
+                        drho_S / (2 * self.tau_s_e[..., None, None, :])
                     ).sum(dim=-1)
-                result[..., bslice, bslice] -= drho / (2 * self.tau_e[patch_id])
-            self.betamue0[patch_id] = betamue
+                result[..., bslice, bslice] -= drho / (2 * self.tau_e)
+            self.betamue0 = betamue
 
-        if patch_id in self.tau_h:
+        if hasattr(self, "tau_h"):
             bslice = slice(nv)
             brange = range(nv)
             fh = rho[..., brange, brange].real
-            betamuh, fh_eq = self.find_mu(
-                1 - fh,
-                self.exp_betaEh[patch_id],
-                self.betamuh0[patch_id],
-            )
+            betamuh, fh_eq = self.find_mu(1 - fh, self.exp_betaEh, self.betamuh0)
             fh_eq = 1 - fh_eq
             if self.only_diagonal:
-                result[..., brange, brange] -= (fh - fh_eq) / (2 * self.tau_h[patch_id])
+                result[..., brange, brange] -= (fh - fh_eq) / (2 * self.tau_h)
             else:
                 drho = rho[..., bslice, bslice] - torch.diag_embed(fh_eq)
-                if patch_id in self.tau_s_h:
+                if hasattr(self, "tau_s_h"):
                     drho_S = apply_projector(drho, self.proj_S_h, self.ab_initio.group)
                     drho -= drho_S.sum(dim=-1)  # leave non-spin parts in drho
                     result[..., bslice, bslice] -= (
-                        drho_S / (2 * self.tau_s_h[patch_id][..., None, None, :])
+                        drho_S / (2 * self.tau_s_h[..., None, None, :])
                     ).sum(dim=-1)
-                result[..., bslice, bslice] -= drho / (2 * self.tau_h[patch_id])
-            self.betamuh0[patch_id] = betamuh
+                result[..., bslice, bslice] -= drho / (2 * self.tau_h)
+            self.betamuh0 = betamuh
 
-        if patch_id in self.tau_eh:
-            result[..., nv:, :nv] -= (
-                rho[..., nv:, :nv] / self.tau_eh[patch_id]
-            )  # + h.c later
+        if hasattr(self, "tau_eh"):
+            result[..., nv:, :nv] -= rho[..., nv:, :nv] / self.tau_eh  # + h.c later
 
-        if patch_id in self.tau_recomb:
+        if hasattr(self, "tau_recomb"):
             fk = torch.einsum("...bb -> ...b", rho).real
-            betamuk, fk_eq = self.find_mu(
-                fk,
-                self.exp_betaE[patch_id],
-                self.betamuk0[patch_id],
-            )
-            result -= (rho - torch.diag_embed(fk_eq)) / (2 * self.tau_recomb[patch_id])
-            self.betamuk0[patch_id] = betamuk
+            betamuk, fk_eq = self.find_mu(fk, self.exp_betaE, self.betamuk0)
+            result -= (rho - torch.diag_embed(fk_eq)) / (2 * self.tau_recomb)
+            self.betamuk0 = betamuk
 
         return result
 

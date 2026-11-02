@@ -16,14 +16,14 @@ class Light(TreeNode):
     A0: torch.Tensor  #: Vector potential amplitude
     E0: torch.Tensor  #: Electric field amplitude
     smearing: float  #: Width of Gaussian
-    omega: dict[int, torch.Tensor]  #: light frequency
-    t0: dict[int, torch.Tensor]  #: center of Gaussian pulse, if sigma is non-zero
-    sigma: dict[int, torch.Tensor]  #: width of Gaussian pulse in time, if non-zero
-    amp_mat: dict[int, torch.Tensor]  #: Amplitude matrix, precomputed A0 . P or E0 . R
-    plus: dict[int, torch.Tensor]  #: TODO: document
-    plus_deg: dict[int, torch.Tensor]  #: TODO: document
-    minus: dict[int, torch.Tensor]  #: TODO: document
-    minus_deg: dict[int, torch.Tensor]  #: TODO: document
+    omega: torch.Tensor  #: light frequency
+    t0: torch.Tensor  #: center of Gaussian pulse, if sigma is non-zero
+    sigma: torch.Tensor  #: width of Gaussian pulse in time, if non-zero
+    amp_mat: torch.Tensor  #: Amplitude matrix, precomputed A0 . P or E0 . R
+    plus: torch.Tensor  #: TODO: document
+    plus_deg: torch.Tensor  #: TODO: document
+    minus: torch.Tensor  #: TODO: document
+    minus_deg: torch.Tensor  #: TODO: document
 
     constant_params: dict[str, torch.Tensor]  #: constant values of parameters
 
@@ -114,12 +114,11 @@ class Light(TreeNode):
         attrs["gauge"] = self.gauge
         return list(attrs.keys())
 
-    def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
-        self._initialize_fields(patch_id, **params)
+    def initialize_fields(self, params: dict[str, torch.Tensor]) -> None:
+        self._initialize_fields(**params)
 
     def _initialize_fields(
         self,
-        patch_id: int,
         *,
         A0: torch.Tensor,
         omega: torch.Tensor,
@@ -140,11 +139,11 @@ class Light(TreeNode):
 
         # reshape omega here for convinient broadcasting
         omega = (omega * torch.ones([1, 1]).to(rc.device))[..., None, None, None]
-        self.t0[patch_id] = t0
-        self.sigma[patch_id] = sigma
+        self.t0 = t0
+        self.sigma = sigma
         if self.coherent:
-            self.amp_mat[patch_id] = amp_mat[None, None]
-            self.omega[patch_id] = omega
+            self.amp_mat = amp_mat[None, None]
+            self.omega = omega
         else:  #: lindblad version
             prefac = torch.sqrt(torch.sqrt(torch.pi / (8 * smearing**2)))
             exp_factor = -1.0 / (smearing**2)
@@ -155,15 +154,15 @@ class Light(TreeNode):
             plus_deg = plus.swapaxes(-2, -1).conj()
             minus_deg = minus.swapaxes(-2, -1).conj()
             self.eye = torch.tile(torch.eye(Nb), (1, Nk, 1, 1)).to(rc.device)
-            self.plus[patch_id] = plus
-            self.plus_deg[patch_id] = plus_deg
-            self.minus[patch_id] = minus
-            self.minus_deg[patch_id] = minus_deg
+            self.plus = plus
+            self.plus_deg = plus_deg
+            self.minus = minus
+            self.minus_deg = minus_deg
 
     @stopwatch
-    def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
-        t0 = self.t0[patch_id]
-        sigma = self.sigma[patch_id]
+    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
+        t0 = self.t0
+        sigma = self.sigma
         # shape of prefac must be (Nx, Ny, 1, 1, 1)
         if sigma > 0:
             prefac = (
@@ -175,19 +174,19 @@ class Light(TreeNode):
             prefac = torch.ones(rho.shape[:2] + (1, 1, 1)).to(rc.device)
 
         if self.coherent:
-            omega = self.omega[patch_id]
+            omega = self.omega
             prefac = (
                 -0.5j * torch.exp(-1j * omega * t) * prefac
             )  # Louiville, symmetrization
-            interaction = prefac * self.amp_mat[patch_id]
+            interaction = prefac * self.amp_mat
             return (interaction - interaction.swapaxes(-2, -1).conj()) @ rho
         else:
             prefac = 0.5 * prefac**2
             I_minus_rho = self.eye - rho
-            plus = self.plus[patch_id]
-            minus = self.minus[patch_id]
-            plus_deg = self.plus_deg[patch_id]
-            minus_deg = self.minus_deg[patch_id]
+            plus = self.plus
+            minus = self.minus
+            plus_deg = self.plus_deg
+            minus_deg = self.minus_deg
             return prefac * (
                 commutator(I_minus_rho @ plus @ rho, plus_deg)
                 + commutator(I_minus_rho @ minus @ rho, minus_deg)

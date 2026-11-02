@@ -168,7 +168,7 @@ class SingleBand(Material):
         return list(attrs.keys()) + ["k", "v", "E"]
 
     def initialize_fields(
-        self, rho: torch.Tensor, params: dict[str, torch.Tensor], patch_id: int
+        self, rho: torch.Tensor, params: dict[str, torch.Tensor]
     ) -> None:
         pass  # No spatially-varying / parameter sweep fields yet
 
@@ -182,7 +182,7 @@ class SingleBand(Material):
     ) -> Callable[[torch.Tensor], torch.Tensor]:  # absorbing boundary
         return torch.zeros_like
 
-    def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
+    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         # TODO: systematize dynamics terms like AbInitio
         if hasattr(self, "scatter"):
             return self.scatter.rho_dot(rho)

@@ -62,7 +62,7 @@ def test_scattering_conservation(
     torch.manual_seed(0)
     rho = torch.rand(100, fc.nk_mine) * 2 - 1  # Random on [-1, 1]
     t = 0.0
-    rho_dot = fc.rho_dot(rho, t, 0)
+    rho_dot = fc.rho_dot(rho, t)
 
     # Charge (and energy for n_r > 1):
     obs_dot = fc.measure_observables(rho_dot, t)

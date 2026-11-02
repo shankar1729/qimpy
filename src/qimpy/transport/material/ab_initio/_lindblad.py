@@ -24,7 +24,7 @@ class Lindblad(TreeNode):
     rho_dot0: torch.Tensor  #: rho_dot(rho0) for detailed balance correction
 
     constant_params: dict[str, torch.Tensor]  #: constant values of parameters
-    scale_factor: dict[int, torch.Tensor]  #: scale factors per patch
+    scale_factor: torch.Tensor  #: scale factors per parameter sweep
     detailed_balance: str
 
     low_rank_file: str  #: Name of HDF5 file to load `U` and `Vdag` from
@@ -201,7 +201,6 @@ class Lindblad(TreeNode):
         self.constant_params = dict(
             scale_factor=torch.tensor(scale_factor, device=rc.device)
         )
-        self.scale_factor = dict()
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
@@ -212,21 +211,21 @@ class Lindblad(TreeNode):
         attrs["low_rank_file"] = self.low_rank_file
         return list(attrs.keys())
 
-    def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
-        self._initialize_fields(patch_id, **params)
+    def initialize_fields(self, params: dict[str, torch.Tensor]) -> None:
+        self._initialize_fields(**params)
 
-    def _initialize_fields(self, patch_id: int, *, scale_factor: torch.Tensor) -> None:
-        self.scale_factor[patch_id] = scale_factor[..., None, None, None]
+    def _initialize_fields(self, *, scale_factor: torch.Tensor) -> None:
+        self.scale_factor = scale_factor[..., None, None, None]
 
     @stopwatch
-    def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
+    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         """drho/dt due to scattering in Schrodinger picture.
         Input and output rho are in unpacked (complex Hermitian) form."""
         if self.detailed_balance == "spatial":
             if self.mu0.shape == (1, 1):
                 self.mu0 = torch.tile(self.mu0, rho.shape[:2])
             self.rho_dot0 = self._update_rho_dot0(rho)
-        return self.scale_factor[patch_id] * (self._calculate(rho) - self.rho_dot0)
+        return self.scale_factor * (self._calculate(rho) - self.rho_dot0)
 
     def _update_rho_dot0(self, rho: torch.Tensor) -> torch.Tensor:
         """Update rho_dot0 for detailed balance."""

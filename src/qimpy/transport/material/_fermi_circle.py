@@ -169,7 +169,7 @@ class FermiCircle(Material):
         return list(attrs.keys())
 
     def initialize_fields(
-        self, rho: torch.Tensor, params: dict[str, torch.Tensor], patch_id: int
+        self, rho: torch.Tensor, params: dict[str, torch.Tensor]
     ) -> None:
         pass  # No spatially-varying / parameter sweep fields yet
 
@@ -183,7 +183,7 @@ class FermiCircle(Material):
         return Reflector(n, v, self.theta0, self.specularity)
 
     @stopwatch
-    def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
+    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         # Collisions:
         result = torch.zeros_like(rho)
         if self.tau_inv_p:

@@ -57,14 +57,12 @@ class Material(TreeNode):
 
     @abstractmethod
     def initialize_fields(
-        self, rho: torch.Tensor, params: dict[str, torch.Tensor], patch_id: int
+        self, rho: torch.Tensor, params: dict[str, torch.Tensor]
     ) -> None:
         """Initialize spatially-dependent / parameter sweep values.
         Using named properties `params`, containing tensors that should broadcast
         with the grid dimensions, update the density matrix `rho` to be spatially
-        varying if necessary and calculate any named fields for use during dynamics.
-        Note that the cached quantities must be associated with `patch_id`, as there
-        may be multiple spatial domains (patches) sharing the same material."""
+        varying if necessary and calculate any named fields for use during dynamics."""
 
     @property
     def transport_velocity(self) -> torch.Tensor:
@@ -91,7 +89,7 @@ class Material(TreeNode):
         and return the corresponding Nsurf x Nkbb_mine distribution function."""
 
     @abstractmethod
-    def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
+    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         """Return material contribution to drho/dt.
         This should include scattering and any coherent evolution in band space."""
 
