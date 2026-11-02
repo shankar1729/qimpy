@@ -2,9 +2,9 @@ fermi_circle:
   kF: 1.0
   vF: 1.0
   n_theta: 32
-  # n_r: 4
-  # dk_r: 0.1
-  # T: 0.1
+  n_r: 4
+  dk_r: 0.1
+  T: 0.1
   # tau_p: 0.2
   tau_ee: 0.1
   r_c: .inf
