@@ -4,13 +4,7 @@ import numpy as np
 import torch
 
 from qimpy import rc, TreeNode
-from qimpy.io import (
-    CheckpointPath,
-    Unit,
-    CheckpointContext,
-    TensorCompatible,
-    cast_tensor,
-)
+from qimpy.io import CheckpointPath, CheckpointContext, TensorCompatible, cast_tensor
 from qimpy.profiler import stopwatch
 from qimpy.transport import material
 from qimpy.transport.advect import Advect
@@ -22,7 +16,7 @@ class EMField(TreeNode):
     ab_initio: material.ab_initio.AbInitio
 
     constant_params: dict[str, torch.Tensor]  #: constant values of parameters
-    grad_phi: dict[int, torch.Tensor]  #: Electric field strength
+    grad_phi: torch.Tensor  #: Electric field strength
 
     def __init__(
         self,
@@ -41,9 +35,7 @@ class EMField(TreeNode):
         """
         super().__init__()
         self.ab_initio = ab_initio
-        self.constant_params = dict(
-            grad_phi=cast_tensor(grad_phi),
-        )
+        self.constant_params = dict(grad_phi=cast_tensor(grad_phi))
 
         # Initialize v*drho/dx calculator:
         self.advect = torch.jit.script(Advect(cent_diff_deriv=False))
@@ -56,22 +48,16 @@ class EMField(TreeNode):
         attrs["grad_phi"] = self.constant_params["grad_phi"].to(rc.cpu)
         return list(attrs.keys())
 
-    def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
-        self._initialize_fields(patch_id, **params)
+    def initialize_fields(self, params: dict[str, torch.Tensor]) -> None:
+        self._initialize_fields(**params)
 
-    def _initialize_fields(
-        self,
-        patch_id: int,
-        *,
-        grad_phi: torch.Tensor
-    ) -> None:
-
+    def _initialize_fields(self, *, grad_phi: torch.Tensor) -> None:
         # Spatial gradient of scalar potential
-        self.grad_phi = grad_phi@np.linalg.inv(self.ab_initio.R)
+        self.grad_phi = grad_phi @ np.linalg.inv(self.ab_initio.R)
         print(self.grad_phi)
 
     @stopwatch
-    def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
+    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         # Rho dot shape: x1, x2, k, b1, b2
         # Expand rho to include dimensions for adjacent k-points along each component
         result = torch.zeros_like(rho)
@@ -81,4 +67,3 @@ class EMField(TreeNode):
             rho_intermediate = rho[:, :, k_adj].real.swapaxes(3, -1)
             result += self.advect(rho_intermediate, F[comp], axis=-1).squeeze(dim=3)
         return result
-        

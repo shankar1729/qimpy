@@ -6,7 +6,7 @@ from qimpy import rc
 
 
 def all_gather_padded(
-    send: torch.Tensor, sizes: np.ndarray, group: dist.ProcessGroup
+    send: torch.Tensor, sizes: np.ndarray, group: dist.ProcessGroup | None
 ) -> torch.Tensor:
     """Gather `send` with possibly uneven dimension 0 `sizes` along `group`.
     Return the result as a single tensor with concatenated dimension 0,
@@ -37,7 +37,9 @@ def all_gather_padded(
     return recv
 
 
-def all_gather_scalars(send: float | int, group: dist.ProcessGroup) -> np.ndarray:
+def all_gather_scalars(
+    send: float | int, group: dist.ProcessGroup | None
+) -> np.ndarray:
     """Gather scalars `send` along `group` into an array."""
     if group.size() == 1:
         return np.array([send])
@@ -48,7 +50,7 @@ def all_gather_scalars(send: float | int, group: dist.ProcessGroup) -> np.ndarra
 
 
 def all_reduce_scalars(
-    value: float | int, op: dist.ReduceOp.RedOpType, group: dist.ProcessGroup
+    value: float | int, op: dist.ReduceOp.RedOpType, group: dist.ProcessGroup | None
 ) -> float | int:
     buf = torch.tensor(value, device=rc.device)
     dist.all_reduce(buf, op=op, group=group)

@@ -1,41 +1,47 @@
 from __future__ import annotations
 from typing import Callable
 from functools import cache
-import operator
 
 import numpy as np
 import torch
-import torch.distributed as dist
 
 from qimpy import rc
-from qimpy.mpi import ProcessGrid, TaskDivision
+from qimpy.mpi import ProcessGrid
 from qimpy.profiler import stopwatch
-from qimpy.io import CheckpointPath, CheckpointContext
-from qimpy.transport.advect import Advect, N_GHOST
-from . import Material
+from qimpy.io import CheckpointPath, CheckpointContext, InvalidInputException
+from ..advect import limiter
+from . import Material, fermi
 
 
 class FermiCircle(Material):
-    """Fermi-circle representation suitable for graphene and 2DEGs."""
+    """Fermi-circle model material suitable for graphene and 2DEGs."""
 
     kF: float  #: Fermi wave-vector
     vF: float  #: Fermi velocity
+    n_theta: int  #: Number of k along Fermi circle
+    n_r: int  #: Number of radial k perpendicular to Fermi circle.`
+    dk_r: float  #: Radial k grid spacing perpendicular to Fermi circle (for n_r > 1)
+    m_star: float  #: Effective mass
+    T: float  #: Temperature
     tau_inv_p: float  #: Momentum relaxation rate
     tau_inv_ee: float  #: Electron internal scattering rate (momentum-conserving)
     theta0: float  #: Initial angle in fermi circle grid
     specularity: float  #: Specularity of reflection at all boundaries
     r_c: float  #: Cyclotron radius for extenral magnetic field (disabled if infinity)
     F_theta: float  #: Angular force in grid coordinates
-    advect: torch.jit.ScriptModule  #: Momentum-space advection logic
 
     def __init__(
         self,
         *,
         kF: float,
         vF: float,
-        N_theta: int,
-        tau_p: float,
-        tau_ee: float,
+        n_theta: int,
+        n_r: int = 1,
+        dk_r: float = 0.0,
+        m_star: float = np.inf,
+        T: float = 0.0,
+        tau_p: float = np.inf,
+        tau_ee: float = np.inf,
         r_c: float = np.inf,
         theta0: float = 0.0,
         specularity: float = 1.0,
@@ -51,8 +57,28 @@ class FermiCircle(Material):
             :yaml:`Fermi wave vector in atomic units.`
         vF
             :yaml:`Fermi velocity in atomic units.`
-        N_theta
+        n_theta
             :yaml:`Number of k along Fermi circle.`
+        n_r
+            :yaml:`Number of radial k perpendicular to Fermi circle.`
+        dk_r
+            :yaml:`Radial k grid spacing perpendicular to Fermi circle.`
+            This is only relevant if `n_r` > 1, and should typically be ~ `T` / `vF`.
+        m_star
+            :yaml:`Longitudinal effective mass determining dispersion relation.`
+            If `n_r` > 1, this controls the velocity and energy away from kF.
+            The default infinite value sets a linear dispersion relation.
+            Set to `kF` / `vF` for a parabolic dispersion relation.
+        T
+            :yaml:`Temperature of reference equilibrium state.`
+            If `n_r` > 1, this controls the equilibrium Fermi distribution about
+            which the change in occupations are referenced. It also controls the Fermi
+            distributions used in defining the contacts and the `tau_p` relaxation.
+            The `n_r` = 1 case does not resolve energies and is effectively T = 0.
+        tau_p
+            :yaml:`Momentum relaxation time.`
+        tau_ee
+            :yaml:`Electron-electron scattering time (momentum-conserving).`
         theta0
             :yaml:`Angle of first k-point.`
         r_c
@@ -69,40 +95,58 @@ class FermiCircle(Material):
         self.r_c = r_c
         self.tau_inv_p = 1.0 / tau_p
         self.tau_inv_ee = 1.0 / tau_ee
+
+        # Initialize angular k grid:
+        self.n_theta = n_theta
+        self.theta0 = theta0
+        dtheta = 2 * np.pi / n_theta
+        theta = theta0 + torch.arange(n_theta, device=rc.device) * dtheta
+        k_hat = torch.stack([theta.cos(), theta.sin()], dim=-1)
+
+        # Initialize radial k grid (centered on kF):
+        self.n_r = n_r
+        self.dk_r = dk_r
+        self.m_star = m_star
+        self.T = T
+        k_r = kF + dk_r * (torch.arange(n_r, device=rc.device) - 0.5 * (n_r - 1))
+        v_r = vF + (k_r - kF) / m_star
+        E_r = vF * (k_r - kF) + 0.5 * (k_r - kF).square() / m_star  # Ef = 0 WLOG
+        wk = (2 / (2 * np.pi) ** 2) * (dtheta * k_r.repeat(n_theta))
+        if n_r > 1:
+            wk *= dk_r  # include radial grid spacing; n_r == 1 case is r-integrated
+            if not dk_r:
+                raise InvalidInputException("dk_r must be > 0 when n_r > 1")
+            if not T:
+                raise InvalidInputException("T must be > 0 when n_r > 1")
+            assert vF * dk_r <= 2 * T  # Radial grid energy spacing should resolve T
+            assert vF * dk_r * n_r >= 2 * T  # Energy range covers multiple T units
+
         self.initialize(
-            wk=1.0 / N_theta,
-            nk=N_theta,
+            wk=wk,
+            nk=len(wk),
             n_bands=1,
             n_dim=2,
             process_grid=process_grid,
         )
+        if self.group.size() > 1:
+            raise NotImplementedError("FermiCircle does not parallelize over k")
 
         # Create theta grid on Fermi circle:
-        dtheta = 2 * np.pi / N_theta
-        theta = theta0 + torch.arange(N_theta, device=rc.device) * dtheta
-        k_hat = torch.stack([theta.cos(), theta.sin()], dim=-1)
-        self.v_all = k_hat[:, None] * vF
-        self.k[:] = k_hat[self.k_mine] * kF
-        self.v[:] = self.v_all[self.k_mine]
-        self.theta0 = theta0
+        self.k[:] = (k_hat[:, None] * k_r[:, None]).flatten(0, 1)
+        self.v[:, 0] = (k_hat[:, None] * v_r[:, None]).flatten(0, 1)
+        self.E[:, 0] = E_r.repeat(n_theta)
+        if n_r > 1:
+            self.fermi0 = fermi(self.E[:, 0], 0.0, T)  # Reference Fermi distribution
         self.specularity = specularity
 
         # Cached normalizations for collision intergal
-        self.nk_inv = 1.0 / N_theta
-        self.vv_inv = torch.linalg.inv(
-            torch.einsum("...i, ...j -> ij", self.v_all, self.v_all)
-        )
+        self.nk_inv = 1.0 / n_theta
+        self.vv_inv = torch.linalg.inv(torch.einsum("...i, ...j -> ij", self.v, self.v))
 
         # Initialize F*drho/dk calculator, if needed:
         if np.isfinite(r_c):
             self.F_theta = self.vF / (self.r_c * dtheta)
             self.dt_max = 0.5 / abs(self.F_theta)
-            self.advect = torch.jit.script(Advect())
-            self.riemann_mask = torch.tensor(
-                (1.0, 0.0) if self.F_theta > 0 else (0.0, 1.0), device=rc.device
-            ).view(
-                1, 1, 1, -1
-            )  # faster constant-F equivalent to get_riemann_mask
         else:
             self.F_theta = 0.0
 
@@ -112,7 +156,11 @@ class FermiCircle(Material):
         attrs = cp_path.attrs
         attrs["kF"] = self.kF
         attrs["vF"] = self.vF
-        attrs["N_theta"] = self.k_division.n_tot
+        attrs["n_theta"] = self.n_theta
+        attrs["n_r"] = self.n_r
+        attrs["dk_r"] = self.dk_r
+        attrs["m_star"] = self.m_star
+        attrs["T"] = self.T
         attrs["tau_p"] = (1.0 / self.tau_inv_p) if self.tau_inv_p else np.inf
         attrs["tau_ee"] = (1.0 / self.tau_inv_ee) if self.tau_inv_ee else np.inf
         attrs["r_c"] = self.r_c
@@ -121,7 +169,7 @@ class FermiCircle(Material):
         return list(attrs.keys())
 
     def initialize_fields(
-        self, rho: torch.Tensor, params: dict[str, torch.Tensor], patch_id: int
+        self, rho: torch.Tensor, params: dict[str, torch.Tensor]
     ) -> None:
         pass  # No spatially-varying / parameter sweep fields yet
 
@@ -131,250 +179,197 @@ class FermiCircle(Material):
         return Contactor(self, n, **kwargs)
 
     def get_reflector(self, n: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
-        return SpecularReflector(
-            n, self.v_all, self.group, self.k_division, self.specularity
-        )
+        v = self.v[:, 0].unflatten(0, (self.n_theta, self.n_r))
+        return Reflector(n, v, self.theta0, self.specularity)
 
     @stopwatch
-    def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
-        result = self.rho_dot_collisions(rho)
-        if self.F_theta:
-            # k-space advection due to magnetic fields:
-            result += self.accumulate_edges(
-                *self.advect(
-                    self.pad_ghost(rho) * self.F_theta,
-                    self.riemann_mask,
-                    -1,
-                    True,
-                    (True, True),
-                )
-            )
-        return result
-
-    def pad_ghost(self, rho: torch.Tensor) -> torch.Tensor:
-        """Pad by ghost zones for monetum-space advection."""
-        assert self.nk_mine >= 1
-        rhoL, rhoR = ring_exchange(self.group, rho[..., 0], rho[..., -1])
-        rho_padded = torch.nn.functional.pad(rho, (N_GHOST, N_GHOST))
-        rho_padded[..., N_GHOST - 1] = rhoL
-        rho_padded[..., -N_GHOST] = rhoR
-        return rho_padded
-
-    def accumulate_edges(
-        self, out: torch.Tensor, outL: torch.Tensor, outR: torch.Tensor
-    ) -> torch.Tensor:
-        """Accumulate momentum-space advection edge contributions `outL` and `outR`
-        into `out`, and return `out` for convenience."""
-        outL, outR = ring_exchange(self.group, outL, outR)
-        out[..., 0] += outL
-        out[..., -1] += outR
-        return out
-
-    def rho_dot_collisions(self, rho: torch.Tensor) -> torch.Tensor:
-        if not (self.tau_inv_p or self.tau_inv_ee):
-            return torch.zeros_like(rho)  # no scattering
-
-        # Compute stationary carrier density:
-        rho_sum = rho.sum(dim=-1).contiguous()
-        if self.group.size() > 1:
-            dist.all_reduce(rho_sum, group=self.group)
-        rho_0 = self.nk_inv * rho_sum[..., None]
-        result = (rho_0 - rho) * (self.tau_inv_p + self.tau_inv_ee)
-
-        # Compute moving equlibrium carrier density if needed:
+    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
+        # Collisions:
+        result = torch.zeros_like(rho)
+        if self.tau_inv_p:
+            result += self.tau_inv_p * (self.get_rho_stationary(rho) - rho)
         if self.tau_inv_ee:
-            v = self.transport_velocity
-            rho_v_sum = torch.einsum("...k, ki -> ...i", rho, v).contiguous()
-            if self.group.size() > 1:
-                dist.all_reduce(rho_v_sum, group=self.group)
-            rho_v = torch.einsum("...i, ij, kj -> ...k", rho_v_sum, self.vv_inv, v)
-            result += rho_v * self.tau_inv_ee  # combines with rho_0 - rho above
+            result += self.tau_inv_ee * (self.get_rho_comoving(rho) - rho)
 
+        # Fields:
+        if self.F_theta:  # k-space advection due to magnetic fields:
+            result += advect_theta(
+                rho.unflatten(1, (self.n_theta, self.n_r)), self.F_theta
+            ).flatten(1, 2)
         return result
 
     def get_observable_names(self) -> list[str]:
-        return ["n", "jx", "jy"]  # density and fluxes
+        return ["n"] if self.n_r == 1 else ["n", "E"]
 
     @cache
     def get_observables(self, t: float) -> torch.Tensor:
-        return torch.cat(
-            (
-                torch.ones((1, self.nk_mine), device=rc.device),
-                self.transport_velocity.T,
-            ),
-            dim=0,
-        )
+        observables = [torch.ones(self.nk_mine, device=rc.device)]  # for density
+        if self.n_r > 1:
+            observables.append(self.E.flatten())  # add energy
+        return torch.stack(observables)
+
+    def get_flux_indices(self) -> list[int]:
+        return [0]
+
+    def get_rho_stationary(self, rho: torch.Tensor) -> torch.Tensor:
+        """Get the stationary rho that matches `rho` in density."""
+        if self.n_r == 1:
+            return rho.mean(dim=-1, keepdim=True)  # broadcasts with rho
+
+        # Find mu (for each spatial point) that matches density:
+        TOL = 1e-12
+        MAX_ITER = 30  # Usually converges in ~ 3 - 4 steps
+        n0 = (rho + self.fermi0) @ self.wk  # reference densities to match
+        mu = torch.zeros_like(n0)
+        f = self.fermi0.tile((len(rho), 1))
+        for i_iter in range(MAX_ITER):
+            err = f @ self.wk - n0
+            active = torch.where(err.abs() > TOL)[0]  # not yet converged
+            if not len(active):
+                return f - self.fermi0  # all converged
+            # Newton update:
+            f_active = f[active]
+            derr_dmu = (f_active * (1.0 - f_active)) @ self.wk / self.T
+            mu[active] -= (err[active] / derr_dmu).clamp(-self.T, self.T)  # bound step
+            f[active] = fermi(self.E[:, 0], mu[active, None], self.T)
+        raise RuntimeError("Failed to converge mu to match density")
+
+    def get_rho_comoving(self, rho: torch.Tensor) -> torch.Tensor:
+        """Get the comoving rho that matches `rho` in energy, density and current."""
+        v = self.transport_velocity
+        if self.n_r == 1:
+            rho_v_sum = torch.einsum("...k, ki -> ...i", rho, v)
+            rho_v = torch.einsum("...i, ij, kj -> ...k", rho_v_sum, self.vv_inv, v)
+            return rho.mean(dim=-1, keepdim=True) + rho_v
+
+        # Find T, mu, Efield (for each spatial point) to match energy, density, current:
+        TOL = 1e-12
+        MAX_ITER = 30  # Usually converges in ~ 3 - 4 steps
+        enj_op = torch.cat((self.E.T, torch.ones_like(self.wk)[None], v.T))  # 4 x n_k
+        enj0 = ((rho + self.fermi0)[:, None] * enj_op) @ self.wk  # target e, n, jx, jy
+        params = torch.zeros_like(enj0)  # T, mu, ex, ey parameters to match enj0
+        params[:, 0] = self.T
+        f = self.fermi0.tile((len(rho), 1))
+        for i_iter in range(MAX_ITER):
+            err = (f[:, None] * enj_op) @ self.wk - enj0
+            active = torch.where(err.norm(dim=1) > TOL)[0]  # not yet converged
+            if not len(active):
+                return f - self.fermi0  # all converged
+            # Newton update:
+            f_active = f[active]
+            mu_eff = params[active, 1:] @ enj_op[1:]
+            T = params[active, 0]
+            derr_dparams = torch.einsum(
+                "rk, ik, rjk, k -> rij",
+                (f_active * (1.0 - f_active)) / T[:, None],
+                enj_op,
+                torch.cat(
+                    (
+                        ((self.E[:, 0] - mu_eff) / T[:, None])[:, None],
+                        enj_op[1:].expand((len(active), -1, -1)),
+                    ),
+                    dim=1,
+                ),
+                self.wk,
+            )
+            delta_params = torch.linalg.solve(derr_dparams, -err[active])
+            params[active] += delta_params.clamp(-self.T, self.T)  # bound for stability
+            mu_eff = params[active, 1:] @ enj_op[1:]
+            T = params[active, 0]
+            f[active] = fermi(self.E[:, 0], mu_eff, T[:, None])
+        raise RuntimeError("Failed to converge T, mu, ex, ey to match E, n, jx, jy")
 
 
 class Contactor:
     rho_contact: torch.Tensor  #: Cached constant contact distribution
 
-    def __init__(
-        self, fc: FermiCircle, n: torch.Tensor, *, dmu: float = 0.0, vD: float = 0.0
-    ) -> None:
-        """Return contact distribution function for specified chemical potential
-        shift and drift velocity. Note that positive vD corresponds to current
-        flowing into the device (along -n), while negative vD flows out (along +n)."""
-        v_hat = fc.transport_velocity / fc.vF
-        self.rho_contact = dmu - (n @ v_hat.T) * (vD / fc.vF)  # TODO: check
+    def __init__(self, fc: FermiCircle, n: torch.Tensor, *, dmu: float = 0.0) -> None:
+        """Return contact distribution function for chemical potential shift `dmu`."""
+        self.rho_contact = torch.empty((len(n), fc.rho0.numel()), device=rc.device)
+        if fc.n_r == 1:
+            self.rho_contact[:] = dmu / fc.vF  # include DOS factor for k_r integral
+        else:
+            self.rho_contact[:] = fermi(fc.E[:, 0], dmu, fc.T) - fc.fermi0
 
     def __call__(self, t):
-        # TODO: add time dependence options
         return self.rho_contact
 
 
-class SpecularReflector:
-    """Reflect velocities specularly i.e. with reflection angle = incidence angle."""
+class Reflector:
+    """Reflect velocities accounting for specular and diffuse contributions.
+    Specular reflections map reflected angle = incident angle (relative to normals),
+    mapping reflected angle to finite grid using linear interpolation. Any small flux
+    mismatch due to inexact angle mapping and diffuse contributions (specularity < 1)
+    are mapped to a uniform incoming distribution to conserve net flux exactly."""
 
     def __init__(
         self,
         n: torch.Tensor,
         v: torch.Tensor,
-        group: dist.ProcessGroup,
-        k_division: TaskDivision,
+        theta0: float,
         specularity: float,
     ) -> None:
-        assert v.shape[1] == 1  # only for single-band case
-        # Find which theta reflects into the first one:
-        v0_normal = torch.einsum("ri, rj, j -> ri", n, n, v[0, 0])
-        v0_reflected = v[None, 0, 0] - 2 * v0_normal
-        v0_diff = (v0_reflected[:, None] - v[None, :, 0]).norm(dim=-1)
-        i0_reflected = v0_diff.argmin(dim=1)
-        dist.broadcast(i0_reflected, group=group, group_src=0)  # ensure consistency
+        # Calculate linearly-interpolated reflection for theta0:
+        angle_n = torch.atan2(n[:, 1], n[:, 0])
+        dtheta0_reflected = 2 * (angle_n - theta0) + np.pi  # deflection of theta0
+        n_theta, n_r, _ = v.shape
+        x0_reflected = dtheta0_reflected * (n_theta / (2 * np.pi))
+        i0_reflected = x0_reflected.floor().to(torch.long)
+        w1 = x0_reflected - i0_reflected
+
         # Map the rest correspondingly:
-        nk = k_division.n_tot
-        i_reflected = (i0_reflected[:, None] - torch.arange(nk, device=rc.device)) % nk
+        i0 = (i0_reflected[:, None] - torch.arange(n_theta, device=rc.device)) % n_theta
+        i01 = torch.stack((i0, (i0 + 1) % n_theta))  # reflected theta interval indices
+        v_n = (n[:, None] * v[:, 0]).sum(dim=-1)  # for one radius (len(n) x n_theta)
+        outward = torch.where(v_n.flatten() > 0)[0]  # only need to reflect outward flux
 
-        # Compute flattened index on Nr x Nk_mine for efficient indexing
-        self.k_division = k_division
-        self.group = group
-        nr = len(n)
-        ir = torch.arange(nr, device=rc.device)[:, None]
-        i_proc = group.rank()
-        n_procs = group.size()
-        if n_procs == 1:
-            self.i_reflected_flat = (ir * nk + i_reflected).flatten()
-        else:
-            # Determine how to receive data:
-            i_reflected_cur = i_reflected[:, k_division.i_start : k_division.i_stop]
-            j_proc = i_reflected_cur.flatten() // k_division.n_each
-            self.recv_counts, self.recv_offsets = get_counts_offsets(j_proc, n_procs)
-            self.recv_index = invert_index(j_proc.argsort(stable=True))
-            # Determine how to send data:
-            send_sel = torch.where(i_reflected // k_division.n_each == i_proc)
-            send_sel_index_mine = send_sel[0] * k_division.n_mine + (
-                i_reflected[send_sel] - k_division.i_start
-            )
-            j_proc = send_sel[1] // k_division.n_each
-            self.send_counts, self.send_offsets = get_counts_offsets(j_proc, n_procs)
-            self.send_index = send_sel_index_mine[j_proc.argsort(stable=True)]
+        # Construct sparse matrix for remapping theta with linear interpolation:
+        w1 = torch.repeat_interleave(w1, n_theta)[outward]
+        w0 = 1.0 - w1
+        n_flattened = v_n.numel()
+        i_boundary = torch.arange(len(n), device=rc.device)[:, None]
+        index_out = torch.cat((outward, outward))
+        index_in = (i_boundary * n_theta + i01).view(2, -1)[:, outward].flatten()
+        inward = torch.where(v_n.flatten()[index_in] < 0)[0]  # only compute inward flux
+        self.specular_matrix = torch.sparse_coo_tensor(
+            indices=torch.stack((index_in[inward], index_out[inward])),
+            values=torch.cat((w0, w1))[inward] * specularity,
+            size=(n_flattened, n_flattened),
+        ).to_sparse_csr()
 
-        # Prepare input and output projectors for diffuse scattering
-        self.specularity = specularity
-        if specularity != 1.0:
-            # Select outgoing and incoming states at each boundary point:
-            outwards = torch.einsum("ri, ki -> rk", n, v[:, 0]) >= 0.0
-            out_r, out_k = torch.nonzero(outwards, as_tuple=True)
-            in_r, in_k = torch.nonzero(torch.logical_not(outwards), as_tuple=True)
-
-            # Select flattened indices local to current process:
-            ik_start = k_division.i_start
-            nk_mine = k_division.n_mine
-            sel = torch.nonzero(out_k // k_division.n_each == i_proc).flatten()
-            self.diffuse_out_r = out_r[sel]
-            self.diffuse_out_rk = self.diffuse_out_r * nk_mine + out_k[sel] - ik_start
-            sel = torch.nonzero(in_k // k_division.n_each == i_proc).flatten()
-            self.diffuse_in_r = in_r[sel]
-            self.diffuse_in_rk = self.diffuse_in_r * nk_mine + in_k[sel] - ik_start
-
-            # Compute normalization factor for projections:
-            _, in_counts = torch.unique_consecutive(in_r, return_counts=True)
-            self.diffuse_normalization = (1.0 - specularity) / in_counts
+        # Compute flux in and out weights for diffuse scattering and norm correction:
+        self.flux_out = torch.where(v_n > 0, v_n, 0.0)[..., None]  # add dim for radial
+        self.flux_in = torch.where(v_n < 0, -v_n, 0.0)[..., None]
+        norm_factor = 1 / self.flux_in.sum(dim=1, keepdim=True)
+        self.flux_in *= norm_factor
+        self.flux_out *= norm_factor
 
     def __call__(self, rho: torch.Tensor) -> torch.Tensor:
-        rho_flat = rho.flatten(1, 2)  # flatten r and k indices
-        group = self.group
-        if group.size() == 1:
-            out_flat = rho_flat[:, self.i_reflected_flat]
-        else:
-            n_ghost, nr, _ = rho.shape  # same on all processes
-            send_buf = rho_flat.T[self.send_index].contiguous()
-            send_counts = self.send_counts * n_ghost
-            recv_counts = self.recv_counts * n_ghost
-            recv_buf = torch.empty_like(send_buf)
-            dist.all_to_all_single(
-                recv_buf.view(-1),
-                send_buf.view(-1),
-                recv_counts,
-                send_counts,
-                group=group,
-            )
-            out_flat = recv_buf[self.recv_index].T
-
-        # Optionally account for diffuse contributions:
-        if self.specularity != 1.0:
-            out_flat *= self.specularity
-
-            # Collect total outgoing rho:
-            rho_out_sum = torch.zeros(rho.shape[:2], device=rc.device)
-            rho_out_sum.index_add_(
-                1, self.diffuse_out_r, rho_flat[:, self.diffuse_out_rk]
-            )
-            if group.size() > 1:
-                dist.all_reduce(rho_out_sum, group=group)
-
-            # Accumulate to incoming rho with normalization:
-            rho_out_sum *= self.diffuse_normalization
-            out_flat.index_add_(
-                1,
-                self.diffuse_in_rk,
-                rho_out_sum[:, self.diffuse_in_r],
-            )
-
-        return out_flat.unflatten(1, rho.shape[1:])  # restore r and k
+        # Compute specular contribution:
+        n_boundary, n_theta, _ = self.flux_out.shape
+        shape_nt_r = (n_boundary * n_theta, -1)  # flatten except n_r
+        shape_n_t_r = (n_boundary, n_theta, -1)  # all dimensions separate
+        out = (self.specular_matrix @ rho.reshape(shape_nt_r)).reshape(shape_n_t_r)
+        # Fix difference between in and out fluxes diffusively:
+        # (handles specularity < 1, and fixes norm errors for un-aligned walls)
+        out += (rho.reshape(shape_n_t_r) * self.flux_out - out * self.flux_in).sum(
+            dim=1, keepdim=True
+        )
+        return out.flatten(1, 2)  # recombine n_theta and n_r dimensions
 
 
-def get_counts_offsets(
-    indices: torch.Tensor, n_bins: int
-) -> tuple[np.ndarray, np.ndarray]:
-    counts = torch.bincount(indices, minlength=n_bins).to(rc.cpu).numpy()
-    offsets = np.concatenate(([0], np.cumsum(counts[:-1])))
-    return counts, offsets
-
-
-def invert_index(indices: torch.Tensor) -> torch.Tensor:
-    inv_indices = torch.empty_like(indices)
-    inv_indices[indices] = torch.arange(len(indices), device=rc.device)
-    return inv_indices
-
-
-def ring_exchange(
-    group: dist.ProcessGroup, buf_l: torch.Tensor, buf_r: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Send `buf_l` and `buf_r` to left and right neighbors of `group`, taken as a ring.
-    Return the results received from the left and right neighbors respectively."""
-    n_procs = group.size()
-    if n_procs == 1:
-        return buf_r, buf_l
-    else:
-        rank = group.rank()
-        rank_l = (rank - 1) % n_procs  # rank to the "left" on ring
-        rank_r = (rank + 1) % n_procs  # rank to the "right" on ring
-        send_buf_l = buf_l.contiguous()
-        send_buf_r = buf_r.contiguous()
-        recv_buf_r = torch.zeros_like(send_buf_l)
-        recv_buf_l = torch.zeros_like(send_buf_r)
-        requests = []
-        for direction in (operator.lt, operator.gt):
-            # Post all low to hi group-rank send/recvs first, and then all hi to lo ones
-            if direction(rank_r, rank):
-                requests.append(dist.irecv(recv_buf_r, group=group, group_src=rank_r))
-            if direction(rank, rank_l):
-                requests.append(dist.isend(send_buf_l, group=group, group_dst=rank_l))
-            if direction(rank_l, rank):
-                requests.append(dist.irecv(recv_buf_l, group=group, group_src=rank_l))
-            if direction(rank, rank_r):
-                requests.append(dist.isend(send_buf_r, group=group, group_dst=rank_r))
-        for request in requests:
-            request.wait()
-        return recv_buf_l, recv_buf_r
+def advect_theta(
+    rho: torch.Tensor, F_theta: float, epsilon_sq: float = 0.0
+) -> torch.Tensor:
+    """Compute theta advection due to magnetic force.
+    Applies smooth face-limiter and ensures upstream-only dependence of derivative."""
+    # Compute +/- neighbor diffs and reconstruction to +/- faces along dim=0:
+    drho = torch.stack((rho.roll(+1, dims=-2), rho.roll(-1, dims=-2))) - rho
+    reconstruct = torch.tensor([+0.25, -0.25], device=rc.device).view(-1, 1, 1, 1)
+    d = reconstruct * drho.diff(dim=0)
+    lo, hi = drho.aminmax(dim=0, keepdim=True)
+    rho_faces = rho + limiter(d, lo, hi, 0, epsilon_sq) * d
+    if F_theta > 0.0:  # Use + face fluxes for +F.del calculation
+        return F_theta * (rho_faces[0].roll(+1, dims=-2) - rho_faces[0])
+    else:  # Use - face fluxes for -F.del calculation
+        return F_theta * (rho_faces[1] - rho_faces[1].roll(-1, dims=-2))

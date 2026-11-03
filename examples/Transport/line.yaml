@@ -1,13 +1,15 @@
 ab_initio:
-  fname: ldbd-CsPbBr3-dft.h5
+  file: ldbd-CsPbBr3-dft.h5  # change this file, and T and mu accordingly
+  T: 300 K
   mu: 0.528824 eV
-  eph_scatt: no
 
-patch_set:
-  svg_file: rect-periodic.svg
-  svg_unit: 100.0 nm
-  grid_spacing: 100.0 nm
+geometry:
+  mesh:
+    line:
+      L: 20 nm
+      N: 200
 
+  cfl: 1.0
   contacts:
     source:
       dmu: 0.1
@@ -21,4 +23,4 @@ time_evolution:
   dt_save: 0.2 ps
   n_collate: 32
 
-checkpoint_out: animation/advect_{:04d}.h5
+checkpoint_out: results/frame{:04d}.h5

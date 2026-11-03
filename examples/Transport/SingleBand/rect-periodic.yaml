@@ -10,12 +10,15 @@ single_band:
   T: 50 K
   v: 0.375
 
-patch_set:
-  svg_file: ../rect-periodic.svg
-  svg_unit: 100.0 nm
-  grid_spacing: 200.0 nm
-  save-rho: yes
-
+geometry:
+  rect:
+    Lx: 100.0 nm
+    Ly: 125.0 nm
+    Nx: 24
+    Ny: 30
+    contacts:
+      source: [ 0.0 nm, 12.5 nm, 12.5 nm ]
+      drain: [ 100.0 nm, 12.5 nm, 12.5 nm ]
   contacts:
     source:
       dmu: 0.005 eV
@@ -27,4 +30,4 @@ time_evolution:
   dt_save: 1 ps
   n_collate: 32
 
-checkpoint_out: animation/advect_{:04d}.h5
+checkpoint_out: results/frame{:04d}.h5

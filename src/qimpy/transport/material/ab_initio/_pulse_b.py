@@ -21,10 +21,10 @@ class PulseB(TreeNode):
     ab_initio: material.ab_initio.AbInitio
 
     constant_params: dict[str, torch.Tensor]  #: constant values of parameters
-    H0: dict[int, torch.Tensor]  #: Perturbing Hamiltonian amplitude
-    omega: dict[int, torch.Tensor]  #: Larmor precession frequencies
-    t_starts: dict[int, torch.Tensor]  #: Pulse start times
-    t_stops: dict[int, torch.Tensor]  #: Pulse stop times
+    H0: torch.Tensor  #: Perturbing Hamiltonian amplitude
+    omega: torch.Tensor  #: Larmor precession frequencies
+    t_starts: torch.Tensor  #: Pulse start times
+    t_stops: torch.Tensor  #: Pulse stop times
 
     def __init__(
         self,
@@ -64,10 +64,6 @@ class PulseB(TreeNode):
             t_starts=cast_tensor(t_starts),
             angles=cast_tensor(angles),
         )
-        self.H0 = {}
-        self.omega = {}
-        self.t_starts = {}
-        self.t_stops = {}
 
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
@@ -80,12 +76,11 @@ class PulseB(TreeNode):
         attrs["angles"] = self.constant_params["angles"].to(rc.cpu)
         return list(attrs.keys())
 
-    def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
-        self._initialize_fields(patch_id, **params)
+    def initialize_fields(self, params: dict[str, torch.Tensor]) -> None:
+        self._initialize_fields(**params)
 
     def _initialize_fields(
         self,
-        patch_id: int,
         *,
         B0: torch.Tensor,
         g: torch.Tensor,
@@ -106,17 +101,17 @@ class PulseB(TreeNode):
         g_flip = torch.where(g_flip == 0.0, g, g_flip)
         durations = angles / abs(g_flip * mu_B * B0r.norm(dim=-1))[..., None]
 
-        self.H0[patch_id] = self.ab_initio.zeemanH(B0r + 1j * B0i)
-        self.omega[patch_id] = omega
-        self.t_starts[patch_id] = t_starts
-        self.t_stops[patch_id] = t_starts + durations
+        self.H0 = self.ab_initio.zeemanH(B0r + 1j * B0i)
+        self.omega = omega
+        self.t_starts = t_starts
+        self.t_stops = t_starts + durations
 
     @stopwatch
-    def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
-        t_starts = self.t_starts[patch_id]
-        t_stops = self.t_stops[patch_id]
-        omega = self.omega[patch_id]
+    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
+        t_starts = self.t_starts
+        t_stops = self.t_stops
+        omega = self.omega
         in_range = torch.where(torch.logical_and(t >= t_starts, t <= t_stops), 1.0, 0.0)
         prefactor = -0.5j * torch.exp(-1j * omega * t) * in_range.sum(dim=-1)
-        iH = prefactor[..., None, None, None] * self.H0[patch_id]
+        iH = prefactor[..., None, None, None] * self.H0
         return (iH - iH.swapaxes(-1, -2).conj()) @ rho

@@ -9,21 +9,21 @@ import torch
 import torch.distributed as dist
 
 
-def sum(v: torch.Tensor, group: dist.ProcessGroup) -> torch.Tensor:
+def sum(v: torch.Tensor, group: dist.ProcessGroup | None) -> torch.Tensor:
     """Global sum of tensor `v` distributed over `group`."""
     result = v.sum() if v.numel() else torch.zeros((), dtype=v.dtype, device=v.device)
     dist.all_reduce(result, op=dist.ReduceOp.SUM, group=group)
     return result
 
 
-def prod(v: torch.Tensor, group: dist.ProcessGroup) -> torch.Tensor:
+def prod(v: torch.Tensor, group: dist.ProcessGroup | None) -> torch.Tensor:
     """Global product of tensor `v` distributed over `group`."""
     result = v.prod() if v.numel() else torch.ones((), dtype=v.dtype, device=v.device)
     dist.all_reduce(result, op=dist.ReduceOp.PRODUCT, group=group)
     return result
 
 
-def min(v: torch.Tensor, group: dist.ProcessGroup) -> torch.Tensor:
+def min(v: torch.Tensor, group: dist.ProcessGroup | None) -> torch.Tensor:
     """Global minimum of tensor `v` distributed over `group`."""
     if v.numel():
         result = v.min()
@@ -34,7 +34,7 @@ def min(v: torch.Tensor, group: dist.ProcessGroup) -> torch.Tensor:
     return result
 
 
-def max(v: torch.Tensor, group: dist.ProcessGroup) -> torch.Tensor:
+def max(v: torch.Tensor, group: dist.ProcessGroup | None) -> torch.Tensor:
     """Global maximum of tensor `v` distributed over `group`."""
     if v.numel():
         result = v.max()

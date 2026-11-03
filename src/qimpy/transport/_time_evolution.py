@@ -9,7 +9,7 @@ from scipy import optimize
 import qimpy
 from qimpy import TreeNode, log, rc
 from qimpy.io import CheckpointPath, CheckpointContext, InvalidInputException
-from .geometry import Geometry, TensorList
+from .geometry import Geometry
 
 
 class TimeEvolution(TreeNode):
@@ -32,10 +32,12 @@ class TimeEvolution(TreeNode):
         t: float = 0.0,
         dt: float = 0.0,
         dt_save: float = 0.0,
+        dt_probe: float = 0.0,
         t_max: float = 0.0,
         n_collate: int = 0,
         integrator: str = "RK2",
-        steady_state: dict[str, str | float] = None,
+        verbose: bool = False,
+        steady_state: dict[str, str | float] | None = None,
         checkpoint_in: CheckpointPath = CheckpointPath(),
         dt_max_sources: list,
     ) -> None:
@@ -52,9 +54,15 @@ class TimeEvolution(TreeNode):
             :yaml:`Time step for evolution.`
             If zero, this is set to the maximum stable time step for advection.
         dt_save
-            :yaml:`Time interval at which to save results.`
+            :yaml:`Time interval at which to save spatially-dependent results.`
             This will be rounded to the nearest multiple of `dt` to ensure
             that the results are written at uniform intervals.
+        dt_probe
+            :yaml:`Time interval at which to save coarse-grained probes.`
+            This will be rounded to the nearest multiple of `dt` to ensure that
+            the results are written at uniform intervals. Probes are collated to
+            the next checkpoint written, as determined by `dt_save` and `n_collate`.
+            If unspecified (zero), this is set equal to `dt_save`.
         t_max
             :yaml:`Stop evolution at this time.`
         n_collate
@@ -64,17 +72,20 @@ class TimeEvolution(TreeNode):
             The results in the checkpoint have an additional outermost dimension
             corresponding to the number of collated steps.
         integrator
-            :yaml:`Integrator for time-stepping: RK2 or RK4.`
+            :yaml:`Integrator for time-stepping: RK2, RK4 or SSPRK3.`
+            SSPRK3 is 3-stage strong-stability-preserving RK3 (Shu-Osher form).
+        verbose
+            :yaml:`Log every step if True, and only probe/observable steps otherwise.`
         steady_state
             :yaml:`Steady state options.`
-            EXPERIMENTAL: works only with a single process and geometry domain for now.
+            EXPERIMENTAL: works only with a single process for now.
             Specify a dictionary of `rho0_path` for initial state, `method` for solver,
             `nit` for number of iterations and `nit_save` for iterations to save at.
         dt_max_sources
             List of objects with dt_max that determine maximum safe time step.
         """
         super().__init__()
-        self.steady_state = steady_state
+        self.steady_state = {} if steady_state is None else steady_state
         if self.steady_state:
             self.rho0_path = self.steady_state["rho0_path"]
             self.method = self.steady_state["method"]
@@ -100,14 +111,17 @@ class TimeEvolution(TreeNode):
                 raise InvalidInputException(f"{dt=} must be smaller than {dt_max=}")
             self.dt = float(dt)
             self.n_steps = max(1, int(np.round(t_max / self.dt)))
+            dt_probe = dt_probe if dt_probe else dt_save
             self.save_interval = max(1, int(np.round(dt_save / self.dt)))
+            self.probe_interval = max(1, int(np.round(dt_probe / self.dt)))
             self.n_collate = int(n_collate)
             self.integrator = integrator
-            if integrator not in {"RK2", "RK4"}:
+            if integrator not in {"RK2", "RK4", "SSPRK3"}:
                 raise InvalidInputException(f"Unrecognized {integrator=}")
+        self.verbose = verbose
 
     def time_step(self, geometry: Geometry) -> None:
-        """Second-order correct time step."""
+        """Advance one step of chosen integrator."""
         t = self.t
         dt = self.dt
         rho0 = geometry.rho
@@ -120,11 +134,14 @@ class TimeEvolution(TreeNode):
             k3 = geometry.rho_dot(rho0 + (0.5 * dt) * k2, t + 0.5 * dt)
             k4 = geometry.rho_dot(rho0 + dt * k3, t + dt)
             geometry.rho = rho0 + (dt / 6.0) * (k1 + 2 * (k2 + k3) + k4)
+        elif self.integrator == "SSPRK3":
+            # Shu-Osher form: each stage is a convex combination of forward-Euler steps:
+            rho1 = rho0 + dt * geometry.rho_dot(rho0, t)
+            rho2 = 0.75 * rho0 + 0.25 * (rho1 + dt * geometry.rho_dot(rho1, t + dt))
+            rho3 = rho2 + dt * geometry.rho_dot(rho2, t + 0.5 * dt)
+            geometry.rho = (1.0 / 3.0) * rho0 + (2.0 / 3.0) * rho3
         else:
             raise KeyError(f"Unrecognized integrator = {self.integrator}")
-        # if len(geometry.rho.data):
-        #    np.save("rho.npy", rho0.data[0].cpu().numpy())
-        #    exit()
 
     def steady_state_sol(
         self, transport: qimpy.transport.Transport, geometry: Geometry
@@ -156,12 +173,10 @@ class TimeEvolution(TreeNode):
             rho0 = rho0.flatten()
 
         rho_shape = geometry.patches[0].rho_shape
-        rho = TensorList(
-            v.view(rho_shape) for v in [torch.from_numpy(rho0).to(rc.device)]
-        )
+        rho = rc.from_np(rho0)
         rho_dot = geometry.rho_dot(rho, t=0.0)
         RHO_SCALE = np.abs(rho0).max()
-        T_SCALE = 1.0 / (torch.max(torch.abs(rho_dot[0])).item() / RHO_SCALE)
+        T_SCALE = 1.0 / (torch.max(torch.abs(rho_dot)).item() / RHO_SCALE)
 
         steady_state_root_fn = SteadyStateRootFunction(
             geometry, RHO_SCALE, T_SCALE, self.nit, self.nit_save
@@ -175,10 +190,7 @@ class TimeEvolution(TreeNode):
         )
         log.info(optimizer)
         log.info(f"{steady_state_root_fn.n_calls=}")
-        geometry.rho = TensorList(
-            v.view(rho_shape)
-            for v in [torch.from_numpy(optimizer.x * RHO_SCALE).to(rc.device)]
-        )
+        geometry.rho = rc.from_np(optimizer.x * RHO_SCALE).view(rho_shape)
 
     def run(self, transport: qimpy.transport.Transport) -> None:
         """Run time evolution loop, checkpointing at regular intervals."""
@@ -198,13 +210,24 @@ class TimeEvolution(TreeNode):
             i_collate = 0
             while self.i_step <= self.n_steps:
                 should_save = (self.i_step > self.i_step_initial) or (self.i_step == 0)
+                tasks = []
+                if self.i_step % self.probe_interval == 0 and should_save:
+                    transport.geometry.update_probes(self.i_step, self.t)
+                    tasks.append("probes")
                 if self.i_step % self.save_interval == 0 and should_save:
-                    transport.geometry.update_stash(self.i_step, self.t)
+                    transport.geometry.update_observables(self.i_step, self.t)
+                    tasks.append("observables")
                     i_collate += 1
-                    log.info(f"Stashed results of step {self.i_step}")
                     if i_collate == self.n_collate or self.i_step == 0:
                         transport.save(self.i_step)
                         i_collate = 0
+
+                tasks_str = f' ({", ".join(tasks)})' if tasks else ""
+                if self.verbose or tasks_str:
+                    log.info(
+                        f"Step {self.i_step} done of {self.n_steps}"
+                        f" at t[s]: {rc.clock():.2f}{tasks_str}"
+                    )
 
                 if self.i_step == self.n_steps:
                     if i_collate:
@@ -212,10 +235,6 @@ class TimeEvolution(TreeNode):
                     break
 
                 self.time_step(transport.geometry)
-
-                log.info(
-                    f"Step {self.i_step} done of {self.n_steps} at t[s]: {rc.clock():.2f}"
-                )
                 self.i_step += 1
                 self.t += self.dt
 
@@ -233,9 +252,11 @@ class TimeEvolution(TreeNode):
             attrs["i_step"] = self.i_step
             attrs["dt"] = self.dt
             attrs["dt_save"] = self.save_interval * self.dt
+            attrs["dt_probe"] = self.probe_interval * self.dt
             attrs["t_max"] = self.n_steps * self.dt
             attrs["n_collate"] = self.n_collate
             attrs["integrator"] = self.integrator
+        attrs["verbose"] = self.verbose
         return list(attrs.keys())
 
 
@@ -252,16 +273,13 @@ class SteadyStateRootFunction:
     def __call__(self, x: np.ndarray) -> np.ndarray:
         # TODO: general tensor list case
         shape = self.geometry.patches[0].rho_shape
-        rho = TensorList(
-            v.view(shape) for v in [torch.from_numpy(x * self.RHO_SCALE).to(rc.device)]
-        )
+        rho = rc.from_np(x * self.RHO_SCALE).view(shape)
         rho_dot = self.geometry.rho_dot(rho, t=0.0)
         self.n_calls += 1
-        result = rho_dot[0].flatten().to(rc.cpu).numpy() / (
-            self.RHO_SCALE / self.T_SCALE
-        )
+        result = rc.to_np(rho_dot.flatten()) / (self.RHO_SCALE / self.T_SCALE)
         log.info(
-            f"Norm(f(x): {np.linalg.norm(result)}, Max(f(x)): {np.abs(result).max()}, n_calls: {self.n_calls} at t[s]: {rc.clock():.2f}"
+            f"Norm(f(x): {np.linalg.norm(result)}, Max(f(x)): {np.abs(result).max()},"
+            f" n_calls: {self.n_calls} at t[s]: {rc.clock():.2f}"
         )
         return result
 
@@ -269,9 +287,6 @@ class SteadyStateRootFunction:
         self.iter += 1
         if (self.iter % self.nit_save) == 0:
             shape = self.geometry.patches[0].rho_shape
-            self.geometry.rho = TensorList(
-                v.view(shape)
-                for v in [torch.from_numpy(x * self.RHO_SCALE).to(rc.device)]
-            )
-            self.geometry.update_stash(self.iter, 0.0)
+            self.geometry.rho = rc.from_np(x * self.RHO_SCALE).view(shape)
+            self.geometry.update_observables(self.iter, 0.0)
             log.info(f"Stashed results of iteration {self.iter}")

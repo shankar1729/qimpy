@@ -363,8 +363,7 @@ class Ions(TreeNode):
         return saved_list
 
     def _read_checkpoint(self, cp_path: CheckpointPath) -> None:
-        symbol_str = cp_path.read_str("symbols")
-        self.symbols = symbol_str.split(",") if symbol_str else list[str]()
+        self.symbols = cp_path.read_str_list("symbols")
         self.types = cp_path.read("types")
         self.positions = cp_path.read("positions")
         self.velocities = cp_path.read_optional("velocities")
