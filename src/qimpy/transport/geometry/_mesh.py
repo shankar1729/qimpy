@@ -203,7 +203,10 @@ class Mesh(TreeNode):
 
         # Find unique face IDs and counts:
         unique_ids, unique_indices, unique_inverse, counts = np.unique(
-            face_ids, return_index=True, return_inverse=True, return_counts=True
+            face_ids.flatten(),
+            return_index=True,
+            return_inverse=True,
+            return_counts=True,
         )
         assert counts.max() <= 2
         unique_rank = np.ones_like(unique_inverse)  # rank within equivalence class
