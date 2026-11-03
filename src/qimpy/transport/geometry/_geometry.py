@@ -24,7 +24,7 @@ class Geometry(TreeNode):
         *,
         material: Material,
         mesh: Mesh | dict | None = None,
-        contacts: dict[str, dict],
+        contacts: dict[str, dict] | None = None,
         courant_number: float = 1.0,
         epsilon_sq: float = 0.0,
         faces_block_size: int = 0,
@@ -68,6 +68,7 @@ class Geometry(TreeNode):
 
         # Initialize cell to face reconstruction operator:
         neighbors, reconstruct = self.mesh.get_face_reconstruction_op()
+        self.is_spatial = neighbors.shape[1] > 0  # else, pure dynamics
         self.neighbors = torch.from_numpy(neighbors).to(rc.device)
         self.reconstruct = torch.from_numpy(reconstruct).to(rc.device)
         if compile:
@@ -122,10 +123,15 @@ class Geometry(TreeNode):
             size=(len(cell_weights) * n_kbb_mine, n_reconstruct * n_faces * n_kbb_mine),
         ).to_sparse_csr()
         rates = self.minus_v_dot_del.values().abs()
-        self.dt_max = courant_number / globalreduce.max(rates, dist.group.WORLD).item()
-        log.info(f"Set dt_max = {self.dt_max:.4g} for Courant number {courant_number}")
+        if self.is_spatial:
+            dt_max = courant_number / globalreduce.max(rates, dist.group.WORLD).item()
+            log.info(f"Set dt_max = {dt_max:.4g} for Courant number {courant_number}")
+            self.dt_max = dt_max
+        else:
+            self.dt_max = np.inf
 
         # Set up boundary conditions:
+        contacts = {} if contacts is None else contacts
         boundary_args = (
             rc.from_np(boundary_map),
             rc.from_np(boundary_region),
@@ -134,7 +140,7 @@ class Geometry(TreeNode):
         self.boundary = Boundary(self, contacts, *boundary_args)
 
         # Initialize flux collection on faces:
-        self.flux_indices = material.get_flux_indices()
+        self.flux_indices = material.get_flux_indices() if self.is_spatial else []
         if self.flux_indices:
             i_face_global = face_division.global_index[: face_division.n_mine]
             i_face_mine = i_face_global - face_division.i_start  # mine in global order
@@ -216,7 +222,10 @@ class Geometry(TreeNode):
             )
         self.stash = Stash()
         self.stash_probe = Stash()  # coarse-grained, more frequent version
-        self.material.initialize_fields(self.rho, {})
+        self.material.initialize_fields(
+            self.rho,
+            {key: value[cell_division.mine] for key, value in self.mesh.fields.items()},
+        )
 
     def to_faces(
         self, rho: torch.Tensor, t: float, boundary_only: bool = False
@@ -269,7 +278,12 @@ class Geometry(TreeNode):
 
     def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         watch = StopWatch("Geometry.rho_dot")
-        out = (self.minus_v_dot_del @ self.to_faces(rho, t).flatten()).view(rho.shape)
+        if self.is_spatial:
+            out = (self.minus_v_dot_del @ self.to_faces(rho, t).flatten()).view(
+                rho.shape
+            )
+        else:
+            out = torch.zeros_like(rho)
         watch.stop()
         n_mine = self.mesh.cell_division.n_mine
         out[:n_mine] += self.material.rho_dot(rho[:n_mine], t)
@@ -344,7 +358,8 @@ class Geometry(TreeNode):
 
         # Probes:
         cp_path.write("probes", torch.stack(self.stash_probe.observables))
-        cp_path.write("probe_flux", torch.stack(self.stash_probe.flux))
+        if self.flux_indices:
+            cp_path.write("probe_flux", torch.stack(self.stash_probe.flux))
         self.stash_probe = Stash()  # reset now-written cached probes
 
         if self.save_rho:

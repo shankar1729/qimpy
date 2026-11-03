@@ -22,6 +22,7 @@ class Mesh(TreeNode):
     boundary_faces: np.ndarray  #: sorted vertex indices, ID of boundary faces (Nb, d+1)
     boundary_names: list[str]  #: names of boundary regions (for face IDs >= 0)
     cell_permutation: np.ndarray | None  #: Reordering of cells relative to the source
+    fields: dict[str, torch.Tensor]  #: Spatial variation / sweep of material parameters
 
     # Calculated members:
     cell_division: CellDivision  #: split of cells over processes
@@ -37,6 +38,7 @@ class Mesh(TreeNode):
         line: mesh_source.Line | dict | None = None,
         rect: mesh_source.Rect | dict | None = None,
         triangulate: mesh_source.Triangulate | dict | None = None,
+        parameter_grid: mesh_source.ParameterGrid | dict | None = None,
         checkpoint_in: CheckpointPath = CheckpointPath(),
     ) -> None:
         """
@@ -53,9 +55,13 @@ class Mesh(TreeNode):
         rect
             :yaml:`Construct triangular mesh for a 2D rectangular domain.`
             Only one source for the mesh must be specified.
+        parameter_grid
+            :yaml:`Material dynamics batched over parameters (no spatial transport).`
+            Only one source for the mesh must be specified.
         """
         super().__init__()
         self.cell_permutation = None
+        self.fields = {}
         self.add_child_one_of(
             "source",
             checkpoint_in,
@@ -64,6 +70,9 @@ class Mesh(TreeNode):
             TreeNode.ChildOptions("rect", mesh_source.Rect, rect, mesh=self),
             TreeNode.ChildOptions(
                 "triangulate", mesh_source.Triangulate, triangulate, mesh=self
+            ),
+            TreeNode.ChildOptions(
+                "parameter_grid", mesh_source.ParameterGrid, parameter_grid, mesh=self
             ),
             have_default=False,
         )
@@ -81,6 +90,11 @@ class Mesh(TreeNode):
         self.boundary_faces = cp.read_np("boundary_faces")
         self.boundary_names = cp.read_str_list("boundary_names")
         self.cell_permutation = cp.read_optional_np("cell_permutation")
+        if cp_fields := cp.member("fields"):
+            checkpoint, path = cp_fields
+            assert checkpoint is not None
+            for field_name in checkpoint[path].keys():
+                self.fields[field_name] = cp_fields.read(field_name)
 
     def save(self, cp: CheckpointPath) -> list[str]:
         """Save within h5 file and return names of saved variables."""
@@ -93,6 +107,8 @@ class Mesh(TreeNode):
         ]
         if self.cell_permutation is not None:
             saved_list.append(cp.write("cell_permutation", self.cell_permutation))
+        for field_name, field_value in self.fields.items():
+            saved_list.append(cp.write(f"fields/{field_name}", field_value))
         return saved_list
 
     def _save_checkpoint(

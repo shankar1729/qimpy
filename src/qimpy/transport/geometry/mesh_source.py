@@ -3,10 +3,17 @@ from typing import TypeAlias, Any
 
 import numpy as np
 import triangle
+import torch
 import torch.distributed as dist
 
-from qimpy import rc, TreeNode
-from qimpy.io import Checkpoint, CheckpointPath, CheckpointContext
+from qimpy import io, rc, TreeNode
+from qimpy.io import (
+    Checkpoint,
+    CheckpointPath,
+    CheckpointContext,
+    InvalidInputException,
+    cast_tensor,
+)
 from qimpy.transport import geometry
 
 __all__ = ("File", "Line", "Rect", "Triangulate", "Options")
@@ -302,4 +309,79 @@ def within_ellipse(points: np.ndarray, ellipse: tuple[float, ...]) -> np.ndarray
     return np.linalg.norm((points - center) / r, axis=1) <= 1.0
 
 
-Options: TypeAlias = File | Line | Rect | Triangulate
+class ParameterGrid(TreeNode):
+    def __init__(
+        self,
+        *,
+        N: int,
+        mesh: geometry.Mesh,
+        checkpoint_in: CheckpointPath = CheckpointPath(),
+        **kwargs,
+    ) -> None:
+        """Make a parameter grid for independent dynamics (no spatial transport).
+
+        Parameters
+        ----------
+        N
+            :yaml:`Number of intervals to divide the domain into.`
+        **kwargs
+            :yaml:`Names of parameters to sweep and their corresponding values.`
+            Each entry is a mapping from `sweep` or `loop` to a list, where sweep
+            creates a linear variation between endpoints, while loop goes over
+            a list of exactly `N` provided values. The name of the parameter must
+            be recognized by the chosen material.
+        """
+        super().__init__()
+        self.N = N
+        if checkpoint_in:
+            return  # data will be loaded from checkpoint instead
+        mesh.vertices = np.column_stack(
+            (np.tile(np.arange(N), 2), np.repeat([0.0, 1.0], N))
+        )
+        mesh.cells = np.column_stack(
+            (np.arange(N), np.arange(N, 2 * N), np.full(N, -1))
+        )
+        mesh.boundary_faces = np.zeros((0, 2), dtype=int)
+        mesh.region_names = []
+        mesh.boundary_names = []
+
+        # Initialize mesh fields:
+        for key, values in io.dict.key_cleanup(kwargs).items():
+            mesh.fields[key] = self.create_values(**values)
+
+    def create_values(
+        self, *, loop: list | None = None, sweep: list | None = None
+    ) -> torch.Tensor:
+        if (loop is None) == (sweep is None):
+            raise InvalidInputException(
+                "Exactly one of loop or sweep should be specified."
+            )
+
+        # Explicitly specified list of praamter values:
+        if loop is not None:
+            values = cast_tensor(loop)
+            if len(values) != self.N:
+                raise InvalidInputException(
+                    f"Number of entries in loop = {len(values)} should match"
+                    f" length {self.N} of parameter grid"
+                )
+            return values
+
+        # Uniform sweep between endpoints:
+        assert sweep is not None
+        limits = cast_tensor(sweep)
+        if len(limits) != 2:
+            raise InvalidInputException(
+                f"Number of entries in sweep = {len(limits)} must be 2"
+            )
+        t = torch.linspace(0, 1, self.N, device=rc.device)
+        return limits[0] + torch.einsum("t,...->t...", t, limits[1] - limits[0])
+
+    def _save_checkpoint(
+        self, cp_path: CheckpointPath, context: CheckpointContext
+    ) -> list[str]:
+        cp_path.attrs["N"] = self.N
+        return list(cp_path.attrs.keys())
+
+
+Options: TypeAlias = File | Line | Rect | Triangulate | ParameterGrid

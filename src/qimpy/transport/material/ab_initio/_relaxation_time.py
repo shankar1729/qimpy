@@ -130,8 +130,8 @@ class RelaxationTime(TreeNode):
         self.dmu_eps = float(dmu_eps)
         self.only_diagonal = only_diagonal
         self.sum_rules = {
-            2: "xykb -> xy",  # electron or hole
-            3: "xykb -> xyk",  # recombination
+            1: "rkb -> r",  # electron or hole
+            2: "rkb -> rk",  # recombination
         }
         self.is_initial = True
 
@@ -170,12 +170,12 @@ class RelaxationTime(TreeNode):
         betamu0 = ab_initio.mu / ab_initio.T
         if torch.isfinite(tau_e):
             self.tau_e = tau_e
-            self.exp_betaEe = torch.exp(ab_initio.E[:, nv:] / ab_initio.T)[None, None]
-            self.betamue0 = torch.ones([1, 1]).to(rc.device) * betamu0
+            self.exp_betaEe = torch.exp(ab_initio.E[:, nv:] / ab_initio.T)[None]
+            self.betamue0 = torch.ones([1]).to(rc.device) * betamu0
         if torch.isfinite(tau_h):
             self.tau_h = tau_h
-            self.exp_betaEh = torch.exp(-ab_initio.E[:, :nv] / ab_initio.T)[None, None]
-            self.betamuh0 = -torch.ones([1, 1]).to(rc.device) * betamu0
+            self.exp_betaEh = torch.exp(-ab_initio.E[:, :nv] / ab_initio.T)[None]
+            self.betamuh0 = -torch.ones([1]).to(rc.device) * betamu0
         if torch.all(torch.isfinite(tau_s_e)):
             self.tau_s_e = tau_s_e
         if torch.all(torch.isfinite(tau_s_h)):
@@ -184,9 +184,9 @@ class RelaxationTime(TreeNode):
             self.tau_eh = tau_eh
         if torch.isfinite(tau_recomb):
             self.tau_recomb = tau_recomb
-            self.exp_betaE = torch.exp(ab_initio.E / ab_initio.T)[None, None]
+            self.exp_betaE = torch.exp(ab_initio.E / ab_initio.T)[None]
             self.betamuk0 = (
-                torch.ones([1, 1, ab_initio.E.shape[0]]).to(rc.device) * betamu0
+                torch.ones([1, ab_initio.E.shape[0]]).to(rc.device) * betamu0
             )
 
     def replicate_betamu(self, rho: torch.Tensor) -> None:
@@ -196,11 +196,11 @@ class RelaxationTime(TreeNode):
             return
         self.is_initial = False
         if hasattr(self, "tau_e"):
-            self.betamue0 = torch.tile(self.betamue0, rho.shape[:2])
+            self.betamue0 = torch.tile(self.betamue0, rho.shape[:1])
         if hasattr(self, "tau_h"):
-            self.betamuh0 = torch.tile(self.betamuh0, rho.shape[:2])
+            self.betamuh0 = torch.tile(self.betamuh0, rho.shape[:1])
         if hasattr(self, "tau_recomb"):
-            self.betamuk0 = torch.tile(self.betamuk0, rho.shape[:2] + (1,))
+            self.betamuk0 = torch.tile(self.betamuk0, rho.shape[:1] + (1,))
 
     @stopwatch
     def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
@@ -266,14 +266,16 @@ class RelaxationTime(TreeNode):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         betamu = betamu0
         sum_rule = self.sum_rules[betamu.ndim]
-        group = self.ab_initio.group if (betamu.ndim == 2) else None
+        group = self.ab_initio.group if (betamu.ndim == 1) else None
         f_total = torch.einsum(sum_rule, f)
         if group:
             dist.all_reduce(f_total, group=group)
-        reshape = betamu.shape + (1,) * (4 - betamu.ndim)
+        reshape = betamu.shape + (1,) * (3 - betamu.ndim)
         # Fermi-dirac distribution, shape (Nx, Ny, Nk, Nb)
         exp_beta_Emu = exp_betaE / torch.exp(betamu).reshape(reshape)
         distribution = 1 / (exp_beta_Emu + 1)
+        if not len(betamu):
+            return betamu, distribution
         F = torch.einsum(sum_rule, distribution)
         if group:
             dist.all_reduce(F, group=group)
