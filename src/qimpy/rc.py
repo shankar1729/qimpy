@@ -53,7 +53,7 @@ t_start: float = time.time()  #: Start time used for `clock` (set by `init`)
 # Set reasonable pre-init defaults for torch:
 torch.set_default_dtype(torch.double)
 torch.set_num_threads(1)  # to prevent overcommit between MPI processes
-warnings.filterwarnings("ignore", message=".*Sparse CSR tensor support*")
+warnings.filterwarnings("ignore", message=".*Sparse.*")
 
 # Declare type mappings from torch to numpy:
 np_type: dict[torch.dtype, type] = {

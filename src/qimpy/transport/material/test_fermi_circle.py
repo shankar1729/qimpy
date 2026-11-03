@@ -35,7 +35,7 @@ def test_contact_n_r_equivalence() -> None:
         n_check = fc.measure_observables(fc.get_contactor(n_hat, dmu=dmu)(t), t)[:, 0]
         relative_error = (n_check / n_ref - 1.0).item()
         log.info(f"{n_r=}: {relative_error=:.3e}")
-        assert abs(relative_error) < 2 * np.exp(-0.5 * n_ref / dmu)
+        assert abs(relative_error) < 2 * np.exp(-0.5 * n_ref.item() / dmu)
 
 
 @pytest.mark.parametrize("n_r", [1, 4])
@@ -60,7 +60,7 @@ def test_scattering_conservation(
     log.info("\n")
     fc = get_fermi_circle(n_r=n_r, tau_p=tau_p, tau_ee=tau_ee, r_c=r_c)
     torch.manual_seed(0)
-    rho = torch.rand(100, fc.nk_mine) * 2 - 1  # Random on [-1, 1]
+    rho = torch.rand(100, fc.nk_mine, device=rc.device) * 2 - 1  # Random on [-1, 1]
     t = 0.0
     rho_dot = fc.rho_dot(rho, t)
 
@@ -88,7 +88,7 @@ def test_reflector_conservation(n_r: int, specularity: float) -> None:
     v = fc.transport_velocity
     v_n = n_hat @ v.T
     v_t = t_hat @ v.T
-    rho_incident = torch.rand(len(theta), fc.nk_mine) * 2 - 1  # Random on [-1, 1]
+    rho_incident = torch.rand(len(theta), fc.nk_mine, device=rc.device) * 2 - 1
     rho_incident[v_t < 0.0] *= -1  # Introduce net tangential bias (else flux ~ 0)
     rho_reflected = fc.get_reflector(n_hat)(rho_incident)
 

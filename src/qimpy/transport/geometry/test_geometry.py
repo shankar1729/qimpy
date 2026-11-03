@@ -181,14 +181,15 @@ def test_wire_equilibration(style: str) -> None:
         assert abs(I.sum().item()) < I_tol  # Symmetry
         assert I_min < I_obs < I_max
 
+    n_cells = len(mesh.cells)
     for t, observables in zip(geometry.stash.t, geometry.stash.observables):
         # Check density profile against analytical ray-trace prediction:
-        n = observables[..., 0]
+        n = observables[..., 0].to(rc.device)
         n_ref = prefactor * (
             torch.where(v_x[:, None] * t > x, 1, 0).sum(dim=0)
             - torch.where(v_x[:, None] * t > Lx - x, 1, 0).sum(dim=0)
         )
-        n_mae = globalreduce.sum((n - n_ref).abs(), geometry.group) / len(mesh.cells)
+        n_mae = globalreduce.sum((n - n_ref).abs(), geometry.group).item() / n_cells
         log.info(f"Density MAE: {n_mae:.3g} (typical n: {dmu:.3g})")
         assert n_mae < dmu * 0.02
 
