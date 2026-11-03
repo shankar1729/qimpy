@@ -218,7 +218,10 @@ class CheckpointPath(NamedTuple):
         """Create dataset with `name` within current checkpoint path."""
         assert self.checkpoint is not None
         return self.checkpoint.create_dataset(
-            "/".join((self.path, name)), shape, dtype, **kwargs
+            "/".join((self.path, name)),
+            shape,
+            dtype=(rc.np_type[dtype] if isinstance(dtype, torch.dtype) else dtype),
+            **kwargs,
         )
 
     def write(self, name: str, data: torch.Tensor | np.ndarray) -> str:
