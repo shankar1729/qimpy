@@ -1,6 +1,7 @@
 """Calculate spherical harmonics and their product expansions."""
 import torch
 
+from qimpy import rc
 from . import _spherical_harmonics_data as shdata
 
 # List exported symbols for doc generation
@@ -11,6 +12,7 @@ __all__ = [
     "get_harmonics_and_prime",
     "get_harmonics_tilde",
     "get_harmonics_tilde_and_prime",
+    "get_product_coefficients",
 ]
 
 
@@ -125,6 +127,21 @@ def get_harmonics_tilde_and_prime(
     Y, Y_prime = get_harmonics_and_prime(l_max, G, compute_prime)
     phase = _reciprocal_phase(l_max, G)
     return Y * phase, Y_prime * phase
+
+
+def get_product_coefficients(l_max: int) -> torch.Tensor:
+    """Expansion coefficients of products of real harmonics (real Gaunt coefficients)
+    :math:`Y_{lm} Y_{l'm'} = \\sum_{LM} c_{lm,l'm'}^{LM} Y_{LM}` for l, l' <= `l_max`.
+    The result is a dense tensor c of shape ((l_max+1)^2, (l_max+1)^2, (2 l_max+1)^2),
+    with each (l, m) index l(l+1)+m, as for the harmonics above."""
+    assert l_max <= shdata.L_MAX_HLF
+    n_lm = (l_max + 1) ** 2
+    result = torch.zeros((n_lm, n_lm, (2 * l_max + 1) ** 2), device=rc.device)
+    for (i_lm1, i_lm2), (i_LM, coeff) in shdata.YLM_PROD.items():
+        if i_lm1 < n_lm:  # table has i_lm1 >= i_lm2 only; product is symmetric:
+            result[i_lm1, i_lm2, i_LM] = torch.tensor(coeff, device=rc.device)
+            result[i_lm2, i_lm1, i_LM] = result[i_lm1, i_lm2, i_LM]
+    return result
 
 
 def _reciprocal_phase(l_max: int, G: torch.Tensor) -> torch.Tensor:

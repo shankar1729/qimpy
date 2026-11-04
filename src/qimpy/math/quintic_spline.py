@@ -126,3 +126,16 @@ class Interpolator:
         else:
             result = (self._mat @ coeff[:n_coeff_needed].flatten(1)).T
             return result.view(coeff.shape[1:] + self._shape)
+
+    def adjoint(self, values: torch.Tensor) -> torch.Tensor:
+        """Apply the transpose of the interpolation to `values`, which are shaped
+        like an output of this interpolator (batch dimensions followed by the
+        shape of x). The result is shaped like the coefficients (n_coeff, batch),
+        with n_coeff the number of coefficients used by this interpolator.
+        This maps a gradient with respect to the interpolated values to the
+        gradient with respect to the coefficients."""
+        n_x, n_coeff_needed = self._mat.shape
+        batch_shape = values.shape[: values.dim() - len(self._shape)]
+        n_batch = int(np.prod(batch_shape))  # explicit: n_x may be zero
+        result = self._mat.t() @ values.reshape(n_batch, n_x).T
+        return result.view((n_coeff_needed,) + batch_shape)

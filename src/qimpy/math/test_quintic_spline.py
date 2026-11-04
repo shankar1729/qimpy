@@ -35,6 +35,32 @@ def test_interpolator():
     assert (y_prime_fine - Interpolator(x_fine, dx, 1)(y_coeff)).norm() < dx**3
 
 
+@pytest.mark.mpi_skip
+@pytest.mark.parametrize("deriv", [0, 1])
+def test_interpolator_adjoint(deriv: int) -> None:
+    """Interpolator.adjoint is the transpose: <y, A x> = <A^T y, x>."""
+    torch.manual_seed(0)
+    dx = 0.1
+    x = 4.0 * torch.rand(7, 11, device=rc.device)  # points of arbitrary shape
+    interp = Interpolator(x, dx, deriv)
+    coeff = torch.randn(60, 2, 3, device=rc.device)  # extra rows, batch 2 x 3
+    y = torch.randn(2, 3, 7, 11, device=rc.device)  # shaped like interp(coeff)
+    y_Ax = (y * interp(coeff)).sum()
+    ATy = interp.adjoint(y)
+    assert ATy.shape[1:] == coeff.shape[1:]
+    ATy_x = (ATy * coeff[: ATy.shape[0]]).sum()
+    assert abs(y_Ax - ATy_x) < 1e-12 * abs(y_Ax)
+
+
+@pytest.mark.mpi_skip
+def test_interpolator_empty() -> None:
+    """No points (e.g. an empty local grid slab in MPI): empty results, no errors."""
+    interp = Interpolator(torch.zeros((4, 0), device=rc.device), 0.1)
+    coeff = torch.randn(20, 2, device=rc.device)
+    assert interp(coeff).shape == (2, 4, 0)
+    assert interp.adjoint(torch.zeros((2, 4, 0), device=rc.device)).shape[1:] == (2,)
+
+
 def main():
     """Run test and additionally plot for visual inspection."""
     import matplotlib.pyplot as plt

@@ -36,3 +36,25 @@ def test_integral(
     tol = 1e-8 * integral_ref.norm()
     assert (field.integral() - integral_ref).norm() < tol
     assert ((~field).integral() - integral_ref).norm() < tol
+
+
+@pytest.mark.mpi_skip
+def test_gradient_operator_follows_lattice() -> None:
+    """The gradient operator must use the current lattice (which changes in
+    variable-cell relaxations), not the one at its first use."""
+    from qimpy.lattice import Lattice
+    from qimpy.symmetries import Symmetries
+    from . import Grid
+
+    lattice = Lattice(system=dict(name="cubic", a=5.0))
+    grid = Grid(
+        lattice=lattice,
+        symmetries=Symmetries(lattice=lattice),
+        shape=(8, 8, 8),
+        group=None,
+    )
+    iG = grid.get_mesh("H").permute(3, 0, 1, 2).to(torch.double)
+    grid.get_gradient_operator("H", False)  # first use (cached mesh)
+    lattice.update(1.1 * lattice.Rbasis, report_change=False)
+    expected = 1j * torch.tensordot(lattice.Gbasis, iG, dims=1)
+    assert torch.allclose(grid.get_gradient_operator("H", False), expected)

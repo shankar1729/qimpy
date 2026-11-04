@@ -9,6 +9,7 @@ from qimpy.grid import FieldH
 from qimpy.dft import ions
 from qimpy.math import RadialFunction
 from qimpy.math.quintic_spline import Interpolator
+from ._augmentation import Augmentation
 
 
 def update(self: ions.Ions, system: dft.System) -> None:
@@ -35,6 +36,9 @@ def update(self: ions.Ions, system: dft.System) -> None:
             ),
         )
         self.D_all = torch.empty((0, 0), dtype=torch.complex128, device=rc.device)
+        self.q_all = None
+        self.D_aug = torch.zeros((), dtype=torch.complex128, device=rc.device)
+        self.augmentation = None
         if system.electrons.need_full_projectors:
             n_basis_tot = system.electrons.basis.n_tot
             self.beta_full = dft.electrons.Wavefunction(
@@ -54,6 +58,14 @@ def update(self: ions.Ions, system: dft.System) -> None:
 
     # Update pseudopotential matrix and projectors:
     self._collect_ps_matrix(system.electrons.n_spinor)
+    # Ultrasoft augmentation (None if norm-conserving). Its part of the nonlocal
+    # matrix, D_aug, follows the potential (see Electrons.update_D_aug), and it
+    # stays zero for norm-conserving pseudopotentials, so that D_all + D_aug
+    # needs no special case:
+    self.augmentation = (
+        None if (self.q_all is None) else Augmentation(self, system.grid)
+    )
+    self.D_aug = torch.zeros((), dtype=torch.complex128, device=rc.device)
     if system.electrons.need_full_projectors:
         beta_full = self._get_projectors(system.electrons.basis, full_basis=True)
         self.beta_full = beta_full
@@ -207,6 +219,11 @@ class _LocalTerms:
             )
             # Propagate to lattice gradient:
             ions.lattice.grad += radial_grad ^ self.stress_kernel
+            # Partial-core density keeps its 1/volume normalization (from SF) under
+            # strain, unlike the electron density at fixed wavefunctions. (For
+            # Vloc and rho, the same factor cancels the volume of the integral.)
+            n_core_volume_term = (ions.n_core_tilde.grad ^ ions.n_core_tilde).sum()
+            ions.lattice.grad -= n_core_volume_term * torch.eye(3, device=rc.device)
 
     def get_structure_factor(self) -> torch.Tensor:
         """Compute structure factor."""
@@ -234,18 +251,25 @@ class _LocalTerms:
 
 def collect_ps_matrix(self: ions.Ions, n_spinor: int) -> None:
     """Collect pseudopotential matrices across species and atoms.
-    Initializes `D_all`."""
+    Initializes `D_all`, and `q_all` if any pseudopotential is ultrasoft."""
     n_proj = self.n_projectors * n_spinor
     self.D_all = torch.zeros((n_proj, n_proj), device=rc.device, dtype=torch.complex128)
+    ultrasoft = any((ps.q is not None) for ps in self.pseudopotentials)
+    self.q_all = torch.zeros_like(self.D_all) if ultrasoft else None
     i_proj_start = 0
     for i_ps, ps in enumerate(self.pseudopotentials):
         D_nlms = ps.pqn_beta.expand_matrix(ps.D, n_spinor)
+        # q_ij expands exactly like D_ij: only the L = 0 part of Q_ij survives
+        # the integral over angles, which is diagonal in (l, m):
+        q_nlms = None if (ps.q is None) else ps.pqn_beta.expand_matrix(ps.q, n_spinor)
         n_proj_atom = D_nlms.shape[0]
         # Set diagonal block for each atom:
         for i_atom in range(self.n_ions_type[i_ps]):
             i_proj_stop = i_proj_start + n_proj_atom
             slice_cur = slice(i_proj_start, i_proj_stop)
             self.D_all[slice_cur, slice_cur] = D_nlms
+            if (self.q_all is not None) and (q_nlms is not None):
+                self.q_all[slice_cur, slice_cur] = q_nlms
             i_proj_start = i_proj_stop
 
 

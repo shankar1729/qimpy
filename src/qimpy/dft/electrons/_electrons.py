@@ -248,9 +248,26 @@ class Electrons(TreeNode):
             have_default=True,
         )
         log.info("\nDiagonalization: " + repr(self.diagonalize))
+        if any(ps.is_ultrasoft for ps in ions.pseudopotentials):
+            self._check_ultrasoft_support()
 
         # Initialize SCF:
         self.add_child("scf", SCF, scf, checkpoint_in, group=self.group)
+
+    def _check_ultrasoft_support(self) -> None:
+        """Raise an error for features not yet combined with ultrasoft
+        pseudopotentials (each needs its own augmentation terms)."""
+        unsupported = {
+            "spinorial calculations": self.spinorial,
+            "CheFSI (its filter needs the inverse overlap)": isinstance(
+                self.diagonalize, CheFSI
+            ),
+            "DFT+U": bool(self.xc.plus_U),
+            "meta-GGA functionals": self.xc.need_tau,
+        }
+        if any(unsupported.values()):
+            names = ", ".join(name for name, flag in unsupported.items() if flag)
+            raise NotImplementedError(f"Ultrasoft pseudopotentials with {names}")
 
     def initialize_wavefunctions(self, system: dft.System) -> None:
         """Initialize wavefunctions to LCAO / random (if not from checkpoint).
@@ -310,6 +327,7 @@ class Electrons(TreeNode):
         V_ks.read(cp_H.relative("V_ks"))
         self.n_tilde = ~n
         self.n_tilde.grad = ~V_ks
+        self.update_D_aug(system.ions)
         log.info("  Read n and V_ks.")
         # Optional kinetic density and gradient:
         if self.xc.need_tau:
@@ -334,7 +352,12 @@ class Electrons(TreeNode):
         C = self.C[:, :, : self.fillings.n_bands]  # ignore extra bands in n
         need_Mvec = self.spinorial and self.spin_polarized
         self.n_tilde = (~(self.basis.collect_density(C, f, need_Mvec))).to(system.grid)
-        # TODO: ultrasoft augmentation
+        if (augmentation := system.ions.augmentation) is not None:
+            # Augment before symmetrizing: both are linear, so symmetrizing the sum
+            # is exact and the atomic density matrices need no symmetrization.
+            wf = f * self.basis.w_sk
+            rho_beta = augmentation.density_matrix(C.proj, wf, self.kpoints.group)
+            self.n_tilde += augmentation.density(rho_beta)
         self.n_tilde.symmetrize()
         if self.xc.need_tau:
             self.tau_tilde = self.n_tilde.zeros_like()
@@ -385,6 +408,14 @@ class Electrons(TreeNode):
         if requires_grad:
             self.n_tilde.grad += n_xc_tilde.grad
             self.n_tilde.grad.symmetrize()
+            self.update_D_aug(system.ions)
+
+    def update_D_aug(self, ions: Ions) -> None:
+        """Update the augmentation part of the nonlocal matrix, `ions.D_aug`, from
+        the Kohn-Sham potential `n_tilde.grad` (only for ultrasoft pseudopotentials).
+        Call whenever the potential changes, before applying the Hamiltonian."""
+        if ions.augmentation is not None:
+            ions.D_aug = ions.augmentation.D_aug(self.n_tilde.grad)
 
     def update(self, system: dft.System, requires_grad: bool = True) -> None:
         """Update electronic system to current wavefunctions and eigenvalues.
@@ -493,14 +524,25 @@ class Electrons(TreeNode):
             )
 
         # Nonlocal:
-        if system.ions.beta.requires_grad:
+        ions = system.ions
+        if ions.beta.requires_grad:
             beta_C = C.proj
-            beta_C_grad = (system.ions.D_all @ beta_C) * wf[:, :, None]
+            beta_C_grad = ((ions.D_all + ions.D_aug) @ beta_C) * wf[:, :, None]
+            if ions.q_all is not None:
+                # Overlap: the constraint C^ O C = 1 contributes -eig q (the
+                # Hellmann-Feynman theorem of the generalized eigenproblem):
+                eig = self.eig[..., : self.fillings.n_bands]
+                beta_C_grad -= (ions.q_all @ beta_C) * (wf * eig)[:, :, None]
             if self.n_spinor == 2:
                 beta_C_grad = (
                     beta_C_grad.unflatten(2, (-1, 2)).swapaxes(-2, -1).flatten(-2, -1)
                 )
             system.ions.beta.grad = C.non_spinor @ beta_C_grad.transpose(-2, -1).conj()
+
+        # Ultrasoft augmentation charges, which move with the ions and lattice:
+        if ions.augmentation is not None:
+            rho_beta = ions.augmentation.density_matrix(C.proj, wf, self.kpoints.group)
+            ions.augmentation.accumulate_geometry_grad(self.n_tilde.grad, rho_beta)
 
     def run(self, system: dft.System, suffix: str = "") -> None:
         """Run any actions specified in the input."""
