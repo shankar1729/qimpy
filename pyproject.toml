@@ -28,6 +28,12 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+[project.optional-dependencies]
+transport = [
+    "triangle",
+    "pymetis",
+]
+
 [project.urls]
 Homepage = "https://qimpy.org"
 "Bug Tracker" = "https://github.com/shankar1729/qimpy/issues"

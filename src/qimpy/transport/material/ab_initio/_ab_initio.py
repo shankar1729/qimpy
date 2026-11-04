@@ -25,13 +25,13 @@ class DynamicsTerm(Protocol):
 
     constant_params: dict[str, torch.Tensor]  #: Constant values of parameters
 
-    def initialize_fields(self, params: dict[str, torch.Tensor], patch_id: int) -> None:
+    def initialize_fields(self, params: dict[str, torch.Tensor]) -> None:
         """Initialize spatially-dependent fields / parameter sweeps per patch.
         Implement the part of `Material.initialize_fields` for current term.
         The `params` account for `constant_params` first and then override
         by any specified spatial dependent / parameter sweep values."""
 
-    def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
+    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         """Compute drho/dt given rho, with input and output in Schrodinger picture.
         Only compute one half of the result; hermitian conjugate is added later."""
 
@@ -141,7 +141,7 @@ class AbInitio(Material):
             nk, n_bands = data_file["E"].shape
             log.info(f"Initializing AbInitio material with {nk=} and {n_bands=}")
             self.initialize(
-                wk=wk,
+                wk=torch.tensor([wk], device=rc.device),
                 nk=nk,
                 n_bands=n_bands,
                 n_dim=3,
@@ -284,14 +284,13 @@ class AbInitio(Material):
         return list(attrs.keys())
 
     def initialize_fields(
-        self, rho: torch.Tensor, params: dict[str, torch.Tensor], patch_id: int
+        self, rho: torch.Tensor, params: dict[str, torch.Tensor]
     ) -> None:
-        self.initialize_fields_local(rho, patch_id, **params)
+        self.initialize_fields_local(rho, **params)
 
     def initialize_fields_local(
         self,
         rho: torch.Tensor,
-        patch_id: int,
         *,
         pumpB: torch.Tensor | None = None,
         **kwargs,
@@ -307,7 +306,7 @@ class AbInitio(Material):
             for key, value in kwargs.items():
                 if key.startswith(prefix):
                     params[key.replace(prefix, "")] = value
-            dynamics_term.initialize_fields(params, patch_id)
+            dynamics_term.initialize_fields(params)
 
     def read_scalars(self, data_file: Checkpoint, name: str) -> torch.Tensor:
         """Read quantities that don't transform with rotations from data_file."""
@@ -386,7 +385,7 @@ class AbInitio(Material):
     ) -> Callable[[torch.Tensor], torch.Tensor]:  # absorbing boundary
         return torch.zeros_like
 
-    def rho_dot(self, rho: torch.Tensor, t: float, patch_id: int) -> torch.Tensor:
+    def rho_dot(self, rho: torch.Tensor, t: float) -> torch.Tensor:
         """Overall drho/dt in interaction picture.
         Input and output rho are in packed (real) form."""
         if not self.dynamics_terms and not self.include_coherent:
@@ -406,7 +405,7 @@ class AbInitio(Material):
         if self.include_coherent:
             rho_dot_S += 1j * torch.einsum("...kab, kb -> ...kab", rho_S, self.E)
         for dynamics_term in self.dynamics_terms.values():
-            rho_dot_S += dynamics_term.rho_dot(rho_S, t, patch_id)
+            rho_dot_S += dynamics_term.rho_dot(rho_S, t)
 
         # Convert result back to interaction picture:
         watch = StopWatch("AbInitio.rho_dot_post")
@@ -424,6 +423,10 @@ class AbInitio(Material):
         phase_conj = self.schrodingerV(t)[None, :].conj()
         observablesI = self.observables * phase_conj  # switch to interaction picture
         return (ph.pack(observablesI) * ph.w_overlap).flatten(1, 3)
+
+    def get_flux_indices(self) -> list[int]:
+        # Only generate flux for particle number (charge) if present:
+        return [i for i, name in enumerate(self.observable_names) if name == "n"]
 
 
 class Contactor:

@@ -119,3 +119,23 @@ def minmod(f: torch.Tensor, axis: int) -> torch.Tensor:
 def get_riemann_mask(v: torch.Tensor, axis: int) -> torch.Tensor:
     v = v.swapaxes(axis, -1)[..., 1:-1]
     return torch.where(torch.stack((v <= 0.0, v >= 0.0), dim=-1), 0.0, 1.0)
+
+
+def limiter(
+    d: torch.Tensor, lo: torch.Tensor, hi: torch.Tensor, dim: int, epsilon_sq: float
+) -> torch.Tensor:
+    """Compute smooth limiter function:
+        phi = (D1^2 + 2 D1 d + epsilon^2) / (D1^2 + D1 d + 2 d^2 + epsilon^2),
+    where d = rho_face - rho, and D1 is the same-sign headroom to rho differences.
+    Here, `lo` and `hi` are the lower and upper bounds of rho differences,
+    and `dim` is the dimension along which multiple faces of th same cell exist in `d`.
+    """
+    lo.clip_(max=0.0)
+    hi.clip_(min=0.0)
+    D1 = torch.where(d >= 0, hi, lo)
+    common = D1.square() + epsilon_sq
+    dD1 = d * D1
+    phi = (common + 2 * dD1) / (common + dD1 + 2 * d.square())
+    phi.nan_to_num_(1.0)  # Handle possible NANs from d underflow
+    phi.clamp_(max=1.0)
+    return phi.amin(dim=dim, keepdim=True)

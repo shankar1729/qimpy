@@ -1,4 +1,5 @@
 import pytest
+import warnings
 
 from . import rc
 
@@ -16,6 +17,8 @@ def pytest_report_teststatus(report, config):
 @pytest.fixture(scope="session", autouse=True)
 def init_run_config():
     rc.init()
+    yield
+    rc.free()
 
 
 def pytest_collection_modifyitems(config, items):
@@ -32,3 +35,7 @@ def pytest_collection_modifyitems(config, items):
     if removed:
         config.hook.pytest_deselected(items=removed)
         items[:] = kept
+
+
+def pytest_configure(config):
+    warnings.filterwarnings("ignore", message=".*Sparse.*")

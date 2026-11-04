@@ -12,6 +12,7 @@ variables MASTER_ADDR and MASTER_PORT. None of these environment variables are r
 from typing import NamedTuple
 from itertools import groupby
 from operator import itemgetter
+import warnings
 import socket
 import datetime
 import time
@@ -52,6 +53,7 @@ t_start: float = time.time()  #: Start time used for `clock` (set by `init`)
 # Set reasonable pre-init defaults for torch:
 torch.set_default_dtype(torch.double)
 torch.set_num_threads(1)  # to prevent overcommit between MPI processes
+warnings.filterwarnings("ignore", message=".*Sparse.*")
 
 # Declare type mappings from torch to numpy:
 np_type: dict[torch.dtype, type] = {
@@ -189,6 +191,16 @@ def report_end():
     t_stop = time.time()
     duration = datetime.timedelta(seconds=(t_stop - t_start))
     log.info(f"\nEnd time: {time.ctime(t_stop)} (Duration: {duration})")
+
+
+def from_np(x: np.ndarray) -> torch.Tensor:
+    """Construct tensor on `device` from numpy array."""
+    return torch.from_numpy(x).to(device)
+
+
+def to_np(x: torch.Tensor) -> np.ndarray:
+    """Get numpy array from tensor on `device` or `cpu`."""
+    return x.detach().cpu().numpy()
 
 
 class HostProcessList(NamedTuple):
