@@ -30,7 +30,7 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 transport = [
-    "triangle",
+    "triangle @ git+https://github.com/drufat/triangle@master",
     "pymetis",
 ]
 
