@@ -248,26 +248,21 @@ class Electrons(TreeNode):
             have_default=True,
         )
         log.info("\nDiagonalization: " + repr(self.diagonalize))
-        if any(ps.is_ultrasoft for ps in ions.pseudopotentials):
-            self._check_ultrasoft_support()
 
         # Initialize SCF:
         self.add_child("scf", SCF, scf, checkpoint_in, group=self.group)
 
-    def _check_ultrasoft_support(self) -> None:
-        """Raise an error for features not yet combined with ultrasoft
-        pseudopotentials (each needs its own augmentation terms)."""
-        unsupported = {
-            "spinorial calculations": self.spinorial,
-            "CheFSI (its filter needs the inverse overlap)": isinstance(
-                self.diagonalize, CheFSI
-            ),
-            "DFT+U": bool(self.xc.plus_U),
-            "meta-GGA functionals": self.xc.need_tau,
-        }
-        if any(unsupported.values()):
-            names = ", ".join(name for name, flag in unsupported.items() if flag)
-            raise NotImplementedError(f"Ultrasoft pseudopotentials with {names}")
+        # Check for unsupported feature combinations:
+        if any(ps.is_ultrasoft for ps in ions.pseudopotentials):
+            unsupported = {
+                "spinorial calculations": self.spinorial,
+                "CheFSI": isinstance(self.diagonalize, CheFSI),
+                "DFT+U": bool(self.xc.plus_U),
+                "meta-GGA functionals": self.xc.need_tau,
+            }
+            if any(unsupported.values()):
+                names = ", ".join(name for name, flag in unsupported.items() if flag)
+                raise NotImplementedError(f"Ultrasoft pseudopotentials with {names}")
 
     def initialize_wavefunctions(self, system: dft.System) -> None:
         """Initialize wavefunctions to LCAO / random (if not from checkpoint).
@@ -353,8 +348,6 @@ class Electrons(TreeNode):
         need_Mvec = self.spinorial and self.spin_polarized
         self.n_tilde = (~(self.basis.collect_density(C, f, need_Mvec))).to(system.grid)
         if (augmentation := system.ions.augmentation) is not None:
-            # Augment before symmetrizing: both are linear, so symmetrizing the sum
-            # is exact and the atomic density matrices need no symmetrization.
             wf = f * self.basis.w_sk
             rho_beta = augmentation.density_matrix(C.proj, wf, self.kpoints.group)
             self.n_tilde += augmentation.density(rho_beta)
@@ -529,8 +522,7 @@ class Electrons(TreeNode):
             beta_C = C.proj
             beta_C_grad = ((ions.D_all + ions.D_aug) @ beta_C) * wf[:, :, None]
             if ions.q_all is not None:
-                # Overlap: the constraint C^ O C = 1 contributes -eig q (the
-                # Hellmann-Feynman theorem of the generalized eigenproblem):
+                # Contribution from overlap augmentation:
                 eig = self.eig[..., : self.fillings.n_bands]
                 beta_C_grad -= (ions.q_all @ beta_C) * (wf * eig)[:, :, None]
             if self.n_spinor == 2:
@@ -539,7 +531,7 @@ class Electrons(TreeNode):
                 )
             system.ions.beta.grad = C.non_spinor @ beta_C_grad.transpose(-2, -1).conj()
 
-        # Ultrasoft augmentation charges, which move with the ions and lattice:
+        # Contributions from density augmentation:
         if ions.augmentation is not None:
             rho_beta = ions.augmentation.density_matrix(C.proj, wf, self.kpoints.group)
             ions.augmentation.accumulate_geometry_grad(self.n_tilde.grad, rho_beta)
