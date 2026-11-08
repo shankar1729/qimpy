@@ -1,11 +1,11 @@
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 import torch
 
 from qimpy import rc, log, TreeNode, Energy
 from qimpy.io import Checkpoint, CheckpointPath
-from qimpy.mpi import ProcessGrid
+from qimpy.mpi import ProcessGrid, get_process_grid
 from qimpy.lattice import Lattice
 from qimpy.symmetries import Symmetries
 from qimpy.grid import Grid
@@ -29,7 +29,6 @@ class System(TreeNode):
     geometry: Geometry  #: Geometry actions, e.g., relaxation / dynamics
     export: Export  #: Exporters to interface with other codes
     energy: Energy  #: Energy components
-    checkpoint_in: CheckpointPath  #: Input checkpoint
     checkpoint_out: str | None  #: Filename for output checkpoint
     process_grid: ProcessGrid  #: Process grid for parallelization
     fluid: Fluid  #: Fluid model for solvation
@@ -48,7 +47,7 @@ class System(TreeNode):
         export: Export | dict | None = None,
         checkpoint: str | None = None,
         checkpoint_out: str | None = None,
-        process_grid_shape: Sequence[int] | None = None,
+        process_grid_shape: tuple[int, ...] | None = None,
     ):
         """Compose a System to calculate from its pieces. Each piece
         could be provided as an object or a dictionary of parameters
@@ -87,7 +86,7 @@ class System(TreeNode):
             auto-determined based on number of tasks available to split along them.
             Default: all process grid dimensions are auto-determined."""
         super().__init__()
-        self.process_grid = ProcessGrid("rkb", process_grid_shape)
+        self.process_grid = get_process_grid("rkb", process_grid_shape)
         # Set in and out checkpoints:
         checkpoint_in = CheckpointPath()
         if checkpoint is not None:

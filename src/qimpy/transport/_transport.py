@@ -1,8 +1,6 @@
-from typing import Sequence
-
 from qimpy import log, TreeNode
 from qimpy.io import CheckpointPath, Checkpoint, CheckpointContext
-from qimpy.mpi import ProcessGrid
+from qimpy.mpi import ProcessGrid, get_process_grid
 from qimpy.profiler import stopwatch
 from .geometry import Geometry
 from .material import Material, FermiCircle
@@ -15,6 +13,8 @@ class Transport(TreeNode):
     material: Material
     geometry: Geometry
     time_evolution: TimeEvolution
+    checkpoint_out: str | None  #: Filename for output checkpoint
+    process_grid: ProcessGrid  #: Process grid for parallelization
 
     def __init__(
         self,
@@ -26,7 +26,7 @@ class Transport(TreeNode):
         time_evolution: TimeEvolution | dict | None = None,
         checkpoint: str | None = None,
         checkpoint_out: str | None = None,
-        process_grid_shape: Sequence[int] | None = None,
+        process_grid_shape: tuple[int, ...] | None = None,
     ):
         """Compose a System to calculate from its pieces. Each piece
         could be provided as an object or a dictionary of parameters
@@ -61,7 +61,7 @@ class Transport(TreeNode):
             auto-determined based on number of tasks available to split along them.
             Default: all process grid dimensions are auto-determined."""
         super().__init__()
-        self.process_grid = ProcessGrid("rk", process_grid_shape)
+        self.process_grid = get_process_grid("rk", process_grid_shape)
         self.process_grid.provide_n_tasks("k", 1)  # prefer r-split if unspecified
         # Set in and out checkpoints:
         checkpoint_in = CheckpointPath()

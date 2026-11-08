@@ -120,7 +120,7 @@ class Ions(TreeNode):
         if "QIMPY_PSEUDO_DIR" in os.environ:
             prefixes.extend(os.environ["QIMPY_PSEUDO_DIR"].split(":"))
         self.pseudopotential_filenames = [
-            self._get_pseudopotential_filename(symbol, pseudopotentials, prefixes)
+            self.get_pseudopotential_filename(symbol, pseudopotentials, prefixes)
             for symbol in self.symbols
         ]
         self.pseudopotentials = [
@@ -227,8 +227,9 @@ class Ions(TreeNode):
             dtype=torch.double,
         )
 
-    def _get_pseudopotential_filename(
-        self, symbol: str, pseudopotentials: list[str], prefixes: list[str]
+    @staticmethod
+    def get_pseudopotential_filename(
+        symbol: str, pseudopotentials: list[str], prefixes: list[str]
     ) -> str:
         """Find exact pseudopotential filename for symbol from filename templates."""
         symbol_variants = [symbol.lower(), symbol.upper(), symbol.capitalize()]
