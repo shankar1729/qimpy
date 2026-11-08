@@ -1,23 +1,16 @@
-import os
-
 import pytest
 import torch
 
 from qimpy import rc
 from qimpy.math import dagger
 from qimpy.dft import System
-from qimpy.dft.ions import Ions
+from qimpy.dft.ions import Pseudopotential
 
 
 @pytest.fixture
 def Si_system() -> System:
-    prefixes = [""]
-    if "QIMPY_PSEUDO_DIR" in os.environ:
-        prefixes.extend(os.environ["QIMPY_PSEUDO_DIR"].split(":"))
     try:
-        psp_filename = Ions.get_pseudopotential_filename(
-            "Si", ["GBRV/$ID_pbe_v1.uspp"], prefixes
-        )
+        psp_filename = Pseudopotential.get_filename("Si", ["GBRV/$ID_pbe_v1.uspp"])
     except ValueError:
         pytest.skip("GBRV pseudopotentials not found")
     return System(

@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import os
-import pathlib
-import re
-
 import numpy as np
 import torch
 
@@ -114,11 +110,8 @@ class Ions(TreeNode):
             pseudopotentials = []
         if isinstance(pseudopotentials, str):
             pseudopotentials = [pseudopotentials]
-        prefixes = [""]
-        if "QIMPY_PSEUDO_DIR" in os.environ:
-            prefixes.extend(os.environ["QIMPY_PSEUDO_DIR"].split(":"))
         self.pseudopotential_filenames = [
-            self.get_pseudopotential_filename(symbol, pseudopotentials, prefixes)
+            Pseudopotential.get_filename(symbol, pseudopotentials)
             for symbol in self.symbols
         ]
         self.pseudopotentials = [
@@ -224,33 +217,6 @@ class Ions(TreeNode):
             device=rc.device,
             dtype=torch.double,
         )
-
-    @staticmethod
-    def get_pseudopotential_filename(
-        symbol: str, pseudopotentials: list[str], prefixes: list[str]
-    ) -> str:
-        """Find exact pseudopotential filename for symbol from filename templates."""
-        symbol_variants = [symbol.lower(), symbol.upper(), symbol.capitalize()]
-        for ps_name in pseudopotentials:
-            if ps_name.count("$ID"):
-                # wildcard syntax
-                for prefix in prefixes:
-                    template = os.path.join(prefix, ps_name) if prefix else ps_name
-                    for symbol_variant in symbol_variants:
-                        filename_test = template.replace("$ID", symbol_variant)
-                        if pathlib.Path(filename_test).exists():
-                            return filename_test  # found
-            else:
-                # specific filename
-                basename = pathlib.PurePath(ps_name).stem
-                ps_symbol = re.split(r"[_\-\.]+", basename)[0]
-                if ps_symbol in symbol_variants:
-                    for prefix in prefixes:
-                        filename = os.path.join(prefix, ps_name) if prefix else ps_name
-                        if pathlib.Path(filename).exists():
-                            return filename
-                    raise FileNotFoundError(ps_name)
-        raise ValueError(f"no pseudopotential found for {symbol}")
 
     def report(self, report_grad: bool) -> None:
         """Report ionic positions / attributes, and optionally forces if `report_grad`."""

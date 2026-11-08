@@ -1,5 +1,8 @@
 from __future__ import annotations
+from functools import cache
 import pathlib
+import os
+import re
 
 import numpy as np
 import torch
@@ -248,3 +251,39 @@ class Pseudopotential:
             result = float(np.interp(ke_cutoff, ke_cutoffs, corrections))
             log.info(f"Pulay dE/drho_basis = {result:.6f} Eh a0^3 for {self.element}")
             return result
+
+    @staticmethod
+    def get_filename(symbol: str, templates: list[str]) -> str:
+        """Find exact pseudopotential filename for symbol from filename templates.
+        Search relative to current directory, and any path in `QIMPY_PSEUDO_DIR`"""
+        prefixes = Pseudopotential.get_prefixes()
+        symbol_variants = [symbol.lower(), symbol.upper(), symbol.capitalize()]
+        for ps_name in templates:
+            if ps_name.count("$ID"):
+                # wildcard syntax
+                for prefix in prefixes:
+                    template = os.path.join(prefix, ps_name) if prefix else ps_name
+                    for symbol_variant in symbol_variants:
+                        filename_test = template.replace("$ID", symbol_variant)
+                        if pathlib.Path(filename_test).exists():
+                            return filename_test  # found
+            else:
+                # specific filename
+                basename = pathlib.PurePath(ps_name).stem
+                ps_symbol = re.split(r"[_\-\.]+", basename)[0]
+                if ps_symbol in symbol_variants:
+                    for prefix in prefixes:
+                        filename = os.path.join(prefix, ps_name) if prefix else ps_name
+                        if pathlib.Path(filename).exists():
+                            return filename
+                    raise FileNotFoundError(ps_name)
+        raise ValueError(f"no pseudopotential found for {symbol}")
+
+    @cache
+    @staticmethod
+    def get_prefixes() -> list[str]:
+        """Prefix directories within which to find pseudopotentials."""
+        prefixes = [""]
+        if "QIMPY_PSEUDO_DIR" in os.environ:
+            prefixes.extend(os.environ["QIMPY_PSEUDO_DIR"].split(":"))
+        return prefixes
