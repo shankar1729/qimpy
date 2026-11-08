@@ -37,7 +37,7 @@ def test_stress(system_name: str, request) -> None:
     assert abs(dE_ratio - 1.0) < 1e-3
 
 
-@pytest.mark.parametrize("system_name", ["system_Si_perturbed"])
+@pytest.mark.parametrize("system_name", ["system_Si_perturbed", "system_H2O"])
 def test_forces(system_name: str, request) -> None:
     system: System = request.getfixturevalue(system_name)
     lattice = system.lattice
