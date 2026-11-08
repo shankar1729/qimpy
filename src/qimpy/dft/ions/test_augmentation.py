@@ -108,7 +108,8 @@ def test_D_aug_adjoint(n_spins: int) -> None:
     V = FieldH(augmentation.grid, shape_batch=(n_spins,))
     V.randomize(seed=1)
     energy = (V ^ augmentation.density([rho])).sum()
-    D = atom_blocks(augmentation.D_aug(V), augmentation.species[0].n_proj)
+    augmentation.D_aug(V)
+    D = atom_blocks(augmentation.ions.D_aug, augmentation.species[0].n_proj)
     assert torch.allclose(D.imag, torch.zeros_like(D.real))
     assert torch.allclose(D, D.transpose(-2, -1))  # real symmetric
     energy_from_D = (D.real * rho.real).sum()
@@ -137,15 +138,20 @@ def test_density_real_space() -> None:
     # exp(-r^2 / 2 sigma^2) sum_LM W_LM r^L Y_LM(r_hat), where W_LM collects rho,
     # the Gaunt coefficients and amplitudes (independent of FFTs and transforms):
     L_max = 2 * max(L_BETA)
-    L_of_LM = torch.arange(L_max + 1).repeat_interleave(2 * torch.arange(L_max + 1) + 1)
+    l_array = torch.arange(L_max + 1, device=rc.device)
+    L_of_LM = l_array.repeat_interleave(2 * l_array + 1)
     c = sh.get_product_coefficients(max(L_BETA))[pqn.i_lm][:, pqn.i_lm]  # a, b, LM
     i_rf = pqn.i_rf.tolist()
     A = torch.tensor(
-        [[[amplitude(i, j, int(L)) for L in L_of_LM] for j in i_rf] for i in i_rf]
+        [[[amplitude(i, j, int(L)) for L in L_of_LM] for j in i_rf] for i in i_rf],
+        device=rc.device,
     )  # amplitude for projectors a, b and each LM
-    r_grid = grid.get_mesh("R").to(torch.double) / torch.tensor(grid.shape)
+    r_grid = grid.get_mesh("R").to(torch.double) / torch.tensor(
+        grid.shape, device=rc.device
+    )
     shifts = torch.stack(
-        torch.meshgrid(*([torch.arange(-1, 2)] * 3), indexing="ij"), dim=-1
+        torch.meshgrid(*([torch.arange(-1, 2, device=rc.device)] * 3), indexing="ij"),
+        dim=-1,
     ).reshape(
         -1, 3
     )  # neighbouring periodic images suffice for this sigma
@@ -174,7 +180,10 @@ def test_charge(n_spins: int) -> None:
     n_aug = augmentation.density([rho])
     q = ps.pqn_beta.expand_matrix(ps.q, 1)
     charge = torch.einsum("saij, ij -> s", rho.real, q)  # per spin channel
-    expected = charge.sum() if (n_spins == 1) else charge @ torch.tensor([1.0, -1.0])
+    if n_spins == 1:
+        expected = charge.sum()
+    else:
+        expected = charge @ torch.tensor([1.0, -1.0], device=rc.device)
     got = n_aug.integral()
     assert abs(got[0] - charge.sum()) < 1e-12 * abs(charge).sum()  # total n
     assert abs(got[-1] - expected) < 1e-12 * abs(charge).sum()  # M_z if polarized
