@@ -12,7 +12,9 @@ def scale_lattice(system: System, scale: float) -> float:
     system.coulomb.update_lattice_dependent()
     system.energy.clear()
     system.ions.update(system)
-    system.electrons.run(system)
+    system.electrons.C = system.electrons.C.orthonormalize()
+    system.electrons.update(system)
+    # system.electrons.run(system)
     return float(system.energy)
 
 
