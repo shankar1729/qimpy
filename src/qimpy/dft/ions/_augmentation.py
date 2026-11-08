@@ -150,7 +150,7 @@ class Augmentation:
         return n_aug
 
     @stopwatch(name="Augmentation.D_aug")
-    def D_aug(self, V: FieldH) -> torch.Tensor:
+    def D_aug(self, V: FieldH) -> None:
         """Augmentation part of the nonlocal matrix, from the Kohn-Sham potential V
         (i.e. `Electrons.n_tilde.grad`, with components n and M_z if polarized):
         D_aug[s, (a, i), (a, j)] = int V_s(r) Q_ij(r - R_a) d^3r, which is also
@@ -180,7 +180,7 @@ class Augmentation:
                 3, (n_atoms, n_proj)
             )
             block.diagonal(dim1=1, dim2=3).copy_(D.permute(0, 2, 3, 1))
-        return D_aug
+        self.ions.D_aug = D_aug
 
     @stopwatch(name="Augmentation.geometry_grad")
     def accumulate_geometry_grad(self, V: FieldH, rho_beta: list[torch.Tensor]) -> None:

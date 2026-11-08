@@ -322,7 +322,8 @@ class Electrons(TreeNode):
         V_ks.read(cp_H.relative("V_ks"))
         self.n_tilde = ~n
         self.n_tilde.grad = ~V_ks
-        self.update_D_aug(system.ions)
+        if (augmentation := system.ions.augmentation) is not None:
+            augmentation.D_aug(self.n_tilde.grad)
         log.info("  Read n and V_ks.")
         # Optional kinetic density and gradient:
         if self.xc.need_tau:
@@ -401,14 +402,8 @@ class Electrons(TreeNode):
         if requires_grad:
             self.n_tilde.grad += n_xc_tilde.grad
             self.n_tilde.grad.symmetrize()
-            self.update_D_aug(system.ions)
-
-    def update_D_aug(self, ions: Ions) -> None:
-        """Update the augmentation part of the nonlocal matrix, `ions.D_aug`, from
-        the Kohn-Sham potential `n_tilde.grad` (only for ultrasoft pseudopotentials).
-        Call whenever the potential changes, before applying the Hamiltonian."""
-        if ions.augmentation is not None:
-            ions.D_aug = ions.augmentation.D_aug(self.n_tilde.grad)
+            if (augmentation := system.ions.augmentation) is not None:
+                augmentation.D_aug(self.n_tilde.grad)
 
     def update(self, system: dft.System, requires_grad: bool = True) -> None:
         """Update electronic system to current wavefunctions and eigenvalues.
