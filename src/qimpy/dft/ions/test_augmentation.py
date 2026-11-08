@@ -80,7 +80,7 @@ def get_augmentation() -> Augmentation:
     ions.n_ions_type = [len(POSITIONS)]
     ions.slices = [slice(0, len(POSITIONS))]
     ions.positions = torch.tensor(POSITIONS, device=rc.device)
-    return Augmentation(ions, grid)
+    return Augmentation(ions, grid, q_all=torch.zeros((), device=rc.device))
 
 
 def random_rho(n_spins: int, seed: int) -> torch.Tensor:
@@ -108,8 +108,8 @@ def test_D_aug_adjoint(n_spins: int) -> None:
     V = FieldH(augmentation.grid, shape_batch=(n_spins,))
     V.randomize(seed=1)
     energy = (V ^ augmentation.density([rho])).sum()
-    augmentation.D_aug(V)
-    D = atom_blocks(augmentation.ions.D_aug, augmentation.species[0].n_proj)
+    augmentation.density_grad(V)
+    D = atom_blocks(augmentation.D_aug, augmentation.species[0].n_proj)
     assert torch.allclose(D.imag, torch.zeros_like(D.real))
     assert torch.allclose(D, D.transpose(-2, -1))  # real symmetric
     energy_from_D = (D.real * rho.real).sum()

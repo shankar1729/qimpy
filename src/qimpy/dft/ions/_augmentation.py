@@ -49,8 +49,10 @@ class Augmentation:
     LM_order: torch.Tensor  #: Order of (L, M) used here: even L first, then odd L
     n_even: int  #: Number of (L, M) with even L (leading block in `LM_order`)
     Y: torch.Tensor  #: Real solid harmonics times sign of i^L, in `LM_order`
+    q_all: torch.Tensor  #: Overlap augmentation
+    D_aug: torch.Tensor  #: Augmentation of `Ions.D_all`
 
-    def __init__(self, ions: dft.ions.Ions, grid: Grid) -> None:
+    def __init__(self, ions: dft.ions.Ions, grid: Grid, q_all: torch.Tensor) -> None:
         """Prepare augmentation for the current `ions` positions on `grid`.
         Requires the radial transforms of the augmentation functions,
         which are updated with the local pseudopotential terms."""
@@ -91,6 +93,8 @@ class Augmentation:
         self._i_L_sign = ((-1.0) ** (L_of_LM // 2))[self.LM_order]  # i^L / i^(L%2)
         self.Y = self._signed(sh.get_harmonics(self.L_max, self.G)[self.LM_order])
         self.Y *= self.in_sphere  # restricts density, D_aug and forces to the sphere
+        self.q_all = q_all
+        self.D_aug = torch.zeros_like(q_all)
 
         # Collect data of ultrasoft species, locating their atoms and projectors:
         self.species = []
@@ -108,7 +112,7 @@ class Augmentation:
                 )
             )
 
-    @stopwatch(name="Augmentation.density_matrix")
+    @stopwatch
     def density_matrix(
         self, beta_C: torch.Tensor, wf: torch.Tensor, group: dist.ProcessGroup
     ) -> list[torch.Tensor]:
@@ -132,7 +136,7 @@ class Augmentation:
             rho_beta.append(rho)
         return rho_beta
 
-    @stopwatch(name="Augmentation.density")
+    @stopwatch
     def density(self, rho_beta: list[torch.Tensor]) -> FieldH:
         """Augmentation density from the atomic density matrices `rho_beta` (per
         species, from `density_matrix`). The result has the density components of
@@ -149,8 +153,8 @@ class Augmentation:
                 n_aug.data += inv_volume * torch.einsum("da..., a... -> d...", T, phase)
         return n_aug
 
-    @stopwatch(name="Augmentation.D_aug")
-    def D_aug(self, V: FieldH) -> None:
+    @stopwatch
+    def density_grad(self, V: FieldH) -> None:
         """Augmentation part of the nonlocal matrix, from the Kohn-Sham potential V
         (i.e. `Electrons.n_tilde.grad`, with components n and M_z if polarized):
         D_aug[s, (a, i), (a, j)] = int V_s(r) Q_ij(r - R_a) d^3r, which is also
@@ -180,7 +184,7 @@ class Augmentation:
                 3, (n_atoms, n_proj)
             )
             block.diagonal(dim1=1, dim2=3).copy_(D.permute(0, 2, 3, 1))
-        self.ions.D_aug = D_aug
+        self.D_aug = D_aug
 
     @stopwatch(name="Augmentation.geometry_grad")
     def accumulate_geometry_grad(self, V: FieldH, rho_beta: list[torch.Tensor]) -> None:

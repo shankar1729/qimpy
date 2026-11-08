@@ -323,7 +323,7 @@ class Electrons(TreeNode):
         self.n_tilde = ~n
         self.n_tilde.grad = ~V_ks
         if (augmentation := system.ions.augmentation) is not None:
-            augmentation.D_aug(self.n_tilde.grad)
+            augmentation.density_grad(self.n_tilde.grad)
         log.info("  Read n and V_ks.")
         # Optional kinetic density and gradient:
         if self.xc.need_tau:
@@ -403,7 +403,7 @@ class Electrons(TreeNode):
             self.n_tilde.grad += n_xc_tilde.grad
             self.n_tilde.grad.symmetrize()
             if (augmentation := system.ions.augmentation) is not None:
-                augmentation.D_aug(self.n_tilde.grad)
+                augmentation.density_grad(self.n_tilde.grad)
 
     def update(self, system: dft.System, requires_grad: bool = True) -> None:
         """Update electronic system to current wavefunctions and eigenvalues.
@@ -513,13 +513,14 @@ class Electrons(TreeNode):
 
         # Nonlocal:
         ions = system.ions
+        augmentation = ions.augmentation
         if ions.beta.requires_grad:
             beta_C = C.proj
-            beta_C_grad = ((ions.D_all + ions.D_aug) @ beta_C) * wf[:, :, None]
-            if ions.q_all is not None:
+            beta_C_grad = (ions.D_eff @ beta_C) * wf[:, :, None]
+            if augmentation is not None:
                 # Contribution from overlap augmentation:
                 eig = self.eig[..., : self.fillings.n_bands]
-                beta_C_grad -= (ions.q_all @ beta_C) * (wf * eig)[:, :, None]
+                beta_C_grad -= (augmentation.q_all @ beta_C) * (wf * eig)[:, :, None]
             if self.n_spinor == 2:
                 beta_C_grad = (
                     beta_C_grad.unflatten(2, (-1, 2)).swapaxes(-2, -1).flatten(-2, -1)
@@ -527,9 +528,9 @@ class Electrons(TreeNode):
             system.ions.beta.grad = C.non_spinor @ beta_C_grad.transpose(-2, -1).conj()
 
         # Contributions from density augmentation:
-        if ions.augmentation is not None:
-            rho_beta = ions.augmentation.density_matrix(C.proj, wf, self.kpoints.group)
-            ions.augmentation.accumulate_geometry_grad(self.n_tilde.grad, rho_beta)
+        if augmentation is not None:
+            rho_beta = augmentation.density_matrix(C.proj, wf, self.kpoints.group)
+            augmentation.accumulate_geometry_grad(self.n_tilde.grad, rho_beta)
 
     def run(self, system: dft.System, suffix: str = "") -> None:
         """Run any actions specified in the input."""

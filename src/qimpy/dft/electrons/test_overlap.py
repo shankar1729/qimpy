@@ -36,7 +36,7 @@ def test_overlap(Si_system) -> None:
     """Check Hermitian, positive definite, dot_O agrees with applying O,
     and that orthonormalize works with an augmented overlap."""
     el = Si_system.electrons
-    assert el.basis.ions.q_all is not None
+    assert el.basis.ions.augmentation is not None
     C = el.C.clone()
     C.randomize()
     C1, C2 = C[:, :, :3], C[:, :, 3:]

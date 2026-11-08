@@ -188,7 +188,7 @@ class SCF(Pulay[FieldH]):
         else:
             electrons.n_tilde.grad = v
             if (augmentation := self.system.ions.augmentation) is not None:
-                augmentation.D_aug(v)
+                augmentation.density_grad(v)
 
     def precondition(self, v: FieldH) -> FieldH:
         result = v.convolve(self.K_kerker)

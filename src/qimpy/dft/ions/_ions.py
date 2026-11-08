@@ -43,8 +43,6 @@ class Ions(TreeNode):
     beta_full: dft.electrons.Wavefunction | None  #: full-basis version of `beta`
     beta_version: int  #: version of `beta` to invalidate cached projections
     D_all: torch.Tensor  #: nonlocal pseudopotential matrix (all atoms)
-    q_all: torch.Tensor | None  #: ultrasoft overlap matrix, like `D_all` (None if NC)
-    D_aug: torch.Tensor  #: augmentation part of nonlocal matrix (zero if NC)
     augmentation: Augmentation | None  #: ultrasoft augmentation (None if NC)
     dEtot_drho_basis: float  #: dE/d(basis function density) for Pulay correction
 
@@ -412,3 +410,10 @@ class Ions(TreeNode):
             scalars=torch.stack(scalars),
             pseudovectors=pseudovectors,
         )
+
+    @property
+    def D_eff(self) -> torch.Tensor:
+        if self.augmentation is None:
+            return self.D_all
+        else:
+            return self.D_all + self.augmentation.D_aug

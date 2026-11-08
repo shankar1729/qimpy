@@ -126,8 +126,8 @@ def _dot_O(self: electrons.Wavefunction, other: electrons.Wavefunction) -> DotRe
         Dimensions: n_spins x nk_mine x n_bands(self) x n_bands(other)
     """
     result = _dot(self, other)
-    if (q_all := self.basis.ions.q_all) is not None:
-        result.extra = dagger(self.proj) @ (q_all @ other.proj)  # Augment overlap
+    if (augmentation := self.basis.ions.augmentation) is not None:
+        result.extra = dagger(self.proj) @ (augmentation.q_all @ other.proj)
     return result
 
 
@@ -137,12 +137,12 @@ def _overlap(self: electrons.Wavefunction) -> electrons.Wavefunction:
     for norm-conserving pseudopotentials, but includes augmentation terms
     for ultrasoft and PAW pseudopotentials"""
     ions = self.basis.ions
-    if ions.q_all is None:
+    if (augmentation := ions.augmentation) is None:
         return self  # norm-conserving: O = 1
     # Augment overlap:
     beta = ions.beta_full if self.band_division else ions.beta
     assert beta is not None
-    return self + beta @ (ions.q_all @ self.proj)
+    return self + beta @ (augmentation.q_all @ self.proj)
 
 
 @stopwatch(name="Wavefunction.matmul")
