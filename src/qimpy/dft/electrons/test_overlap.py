@@ -1,34 +1,13 @@
-import pytest
 import torch
 
 from qimpy import rc
 from qimpy.math import dagger
-from qimpy.dft import System
-from qimpy.dft.ions import Pseudopotential
 
 
-@pytest.fixture
-def Si_system() -> System:
-    try:
-        psp_filename = Pseudopotential.get_filename("Si", ["GBRV/$ID_pbe_v1.uspp"])
-    except ValueError:
-        pytest.skip("GBRV pseudopotentials not found")
-    return System(
-        lattice=dict(system=dict(name="Cubic", modification="face-centered", a=10.35)),
-        ions=dict(
-            pseudopotentials=psp_filename,
-            coordinates=[["Si", 0.0, 0.0, 0.0], ["Si", 0.25, 0.25, 0.25]],
-        ),
-        electrons=dict(
-            basis=dict(ke_cutoff=10.0), k_mesh=dict(size=[2, 2, 2]), lcao=False
-        ),
-    )
-
-
-def test_overlap(Si_system) -> None:
+def test_overlap(system_Si) -> None:
     """Check Hermitian, positive definite, dot_O agrees with applying O,
     and that orthonormalize works with an augmented overlap."""
-    el = Si_system.electrons
+    el = system_Si.electrons
     assert el.basis.ions.augmentation is not None
     C = el.C.clone()
     C.randomize()
