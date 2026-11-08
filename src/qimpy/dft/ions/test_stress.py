@@ -1,33 +1,39 @@
+import pytest
+import torch
+
 from qimpy.dft import System
 
-DELTA = 5e-4  # isotropic strain for the central difference
 
-
-def scale_lattice(system: System, scale: float) -> float:
-    """Scale the lattice in place, as the geometry stepper does, and return the
-    self-consistent energy. The wavefunction basis keeps its G-vectors, so the
-    energy difference contains no Pulay term, like the analytic lattice gradient."""
-    lattice = system.lattice
-    lattice.update(lattice.Rbasis * scale, report_change=False)
-    system.coulomb.update_lattice_dependent()
-    system.energy.clear()
-    system.ions.update(system)
-    system.electrons.C = system.electrons.C.orthonormalize()
-    system.electrons.update(system)
-    # system.electrons.run(system)
-    return float(system.energy)
-
-
-def test_stress_partial_core(system_Si) -> None:
+@pytest.mark.parametrize("system_name", ["system_Si", "system_Si_perturbed"])
+def test_stress(system_name: str, request) -> None:
     """For the isotropic strain Rbasis -> (1 + delta) Rbasis, dE/d(delta) is the trace
     of the lattice gradient (dE/d(strain), i.e. stress times volume)."""
-    system = system_Si
-    system.lattice.compute_stress = True
+    system: System = request.getfixturevalue(system_name)
+    lattice = system.lattice
+    lattice.compute_stress = True
     system.run()
-    assert system.lattice.grad is not None
-    dE_analytic = float(system.lattice.grad.trace())
-    E_plus = scale_lattice(system, 1.0 + DELTA)
-    E_minus = scale_lattice(system, (1.0 - DELTA) / (1.0 + DELTA))
-    dE_numerical = (E_plus - E_minus) / (2.0 * DELTA)
-    print(f"dE/d(delta): analytic {dE_analytic:.8f}, numerical {dE_numerical:.8f} Eh")
-    assert abs(dE_analytic - dE_numerical) < 1e-3
+    assert lattice.grad is not None
+
+    # Generate a commensurate perturbation:
+    torch.manual_seed(0)
+    strain = system.symmetries.symmetrize_matrix(torch.rand_like(lattice.grad))
+    dRbasis = strain @ lattice.Rbasis
+    print(lattice.grad)
+
+    def step(scale: float) -> float:
+        lattice.update(lattice.Rbasis + scale * dRbasis, report_change=False)
+        system.coulomb.update_lattice_dependent()
+        system.energy.clear()
+        system.ions.update(system)
+        system.electrons.C = system.electrons.C.orthonormalize()
+        system.electrons.update(system)
+        return float(system.energy)
+
+    dE_analytic = float((lattice.grad * strain).sum())
+    DELTA = 5.0e-4
+    E_plus = step(DELTA)
+    E_minus = step(-2 * DELTA)
+    dE_numerical = (E_plus - E_minus) / (2 * DELTA)
+    dE_ratio = dE_analytic / dE_numerical
+    print(f"{system_name}: dE_ratio: {dE_ratio:.8f}")
+    assert abs(dE_ratio - 1.0) < 1e-3
