@@ -305,21 +305,19 @@ class Species:
         """Compute radial spline coefficients (density component, atom, lm)
         for density augmentation from atomic density matrix `rho` (spin, atom, i, j)."""
         # Symmetry of Gaunt coefficients + hermiticity of rho => only rho.real matters:
-        multipoles = torch.einsum("qLij, saij -> saqL", self.gaunt, rho.real)
-        multipoles = torch.einsum(
-            "ds, saqL -> daqL", _spin_map(rho.shape[0]), multipoles
+        spin_map = _spin_map(rho.shape[0])
+        return torch.einsum(
+            "cq, qLij, ds, saij -> cdaL", self.Q_coeff, self.gaunt, spin_map, rho.real
         )
-        # Combine radial functions on spline nodes (interpolation is linear):
-        return torch.einsum("cq, daqL -> cdaL", self.Q_coeff, multipoles)
 
     def radial_coefficients_grad(self, coeff_grad: torch.Tensor) -> torch.Tensor:
         """Gradient propagation from spline coefficients to atomic density matrix,
         corresponding to `radial_coefficients`."""
         Q_coeff = self.Q_coeff[: coeff_grad.shape[0]]  # rows used by Ginterp
-        multipoles_grad = torch.einsum("cq, cdaL -> daqL", Q_coeff, coeff_grad)
         spin_map = _spin_map(coeff_grad.shape[1])
-        multipoles_grad = torch.einsum("ds, daqL -> saqL", spin_map, multipoles_grad)
-        return torch.einsum("qLij, saqL -> saij", self.gaunt, multipoles_grad)
+        return torch.einsum(
+            "ds, qLij, cq, cdaL -> saij", spin_map, self.gaunt, Q_coeff, coeff_grad
+        )
 
 
 def _get_gaunt(ps: dft.ions.Pseudopotential, L_of_LM: torch.Tensor) -> torch.Tensor:
