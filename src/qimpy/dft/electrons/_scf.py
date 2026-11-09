@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 
 import torch
 import torch.distributed as dist
@@ -8,6 +9,7 @@ from qimpy.io import CheckpointPath, CheckpointContext
 from qimpy.mpi import globalreduce
 from qimpy.algorithms import Pulay
 from qimpy.grid import FieldH
+from qimpy.profiler import StopWatch
 
 
 class SCF(Pulay[FieldH]):
@@ -112,6 +114,10 @@ class SCF(Pulay[FieldH]):
             mix_fraction=mix_fraction,
         )
 
+        # Profiling controls (useful when optimizing electron operator implementations):
+        self._profile_scf_only = os.environ.get("QIMPY_PROFILE_SCF_ONLY", "0") != "0"
+        self._profile_scf_cycle = int(os.environ.get("QIMPY_PROFILE_SCF_CYCLE", "0"))
+
     def _save_checkpoint(
         self, cp_path: CheckpointPath, context: CheckpointContext
     ) -> list[str]:
@@ -167,6 +173,17 @@ class SCF(Pulay[FieldH]):
         deig = (eig_cur - eig_prev).abs()
         deig_max = globalreduce.max(deig, electrons.group)
         return deig_max[None]
+
+    def report(self, i_iter: int) -> None:
+        if self._profile_scf_only:  # Stopwatch only after SCF 0 (of final ionic step)
+            StopWatch._process_events()
+            StopWatch._stats.clear()
+        if i_iter_profile := self._profile_scf_cycle:
+            # Markers for detailed cuda profiling of a single SCF cycle:
+            if i_iter == i_iter_profile:
+                torch.cuda.nvtx.range_push("SCFn")
+            if i_iter == i_iter_profile:
+                torch.cuda.nvtx.range_pop()
 
     @property
     def energy(self) -> Energy:
