@@ -15,28 +15,7 @@ ATOM_CHUNK_BYTES: int = 300_000_000  #: Memory limit on per-atom-lm intermediate
 
 
 class Augmentation:
-    r"""Augmentation charges of ultrasoft pseudopotentials on the density grid.
-
-    Atom a at :math:`R_a` carries the augmentation density
-    :math:`\sum_{ij} \rho^\beta_{a,ij} Q_{ij}(r - R_a)`, where
-    :math:`Q_{ij}(r) = \sum_{LM} c^{LM}_{ij} Q^L_{ij}(r) Y_{LM}(\hat{r})` (real Gaunt
-    coefficients c) and :math:`\rho^\beta_{a,ij} = \sum_{kn} w_k f_{kn}
-    \langle\psi_{kn}|\beta_{ai}\rangle \langle\beta_{aj}|\psi_{kn}\rangle` is the
-    atomic density matrix in the projector basis (from the cached projections).
-
-    In reciprocal space, `density` is a chain of linear maps:
-    rho_beta -> multipoles (Gaunt) -> spline coefficients (sum over Q functions)
-    -> radial parts at \|G\| (interpolate) -> n_aug(G) (harmonics and phases).
-    Radial functions are combined before interpolating, so that each G evaluates
-    one spline per (atom, LM) instead of one per (i, j, L). `D_aug` applies the
-    transposed chain to a potential, and `accumulate_geometry_grad` differentiates
-    the last two maps with respect to atom positions and strain.
-
-    Projections use the phase convention of `Ions.get_projectors`, i^l instead of
-    the (-i)^l of the Fourier transform, i.e. an extra (-1)^l per projector.
-    The harmonics here carry i^L likewise, and since L = l_i + l_j (mod 2) in the
-    Gaunt coefficients, the extra (-1)^(l_i + l_j + L) = 1 cancels throughout.
-    """
+    """Density augmentation from ultrasoft pseudopotentials on charge density grid."""
 
     ions: dft.ions.Ions  #: Ions whose augmentation charges these are
     grid: Grid  #: Density grid (local half-space portion used)
@@ -51,9 +30,7 @@ class Augmentation:
     D_aug: torch.Tensor  #: Augmentation of `Ions.D_all`
 
     def __init__(self, ions: dft.ions.Ions, grid: Grid, q_all: torch.Tensor) -> None:
-        """Prepare augmentation for the current `ions` positions on `grid`.
-        Requires the radial transforms of the augmentation functions,
-        which are updated with the local pseudopotential terms."""
+        """Prepare density augmentation on `grid` for atom positions in `ions`."""
         self.ions = ions
         self.grid = grid
         self.iG = grid.get_mesh("H").to(torch.double)
@@ -62,14 +39,6 @@ class Augmentation:
         self.Ginterp = Interpolator(Gmag, RadialFunction.DG, need_grad=True)
 
         # Augment only within the density cutoff sphere, |G|^2 <= 2 grid.ke_cutoff
-        # (or the sphere inscribed in the FFT box, without its Nyquist planes, if
-        # only the grid shape is specified). Symmetry images of these G stay in the
-        # sphere, so the augmentation density is exactly symmetric; in the corners
-        # of the box, field symmetrization would alias it instead (it wraps images
-        # that leave the box back into it). Augmenting the full box, as JDFTx does,
-        # makes symmetry-reduced and full k-mesh runs differ (3e-6 Eh for Si at
-        # 100 Eh, in both codes), versus 2e-12 Eh within the sphere. Results then
-        # depend on the density cutoff alone, not on the FFT box, as in QE.
         R_lengths = grid.lattice.Rbasis.norm(dim=0)
         G_inscribed = np.pi * min(n / float(a) for n, a in zip(grid.shape, R_lengths))
         self.in_sphere = Gmag < G_inscribed
@@ -111,39 +80,19 @@ class Augmentation:
             return Y[is_even], Y[~is_even]
 
     @stopwatch
-    def density_matrix(
-        self, beta_C: torch.Tensor, wf: torch.Tensor, group: dist.ProcessGroup
-    ) -> list[torch.Tensor]:
-        """Atomic density matrix in the projector basis for each ultrasoft species,
-        rho[s, a, i, j] = sum_{k, n} wf[s, k, n] conj(beta_C[s, k, (a, i), n])
-        beta_C[s, k, (a, j), n] (n_spins x n_atoms x n_proj x n_proj), from the
-        projections `beta_C` = C.proj and weights `wf` = fillings times k-point
-        weights (n_spins x nk x n_bands). The k sum is reduced over `group`.
-        (Projections are complete in bands and basis on each process already.)"""
-        rho_beta = []
-        for species in self.species:
-            beta_C_cur = beta_C[:, :, species.proj_slice].unflatten(
-                2, (species.n_atoms, species.n_proj)
-            )  # spin, k, atom, projector, band
-            rho = torch.einsum(
-                "skain, skajn -> saij",
-                beta_C_cur.conj(),
-                beta_C_cur * wf[:, :, None, None, :],
-            )
-            dist.all_reduce(rho, group=group)
-            rho_beta.append(rho)
-        return rho_beta
-
-    @stopwatch
-    def density(self, rho_beta: list[torch.Tensor]) -> FieldH:
-        """Augmentation density from the atomic density matrices `rho_beta` (per
-        species, from `density_matrix`). The result has the density components of
-        `Electrons.n_tilde`: n, and M_z if spin-polarized (collinear)."""
-        n_spins = rho_beta[0].shape[0]
+    def density(self, C: dft.electrons.Wavefunction, f: torch.Tensor) -> FieldH:
+        """Compute density augmentation from wavefunction projections `beta_C`
+        and weighted occupations `wf`, with k-point reduction over `group_k`."""
+        beta_C = C.proj
+        basis = C.basis
+        wf = f * basis.w_sk
+        group_k = basis.kpoints.group
+        n_spins = beta_C.shape[0]
         n_aug = FieldH(self.grid, shape_batch=(n_spins,))
         inv_volume = 1.0 / self.grid.lattice.volume
-        for species, rho in zip(self.species, rho_beta):
-            coeff = species.radial_coefficients(rho)  # spline, density, atom, lm
+        for species in self.species:
+            species.update_density_matrix(beta_C, wf, group_k)
+            coeff = species.radial_coefficients()  # spline, density, atom, lm
             for atoms in species.atom_chunks(n_spins):
                 radial = self.Ginterp(coeff[:, :, atoms])  # density, atom, LM, grid
                 T = species.combine(radial, self.Y)  # density, atom, grid
@@ -153,12 +102,8 @@ class Augmentation:
 
     @stopwatch
     def density_grad(self, V: FieldH) -> None:
-        """Augmentation part of the nonlocal matrix, from the Kohn-Sham potential V
-        (i.e. `Electrons.n_tilde.grad`, with components n and M_z if polarized):
-        D_aug[s, (a, i), (a, j)] = int V_s(r) Q_ij(r - R_a) d^3r, which is also
-        dE / d rho_beta[s, a, i, j]. Obtained by transposing each map in `density`.
-        Returns the block-diagonal matrix on all projectors, n_spins x 1 x
-        n_projectors x n_projectors (broadcast over k), to add to `Ions.D_all`."""
+        """Gradient propagation corresponding to `density`, leading to matrix `D_aug`
+        on all projectors (n_spins x 1 x n_proj x n_proj) that adds to `Ions.D_all`."""
         n_spins = V.data.shape[0]
         n_proj_tot = self.ions.n_projectors
         D_aug = torch.zeros(
@@ -186,12 +131,8 @@ class Augmentation:
         self.D_aug = D_aug
 
     @stopwatch(name="Augmentation.geometry_grad")
-    def accumulate_geometry_grad(self, V: FieldH, rho_beta: list[torch.Tensor]) -> None:
-        """Accumulate force and stress contributions of the augmentation charges
-        moving with the ions and the lattice, at fixed `rho_beta`, in the potential
-        V (see `D_aug`). Changes of rho_beta itself (through the projectors) are
-        accounted for by `Ions.beta.grad`. As in `Ions.accumulate_geometry_grad`,
-        each is collected only if the corresponding `requires_grad` is enabled."""
+    def accumulate_geometry_grad(self, V: FieldH) -> None:
+        """Accumulate force and stress contributions due to density augmentation."""
         ions = self.ions
         lattice = self.grid.lattice
         need_forces = ions.positions.requires_grad
@@ -209,8 +150,8 @@ class Augmentation:
             Ghat = self.G * torch.where(Gmag == 0.0, 0.0, 1.0 / Gmag)[..., None]
             Y_prime = self._get_harmonics(prime=True)
 
-        for species, rho in zip(self.species, rho_beta):
-            coeff = species.radial_coefficients(rho)
+        for species in self.species:
+            coeff = species.radial_coefficients()  # at current density matrix
             for atoms in species.atom_chunks(n_spins * (4 if need_stress else 1)):
                 radial = self.Ginterp(coeff[:, :, atoms])  # d, atom, LM, grid
                 U = V_weighted[:, None] * species.phase(atoms)  # d, atom, grid
@@ -257,6 +198,7 @@ class Species:
     n_even_LM: int  #: Number of (L, M) at even L
     n_odd_LM: int  #: Number of (L, M) at odd L
     gaunt: torch.Tensor  #: Gaunt map to product functions: (n_Q, n_LM, n_proj, n_proj)
+    rho: torch.Tensor  #: Atomic density matrix in projector basis
 
     def __init__(
         self,
@@ -281,14 +223,23 @@ class Species:
     def n_atoms(self) -> int:
         return self.atom_slice.stop - self.atom_slice.start
 
-    def radial_coefficients(self, rho: torch.Tensor) -> torch.Tensor:
+    def update_density_matrix(
+        self, beta_C: torch.Tensor, wf: torch.Tensor, group_k: dist.ProcessGroup
+    ) -> None:
+        """Set atomic density matrix from wavefunction projections `beta_C`
+        and weighted occupations `wf`."""
+        proj = beta_C[:, :, self.proj_slice].unflatten(2, (self.n_atoms, self.n_proj))
+        self.rho = torch.einsum("skain, skn, skajn -> saij", proj.conj(), wf, proj)
+        dist.all_reduce(self.rho, group=group_k)
+
+    def radial_coefficients(self) -> torch.Tensor:
         """Compute radial spline coefficients (density component, atom, lm)
         for density augmentation from atomic density matrix `rho` (spin, atom, i, j)."""
         # Symmetry of Gaunt coefficients + hermiticity of rho => only rho.real matters:
-        spin_map = _spin_map(rho.shape[0])
+        spin_map = _spin_map(self.rho.shape[0])
         Q_coeff = self.ps.Q.f_tilde_coeff
         return torch.einsum(
-            "cq, qLij, ds, saij -> cdaL", Q_coeff, self.gaunt, spin_map, rho.real
+            "cq, qLij, ds, saij -> cdaL", Q_coeff, self.gaunt, spin_map, self.rho.real
         )
 
     def radial_coefficients_grad(self, coeff_grad: torch.Tensor) -> torch.Tensor:

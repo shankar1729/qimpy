@@ -349,9 +349,7 @@ class Electrons(TreeNode):
         need_Mvec = self.spinorial and self.spin_polarized
         self.n_tilde = (~(self.basis.collect_density(C, f, need_Mvec))).to(system.grid)
         if (augmentation := system.ions.augmentation) is not None:
-            wf = f * self.basis.w_sk
-            rho_beta = augmentation.density_matrix(C.proj, wf, self.kpoints.group)
-            self.n_tilde += augmentation.density(rho_beta)
+            self.n_tilde += augmentation.density(C, f)
         self.n_tilde.symmetrize()
         if self.xc.need_tau:
             self.tau_tilde = self.n_tilde.zeros_like()
@@ -529,8 +527,7 @@ class Electrons(TreeNode):
 
         # Contributions from density augmentation:
         if augmentation is not None:
-            rho_beta = augmentation.density_matrix(C.proj, wf, self.kpoints.group)
-            augmentation.accumulate_geometry_grad(self.n_tilde.grad, rho_beta)
+            augmentation.accumulate_geometry_grad(self.n_tilde.grad)
 
     def run(self, system: dft.System, suffix: str = "") -> None:
         """Run any actions specified in the input."""
