@@ -1,5 +1,4 @@
 from __future__ import annotations
-from dataclasses import dataclass
 
 import numpy as np
 import torch
@@ -10,6 +9,7 @@ from qimpy.profiler import stopwatch
 from qimpy.grid import Grid, FieldH
 from qimpy.math import RadialFunction, spherical_harmonics as sh
 from qimpy.math.quintic_spline import Interpolator
+from . import Pseudopotential
 
 ATOM_CHUNK_BYTES: int = 1 << 28  #: Memory target of per-atom grid intermediates
 
@@ -48,7 +48,8 @@ class Augmentation:
     L_max: int  #: Largest L of all augmentation functions
     LM_order: torch.Tensor  #: Order of (L, M) used here: even L first, then odd L
     n_even: int  #: Number of (L, M) with even L (leading block in `LM_order`)
-    Y: torch.Tensor  #: Real solid harmonics times sign of i^L, in `LM_order`
+    Y: tuple[torch.Tensor, torch.Tensor]  #: Even and odd signed harmonics
+    Y_prime: tuple[torch.Tensor, torch.Tensor]  #: Spatial derivatives of Y
     q_all: torch.Tensor  #: Overlap augmentation
     D_aug: torch.Tensor  #: Augmentation of `Ions.D_all`
 
@@ -87,12 +88,10 @@ class Augmentation:
             int(ps.Q.l.max()) for ps in ions.pseudopotentials if (ps.Q is not None)
         )
         L = torch.arange(self.L_max + 1, device=rc.device)
-        L_of_LM = L.repeat_interleave(2 * L + 1)
-        self.LM_order = torch.argsort(L_of_LM % 2, stable=True)
-        self.n_even = int((L_of_LM % 2 == 0).sum().item())
-        self._i_L_sign = ((-1.0) ** (L_of_LM // 2))[self.LM_order]  # i^L / i^(L%2)
-        self.Y = self._signed(sh.get_harmonics(self.L_max, self.G)[self.LM_order])
-        self.Y *= self.in_sphere  # restricts density, D_aug and forces to the sphere
+        self.L_of_LM = L.repeat_interleave(2 * L + 1)
+        self.LM_order = torch.argsort(self.L_of_LM % 2, stable=True)
+        self.n_even = int((self.L_of_LM % 2 == 0).sum().item())
+        self.Y = self._get_harmonics()
         self.q_all = q_all
         self.D_aug = torch.zeros_like(q_all)
 
@@ -103,14 +102,24 @@ class Augmentation:
             n_atoms = atom_slice.stop - atom_slice.start
             proj_slice = slice(i_proj_start, i_proj_start + n_atoms * ps.n_projectors)
             i_proj_start = proj_slice.stop
-            if ps.Q is None:
-                continue  # norm-conserving species (in a mixed calculation)
-            gaunt = _get_gaunt(ps, L_of_LM)[:, self.LM_order]
-            self.species.append(
-                Species(
-                    atom_slice, proj_slice, ps.n_projectors, gaunt, ps.Q.f_tilde_coeff
-                )
-            )
+            if ps.Q is not None:
+                self.species.append(Species(atom_slice, proj_slice, ps, self))
+
+    def _get_harmonics(self, prime: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
+        """Get harmonics sorted by even and odd, and with i^(L - L%2) sign."""
+        L = torch.arange(self.L_max + 1, device=rc.device)
+        L = L.repeat_interleave(2 * L + 1)  # repeat for M
+        is_even = L % 2 == 0
+        if prime:
+            Y_prime = sh.get_harmonics_and_prime(self.L_max, self.G)[1]
+            Y_prime *= self.in_sphere  # restrict to ke-cutoff sphere
+            Y_prime[:, (L // 2) % 2 == 1] *= -1.0  # i^L relative to L = 0, 1
+            return Y_prime[:, is_even], Y_prime[:, ~is_even]
+        else:
+            Y = sh.get_harmonics(self.L_max, self.G)
+            Y *= self.in_sphere  # restrict to ke-cutoff sphere
+            Y[(L // 2) % 2 == 1] *= -1.0  # i^L relative to L = 0, 1 for even, odd L
+            return Y[is_even], Y[~is_even]
 
     @stopwatch
     def density_matrix(
@@ -148,7 +157,7 @@ class Augmentation:
             coeff = species.radial_coefficients(rho)  # spline, density, atom, lm
             for atoms in self._atom_chunks(species, n_spins):
                 radial = self.Ginterp(coeff[:, :, atoms])  # density, atom, LM, grid
-                T = self._combine(radial, self.Y)  # density, atom, grid
+                T = self._combine(radial)  # density, atom, grid
                 phase = self._phase(species, atoms)  # atom, grid
                 n_aug.data += inv_volume * torch.einsum("da..., a... -> d...", T, phase)
         return n_aug
@@ -171,7 +180,7 @@ class Augmentation:
             coeff_grad = []
             for atoms in self._atom_chunks(species, n_spins):
                 U = V_weighted[:, None] * self._phase(species, atoms)  # d, atom, grid
-                radial_grad = self._combine_adjoint(U, self.Y)  # d, atom, LM, grid
+                radial_grad = self._combine_adjoint(U)  # d, atom, LM, grid
                 coeff_grad.append(self.Ginterp.grad(radial_grad))
             D = species.radial_coefficients_grad(torch.cat(coeff_grad, dim=2))
             if self.grid.is_split:
@@ -209,8 +218,7 @@ class Augmentation:
             Gmag = self.G.norm(dim=-1)
             Ginterp_prime = Interpolator(Gmag, RadialFunction.DG, deriv=1)
             Ghat = self.G * torch.where(Gmag == 0.0, 0.0, 1.0 / Gmag)[..., None]
-            Y_prime = sh.get_harmonics_and_prime(self.L_max, self.G)[1]
-            Y_prime = self._signed(Y_prime[:, self.LM_order]) * self.in_sphere
+            self.Y_prime = self._get_harmonics(prime=True)
 
         for species, rho in zip(self.species, rho_beta):
             coeff = species.radial_coefficients(rho)
@@ -220,7 +228,7 @@ class Augmentation:
                 radial = self.Ginterp(coeff[:, :, atoms])  # d, atom, LM, grid
                 U = V_weighted[:, None] * self._phase(species, atoms)  # d, atom, grid
                 # E = sum Re(U T), with d(phase)/d(position) = -2 pi i iG phase:
-                UT = U * self._combine(radial, self.Y)
+                UT = U * self._combine(radial)
                 if need_forces:
                     atom_start = species.atom_slice.start
                     pos_grad[atom_start + atoms.start : atom_start + atoms.stop] += (
@@ -233,10 +241,10 @@ class Augmentation:
                     # Strain changes G -> (1 - strain) G at fixed phases, giving
                     # d(f(|G|) Y(G))/d(strain_ij) = -G_j d(f Y)/dG_i:
                     radial_prime = Ginterp_prime(coeff[:, :, atoms])
-                    T_prime_radial = self._combine(radial_prime, self.Y)
+                    T_prime_radial = self._combine(radial_prime)
                     for i_dir in range(3):
                         dT_dG = T_prime_radial * Ghat[..., i_dir] + self._combine(
-                            radial, Y_prime[i_dir]
+                            radial, i_dir
                         )
                         lattice_grad[i_dir] -= torch.einsum(
                             "da..., ...j -> j", (U * dT_dG).real, self.G
@@ -249,28 +257,27 @@ class Augmentation:
             ions.positions.grad += pos_grad
         if need_stress:
             lattice.grad += lattice_grad
+            del self.Y_prime  # save memory
 
-    def _signed(self, Y: torch.Tensor) -> torch.Tensor:
-        """Multiply harmonics `Y` (LM along dimension -4, in `LM_order`) by the sign
-        of i^L, leaving the factor i for odd L to `_combine`."""
-        return Y * self._i_L_sign.view(-1, 1, 1, 1)
-
-    def _combine(self, radial: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
-        """Complex sum over LM of radial[d, a, LM, grid] i^L Y_LM[grid], with the
-        signed real harmonics `Y` (see `_signed`): real part from even L and
-        imaginary part from odd L."""
+    def _combine(self, radial: torch.Tensor, prime_dir: int = -1) -> torch.Tensor:
+        """Complex sum over LM of radial[d, a, LM, grid] i^L Y_LM[grid], with signed
+        real harmonics `Y`: real part from even L and imaginary part from odd L."""
         n = self.n_even
+        if prime_dir >= 0:
+            Yeven, Yodd = self.Y_prime[0][prime_dir], self.Y_prime[1][prime_dir]
+        else:
+            Yeven, Yodd = self.Y
         return torch.complex(
-            torch.einsum("daL..., L... -> da...", radial[:, :, :n], Y[:n]),
-            torch.einsum("daL..., L... -> da...", radial[:, :, n:], Y[n:]),
+            torch.einsum("daL..., L... -> da...", radial[:, :, :n], Yeven),
+            torch.einsum("daL..., L... -> da...", radial[:, :, n:], Yodd),
         )
 
-    def _combine_adjoint(self, U: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
+    def _combine_adjoint(self, U: torch.Tensor) -> torch.Tensor:
         """Transpose of `_combine` for the real inner product sum Re(U T):
         d/d(radial) of sum Re(U[d, a, grid] T[d, a, grid]), which is real."""
-        n = self.n_even
+        Yeven, Yodd = self.Y
         return torch.cat(
-            (U.real[:, :, None] * Y[:n], -U.imag[:, :, None] * Y[n:]), dim=2
+            (U.real[:, :, None] * Yeven, -U.imag[:, :, None] * Yodd), dim=2
         )
 
     def _phase(self, species: Species, atoms: slice) -> torch.Tensor:
@@ -282,21 +289,33 @@ class Augmentation:
     def _atom_chunks(self, species: Species, n_batch: int) -> list[slice]:
         """Split the atoms of `species` so that per-chunk grid intermediates of
         n_batch x LM real values per atom and grid point fit `ATOM_CHUNK_BYTES`."""
-        bytes_per_atom = 8 * n_batch * max(1, self.Y.numel())  # (slab may be empty)
+        bytes_per_atom = 8 * n_batch * max(1, self.Y[0].numel())  # (slab may be empty)
         n_chunk = max(1, ATOM_CHUNK_BYTES // bytes_per_atom)
         n_atoms = species.n_atoms
         return [slice(i, min(i + n_chunk, n_atoms)) for i in range(0, n_atoms, n_chunk)]
 
 
-@dataclass
 class Species:
     """Augmentation data of one ultrasoft species."""
 
     atom_slice: slice  #: Atoms of this species within `Ions`
     proj_slice: slice  #: Projectors of these atoms within `Ions.beta` and `D_all`
+    ps: Pseudopotential  #: Corresponding pseudopotential
     n_proj: int  #: Number of projectors per atom (including m)
     gaunt: torch.Tensor  #: Gaunt tensor (see `_get_gaunt`), in `LM_order`
-    Q_coeff: torch.Tensor  #: Spline coefficients of Q^L_ij(G) / G^L (n_spline x n_Q)
+
+    def __init__(
+        self,
+        atom_slice: slice,
+        proj_slice: slice,
+        ps: Pseudopotential,
+        augmentation: Augmentation,
+    ) -> None:
+        self.atom_slice = atom_slice
+        self.proj_slice = proj_slice
+        self.ps = ps
+        self.n_proj = ps.n_projectors
+        self.gaunt = _get_gaunt(ps, augmentation.L_of_LM)[:, augmentation.LM_order]
 
     @property
     def n_atoms(self) -> int:
@@ -307,14 +326,15 @@ class Species:
         for density augmentation from atomic density matrix `rho` (spin, atom, i, j)."""
         # Symmetry of Gaunt coefficients + hermiticity of rho => only rho.real matters:
         spin_map = _spin_map(rho.shape[0])
+        Q_coeff = self.ps.Q.f_tilde_coeff
         return torch.einsum(
-            "cq, qLij, ds, saij -> cdaL", self.Q_coeff, self.gaunt, spin_map, rho.real
+            "cq, qLij, ds, saij -> cdaL", Q_coeff, self.gaunt, spin_map, rho.real
         )
 
     def radial_coefficients_grad(self, coeff_grad: torch.Tensor) -> torch.Tensor:
         """Gradient propagation from spline coefficients to atomic density matrix,
         corresponding to `radial_coefficients`."""
-        Q_coeff = self.Q_coeff[: coeff_grad.shape[0]]  # rows used by Ginterp
+        Q_coeff = self.ps.Q.f_tilde_coeff[: coeff_grad.shape[0]]  # rows used by Ginterp
         spin_map = _spin_map(coeff_grad.shape[1])
         return torch.einsum(
             "ds, qLij, cq, cdaL -> saij", spin_map, self.gaunt, Q_coeff, coeff_grad
