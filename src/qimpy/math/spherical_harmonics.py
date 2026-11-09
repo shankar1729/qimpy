@@ -1,4 +1,7 @@
 """Calculate spherical harmonics and their product expansions."""
+
+from functools import cache
+
 import torch
 
 from qimpy import rc
@@ -16,35 +19,25 @@ __all__ = [
 ]
 
 
-# Versions of shdata converted to torch.Tensors on appropriate device
-_YLM_RECUR: list[torch.Tensor] = []
-_YLM_PROD: dict[tuple[int, int], tuple[torch.Tensor, torch.Tensor]] = {}
 L_MAX: int = shdata.L_MAX  #: Maximum l for calculation of harmonics
 L_MAX_HLF: int = shdata.L_MAX_HLF  #: Maximum l of harmonics in products
 
 
-def _initialize_device(device: torch.device) -> None:
-    """Initialize spherical harmonic data as torch tensors on device."""
-    global _YLM_RECUR, _YLM_PROD
-    # Recurrence coefficients:
-    _YLM_RECUR.clear()
+@cache
+def _get_YLM_RECUR() -> list[torch.Tensor]:
+    """Get spherical harmonic coefficients as tensors on target device."""
+    result = []
     for l, (i1, i2, coeff) in enumerate(shdata.YLM_RECUR):
         if l < 2:
-            _YLM_RECUR.append(torch.tensor(coeff, device=device))
+            result.append(torch.tensor(coeff, device=rc.device))
         else:
-            indices = torch.tensor((i1, i2), device=device)
-            _YLM_RECUR.append(
+            indices = torch.tensor((i1, i2), device=rc.device)
+            result.append(
                 torch.sparse_coo_tensor(
-                    indices, coeff, size=(2 * l + 1, 3 * (2 * l - 1)), device=device
+                    indices, coeff, size=(2 * l + 1, 3 * (2 * l - 1)), device=rc.device
                 )
             )
-    # Product coefficients:
-    _YLM_PROD.clear()
-    for ilm_pair, (ilm, coeff) in shdata.YLM_PROD.items():
-        _YLM_PROD[ilm_pair] = (
-            torch.tensor(ilm, device=device),
-            torch.tensor(coeff, device=device),
-        )
+    return result
 
 
 def get_harmonics(l_max: int, r: torch.Tensor) -> torch.Tensor:
@@ -63,8 +56,7 @@ def get_harmonics_and_prime(
     Second return value is the derivative with respect to `r`, with the direction
     as a first additional dimension of length 3. (Empty if `compute_prime` is False.)
     """
-    if not _YLM_PROD:
-        _initialize_device(r.device)
+    YLM_RECUR = _get_YLM_RECUR()
     assert l_max <= shdata.L_MAX
     shape = r.shape[:-1]  # shape of r except for Cartesian direction
     Y = torch.empty(((l_max + 1) ** 2,) + shape, dtype=r.dtype, device=r.device)
@@ -75,17 +67,17 @@ def get_harmonics_and_prime(
     )
     if l_max >= 0:
         # l = 0: constant
-        Y[0] = _YLM_RECUR[0]
+        Y[0] = YLM_RECUR[0]
         if compute_prime:
             Y_prime[:, 0] = 0.0
     if l_max >= 1:
         # l = 1: proportional to (y, z, x) for m = (-1, 0, +1):
         lm_slice = slice(1, 4)
-        Y1 = _YLM_RECUR[1] * r.flatten(0, -2).T[(1, 2, 0), :]
+        Y1 = YLM_RECUR[1] * r.flatten(0, -2).T[(1, 2, 0), :]
         Y[lm_slice] = Y1.unflatten(1, shape)
         if compute_prime:
             eye3 = torch.eye(3, dtype=r.dtype, device=r.device)
-            Y1_prime = _YLM_RECUR[1] * eye3[:, (1, 2, 0), None]
+            Y1_prime = YLM_RECUR[1] * eye3[:, (1, 2, 0), None]
             Y_prime[:, lm_slice] = Y1_prime.unflatten(2, (1,) * len(shape))
             Yprev_prime = Y1_prime
         Yprev = Y1
@@ -93,14 +85,14 @@ def get_harmonics_and_prime(
         # l > 1: compute from product of harmonics at l = 1 and l - 1:
         lm_slice = slice(l**2, (l + 1) ** 2)
         Yprod = Yprev[:, None] * Y1  # outer product of l = 1 and l - 1
-        Yl = _YLM_RECUR[l] @ Yprod.flatten(0, 1)
+        Yl = YLM_RECUR[l] @ Yprod.flatten(0, 1)
         Y[lm_slice] = Yl.unflatten(1, shape)
         if compute_prime:
             Yprod_prime = (
                 Yprev_prime[:, :, None] * Y1 + Yprev[:, None] * Y1_prime[:, None]
             )
             Yl_prime = (
-                (_YLM_RECUR[l] @ Yprod_prime.flatten(1, 2).transpose(0, 1).flatten(1))
+                (YLM_RECUR[l] @ Yprod_prime.flatten(1, 2).transpose(0, 1).flatten(1))
                 .unflatten(1, (3, -1))
                 .transpose(0, 1)
             )
@@ -129,16 +121,16 @@ def get_harmonics_tilde_and_prime(
     return Y * phase, Y_prime * phase
 
 
+@cache
 def get_product_coefficients(l_max: int) -> torch.Tensor:
     """Expansion coefficients of products of real harmonics (real Gaunt coefficients)
-    :math:`Y_{lm} Y_{l'm'} = \\sum_{LM} c_{lm,l'm'}^{LM} Y_{LM}` for l, l' <= `l_max`.
-    The result is a dense tensor c of shape ((l_max+1)^2, (l_max+1)^2, (2 l_max+1)^2),
-    with each (l, m) index l(l+1)+m, as for the harmonics above."""
+    for l <= `l_max`, as a tensor of shape ((l_max+1)^2, (l_max+1)^2, (2 l_max+1)^2),
+    with each (l, m) indexed by l(l+1)+m, as for the harmonics above."""
     assert l_max <= shdata.L_MAX_HLF
     n_lm = (l_max + 1) ** 2
     result = torch.zeros((n_lm, n_lm, (2 * l_max + 1) ** 2), device=rc.device)
     for (i_lm1, i_lm2), (i_LM, coeff) in shdata.YLM_PROD.items():
-        if i_lm1 < n_lm:  # table has i_lm1 >= i_lm2 only; product is symmetric:
+        if i_lm1 < n_lm:  # YLM_PROD stores only i_lm1 >= i_lm2; result is symmetric
             result[i_lm1, i_lm2, i_LM] = torch.tensor(coeff, device=rc.device)
             result[i_lm2, i_lm1, i_LM] = result[i_lm1, i_lm2, i_LM]
     return result
