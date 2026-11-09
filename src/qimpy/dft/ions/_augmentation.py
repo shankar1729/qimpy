@@ -11,7 +11,7 @@ from qimpy.math import RadialFunction, spherical_harmonics as sh
 from qimpy.math.quintic_spline import Interpolator
 from . import Pseudopotential
 
-ATOM_CHUNK_BYTES: int = 1 << 28  #: Memory target of per-atom grid intermediates
+ATOM_CHUNK_BYTES: int = 300_000_000  #: Memory limit on per-atom-lm intermediates
 
 
 class Augmentation:
@@ -144,10 +144,10 @@ class Augmentation:
         inv_volume = 1.0 / self.grid.lattice.volume
         for species, rho in zip(self.species, rho_beta):
             coeff = species.radial_coefficients(rho)  # spline, density, atom, lm
-            for atoms in self._atom_chunks(species, n_spins):
+            for atoms in species.atom_chunks(n_spins):
                 radial = self.Ginterp(coeff[:, :, atoms])  # density, atom, LM, grid
                 T = species.combine(radial, self.Y)  # density, atom, grid
-                phase = self._phase(species, atoms)  # atom, grid
+                phase = species.phase(atoms)  # atom, grid
                 n_aug.data += inv_volume * torch.einsum("da..., a... -> d...", T, phase)
         return n_aug
 
@@ -167,8 +167,8 @@ class Augmentation:
         V_weighted = V.data.conj() * self.grid.weight2H  # Hermitian-symmetry weights
         for species in self.species:
             coeff_grad = []
-            for atoms in self._atom_chunks(species, n_spins):
-                U = V_weighted[:, None] * self._phase(species, atoms)  # d, atom, grid
+            for atoms in species.atom_chunks(n_spins):
+                U = V_weighted[:, None] * species.phase(atoms)  # d, atom, grid
                 radial_grad = species.combine_grad(U, self.Y)  # d, atom, LM, grid
                 coeff_grad.append(self.Ginterp.grad(radial_grad))
             D = species.radial_coefficients_grad(torch.cat(coeff_grad, dim=2))
@@ -211,11 +211,9 @@ class Augmentation:
 
         for species, rho in zip(self.species, rho_beta):
             coeff = species.radial_coefficients(rho)
-            for atoms in self._atom_chunks(
-                species, n_spins * (4 if need_stress else 1)
-            ):
+            for atoms in species.atom_chunks(n_spins * (4 if need_stress else 1)):
                 radial = self.Ginterp(coeff[:, :, atoms])  # d, atom, LM, grid
-                U = V_weighted[:, None] * self._phase(species, atoms)  # d, atom, grid
+                U = V_weighted[:, None] * species.phase(atoms)  # d, atom, grid
                 # E = sum Re(U T), with d(phase)/d(position) = -2 pi i iG phase:
                 UT = U * species.combine(radial, self.Y)
                 if need_forces:
@@ -247,20 +245,6 @@ class Augmentation:
         if need_stress:
             lattice.grad += lattice_grad
 
-    def _phase(self, species: Species, atoms: slice) -> torch.Tensor:
-        """Translation phases (atom, grid) of `atoms` (a slice within `species`)."""
-        start = species.atom_slice.start
-        atom_slice = slice(start + atoms.start, start + atoms.stop)
-        return self.ions.translation_phase(self.iG, atom_slice).permute(3, 0, 1, 2)
-
-    def _atom_chunks(self, species: Species, n_batch: int) -> list[slice]:
-        """Split the atoms of `species` so that per-chunk grid intermediates of
-        n_batch x LM real values per atom and grid point fit `ATOM_CHUNK_BYTES`."""
-        bytes_per_atom = 8 * n_batch * max(1, self.Y[0].numel())  # (slab may be empty)
-        n_chunk = max(1, ATOM_CHUNK_BYTES // bytes_per_atom)
-        n_atoms = species.n_atoms
-        return [slice(i, min(i + n_chunk, n_atoms)) for i in range(0, n_atoms, n_chunk)]
-
 
 class Species:
     """Augmentation data of one ultrasoft species."""
@@ -268,6 +252,7 @@ class Species:
     atom_slice: slice  #: Atoms of this species within `Ions`
     proj_slice: slice  #: Projectors of these atoms within `Ions.beta` and `D_all`
     ps: Pseudopotential  #: Corresponding pseudopotential
+    augmentation: Augmentation  #: Parent augemntation object for shared quantities
     n_proj: int  #: Number of projectors per atom (including m)
     n_even_LM: int  #: Number of (L, M) at even L
     n_odd_LM: int  #: Number of (L, M) at odd L
@@ -283,6 +268,7 @@ class Species:
         self.atom_slice = atom_slice
         self.proj_slice = proj_slice
         self.ps = ps
+        self.augmentation = augmentation
         self.n_proj = ps.n_projectors
 
         # Split gaunt coefficients into even and odd pieces:
@@ -334,6 +320,23 @@ class Species:
         n_odd = self.n_odd_LM
         U = U[:, :, None]  # add broadcasting dimensions for below
         return torch.cat((U.real * Y[0][:n_even], -U.imag * Y[1][:n_odd]), dim=2)
+
+    def phase(self, atoms: slice) -> torch.Tensor:
+        """Translation phases (atom, grid) of `atoms` (slice within `atom_slice`)."""
+        iG = self.augmentation.iG
+        ions = self.augmentation.ions
+        start = self.atom_slice.start
+        atom_slice_sub = slice(start + atoms.start, start + atoms.stop)
+        return ions.translation_phase(iG, atom_slice_sub).permute(3, 0, 1, 2)
+
+    def atom_chunks(self, n_batch: int) -> list[slice]:
+        """Split the atoms of `species` so that per-chunk grid intermediates of
+        n_batch x LM real values per atom and grid point fit `ATOM_CHUNK_BYTES`."""
+        nG = np.prod(self.augmentation.grid.shapeH_mine)
+        bytes_per_atom = 8 * n_batch * max(1, nG * self.gaunt.shape[1])
+        n_chunk = max(1, ATOM_CHUNK_BYTES // bytes_per_atom)
+        n_atoms = self.n_atoms
+        return [slice(i, min(i + n_chunk, n_atoms)) for i in range(0, n_atoms, n_chunk)]
 
 
 def _spin_map(n_spins: int) -> torch.Tensor:
