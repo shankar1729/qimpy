@@ -61,7 +61,7 @@ class Augmentation:
         self.iG = grid.get_mesh("H").to(torch.double)
         self.G = self.iG @ grid.lattice.Gbasis.T
         Gmag = self.G.norm(dim=-1)
-        self.Ginterp = Interpolator(Gmag, RadialFunction.DG)
+        self.Ginterp = Interpolator(Gmag, RadialFunction.DG, need_grad=True)
 
         # Augment only within the density cutoff sphere, |G|^2 <= 2 grid.ke_cutoff
         # (or the sphere inscribed in the FFT box, without its Nyquist planes, if
@@ -172,9 +172,10 @@ class Augmentation:
             for atoms in self._atom_chunks(species, n_spins):
                 U = V_weighted[:, None] * self._phase(species, atoms)  # d, atom, grid
                 radial_grad = self._combine_adjoint(U, self.Y)  # d, atom, LM, grid
-                coeff_grad.append(self.Ginterp.adjoint(radial_grad))
+                coeff_grad.append(self.Ginterp.grad(radial_grad))
             D = species.radial_coefficients_grad(torch.cat(coeff_grad, dim=2))
-            if self.grid.group is not None:
+            if self.grid.is_split:
+                D = D.contiguous()
                 dist.all_reduce(D, group=self.grid.group)  # sum over local G
             # Write each atom's block on the diagonal (view the species block as
             # spin, atom, i, atom', j and set its atom = atom' diagonal):
@@ -240,7 +241,7 @@ class Augmentation:
                         lattice_grad[i_dir] -= torch.einsum(
                             "da..., ...j -> j", (U * dT_dG).real, self.G
                         )
-        if self.grid.group is not None:
+        if self.grid.is_split:
             dist.all_reduce(pos_grad, group=self.grid.group)
             dist.all_reduce(lattice_grad, group=self.grid.group)
         if need_forces:
@@ -343,8 +344,8 @@ def _get_gaunt(ps: dft.ions.Pseudopotential, L_of_LM: torch.Tensor) -> torch.Ten
 
 
 def _spin_map(n_spins: int) -> torch.Tensor:
-    """Map from spin channels (up, down) to the density components (n, M_z) stored
-    in `Electrons.n_tilde`: n = up + down and M_z = up - down."""
+    """Map from spin channels (up, down) to the density components (n, M_z).
+    (Currently, only supports non-spinorial modes.)"""
     if n_spins == 1:
         return torch.ones((1, 1), device=rc.device)
     return torch.tensor([[1.0, 1.0], [1.0, -1.0]], device=rc.device)

@@ -98,7 +98,7 @@ class Grid(TreeNode):
         self.n_procs, self.i_proc = (
             (1, 0) if (group is None) else (group.size(), group.rank())
         )
-        self.is_split = self.n_procs == 1
+        self.is_split = self.n_procs > 1
 
         # Select the relevant ke-cutoff:
         self.ke_cutoff = ke_cutoff if ke_cutoff else 0.0
