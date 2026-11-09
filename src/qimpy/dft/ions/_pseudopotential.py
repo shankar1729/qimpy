@@ -1,5 +1,5 @@
 from __future__ import annotations
-from functools import cache
+from functools import cache, cached_property
 import pathlib
 import os
 import re
@@ -9,7 +9,7 @@ import torch
 import torch.distributed as dist
 
 from qimpy import log, rc
-from qimpy.math import RadialFunction
+from qimpy.math import RadialFunction, spherical_harmonics as sh
 from qimpy.dft.ions import PseudoQuantumNumbers
 from qimpy.dft.ions._read_upf import read_upf
 from qimpy.dft.ions._read_uspp import read_uspp
@@ -175,6 +175,29 @@ class Pseudopotential:
             f"  Ultrasoft: {len(Q_f)} augmentation functions Q^L_ij(r) up to"
             f" L = {max(Q_l)}; max |q_ij - q_file| = {np.abs(q - q_file).max():.1e}"
         )
+
+    @cached_property
+    def gaunt(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Get Gaunt coefficients (n_Q x n_LM x n_proj x n_proj).
+        The result is split by even and odd L outputs, as used for augmentation."""
+        assert (self.Q is not None) and (self.Q_pair is not None)
+        pqn = self.pqn_beta
+        # Match projector pairs to radial functions:
+        i_rf, (i, j) = pqn.i_rf, self.Q_pair.T[..., None, None]
+        match = (i == i_rf.view(1, -1, 1)) & (j == i_rf.view(1, 1, -1))  # Q, proj, proj
+        match = match | match.transpose(1, 2)  # include i <-> j match
+        # Match angular momentum of radial functions:
+        L = torch.arange(self.Q.l.max().item() + 1, device=rc.device)
+        L = L.repeat_interleave(2 * L + 1)  # including repetitions for M
+        matchL = self.Q.l[:, None] == L[None, :]
+        match = match[:, None] & matchL[..., None, None]  # Q, LM, proj, proj
+        # Map product coefficients by projectors:
+        coeff = sh.get_product_coefficients(pqn.l_max)  # lm1, lm2, LM
+        coeff = coeff[pqn.i_lm][:, pqn.i_lm].permute(2, 0, 1)  # LM, proj, proj
+        # Expand to include radial functions:
+        result = coeff[None] * match
+        is_even = L % 2 == 0
+        return result[:, is_even], result[:, ~is_even]
 
     @property
     def n_projectors(self) -> int:
