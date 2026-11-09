@@ -40,7 +40,7 @@ class Augmentation:
 
     ions: dft.ions.Ions  #: Ions whose augmentation charges these are
     grid: Grid  #: Density grid (local half-space portion used)
-    species: list[_Species]  #: Data of each ultrasoft species
+    species: list[Species]  #: Data of each ultrasoft species
     iG: torch.Tensor  #: Local reciprocal lattice vectors (integer coordinates)
     G: torch.Tensor  #: Local reciprocal lattice vectors (Cartesian)
     Ginterp: Interpolator  #: Interpolates radial functions at \|G\|
@@ -107,7 +107,7 @@ class Augmentation:
                 continue  # norm-conserving species (in a mixed calculation)
             gaunt = _get_gaunt(ps, L_of_LM)[:, self.LM_order]
             self.species.append(
-                _Species(
+                Species(
                     atom_slice, proj_slice, ps.n_projectors, gaunt, ps.Q.f_tilde_coeff
                 )
             )
@@ -145,7 +145,7 @@ class Augmentation:
         n_aug = FieldH(self.grid, shape_batch=(n_spins,))
         inv_volume = 1.0 / self.grid.lattice.volume
         for species, rho in zip(self.species, rho_beta):
-            coeff = self._radial_coefficients(species, rho)  # spline, density, atom, LM
+            coeff = species.radial_coefficients(rho)  # spline, density, atom, lm
             for atoms in self._atom_chunks(species, n_spins):
                 radial = self.Ginterp(coeff[:, :, atoms])  # density, atom, LM, grid
                 T = self._combine(radial, self.Y)  # density, atom, grid
@@ -173,7 +173,7 @@ class Augmentation:
                 U = V_weighted[:, None] * self._phase(species, atoms)  # d, atom, grid
                 radial_grad = self._combine_adjoint(U, self.Y)  # d, atom, LM, grid
                 coeff_grad.append(self.Ginterp.adjoint(radial_grad))
-            D = self._radial_coefficients_adjoint(species, torch.cat(coeff_grad, dim=2))
+            D = species.radial_coefficients_grad(torch.cat(coeff_grad, dim=2))
             if self.grid.group is not None:
                 dist.all_reduce(D, group=self.grid.group)  # sum over local G
             # Write each atom's block on the diagonal (view the species block as
@@ -212,7 +212,7 @@ class Augmentation:
             Y_prime = self._signed(Y_prime[:, self.LM_order]) * self.in_sphere
 
         for species, rho in zip(self.species, rho_beta):
-            coeff = self._radial_coefficients(species, rho)
+            coeff = species.radial_coefficients(rho)
             for atoms in self._atom_chunks(
                 species, n_spins * (4 if need_stress else 1)
             ):
@@ -249,34 +249,6 @@ class Augmentation:
         if need_stress:
             lattice.grad += lattice_grad
 
-    def _radial_coefficients(
-        self, species: _Species, rho: torch.Tensor
-    ) -> torch.Tensor:
-        """Spline coefficients of the radial part of each (density component,
-        atom, LM) from the density matrices `rho` of a species (spin, atom, i, j).
-        These are the first (small) maps of `density`, before any grid work."""
-        # Gaunt: multipole weight of each Q function on each atom. The Gaunt
-        # tensor is real and symmetric in (i, j) while rho is Hermitian, so only
-        # the real part of rho contributes:
-        multipoles = torch.einsum("qLij, saij -> saqL", species.gaunt, rho.real)
-        multipoles = torch.einsum(
-            "ds, saqL -> daqL", _spin_map(rho.shape[0]), multipoles
-        )
-        # Combine radial functions on spline nodes (interpolation is linear):
-        return torch.einsum("cq, daqL -> cdaL", species.Q_coeff, multipoles)
-
-    def _radial_coefficients_adjoint(
-        self, species: _Species, coeff_grad: torch.Tensor
-    ) -> torch.Tensor:
-        """Transpose of `_radial_coefficients`: from the gradient with respect to
-        spline coefficients (spline, density, atom, LM), return the gradient with
-        respect to rho (spin, atom, i, j), which is real and symmetric in (i, j)."""
-        Q_coeff = species.Q_coeff[: coeff_grad.shape[0]]  # rows used by Ginterp
-        multipoles_grad = torch.einsum("cq, cdaL -> daqL", Q_coeff, coeff_grad)
-        spin_map = _spin_map(coeff_grad.shape[1])
-        multipoles_grad = torch.einsum("ds, daqL -> saqL", spin_map, multipoles_grad)
-        return torch.einsum("qLij, saqL -> saij", species.gaunt, multipoles_grad)
-
     def _signed(self, Y: torch.Tensor) -> torch.Tensor:
         """Multiply harmonics `Y` (LM along dimension -4, in `LM_order`) by the sign
         of i^L, leaving the factor i for odd L to `_combine`."""
@@ -300,13 +272,13 @@ class Augmentation:
             (U.real[:, :, None] * Y[:n], -U.imag[:, :, None] * Y[n:]), dim=2
         )
 
-    def _phase(self, species: _Species, atoms: slice) -> torch.Tensor:
+    def _phase(self, species: Species, atoms: slice) -> torch.Tensor:
         """Translation phases (atom, grid) of `atoms` (a slice within `species`)."""
         start = species.atom_slice.start
         atom_slice = slice(start + atoms.start, start + atoms.stop)
         return self.ions.translation_phase(self.iG, atom_slice).permute(3, 0, 1, 2)
 
-    def _atom_chunks(self, species: _Species, n_batch: int) -> list[slice]:
+    def _atom_chunks(self, species: Species, n_batch: int) -> list[slice]:
         """Split the atoms of `species` so that per-chunk grid intermediates of
         n_batch x LM real values per atom and grid point fit `ATOM_CHUNK_BYTES`."""
         bytes_per_atom = 8 * n_batch * max(1, self.Y.numel())  # (slab may be empty)
@@ -316,7 +288,7 @@ class Augmentation:
 
 
 @dataclass
-class _Species:
+class Species:
     """Augmentation data of one ultrasoft species."""
 
     atom_slice: slice  #: Atoms of this species within `Ions`
@@ -328,6 +300,26 @@ class _Species:
     @property
     def n_atoms(self) -> int:
         return self.atom_slice.stop - self.atom_slice.start
+
+    def radial_coefficients(self, rho: torch.Tensor) -> torch.Tensor:
+        """Compute radial spline coefficients (density component, atom, lm)
+        for density augmentation from atomic density matrix `rho` (spin, atom, i, j)."""
+        # Symmetry of Gaunt coefficients + hermiticity of rho => only rho.real matters:
+        multipoles = torch.einsum("qLij, saij -> saqL", self.gaunt, rho.real)
+        multipoles = torch.einsum(
+            "ds, saqL -> daqL", _spin_map(rho.shape[0]), multipoles
+        )
+        # Combine radial functions on spline nodes (interpolation is linear):
+        return torch.einsum("cq, daqL -> cdaL", self.Q_coeff, multipoles)
+
+    def radial_coefficients_grad(self, coeff_grad: torch.Tensor) -> torch.Tensor:
+        """Gradient propagation from spline coefficients to atomic density matrix,
+        corresponding to `radial_coefficients`."""
+        Q_coeff = self.Q_coeff[: coeff_grad.shape[0]]  # rows used by Ginterp
+        multipoles_grad = torch.einsum("cq, cdaL -> daqL", Q_coeff, coeff_grad)
+        spin_map = _spin_map(coeff_grad.shape[1])
+        multipoles_grad = torch.einsum("ds, daqL -> saqL", spin_map, multipoles_grad)
+        return torch.einsum("qLij, saqL -> saij", self.gaunt, multipoles_grad)
 
 
 def _get_gaunt(ps: dft.ions.Pseudopotential, L_of_LM: torch.Tensor) -> torch.Tensor:
