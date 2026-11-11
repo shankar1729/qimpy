@@ -221,8 +221,6 @@ class Grid(TreeNode):
             Tensor with dimensions (3,) + shape_mine, where
             shape_mine is the relevant local dimensions of requested space
         """
-        # Only the integer mesh is cached: the lattice may change (e.g. in a
-        # variable-cell relaxation), so apply the current Gbasis on each call.
         iG = self._get_gradient_mesh(space, zero_nyquist)
         return 1j * torch.tensordot(self.lattice.Gbasis, iG, dims=1)
 
@@ -236,7 +234,7 @@ class Grid(TreeNode):
         return iG
 
     @cache
-    def get_nyquist_indices(self, space: str) -> list[tuple(int, int)]:
+    def get_nyquist_indices(self, space: str) -> list[tuple[int, int]]:
         """List of dimensions and corresponding indices of Nyquist frequencies."""
         result = []
         mesh1D = self._mesh1D_mine[space]
