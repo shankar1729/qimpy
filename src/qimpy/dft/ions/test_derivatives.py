@@ -27,7 +27,7 @@ def test_stress(system_name: str, request) -> None:
         system.electrons.update(system)
         return float(system.energy)
 
-    dE_analytic = float((lattice.grad * strain).sum())
+    dE_analytic = float((lattice.grad.detach() * strain).sum())
     DELTA = 5.0e-4
     E_plus = step(DELTA)
     E_minus = step(-2 * DELTA)
