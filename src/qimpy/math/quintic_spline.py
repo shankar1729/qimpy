@@ -3,7 +3,6 @@
 # List exported symbols for doc generation
 __all__ = ["get_coeff", "Interpolator"]
 
-
 import numpy as np
 import torch
 from scipy.linalg import solve_banded
@@ -71,11 +70,15 @@ class Interpolator:
     _mat: torch.Tensor  #: internal sparse matrix used for interpolation
     _BLIP_TO_POLY: torch.Tensor | None = None  #: blip to poly transform
 
-    def __init__(self, x: torch.Tensor, dx: float, deriv: int = 0):
+    def __init__(
+        self, x: torch.Tensor, dx: float, deriv: int = 0, need_grad=False
+    ) -> None:
         """Initialize interpolator for evaluating at points `x`. Here `dx` is
         the spacing between coefficients that this will be used with later.
         Optionally, initialize to calculate derivative of order `deriv`
         (must be <= 4, since quintic splines are :math:`C^4` continuous).
+        If gradient propagation with respect to the interpolation is required,
+        set `need_grad` to True in order to initialize the transpose transformation.
         """
         self._shape = x.shape  # remember shape before flattening below
         t = x.view(-1, 1) / dx  # dimensionless coordinate (flattened)
@@ -113,9 +116,10 @@ class Interpolator:
         indices = torch.empty((2, n_x, 6))
         indices[0] = torch.arange(n_x, device=x.device)[:, None]
         indices[1] = i + powers  # fetch 6 adjacent coefficients for each
-        self._mat = torch.sparse_coo_tensor(
-            indices.flatten(1), f.flatten(), device=x.device
-        )
+        mat = torch.sparse_coo_tensor(indices.flatten(1), f.flatten(), device=x.device)
+        self._mat = mat.to_sparse_csr()
+        if need_grad:
+            self._mat_T = mat.t().to_sparse_csr()
 
     def __call__(self, coeff: torch.Tensor) -> torch.Tensor:
         """Apply interpolation to specified coefficients."""
@@ -126,3 +130,11 @@ class Interpolator:
         else:
             result = (self._mat @ coeff[:n_coeff_needed].flatten(1)).T
             return result.view(coeff.shape[1:] + self._shape)
+
+    def grad(self, values: torch.Tensor) -> torch.Tensor:
+        """Gradient propagation corresponding to the interpolation."""
+        n_x, n_coeff_needed = self._mat.shape
+        batch_shape = values.shape[: values.dim() - len(self._shape)]
+        n_batch = int(np.prod(batch_shape))
+        result = self._mat_T @ values.reshape(n_batch, n_x).T
+        return result.view((n_coeff_needed,) + batch_shape)

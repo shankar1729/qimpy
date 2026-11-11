@@ -41,43 +41,6 @@ def test_ylm(r_ylm: tuple[torch.Tensor, torch.Tensor]) -> None:
 
 
 @pytest.mark.mpi_skip
-def test_ylm_prod(r_ylm: tuple[torch.Tensor, torch.Tensor]) -> None:
-    log.info("Testing product coefficients:")
-    r, ylm = r_ylm
-    r_sq = (r**2).sum(dim=-1)
-    if not sh._YLM_PROD:
-        sh._initialize_device(rc.device)
-    rel_err_all = []
-    dl_shape = (-1,) + (1,) * len(r_sq.shape)  # bcast with r_sq[None]
-    for l1 in range(sh.L_MAX_HLF + 1):
-        l1_slice = slice(l1**2, (l1 + 1) ** 2)
-        for l2 in range(l1 + 1):
-            l2_slice = slice(l2**2, (l2 + 1) ** 2)
-            product_ref = ylm[l1_slice, None, :] * ylm[None, l2_slice, :]
-            product = torch.zeros_like(product_ref)
-            for m1 in range(-l1, l1 + 1):
-                ilm1 = l1 * (l1 + 1) + m1
-                for m2 in range(-l2, l2 + 1):
-                    ilm2 = l2 * (l2 + 1) + m2
-                    index, coeffs = sh._YLM_PROD[(max(ilm1, ilm2), min(ilm1, ilm2))]
-                    l_net = index.sqrt().floor().to(torch.int)
-                    dl_by_2 = (l1 + l2 - l_net).div(2, rounding_mode="floor")
-                    prod_terms = ylm[index] * (
-                        r_sq[None, ...] ** dl_by_2.view(dl_shape)
-                    )
-                    product[l1 + m1, l2 + m2] = torch.tensordot(
-                        coeffs, prod_terms, dims=1
-                    )
-            err = (product - product_ref).norm().item()
-            rel_err = err / product_ref.norm().item()
-            rel_err_all.append(rel_err)
-            log.info(f"  l: {l1} {l2} Err: {rel_err:9.3e}")
-    rel_err_overall = np.sqrt((np.array(rel_err_all) ** 2).mean())
-    log.info(f"  Overall Err: {rel_err_overall:9.3e}\n")
-    assert rel_err_overall < 1e-14
-
-
-@pytest.mark.mpi_skip
 def test_ylm_prime(r_ylm: tuple[torch.Tensor, torch.Tensor]) -> None:
     log.info("Testing derivatives:")
     # Analytical calculation:
@@ -110,6 +73,22 @@ def test_ylm_prime(r_ylm: tuple[torch.Tensor, torch.Tensor]) -> None:
     assert np.all(err_avg < 1e-8)
 
 
+@pytest.mark.mpi_skip
+def test_ylm_product() -> None:
+    log.info("Testing product coefficients:")
+    l_max = sh.L_MAX_HLF
+    coeff = sh.get_product_coefficients(l_max)
+    torch.manual_seed(1)
+    r_hat = torch.nn.functional.normalize(torch.randn(1000, 3, device=rc.device), dim=1)
+    Y = sh.get_harmonics(2 * l_max, r_hat)
+    n_lm = (l_max + 1) ** 2
+    product = Y[:n_lm, None] * Y[None, :n_lm]
+    assert torch.allclose(torch.einsum("abL, Lr -> abr", coeff, Y), product, atol=1e-13)
+    assert torch.equal(coeff, coeff.transpose(0, 1))
+    Y00 = 1.0 / np.sqrt(4 * np.pi)  # Y_a Y_b integrates to delta_ab = c_ab^00 / Y00
+    assert torch.allclose(coeff[:, :, 0], Y00 * torch.eye(n_lm, device=rc.device))
+
+
 def main():
     """Run test with verbose log."""
     log_config()
@@ -117,8 +96,8 @@ def main():
     assert rc.n_procs == 1
     r, ylm = get_r_ylm()
     test_ylm((r, ylm))
-    test_ylm_prod((r, ylm))
     test_ylm_prime((r, ylm))
+    test_ylm_product()
 
 
 if __name__ == "__main__":

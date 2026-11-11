@@ -252,6 +252,18 @@ class Electrons(TreeNode):
         # Initialize SCF:
         self.add_child("scf", SCF, scf, checkpoint_in, group=self.group)
 
+        # Check for unsupported feature combinations:
+        if any(ps.is_ultrasoft for ps in ions.pseudopotentials):
+            unsupported = {
+                "spinorial calculations": self.spinorial,
+                "CheFSI": isinstance(self.diagonalize, CheFSI),
+                "DFT+U": bool(self.xc.plus_U),
+                "meta-GGA functionals": self.xc.need_tau,
+            }
+            if any(unsupported.values()):
+                names = ", ".join(name for name, flag in unsupported.items() if flag)
+                raise NotImplementedError(f"Ultrasoft pseudopotentials with {names}")
+
     def initialize_wavefunctions(self, system: dft.System) -> None:
         """Initialize wavefunctions to LCAO / random (if not from checkpoint).
         (This needs to happen after ions have been updated in order to get
@@ -310,6 +322,8 @@ class Electrons(TreeNode):
         V_ks.read(cp_H.relative("V_ks"))
         self.n_tilde = ~n
         self.n_tilde.grad = ~V_ks
+        if (augmentation := system.ions.augmentation) is not None:
+            augmentation.density_grad(self.n_tilde.grad)
         log.info("  Read n and V_ks.")
         # Optional kinetic density and gradient:
         if self.xc.need_tau:
@@ -334,7 +348,8 @@ class Electrons(TreeNode):
         C = self.C[:, :, : self.fillings.n_bands]  # ignore extra bands in n
         need_Mvec = self.spinorial and self.spin_polarized
         self.n_tilde = (~(self.basis.collect_density(C, f, need_Mvec))).to(system.grid)
-        # TODO: ultrasoft augmentation
+        if (augmentation := system.ions.augmentation) is not None:
+            self.n_tilde += augmentation.density(C, f)
         self.n_tilde.symmetrize()
         if self.xc.need_tau:
             self.tau_tilde = self.n_tilde.zeros_like()
@@ -385,6 +400,8 @@ class Electrons(TreeNode):
         if requires_grad:
             self.n_tilde.grad += n_xc_tilde.grad
             self.n_tilde.grad.symmetrize()
+            if (augmentation := system.ions.augmentation) is not None:
+                augmentation.density_grad(self.n_tilde.grad)
 
     def update(self, system: dft.System, requires_grad: bool = True) -> None:
         """Update electronic system to current wavefunctions and eigenvalues.
@@ -493,14 +510,24 @@ class Electrons(TreeNode):
             )
 
         # Nonlocal:
-        if system.ions.beta.requires_grad:
+        ions = system.ions
+        augmentation = ions.augmentation
+        if ions.beta.requires_grad:
             beta_C = C.proj
-            beta_C_grad = (system.ions.D_all @ beta_C) * wf[:, :, None]
+            beta_C_grad = (ions.D_eff @ beta_C) * wf[:, :, None]
+            if augmentation is not None:
+                # Contribution from overlap augmentation:
+                eig = self.eig[..., : self.fillings.n_bands]
+                beta_C_grad -= (augmentation.q_all @ beta_C) * (wf * eig)[:, :, None]
             if self.n_spinor == 2:
                 beta_C_grad = (
                     beta_C_grad.unflatten(2, (-1, 2)).swapaxes(-2, -1).flatten(-2, -1)
                 )
             system.ions.beta.grad = C.non_spinor @ beta_C_grad.transpose(-2, -1).conj()
+
+        # Contributions from density augmentation:
+        if augmentation is not None:
+            augmentation.geometry_grad(self.n_tilde.grad)
 
     def run(self, system: dft.System, suffix: str = "") -> None:
         """Run any actions specified in the input."""

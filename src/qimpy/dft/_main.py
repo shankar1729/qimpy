@@ -197,7 +197,7 @@ def main():
         input_dict = io.dict.remove_units(input_dict)  # Remove units
 
     # Initialize system with input parameters:
-    system = System(process_grid_shape=args.process_grid, **input_dict)
+    system = System(process_grid_shape=tuple(args.process_grid), **input_dict)
 
     # Dry-run bypass:
     if args.dry_run:

@@ -98,7 +98,7 @@ class Grid(TreeNode):
         self.n_procs, self.i_proc = (
             (1, 0) if (group is None) else (group.size(), group.rank())
         )
-        self.is_split = self.n_procs == 1
+        self.is_split = self.n_procs > 1
 
         # Select the relevant ke-cutoff:
         self.ke_cutoff = ke_cutoff if ke_cutoff else 0.0
@@ -203,7 +203,6 @@ class Grid(TreeNode):
         mesh1D = self._mesh1D_mine[space] if mine else self._mesh1D[space]
         return torch.stack(torch.meshgrid(*mesh1D, indexing="ij")).permute(1, 2, 3, 0)
 
-    @cache
     def get_gradient_operator(self, space: str, zero_nyquist: bool) -> torch.Tensor:
         """Get gradient operator in reciprocal space.
 
@@ -222,14 +221,20 @@ class Grid(TreeNode):
             Tensor with dimensions (3,) + shape_mine, where
             shape_mine is the relevant local dimensions of requested space
         """
+        iG = self._get_gradient_mesh(space, zero_nyquist)
+        return 1j * torch.tensordot(self.lattice.Gbasis, iG, dims=1)
+
+    @cache
+    def _get_gradient_mesh(self, space: str, zero_nyquist: bool) -> torch.Tensor:
+        """Integer mesh (3,) + shape_mine used by `get_gradient_operator`."""
         mesh1D = self._mesh1D_mine[space]
         iG = torch.stack(torch.meshgrid(*mesh1D, indexing="ij")).to(torch.double)
         if zero_nyquist:
             self.zero_nyquist(iG, space)
-        return 1j * torch.tensordot(self.lattice.Gbasis, iG, dims=1)
+        return iG
 
     @cache
-    def get_nyquist_indices(self, space: str) -> list[tuple(int, int)]:
+    def get_nyquist_indices(self, space: str) -> list[tuple[int, int]]:
         """List of dimensions and corresponding indices of Nyquist frequencies."""
         result = []
         mesh1D = self._mesh1D_mine[space]

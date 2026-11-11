@@ -12,7 +12,7 @@ Designed from the ground up in 2021, this code takes advantage of modern Python
 for ease of development and PyTorch for high performance on a wide range of computing hardware.
 It is intended as a successor of `JDFTx <https://jdftx.org>`_ and will develop a full feature set
 for first-principles electrochemistry, carrier dynamics and transport in 2023 and 2024.
-At the moment, QimPy is a fully-functional plane-wave DFT code with norm-conserving pseudopotentials,
+At the moment, QimPy is a fully-functional plane-wave DFT code with norm-conserving and ultrasoft pseudopotentials,
 supporing electronic structure, geometry optimization and *ab initio* molecular dynamics calciulations.
 
 QimPy is built on PyTorch as a hardware abstraction layer, and fully supports CPUs,

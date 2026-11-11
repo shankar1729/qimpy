@@ -131,5 +131,5 @@ class ProcessGrid:
 
 @functools.cache
 def get_process_grid(dim_names: str, shape: tuple[int, ...] | None) -> ProcessGrid:
-    """Cached process grid creation, especiallu useful for test routines."""
+    """Cached process grid creation, especially useful for test routines."""
     return ProcessGrid(dim_names, shape)

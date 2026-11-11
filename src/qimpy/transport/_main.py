@@ -190,7 +190,7 @@ def main():
     input_dict = io.dict.remove_units(input_dict)  # Remove units
 
     # Initialize system with input parameters:
-    transport = Transport(process_grid_shape=args.process_grid, **input_dict)
+    transport = Transport(process_grid_shape=tuple(args.process_grid), **input_dict)
 
     # Dry-run bypass:
     if args.dry_run:

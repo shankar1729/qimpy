@@ -1,20 +1,24 @@
 from __future__ import annotations
+from functools import cache, cached_property
 import pathlib
+import os
+import re
 
 import numpy as np
 import torch
 import torch.distributed as dist
 
-from qimpy import log
-from qimpy.math import RadialFunction
+from qimpy import log, rc
+from qimpy.math import RadialFunction, spherical_harmonics as sh
 from qimpy.dft.ions import PseudoQuantumNumbers
 from qimpy.dft.ions._read_upf import read_upf
+from qimpy.dft.ions._read_uspp import read_uspp
 
 
 class Pseudopotential:
     """Specification of electron-ion interactions. Contains
     for local potential, nonlocal projectors and atomic orbitals.
-    Currently supports norm-conserving pseudopotentials."""
+    Supports norm-conserving and ultrasoft pseudopotentials."""
 
     element: str  #: Chemical symbol of element
     atomic_number: int  #: Atomic number of element
@@ -35,6 +39,9 @@ class Pseudopotential:
     j_psi: torch.Tensor | None  #: l+s of atomic orbitals (if relativistic)
     eig_psi: np.ndarray  #: Energy eigenvalue of each atomic orbital
     D: torch.Tensor  #: Descreened nonlocal pseudopotential matrix
+    q: torch.Tensor | None  #: Ultrasoft overlap coefficients (like `D`; None if NC)
+    Q: RadialFunction | None  #: Ultrasoft augmentation functions, with Q.l = L
+    Q_pair: torch.Tensor | None  #: Radial projectors (i <= j) of each `Q` (n_Q x 2)
 
     Gmax: float  #: Current reciprocal space extent of radial functions
     pqn_beta: PseudoQuantumNumbers  #: quantum numbers for projectors
@@ -47,11 +54,17 @@ class Pseudopotential:
         Parameters
         ----------
         filename : str
-            File to read pseudopotential from.
-            Currently, only norm-conserving UPF files are supported.
+            File to read pseudopotential from: UPF (v2.0+ XML format, supports
+            norm-conserving and ultrasoft) or USPP (binary format, ultrasoft).
         """
-        assert filename[-4:].lower() == ".upf"
-        read_upf(self, filename)
+        self.q = self.Q = self.Q_pair = None  # set by readers for ultrasoft cases
+        suffix = pathlib.Path(filename).suffix.lower()
+        if suffix == ".upf":
+            read_upf(self, filename)
+        elif suffix == ".uspp":
+            read_uspp(self, filename)
+        else:
+            raise ValueError(f"Unknown pseudopotential format '{suffix}' in {filename}")
         self.Gmax = 0.0  # reciprocal space versions not yet initialized
         self.pqn_beta = PseudoQuantumNumbers(self.beta.l, self.j_beta)
         self.pqn_psi = PseudoQuantumNumbers(self.psi.l, self.j_psi)
@@ -82,8 +95,103 @@ class Pseudopotential:
             transform_list = [self.rho_atom, self.Vloc, self.beta, self.psi]
             if hasattr(self, "n_core"):
                 transform_list.append(self.n_core)
+            if self.Q is not None:
+                transform_list.append(self.Q)
             RadialFunction.transform(transform_list, Gmax, group, self.element)
             self.Gmax = Gmax
+
+    def set_augmentation(
+        self,
+        r_sq_Q: np.ndarray,
+        q_file: np.ndarray,
+        r_inner: np.ndarray | None = None,
+        Q_taylor: np.ndarray | None = None,
+    ) -> None:
+        """Set ultrasoft augmentation from data parsed in any file format.
+        Handles inner pseudization, computes overlap integrals and drops zero functions.
+
+        Parameters
+        ----------
+        r_sq_Q
+            :math:`r^2 Q_{ij}(r)` on the radial grid for each pair of radial
+            projectors (symmetric in i, j): shape (n_beta, n_beta, n_r) if one
+            function serves all L ('.uspp', and UPF with q_with_l false), or
+            (n_beta, n_beta, n_L, n_r) with one function per L (UPF q_with_l true).
+        q_file
+            Overlap coefficients :math:`q_{ij}` stored in the file (n_beta^2).
+            Only used for reporting comparison with `q` computed from :math:`Q^0_{ij}`,
+            which guarantees exact agreement between density and overlap augmentation.
+        r_inner, Q_taylor
+            Optional inner pseudization radii and Taylor coefficients (USPP scheme).
+        """
+        r = self.r.to(rc.cpu).numpy()
+        r_sq = r**2
+        l_beta = self.beta.l.tolist()
+        n_beta = len(l_beta)
+        # Integration weights for r^2 dr, matching RadialFunction.transform:
+        w = (2.0 / 3) * (r**2) * self.dr.to(rc.cpu).numpy()
+        w[1::2] *= 2.0
+        w[[0, -1]] *= 0.5
+
+        # Collect nonzero Q^L_ij(r) for i <= j:
+        Q_f: list[np.ndarray] = []  # Q^L_ij(r) / r^L
+        Q_l: list[int] = []  # L of each function
+        Q_pair: list[tuple[int, int]] = []  # (i, j) of each function
+        q = np.zeros((n_beta, n_beta))
+        for i in range(n_beta):
+            for j in range(i, n_beta):
+                l_i, l_j = l_beta[i], l_beta[j]
+                for L in range(abs(l_i - l_j), l_i + l_j + 1, 2):  # Gaunt selection
+                    Q = (r_sq_Q[i, j] if (r_sq_Q.ndim == 3) else r_sq_Q[i, j, L]) / r_sq
+                    if Q_taylor is not None:
+                        assert r_inner is not None
+                        inner = r < r_inner[L]
+                        powers = L + 2 * np.arange(Q_taylor.shape[-1])
+                        Q[inner] = (r[inner, None] ** powers) @ Q_taylor[i, j, L]
+                    if not np.any(Q):
+                        continue  # nothing to augment (e.g. NC in ultrasoft format)
+                    Q_f.append(Q / r**L)
+                    Q_l.append(L)
+                    Q_pair.append((i, j))
+                    if L == 0:
+                        q[i, j] = q[j, i] = Q @ w
+
+        if not Q_f:
+            log.info("  No augmentation functions: treated as norm-conserving.")
+            self.is_ultrasoft = False
+            self.q = self.Q = self.Q_pair = None
+            return
+        self.is_ultrasoft = True
+        self.q = torch.tensor(q, device=rc.device)
+        self.Q = RadialFunction(self.r, self.dr, np.array(Q_f), np.array(Q_l))
+        self.Q_pair = torch.tensor(Q_pair, device=rc.device)
+        log.info(
+            f"  {len(Q_f)} augmentation functions, with L_max = {max(Q_l)},"
+            f" overlap integrals within {np.abs(q - q_file).max():.1e} of file."
+        )
+
+    @cached_property
+    def gaunt(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Get Gaunt coefficients (n_Q x n_LM x n_proj x n_proj).
+        The result is split by even and odd L outputs, as used for augmentation."""
+        assert (self.Q is not None) and (self.Q_pair is not None)
+        pqn = self.pqn_beta
+        # Match projector pairs to radial functions:
+        i_rf, (i, j) = pqn.i_rf, self.Q_pair.T[..., None, None]
+        match = (i == i_rf.view(1, -1, 1)) & (j == i_rf.view(1, 1, -1))  # Q, proj, proj
+        match = match | match.transpose(1, 2)  # include i <-> j match
+        # Match angular momentum of radial functions:
+        L = torch.arange(self.Q.l.max().item() + 1, device=rc.device)
+        L = L.repeat_interleave(2 * L + 1)  # including repetitions for M
+        matchL = self.Q.l[:, None] == L[None, :]
+        match = match[:, None] & matchL[..., None, None]  # Q, LM, proj, proj
+        # Map product coefficients by projectors:
+        coeff = sh.get_product_coefficients(pqn.l_max)  # lm1, lm2, LM
+        coeff = coeff[pqn.i_lm][:, pqn.i_lm].permute(2, 0, 1)  # LM, proj, proj
+        # Expand to include radial functions:
+        result = coeff[None] * match
+        is_even = L % 2 == 0
+        return result[:, is_even], result[:, ~is_even]
 
     @property
     def n_projectors(self) -> int:
@@ -160,3 +268,39 @@ class Pseudopotential:
             result = float(np.interp(ke_cutoff, ke_cutoffs, corrections))
             log.info(f"Pulay dE/drho_basis = {result:.6f} Eh a0^3 for {self.element}")
             return result
+
+    @staticmethod
+    def get_filename(symbol: str, templates: list[str]) -> str:
+        """Find exact pseudopotential filename for symbol from filename templates.
+        Search relative to current directory, and any path in `QIMPY_PSEUDO_DIR`"""
+        prefixes = Pseudopotential.get_prefixes()
+        symbol_variants = [symbol.lower(), symbol.upper(), symbol.capitalize()]
+        for ps_name in templates:
+            if ps_name.count("$ID"):
+                # wildcard syntax
+                for prefix in prefixes:
+                    template = os.path.join(prefix, ps_name) if prefix else ps_name
+                    for symbol_variant in symbol_variants:
+                        filename_test = template.replace("$ID", symbol_variant)
+                        if pathlib.Path(filename_test).exists():
+                            return filename_test  # found
+            else:
+                # specific filename
+                basename = pathlib.PurePath(ps_name).stem
+                ps_symbol = re.split(r"[_\-\.]+", basename)[0]
+                if ps_symbol in symbol_variants:
+                    for prefix in prefixes:
+                        filename = os.path.join(prefix, ps_name) if prefix else ps_name
+                        if pathlib.Path(filename).exists():
+                            return filename
+                    raise FileNotFoundError(ps_name)
+        raise ValueError(f"no pseudopotential found for {symbol}")
+
+    @cache
+    @staticmethod
+    def get_prefixes() -> list[str]:
+        """Prefix directories within which to find pseudopotentials."""
+        prefixes = [""]
+        if "QIMPY_PSEUDO_DIR" in os.environ:
+            prefixes.extend(os.environ["QIMPY_PSEUDO_DIR"].split(":"))
+        return prefixes

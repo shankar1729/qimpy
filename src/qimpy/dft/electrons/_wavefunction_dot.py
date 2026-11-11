@@ -6,8 +6,8 @@ import torch
 import torch.distributed as dist
 
 from qimpy.profiler import stopwatch
-from qimpy.mpi import Waitable, Waitless, globalreduce
-from qimpy.math import abs_squared, ortho_matrix
+from qimpy.mpi import globalreduce
+from qimpy.math import abs_squared, ortho_matrix, dagger
 from qimpy.dft import electrons
 
 
@@ -17,9 +17,7 @@ def _norm(self: electrons.Wavefunction) -> float:
 
 
 @stopwatch(name="Wavefunction.dot")
-def _dot(
-    self: electrons.Wavefunction, other: electrons.Wavefunction
-) -> Waitable[torch.Tensor]:
+def _dot(self: electrons.Wavefunction, other: electrons.Wavefunction) -> DotResult:
     """Inner (dot) product of `self` with `other`.
     For convenience, this can also be invoked as `self` ^ `other`.
     Note that this means xor(`self`, `other`) also computes wavefunction dot
@@ -35,14 +33,11 @@ def _dot(
         projectors in spinorial calculations, the spinor dimenion is not
         contracted over and instead integrated as adjacent bands of the
         non-spinorial input.
-    overlap: bool, default: False
-        If True, include the overlap operator in the product. The overlap
-        operator is identity for norm-conserving pseudopotentials, but
-        includes augmentation for ultrasoft and PAW pseudopotentials
 
     Returns
     -------
-    torch.Tensor
+    DotResult
+        Returns with a possibly pending reduction operation (Waitable protocol).
         Dimensions: n_spins x nk_mine x n_bands(self) x n_bands(other).
         If only one of the two inputs is spinorial, then n_bands
         of the non-spinorial one is effectively doubled,
@@ -101,28 +96,25 @@ def _dot(
         result = result.view(split_shape).transpose(-2, -1).reshape(new_shape)
 
     # Reduce asynchronously if needed:
-    need_reduce = (basis.division.n_procs > 1) and (not full_basis)
-    if need_reduce:
-        return DotResult(
-            result, dist.all_reduce(result, group=basis.group, async_op=True)
-        )
-    else:
-        return Waitless(result)  # Result available now
+    request = None
+    if (basis.division.n_procs > 1) and (not full_basis):
+        request = dist.all_reduce(result, group=basis.group, async_op=True)
+    return DotResult(result, request)
 
 
 @dataclass
 class DotResult:
     result: torch.Tensor
-    request: dist.Work
+    request: dist.Work | None = None  # Pending reduction, if any
+    extra: torch.Tensor | None = None  # Extra augmentation contribution, if any:
 
     def wait(self) -> torch.Tensor:
-        self.request.wait()
-        return self.result
+        if self.request is not None:
+            self.request.wait()
+        return self.result if (self.extra is None) else (self.result + self.extra)
 
 
-def _dot_O(
-    self: electrons.Wavefunction, other: electrons.Wavefunction
-) -> Waitable[torch.Tensor]:
+def _dot_O(self: electrons.Wavefunction, other: electrons.Wavefunction) -> DotResult:
     """Dot product of `self` with O(`other`).
     Here, the overlap operator O is identity for norm-conserving
     pseudopotentials, but includes augmentation for ultrasoft
@@ -134,8 +126,8 @@ def _dot_O(
         Dimensions: n_spins x nk_mine x n_bands(self) x n_bands(other)
     """
     result = _dot(self, other)
-    # Overlap augmentation:
-    # TODO: augment overlap here when adding ultrasoft / PAW
+    if (augmentation := self.basis.ions.augmentation) is not None:
+        result.extra = dagger(self.proj) @ (augmentation.q_all @ other.proj)
     return result
 
 
@@ -144,7 +136,13 @@ def _overlap(self: electrons.Wavefunction) -> electrons.Wavefunction:
     This is identity and returns a view of the original wavefunction
     for norm-conserving pseudopotentials, but includes augmentation terms
     for ultrasoft and PAW pseudopotentials"""
-    return self  # TODO: augment overlap here when adding ultrasoft / PAW
+    ions = self.basis.ions
+    if (augmentation := ions.augmentation) is None:
+        return self  # norm-conserving: O = 1
+    # Augment overlap:
+    beta = ions.beta_full if self.band_division else ions.beta
+    assert beta is not None
+    return self + beta @ (augmentation.q_all @ self.proj)
 
 
 @stopwatch(name="Wavefunction.matmul")
