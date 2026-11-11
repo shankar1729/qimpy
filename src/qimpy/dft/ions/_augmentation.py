@@ -106,29 +106,25 @@ class Augmentation:
         on all projectors (n_spins x 1 x n_proj x n_proj) that adds to `Ions.D_all`."""
         n_spins = V.data.shape[0]
         n_proj_tot = self.ions.n_projectors
-        D_aug = torch.zeros(
-            (n_spins, 1, n_proj_tot, n_proj_tot), dtype=torch.cdouble, device=rc.device
-        )
-        V_weighted = V.data.conj() * self.grid.weight2H  # Hermitian-symmetry weights
+        D_shape = (n_spins, 1, n_proj_tot, n_proj_tot)
+        self.D_aug = torch.zeros(D_shape, dtype=torch.cdouble, device=rc.device)
+        V_weighted = V.data.conj()[:, None] * self.grid.weight2H
         for species in self.species:
+            # Propagate V from grid to atomic density matrix:
             coeff_grad = []
             for atoms in species.atom_chunks(n_spins):
-                U = V_weighted[:, None] * species.phase(atoms)  # d, atom, grid
-                radial_grad = species.combine_grad(U, self.Y)  # d, atom, LM, grid
+                V_atoms = V_weighted * species.phase(atoms)  # d, atom, grid
+                radial_grad = species.combine_grad(V_atoms, self.Y)  # d, atom, LM, grid
                 coeff_grad.append(self.Ginterp.grad(radial_grad))
             D = species.radial_coefficients_grad(torch.cat(coeff_grad, dim=2))
             if self.grid.is_split:
                 D = D.contiguous()
                 dist.all_reduce(D, group=self.grid.group)  # sum over local G
-            # Write each atom's block on the diagonal (view the species block as
-            # spin, atom, i, atom', j and set its atom = atom' diagonal):
+            # Set to diagonal blocks in D_aug:
             n_atoms, n_proj = species.n_atoms, species.n_proj
-            block = D_aug[:, 0, species.proj_slice, species.proj_slice]
-            block = block.unflatten(1, (n_atoms, n_proj)).unflatten(
-                3, (n_atoms, n_proj)
-            )
+            shape = (n_spins, n_atoms, n_proj, n_atoms, n_proj)
+            block = self.D_aug[:, 0, species.proj_slice, species.proj_slice].view(shape)
             block.diagonal(dim1=1, dim2=3).copy_(D.permute(0, 2, 3, 1))
-        self.D_aug = D_aug
 
     @stopwatch(name="Augmentation.geometry_grad")
     def accumulate_geometry_grad(self, V: FieldH) -> None:
