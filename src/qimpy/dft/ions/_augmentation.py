@@ -33,25 +33,30 @@ class Augmentation:
         """Prepare density augmentation on `grid` for atom positions in `ions`."""
         self.ions = ions
         self.grid = grid
-        self.iG = grid.get_mesh("H").to(torch.double)
-        self.G = self.iG @ grid.lattice.Gbasis.T
-        Gmag = self.G.norm(dim=-1)
-        self.Ginterp = Interpolator(Gmag, RadialFunction.DG, need_grad=True)
+        self.q_all = q_all
+        self.D_aug = torch.zeros_like(q_all)
 
         # Augment only within the density cutoff sphere, |G|^2 <= 2 grid.ke_cutoff
         R_lengths = grid.lattice.Rbasis.norm(dim=0)
-        G_inscribed = np.pi * min(n / float(a) for n, a in zip(grid.shape, R_lengths))
-        self.in_sphere = Gmag < G_inscribed
+        G_cut = np.pi * min(n / float(a) for n, a in zip(grid.shape, R_lengths))
         if grid.ke_cutoff:
-            self.in_sphere &= Gmag <= np.sqrt(2.0 * grid.ke_cutoff)
+            G_cut = min(G_cut, np.sqrt(2.0 * grid.ke_cutoff))
+
+        # Construct grid index and interpolation:
+        iG = grid.get_mesh("H").to(torch.double).flatten(0, 2)
+        G = iG @ grid.lattice.Gbasis.T
+        Gmag = G.norm(dim=-1)
+        self.indexH = torch.where(Gmag <= G_cut)[0]  # index into flattened FieldH
+        self.iG = iG[self.indexH]
+        self.G = G[self.indexH]
+        self.Gmag = Gmag[self.indexH]
+        self.Ginterp = Interpolator(self.Gmag, RadialFunction.DG, need_grad=True)
 
         # Initialize harmonics for max product L needed:
         self.L_max = max(
             int(ps.Q.l.max()) for ps in ions.pseudopotentials if (ps.Q is not None)
         )
         self.Y = self._get_harmonics()
-        self.q_all = q_all
-        self.D_aug = torch.zeros_like(q_all)
 
         # Collect data of ultrasoft species, locating their atoms and projectors:
         self.species = []
@@ -70,12 +75,10 @@ class Augmentation:
         is_even = L % 2 == 0
         if prime:
             Y_prime = sh.get_harmonics_and_prime(self.L_max, self.G)[1]
-            Y_prime *= self.in_sphere  # restrict to ke-cutoff sphere
             Y_prime[:, (L // 2) % 2 == 1] *= -1.0  # i^L relative to L = 0, 1
             return Y_prime[:, is_even], Y_prime[:, ~is_even]
         else:
             Y = sh.get_harmonics(self.L_max, self.G)
-            Y *= self.in_sphere  # restrict to ke-cutoff sphere
             Y[(L // 2) % 2 == 1] *= -1.0  # i^L relative to L = 0, 1 for even, odd L
             return Y[is_even], Y[~is_even]
 
@@ -88,7 +91,8 @@ class Augmentation:
         wf = f * basis.w_sk
         group_k = basis.kpoints.group
         n_spins = beta_C.shape[0]
-        n_aug = FieldH(self.grid, shape_batch=(n_spins,))
+        nG = len(self.G)
+        n_aug = torch.zeros((n_spins, nG), device=rc.device, dtype=torch.cdouble)
         for species in self.species:
             species.update_density_matrix(beta_C, wf, group_k)
             coeff = species.radial_coefficients()  # spline, density, atom, lm
@@ -96,9 +100,11 @@ class Augmentation:
                 radial = self.Ginterp(coeff[:, :, atoms])  # density, atom, LM, grid
                 n_aug_atoms = species.combine(radial, self.Y)  # density, atom, grid
                 phase = species.phase(atoms)  # atom, grid
-                n_aug.data += torch.einsum("da..., a... -> d...", n_aug_atoms, phase)
-        n_aug.data *= 1.0 / self.grid.lattice.volume
-        return n_aug
+                n_aug += torch.einsum("daG, aG -> dG", n_aug_atoms, phase)
+        inv_volume = 1.0 / self.grid.lattice.volume
+        n_aug_tilde = FieldH(self.grid, shape_batch=(n_spins,))
+        n_aug_tilde.data.flatten(-3, -1)[:, self.indexH] = n_aug * inv_volume
+        return n_aug_tilde
 
     @stopwatch
     def density_grad(self, V: FieldH) -> None:
@@ -108,12 +114,12 @@ class Augmentation:
         n_proj_tot = self.ions.n_projectors
         D_shape = (n_spins, 1, n_proj_tot, n_proj_tot)
         self.D_aug = torch.zeros(D_shape, dtype=torch.cdouble, device=rc.device)
-        V_weighted = V.data.conj()[:, None] * self.grid.weight2H
+        V_w = (V.data.conj() * self.grid.weight2H).flatten(-3, -1)[:, None, self.indexH]
         for species in self.species:
             # Propagate V from grid to atomic density matrix:
             coeff_grad = []
             for atoms in species.atom_chunks(n_spins):
-                V_atoms = V_weighted * species.phase(atoms)  # d, atom, grid
+                V_atoms = V_w * species.phase(atoms)  # d, atom, grid
                 radial_grad = species.combine_grad(V_atoms, self.Y)  # d, atom, LM, grid
                 coeff_grad.append(self.Ginterp.grad(radial_grad))
             D = species.radial_coefficients_grad(torch.cat(coeff_grad, dim=2))
@@ -136,13 +142,13 @@ class Augmentation:
         if not (need_forces or need_stress):
             return
         n_spins = V.data.shape[0]
-        V_weighted = V.data.conj()[:, None] * self.grid.weight2H
+        V_w = (V.data.conj() * self.grid.weight2H).flatten(-3, -1)[:, None, self.indexH]
         pos_grad = torch.zeros_like(ions.positions)
         lattice_grad = torch.zeros((3, 3), device=rc.device)
         volume_term = torch.zeros((), device=rc.device)  # volume term in stress
         if need_stress:
             # Derivatives of radial parts and harmonics with respect to G:
-            Gmag = self.G.norm(dim=-1)
+            Gmag = self.Gmag
             Ginterp_prime = Interpolator(Gmag, RadialFunction.DG, deriv=1)
             Ghat = self.G * torch.where(Gmag == 0.0, 0.0, 1.0 / Gmag)[..., None]
             Y_prime = self._get_harmonics(prime=True)
@@ -152,12 +158,12 @@ class Augmentation:
             coeff = species.radial_coefficients()  # at current density matrix
             for atoms in species.atom_chunks(n_spins * (4 if need_stress else 1)):
                 radial = self.Ginterp(coeff[:, :, atoms])  # d, atom, LM, grid
-                V_atoms = V_weighted * species.phase(atoms)  # d, atom, grid
+                V_atoms = V_w * species.phase(atoms)  # d, atom, grid
                 V_n_atoms = V_atoms * species.combine(radial, self.Y)
                 if need_forces:
                     start = species.atom_slice.start
                     pos_grad[start + atoms.start : start + atoms.stop] += torch.einsum(
-                        "da..., ...k -> ak", V_n_atoms.imag, self.iG
+                        "daG, Gi -> ai", V_n_atoms.imag, self.iG
                     )
                 if need_stress:
                     volume_term += V_n_atoms.real.sum()
@@ -167,7 +173,7 @@ class Augmentation:
                         dV_n_atoms_dG = n_aug_atoms_prime * Ghat[..., i_dir]
                         dV_n_atoms_dG += species.combine(radial, Y_prime[i_dir])
                         lattice_grad[i_dir] -= torch.einsum(
-                            "da..., ...j -> j", (V_atoms * dV_n_atoms_dG).real, self.G
+                            "daG, Gj -> j", (V_atoms * dV_n_atoms_dG).real, self.G
                         )
         lattice_grad -= volume_term * torch.eye(3, device=rc.device)
         if self.grid.is_split:
@@ -252,8 +258,8 @@ class Species:
         n_even = self.n_even_LM
         n_odd = self.n_odd_LM
         return torch.complex(
-            torch.einsum("daL..., L... -> da...", radial[:, :, :n_even], Y[0][:n_even]),
-            torch.einsum("daL..., L... -> da...", radial[:, :, n_even:], Y[1][:n_odd]),
+            torch.einsum("daLG, LG -> daG", radial[:, :, :n_even], Y[0][:n_even]),
+            torch.einsum("daLG, LG -> daG", radial[:, :, n_even:], Y[1][:n_odd]),
         )
 
     def combine_grad(
@@ -271,7 +277,7 @@ class Species:
         ions = self.augmentation.ions
         start = self.atom_slice.start
         atom_slice_sub = slice(start + atoms.start, start + atoms.stop)
-        return ions.translation_phase(iG, atom_slice_sub).permute(3, 0, 1, 2)
+        return ions.translation_phase(iG, atom_slice_sub).T
 
     def atom_chunks(self, n_batch: int) -> list[slice]:
         """Split the atoms of `species` so that per-chunk grid intermediates of
