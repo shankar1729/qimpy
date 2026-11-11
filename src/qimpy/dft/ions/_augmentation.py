@@ -89,15 +89,15 @@ class Augmentation:
         group_k = basis.kpoints.group
         n_spins = beta_C.shape[0]
         n_aug = FieldH(self.grid, shape_batch=(n_spins,))
-        inv_volume = 1.0 / self.grid.lattice.volume
         for species in self.species:
             species.update_density_matrix(beta_C, wf, group_k)
             coeff = species.radial_coefficients()  # spline, density, atom, lm
             for atoms in species.atom_chunks(n_spins):
                 radial = self.Ginterp(coeff[:, :, atoms])  # density, atom, LM, grid
-                T = species.combine(radial, self.Y)  # density, atom, grid
+                n_aug_atoms = species.combine(radial, self.Y)  # density, atom, grid
                 phase = species.phase(atoms)  # atom, grid
-                n_aug.data += inv_volume * torch.einsum("da..., a... -> d...", T, phase)
+                n_aug.data += torch.einsum("da..., a... -> d...", n_aug_atoms, phase)
+        n_aug.data *= 1.0 / self.grid.lattice.volume
         return n_aug
 
     @stopwatch
@@ -126,8 +126,8 @@ class Augmentation:
             block = self.D_aug[:, 0, species.proj_slice, species.proj_slice].view(shape)
             block.diagonal(dim1=1, dim2=3).copy_(D.permute(0, 2, 3, 1))
 
-    @stopwatch(name="Augmentation.geometry_grad")
-    def accumulate_geometry_grad(self, V: FieldH) -> None:
+    @stopwatch
+    def geometry_grad(self, V: FieldH) -> None:
         """Accumulate force and stress contributions due to density augmentation."""
         ions = self.ions
         lattice = self.grid.lattice
@@ -136,49 +136,46 @@ class Augmentation:
         if not (need_forces or need_stress):
             return
         n_spins = V.data.shape[0]
-        V_weighted = V.data.conj() * self.grid.weight2H
+        V_weighted = V.data.conj()[:, None] * self.grid.weight2H
         pos_grad = torch.zeros_like(ions.positions)
         lattice_grad = torch.zeros((3, 3), device=rc.device)
+        volume_term = torch.zeros((), device=rc.device)  # volume term in stress
         if need_stress:
             # Derivatives of radial parts and harmonics with respect to G:
             Gmag = self.G.norm(dim=-1)
             Ginterp_prime = Interpolator(Gmag, RadialFunction.DG, deriv=1)
             Ghat = self.G * torch.where(Gmag == 0.0, 0.0, 1.0 / Gmag)[..., None]
             Y_prime = self._get_harmonics(prime=True)
+            Y_prime = [(Y_prime[0][i_dir], Y_prime[1][i_dir]) for i_dir in range(3)]
 
         for species in self.species:
             coeff = species.radial_coefficients()  # at current density matrix
             for atoms in species.atom_chunks(n_spins * (4 if need_stress else 1)):
                 radial = self.Ginterp(coeff[:, :, atoms])  # d, atom, LM, grid
-                U = V_weighted[:, None] * species.phase(atoms)  # d, atom, grid
-                # E = sum Re(U T), with d(phase)/d(position) = -2 pi i iG phase:
-                UT = U * species.combine(radial, self.Y)
+                V_atoms = V_weighted * species.phase(atoms)  # d, atom, grid
+                V_n_atoms = V_atoms * species.combine(radial, self.Y)
                 if need_forces:
-                    atom_start = species.atom_slice.start
-                    pos_grad[atom_start + atoms.start : atom_start + atoms.stop] += (
-                        2 * np.pi
-                    ) * torch.einsum("da..., ...k -> ak", UT.imag, self.iG)
+                    start = species.atom_slice.start
+                    pos_grad[start + atoms.start : start + atoms.stop] += torch.einsum(
+                        "da..., ...k -> ak", V_n_atoms.imag, self.iG
+                    )
                 if need_stress:
-                    # Volume factor 1/Omega of the density at fixed rho_beta
-                    # (unlike the wavefunction density in QimPy's convention):
-                    lattice_grad -= torch.eye(3, device=rc.device) * UT.real.sum()
-                    # Strain changes G -> (1 - strain) G at fixed phases, giving
-                    # d(f(|G|) Y(G))/d(strain_ij) = -G_j d(f Y)/dG_i:
+                    volume_term += V_n_atoms.real.sum()
                     radial_prime = Ginterp_prime(coeff[:, :, atoms])
-                    T_prime_radial = species.combine(radial_prime, self.Y)
-                    for i_dir in range(3):
-                        dT_dG = T_prime_radial * Ghat[..., i_dir] + species.combine(
-                            radial, (Y_prime[0][i_dir], Y_prime[1][i_dir])
-                        )
+                    n_aug_atoms_prime = species.combine(radial_prime, self.Y)
+                    for i_dir in range(3):  # one row at a time to reduce memory
+                        dV_n_atoms_dG = n_aug_atoms_prime * Ghat[..., i_dir]
+                        dV_n_atoms_dG += species.combine(radial, Y_prime[i_dir])
                         lattice_grad[i_dir] -= torch.einsum(
-                            "da..., ...j -> j", (U * dT_dG).real, self.G
+                            "da..., ...j -> j", (V_atoms * dV_n_atoms_dG).real, self.G
                         )
+        lattice_grad -= volume_term * torch.eye(3, device=rc.device)
         if self.grid.is_split:
             dist.all_reduce(pos_grad, group=self.grid.group)
             dist.all_reduce(lattice_grad, group=self.grid.group)
         if need_forces:
             assert ions.positions.grad is not None
-            ions.positions.grad += pos_grad
+            ions.positions.grad += pos_grad * (2 * np.pi)  # 2 pi from dphase/dpositions
         if need_stress:
             lattice.grad += lattice_grad
 

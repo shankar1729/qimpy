@@ -527,7 +527,7 @@ class Electrons(TreeNode):
 
         # Contributions from density augmentation:
         if augmentation is not None:
-            augmentation.accumulate_geometry_grad(self.n_tilde.grad)
+            augmentation.geometry_grad(self.n_tilde.grad)
 
     def run(self, system: dft.System, suffix: str = "") -> None:
         """Run any actions specified in the input."""
