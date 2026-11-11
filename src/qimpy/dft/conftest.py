@@ -51,4 +51,5 @@ def system_H2O() -> System:
             ],
         ),
         electrons=dict(basis=dict(ke_cutoff=10.0, real_wavefunctions=True)),
+        process_grid_shape=(1, 1, -1),
     )
