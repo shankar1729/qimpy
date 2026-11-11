@@ -12,7 +12,7 @@ from . import symbols
 
 def read_upf(ps: ions.Pseudopotential, filename: str) -> None:
     """Read a UPF pseudopotential.
-    Note that only norm-conserving and ultrasoft UPF files are supported (not PAW).
+    Note that only norm-conserving and ultrasoft UPF files are supported.
 
     Parameters
     ----------
@@ -42,8 +42,7 @@ def read_upf(ps: ions.Pseudopotential, filename: str) -> None:
         )
         raise ValueError("Invalid chemical symbol in " + filename)
     log.info(
-        f"  '{ps.element}' pseudopotential,"
-        f" '{section.attrib['functional']}' functional"
+        f"  {ps.element} pseudopotential," f" {section.attrib['functional']} functional"
     )
 
     # --- Non essential info:
@@ -66,8 +65,9 @@ def read_upf(ps: ions.Pseudopotential, filename: str) -> None:
         log.error("  PAW datasets are not yet supported.")
         raise ValueError("PAW dataset in " + filename + " unsupported")
 
+    # --- ultrasoft
     ps.is_ultrasoft = str(section.attrib.get("is_ultrasoft")).lower() in ["t", "true"]
-    augmentation = None  # read from PP_NONLOCAL/PP_AUGMENTATION if ultrasoft
+    augmentation = None
 
     # --- Valence properties:
     ps.Z = float(section.attrib["z_valence"])
@@ -236,25 +236,24 @@ def read_upf(ps: ions.Pseudopotential, filename: str) -> None:
         ps.n_core = RadialFunction(ps.r, ps.dr)
     if ps.is_ultrasoft:
         if augmentation is None:
-            raise ValueError("Ultrasoft pseudopotential without PP_AUGMENTATION")
+            raise ValueError(f"Ultrasoft {filename} missing PP_AUGMENTATION")
         ps.set_augmentation(*augmentation)
 
 
 def _read_augmentation(
     section: ET.Element, n_beta: int, n_grid: int, l_max: int
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None, np.ndarray | None]:
-    """Parse PP_AUGMENTATION of an ultrasoft UPF v2 file.
-    Returns the arguments of :meth:`Pseudopotential.set_augmentation`."""
-    # Logicals appear as T/F, true/false or .true./.false. depending on QE version:
-    q_with_l = section.attrib.get("q_with_l", "F").strip().lower() in (
+    """Read augmentation from UPF as needed for `Pseudopotential.set_augmentation`."""
+    trues = {
         "t",
         "true",
         ".true.",
-    )
+    }
+    q_with_l = section.attrib.get("q_with_l", "F").strip().lower() in trues
     n_qf = int(section.attrib.get("nqf", 0))  # Taylor coefficients (if pseudized)
     n_L = int(section.attrib.get("nqlc", 0)) or (2 * l_max + 1)
     shape_Q = (n_beta, n_beta) + ((n_L,) if q_with_l else ()) + (n_grid,)
-    r2_Q = np.zeros(shape_Q)  # r^2 Q_ij(r), per L only if q_with_l
+    r_sq_Q = np.zeros(shape_Q)  # r^2 Q_ij(r), per L only if q_with_l
     q_file = np.zeros((n_beta, n_beta))
     r_inner = Q_taylor = None
     for entry in section:
@@ -265,22 +264,18 @@ def _read_augmentation(
             Q_taylor = data.reshape(n_beta, n_beta, n_L, n_qf)
         elif entry.tag == "PP_RINNER":
             r_inner = data
-        elif entry.tag.startswith("PP_QIJ"):
-            # PP_QIJ.i.j (q_with_l false) or PP_QIJL.i.j.L (true), 1-based i, j.
-            # The tag and the attribute must agree: otherwise functions of
-            # different L would be silently mixed up, so refuse instead.
-            indices = [int(index) for index in entry.tag.split(".")[1:]]
+        elif entry.tag.startswith("PP_QIJ"):  # PP_QIJ.i.j.L if q_with_l else PP_QIJ.i.j
+            indices = [int(index) for index in entry.tag.split(".")[1:]]  # i, j, [L]
             if (len(indices) == 3) != q_with_l:
                 raise ValueError(
-                    f"{entry.tag} inconsistent with q_with_l = {q_with_l} in"
-                    " PP_AUGMENTATION"
+                    f"{entry.tag} inconsistent with {q_with_l=} in PP_AUGMENTATION"
                 )
             i, j = indices[0] - 1, indices[1] - 1
             L_index = tuple(indices[2:])  # empty unless q_with_l
-            r2_Q[(i, j) + L_index][: len(data)] = data
-            r2_Q[(j, i) + L_index][: len(data)] = data
+            r_sq_Q[(i, j) + L_index][: len(data)] = data
+            r_sq_Q[(j, i) + L_index][: len(data)] = data
         else:
             log.info(f"  NOTE: ignored section '{entry.tag}'")
     if q_with_l or (not n_qf):
         r_inner = Q_taylor = None  # inner pseudization only for q_with_l false
-    return r2_Q, q_file, r_inner, Q_taylor
+    return r_sq_Q, q_file, r_inner, Q_taylor

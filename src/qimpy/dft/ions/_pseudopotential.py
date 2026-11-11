@@ -54,10 +54,10 @@ class Pseudopotential:
         Parameters
         ----------
         filename : str
-            File to read pseudopotential from: UPF (norm-conserving or ultrasoft)
-            or Vanderbilt '.uspp' (ultrasoft, e.g. the GBRV library).
+            File to read pseudopotential from: UPF (v2.0+ XML format, supports
+            norm-conserving and ultrasoft) or USPP (binary format, ultrasoft).
         """
-        self.q = self.Q = self.Q_pair = None  # set by readers only if ultrasoft
+        self.q = self.Q = self.Q_pair = None  # set by readers for ultrasoft cases
         suffix = pathlib.Path(filename).suffix.lower()
         if suffix == ".upf":
             read_upf(self, filename)
@@ -96,51 +96,45 @@ class Pseudopotential:
             if hasattr(self, "n_core"):
                 transform_list.append(self.n_core)
             if self.Q is not None:
-                transform_list.append(self.Q)  # same radial grid: same batch
+                transform_list.append(self.Q)
             RadialFunction.transform(transform_list, Gmax, group, self.element)
             self.Gmax = Gmax
 
     def set_augmentation(
         self,
-        r2_Q: np.ndarray,
+        r_sq_Q: np.ndarray,
         q_file: np.ndarray,
         r_inner: np.ndarray | None = None,
         Q_taylor: np.ndarray | None = None,
     ) -> None:
         """Set ultrasoft augmentation from data parsed in any file format.
-        The readers only parse, and this does the processing common to formats:
-        inner pseudization, dropping zero functions, and the overlap coefficients.
+        Handles inner pseudization, computes overlap integrals and drops zero functions.
 
         Parameters
         ----------
-        r2_Q
+        r_sq_Q
             :math:`r^2 Q_{ij}(r)` on the radial grid for each pair of radial
             projectors (symmetric in i, j): shape (n_beta, n_beta, n_r) if one
             function serves all L ('.uspp', and UPF with q_with_l false), or
             (n_beta, n_beta, n_L, n_r) with one function per L (UPF q_with_l true).
         q_file
             Overlap coefficients :math:`q_{ij}` stored in the file (n_beta^2).
-            Only reported: `q` is instead integrated from the pseudized
-            :math:`Q^0_{ij}`, so that the augmentation charge exactly equals
-            :math:`\\sum_{ij}\\rho_{ij} q_{ij}` (as in JDFTx).
+            Only used for reporting comparison with `q` computed from :math:`Q^0_{ij}`,
+            which guarantees exact agreement between density and overlap augmentation.
         r_inner, Q_taylor
-            Optional inner pseudization: for r < r_inner[L], replace
-            :math:`Q^L_{ij}(r)` by the series :math:`\\sum_k c_k r^{L+2k}`, with
-            :math:`c_k` = Q_taylor[i, j, L, k] (shapes (n_L,), (n_beta, n_beta, n_L,
-            n_qf)). This is the Vanderbilt 'qfcoef' / 'rinner' scheme.
+            Optional inner pseudization radii and Taylor coefficients (USPP scheme).
         """
         r = self.r.to(rc.cpu).numpy()
+        r_sq = r**2
         l_beta = self.beta.l.tolist()
         n_beta = len(l_beta)
-        # Integration weights for q = int r^2 Q dr: the same Simpson rule as the
-        # G = 0 limit of RadialFunction.transform, so that q matches the
-        # augmentation charge on the grid to machine precision:
+        # Integration weights for r^2 dr, matching RadialFunction.transform:
         w = (2.0 / 3) * (r**2) * self.dr.to(rc.cpu).numpy()
         w[1::2] *= 2.0
         w[[0, -1]] *= 0.5
 
-        # Collect the distinct nonzero Q^L_ij(r) for i <= j (few, only at read):
-        Q_f: list[np.ndarray] = []  # Q^L_ij(r) / r^L (RadialFunction convention)
+        # Collect nonzero Q^L_ij(r) for i <= j:
+        Q_f: list[np.ndarray] = []  # Q^L_ij(r) / r^L
         Q_l: list[int] = []  # L of each function
         Q_pair: list[tuple[int, int]] = []  # (i, j) of each function
         q = np.zeros((n_beta, n_beta))
@@ -148,7 +142,7 @@ class Pseudopotential:
             for j in range(i, n_beta):
                 l_i, l_j = l_beta[i], l_beta[j]
                 for L in range(abs(l_i - l_j), l_i + l_j + 1, 2):  # Gaunt selection
-                    Q = (r2_Q[i, j] if (r2_Q.ndim == 3) else r2_Q[i, j, L]) / r**2
+                    Q = (r_sq_Q[i, j] if (r_sq_Q.ndim == 3) else r_sq_Q[i, j, L]) / r_sq
                     if Q_taylor is not None:
                         assert r_inner is not None
                         inner = r < r_inner[L]
@@ -159,7 +153,7 @@ class Pseudopotential:
                     Q_f.append(Q / r**L)
                     Q_l.append(L)
                     Q_pair.append((i, j))
-                    if L == 0:  # only possible for l_i = l_j
+                    if L == 0:
                         q[i, j] = q[j, i] = Q @ w
 
         if not Q_f:
@@ -172,8 +166,8 @@ class Pseudopotential:
         self.Q = RadialFunction(self.r, self.dr, np.array(Q_f), np.array(Q_l))
         self.Q_pair = torch.tensor(Q_pair, device=rc.device)
         log.info(
-            f"  Ultrasoft: {len(Q_f)} augmentation functions Q^L_ij(r) up to"
-            f" L = {max(Q_l)}; max |q_ij - q_file| = {np.abs(q - q_file).max():.1e}"
+            f"  {len(Q_f)} augmentation functions, with L_max = {max(Q_l)},"
+            f" overlap integrals within {np.abs(q - q_file).max():.1e} of file."
         )
 
     @cached_property
