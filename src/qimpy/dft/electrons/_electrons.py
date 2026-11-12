@@ -255,7 +255,7 @@ class Electrons(TreeNode):
         # Check for unsupported feature combinations:
         if any(ps.is_ultrasoft for ps in ions.pseudopotentials):
             unsupported = {
-                "spinorial calculations": self.spinorial,
+                # "spinorial calculations": self.spinorial,
                 "CheFSI": isinstance(self.diagonalize, CheFSI),
                 "DFT+U": bool(self.xc.plus_U),
                 "meta-GGA functionals": self.xc.need_tau,
@@ -272,9 +272,7 @@ class Electrons(TreeNode):
         n_atomic = 0
         if (self.lcao is not None) and not self._n_bands_done:
             n_atomic = system.ions.n_atomic_orbitals(self.n_spinor)
-            log.info(
-                f"Setting {n_atomic} bands of wavefunctions C" " to atomic orbitals"
-            )
+            log.info(f"Setting {n_atomic} bands of wavefunctions C to atomic orbitals")
             if n_atomic < self.C.n_bands():
                 self.C[:, :, :n_atomic] = system.ions.get_atomic_orbitals(self.basis)
             else:
@@ -349,8 +347,11 @@ class Electrons(TreeNode):
         need_Mvec = self.spinorial and self.spin_polarized
         self.n_tilde = (~(self.basis.collect_density(C, f, need_Mvec))).to(system.grid)
         if (augmentation := system.ions.augmentation) is not None:
-            self.n_tilde += augmentation.density(C, f)
+            self.n_tilde += augmentation.density(C, f, need_Mvec)
         self.n_tilde.symmetrize()
+
+        log.info(f"{self.n_tilde.integral()=}")
+
         if self.xc.need_tau:
             self.tau_tilde = self.n_tilde.zeros_like()
             for i_dir in range(3):

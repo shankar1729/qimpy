@@ -24,7 +24,7 @@ def test_augmentation(system_name: str, request) -> None:
     f = electrons.fillings.f
     beta_C = C.proj[..., : electrons.fillings.n_bands]
     wf = (f * electrons.basis.w_sk).to(beta_C.dtype)
-    n_aug = system.ions.augmentation.density(C, f)
+    n_aug = system.ions.augmentation.density(C, f, need_Mvec=False)
     D_aug = system.ions.augmentation.D_aug
     dE_expected = (electrons.n_tilde.grad ^ n_aug).sum().to(D_aug.dtype)
     dE = torch.einsum("skji, skib, skb, skjb ->", D_aug, beta_C.conj(), wf, beta_C)

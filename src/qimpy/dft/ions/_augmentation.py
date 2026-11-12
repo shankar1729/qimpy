@@ -1,4 +1,5 @@
 from __future__ import annotations
+from functools import cache
 
 import numpy as np
 import torch
@@ -19,32 +20,39 @@ class Augmentation:
 
     ions: dft.ions.Ions  #: Ions whose augmentation charges these are
     grid: Grid  #: Density grid (local half-space portion used)
-    species: list[Species]  #: Data of each ultrasoft species
+    q_all: torch.Tensor  #: Overlap augmentation
+    n_spins: int  #: Number of spin channels
+    n_spinor: int  #: Number of spinor components
+    D_aug: torch.Tensor  #: Augmentation of `Ions.D_all`
+    indexH: torch.Tensor  #: Non-zero indices into FieldH data for ke-cutoff sphere
     iG: torch.Tensor  #: Local reciprocal lattice vectors (integer coordinates)
     G: torch.Tensor  #: Local reciprocal lattice vectors (Cartesian)
+    Gmag: torch.Tensor  #: Local magnitudes of `G`.
     Ginterp: Interpolator  #: Interpolates radial functions at \|G\|
     in_sphere: torch.Tensor  #: Local G within the density cutoff sphere (augmented)
     L_max: int  #: Largest L of all augmentation functions
     Y: tuple[torch.Tensor, torch.Tensor]  #: Even and odd signed harmonics
-    q_all: torch.Tensor  #: Overlap augmentation
-    D_aug: torch.Tensor  #: Augmentation of `Ions.D_all`
+    species: list[Species]  #: Data of each ultrasoft species
 
-    def __init__(self, ions: dft.ions.Ions, grid: Grid, q_all: torch.Tensor) -> None:
-        """Prepare density augmentation on `grid` for atom positions in `ions`."""
-        self.ions = ions
-        self.grid = grid
+    def __init__(self, system: dft.System, q_all: torch.Tensor) -> None:
+        """Prepare density augmentation for specified dft `system`."""
+        self.ions = system.ions
+        self.grid = system.grid
         self.q_all = q_all
-        self.D_aug = torch.zeros_like(q_all)
+        self.n_spins = system.electrons.n_spins
+        self.n_spinor = system.electrons.n_spinor
+        D_shape = (self.n_spins, 1) + q_all.shape
+        self.D_aug = torch.zeros(D_shape, dtype=q_all.dtype, device=rc.device)
 
         # Augment only within the density cutoff sphere, |G|^2 <= 2 grid.ke_cutoff
-        R_lengths = grid.lattice.Rbasis.norm(dim=0)
-        G_cut = np.pi * min(n / float(a) for n, a in zip(grid.shape, R_lengths))
-        if grid.ke_cutoff:
-            G_cut = min(G_cut, np.sqrt(2.0 * grid.ke_cutoff))
+        R_lengths = system.lattice.Rbasis.norm(dim=0)
+        G_cut = np.pi * min(n / float(a) for n, a in zip(self.grid.shape, R_lengths))
+        if ke_cutoff := self.grid.ke_cutoff:
+            G_cut = min(G_cut, np.sqrt(2.0 * ke_cutoff))
 
         # Construct grid index and interpolation:
-        iG = grid.get_mesh("H").to(torch.double).flatten(0, 2)
-        G = iG @ grid.lattice.Gbasis.T
+        iG = self.grid.get_mesh("H").to(torch.double).flatten(0, 2)
+        G = iG @ self.grid.lattice.Gbasis.T
         Gmag = G.norm(dim=-1)
         self.indexH = torch.where(Gmag <= G_cut)[0]  # index into flattened FieldH
         self.iG = iG[self.indexH]
@@ -54,16 +62,17 @@ class Augmentation:
 
         # Initialize harmonics for max product L needed:
         self.L_max = max(
-            int(ps.Q.l.max()) for ps in ions.pseudopotentials if (ps.Q is not None)
+            int(ps.Q.l.max()) for ps in self.ions.pseudopotentials if (ps.Q is not None)
         )
         self.Y = self._get_harmonics()
 
         # Collect data of ultrasoft species, locating their atoms and projectors:
         self.species = []
         i_proj_start = 0
-        for ps, atom_slice in zip(ions.pseudopotentials, ions.slices):
+        for ps, atom_slice in zip(self.ions.pseudopotentials, self.ions.slices):
             n_atoms = atom_slice.stop - atom_slice.start
-            proj_slice = slice(i_proj_start, i_proj_start + n_atoms * ps.n_projectors)
+            n_proj_s = ps.n_projectors * self.n_spinor
+            proj_slice = slice(i_proj_start, i_proj_start + n_atoms * n_proj_s)
             i_proj_start = proj_slice.stop
             if ps.Q is not None:
                 self.species.append(Species(atom_slice, proj_slice, ps, self))
@@ -83,26 +92,29 @@ class Augmentation:
             return Y[is_even], Y[~is_even]
 
     @stopwatch
-    def density(self, C: dft.electrons.Wavefunction, f: torch.Tensor) -> FieldH:
+    def density(
+        self, C: dft.electrons.Wavefunction, f: torch.Tensor, need_Mvec: bool
+    ) -> FieldH:
         """Compute density augmentation from wavefunction projections `beta_C`
-        and weighted occupations `wf`, with k-point reduction over `group_k`."""
+        and weighted occupations `wf`, with k-point reduction over `group_k`.
+        Return 4 components inlcluding magnetization if `need_Mvec` (spinor case)."""
         beta_C = C.proj
         basis = C.basis
         wf = f * basis.w_sk
         group_k = basis.kpoints.group
-        n_spins = beta_C.shape[0]
         nG = len(self.G)
-        n_aug = torch.zeros((n_spins, nG), device=rc.device, dtype=torch.cdouble)
+        n_densities = 4 if need_Mvec else self.n_spins
+        n_aug = torch.zeros((n_densities, nG), device=rc.device, dtype=torch.cdouble)
         for species in self.species:
             species.update_density_matrix(beta_C, wf, group_k)
-            coeff = species.radial_coefficients()  # spline, density, atom, lm
-            for atoms in species.atom_chunks(n_spins):
+            coeff = species.radial_coefficients(n_densities)  # coeff, density, atom, lm
+            for atoms in species.atom_chunks(self.n_spins):
                 radial = self.Ginterp(coeff[:, :, atoms])  # density, atom, LM, grid
                 n_aug_atoms = species.combine(radial, self.Y)  # density, atom, grid
                 phase = species.phase(atoms)  # atom, grid
                 n_aug += torch.einsum("daG, aG -> dG", n_aug_atoms, phase)
         inv_volume = 1.0 / self.grid.lattice.volume
-        n_aug_tilde = FieldH(self.grid, shape_batch=(n_spins,))
+        n_aug_tilde = FieldH(self.grid, shape_batch=(n_densities,))
         n_aug_tilde.data.flatten(-3, -1)[:, self.indexH] = n_aug * inv_volume
         return n_aug_tilde
 
@@ -110,15 +122,11 @@ class Augmentation:
     def density_grad(self, V: FieldH) -> None:
         """Gradient propagation corresponding to `density`, leading to matrix `D_aug`
         on all projectors (n_spins x 1 x n_proj x n_proj) that adds to `Ions.D_all`."""
-        n_spins = V.data.shape[0]
-        n_proj_tot = self.ions.n_projectors
-        D_shape = (n_spins, 1, n_proj_tot, n_proj_tot)
-        self.D_aug = torch.zeros(D_shape, dtype=torch.cdouble, device=rc.device)
         V_w = (V.data.conj() * self.grid.weight2H).flatten(-3, -1)[:, None, self.indexH]
         for species in self.species:
             # Propagate V from grid to atomic density matrix:
             coeff_grad = []
-            for atoms in species.atom_chunks(n_spins):
+            for atoms in species.atom_chunks(self.n_spins):
                 V_atoms = V_w * species.phase(atoms)  # d, atom, grid
                 radial_grad = species.combine_grad(V_atoms, self.Y)  # d, atom, LM, grid
                 coeff_grad.append(self.Ginterp.grad(radial_grad))
@@ -127,8 +135,8 @@ class Augmentation:
                 D = D.contiguous()
                 dist.all_reduce(D, group=self.grid.group)  # sum over local G
             # Set to diagonal blocks in D_aug:
-            n_atoms, n_proj = species.n_atoms, species.n_proj
-            shape = (n_spins, n_atoms, n_proj, n_atoms, n_proj)
+            n_atoms, n_proj = species.n_atoms, species.n_proj_s
+            shape = (self.n_spins, n_atoms, n_proj, n_atoms, n_proj)
             block = self.D_aug[:, 0, species.proj_slice, species.proj_slice].view(shape)
             block.diagonal(dim1=1, dim2=3).copy_(D.permute(0, 2, 3, 1))
 
@@ -141,7 +149,6 @@ class Augmentation:
         need_stress = lattice.requires_grad
         if not (need_forces or need_stress):
             return
-        n_spins = V.data.shape[0]
         V_w = (V.data.conj() * self.grid.weight2H).flatten(-3, -1)[:, None, self.indexH]
         pos_grad = torch.zeros_like(ions.positions)
         lattice_grad = torch.zeros((3, 3), device=rc.device)
@@ -155,8 +162,8 @@ class Augmentation:
             Y_prime = [(Y_prime[0][i_dir], Y_prime[1][i_dir]) for i_dir in range(3)]
 
         for species in self.species:
-            coeff = species.radial_coefficients()  # at current density matrix
-            for atoms in species.atom_chunks(n_spins * (4 if need_stress else 1)):
+            coeff = species.radial_coefficients(len(V_w))  # at current density matrix
+            for atoms in species.atom_chunks(self.n_spins * (4 if need_stress else 1)):
                 radial = self.Ginterp(coeff[:, :, atoms])  # d, atom, LM, grid
                 V_atoms = V_w * species.phase(atoms)  # d, atom, grid
                 V_n_atoms = V_atoms * species.combine(radial, self.Y)
@@ -193,7 +200,8 @@ class Species:
     proj_slice: slice  #: Projectors of these atoms within `Ions.beta` and `D_all`
     ps: Pseudopotential  #: Corresponding pseudopotential
     augmentation: Augmentation  #: Parent augemntation object for shared quantities
-    n_proj: int  #: Number of projectors per atom (including m)
+    n_proj: int  #: Number of projectors per atom (including m, but not spinors)
+    n_proj_s: int  #: Number of projectors per atom (including m and spinors)
     n_even_LM: int  #: Number of (L, M) at even L
     n_odd_LM: int  #: Number of (L, M) at odd L
     gaunt: torch.Tensor  #: Gaunt map to product functions: (n_Q, n_LM, n_proj, n_proj)
@@ -208,15 +216,21 @@ class Species:
     ) -> None:
         self.atom_slice = atom_slice
         self.proj_slice = proj_slice
+        self.n_proj = ps.n_projectors
+        self.n_proj_s = self.n_proj * augmentation.n_spinor
         self.ps = ps
         self.augmentation = augmentation
-        self.n_proj = ps.n_projectors
 
         # Split gaunt coefficients into even and odd pieces:
         gaunt = ps.gaunt
         self.n_even_LM = gaunt[0].shape[1]
         self.n_odd_LM = gaunt[1].shape[1]
         self.gaunt = torch.cat(gaunt, dim=1)
+
+        # Extra transformations for relativistic case:
+        if augmentation.n_spinor == 2:
+            self.PAULI = ps.pqn_beta.PAULI()  # 4 x 2 x 2
+            self.overlaps_lj = ps.pqn_beta.overlaps_lj(diagonal_only=True)
 
     @property
     def n_atoms(self) -> int:
@@ -227,28 +241,37 @@ class Species:
     ) -> None:
         """Set atomic density matrix from wavefunction projections `beta_C`
         and weighted occupations `wf`."""
-        proj = beta_C[:, :, self.proj_slice].unflatten(2, (self.n_atoms, self.n_proj))
+        proj = beta_C[:, :, self.proj_slice].unflatten(2, (self.n_atoms, self.n_proj_s))
         self.rho = torch.einsum("skain, skn, skajn -> saij", proj.conj(), wf, proj)
         dist.all_reduce(self.rho, group=group_k)
 
-    def radial_coefficients(self) -> torch.Tensor:
+    def radial_coefficients(self, n_densities: int) -> torch.Tensor:
         """Compute radial spline coefficients (density component, atom, lm)
         for density augmentation from atomic density matrix `rho` (spin, atom, i, j)."""
-        # Symmetry of Gaunt coefficients + hermiticity of rho => only rho.real matters:
-        spin_map = _spin_map(self.rho.shape[0])
+        rho = self.rho
+        if self.augmentation.n_spinor == 2:
+            if self.ps.is_relativistic:
+                rho = self.overlaps_lj @ rho @ self.overlaps_lj
+            rho = rho.reshape(self.n_atoms, self.n_proj, 2, self.n_proj, 2)
+            rho = torch.einsum("dsS, aisjS -> daij", self.PAULI[:n_densities], rho)
+        elif self.augmentation.n_spins == 2:
+            rho = torch.einsum("ds, saij -> daij", spin_map(), rho)
         Q_coeff = self.ps.Q.f_tilde_coeff
-        return torch.einsum(
-            "cq, qLij, ds, saij -> cdaL", Q_coeff, self.gaunt, spin_map, self.rho.real
-        )
+        return torch.einsum("cq, qLij, daij -> cdaL", Q_coeff, self.gaunt, rho.real)
 
     def radial_coefficients_grad(self, coeff_grad: torch.Tensor) -> torch.Tensor:
         """Gradient propagation from spline coefficients to atomic density matrix,
         corresponding to `radial_coefficients`."""
         Q_coeff = self.ps.Q.f_tilde_coeff[: coeff_grad.shape[0]]  # rows used by Ginterp
-        spin_map = _spin_map(coeff_grad.shape[1])
-        return torch.einsum(
-            "ds, qLij, cq, cdaL -> saij", spin_map, self.gaunt, Q_coeff, coeff_grad
-        )
+        V_rho = torch.einsum("qLij, cq, cdaL -> daij", self.gaunt, Q_coeff, coeff_grad)
+        if self.augmentation.n_spinor == 2:
+            V_rho = torch.einsum("dsS, daij -> aisjS", self.PAULI[: len(V_rho)], V_rho)
+            V_rho = V_rho.reshape(1, self.n_atoms, self.n_proj_s, self.n_proj_s)
+            if self.ps.is_relativistic:
+                return self.overlaps_lj @ V_rho @ self.overlaps_lj
+        elif self.augmentation.n_spins == 2:
+            V_rho = torch.einsum("ds, daij -> saij", spin_map(), V_rho)
+        return V_rho
 
     def combine(
         self, radial: torch.Tensor, Y: tuple[torch.Tensor, torch.Tensor]
@@ -289,9 +312,7 @@ class Species:
         return [slice(i, min(i + n_chunk, n_atoms)) for i in range(0, n_atoms, n_chunk)]
 
 
-def _spin_map(n_spins: int) -> torch.Tensor:
-    """Map from spin channels (up, down) to the density components (n, M_z).
-    (Currently, only supports non-spinorial modes.)"""
-    if n_spins == 1:
-        return torch.ones((1, 1), device=rc.device)
+@cache
+def spin_map() -> torch.Tensor:
+    """Map from spin channels (up, down) to the density components (n, M_z)."""
     return torch.tensor([[1.0, 1.0], [1.0, -1.0]], device=rc.device)

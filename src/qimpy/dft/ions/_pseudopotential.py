@@ -127,6 +127,7 @@ class Pseudopotential:
         r = rc.to_np(self.r)
         r_sq = r**2
         l_beta = self.beta.l.tolist()
+        j_beta = self.j_beta.tolist() if self.is_relativistic else np.zeros_like(l_beta)
         n_beta = len(l_beta)
         # Integration weights for r^2 dr, matching RadialFunction.transform:
         w = (2.0 / 3) * (r**2) * rc.to_np(self.dr)
@@ -153,7 +154,7 @@ class Pseudopotential:
                     Q_f.append(Q / r**L)
                     Q_l.append(L)
                     Q_pair.append((i, j))
-                    if L == 0:
+                    if L == 0 and (j_beta[i] == j_beta[j]):
                         q[i, j] = q[j, i] = Q @ w
 
         if not Q_f:

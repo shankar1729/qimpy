@@ -121,7 +121,7 @@ def read_uspp(ps: ions.Pseudopotential, filename: str) -> None:
         r_psi.reshape(n_psi, n_grid) * (r[None, :] ** -(l_psi + 1)[:, None]),
         l_psi,
     )
-    ps.set_augmentation(r_sq_Q, q_file, r_inner=r_inner, Q_taylor=Q_taylor)
+    ps.set_augmentation(r_sq_Q, q_file, r_inner, Q_taylor)
 
 
 class _FortranRecords:

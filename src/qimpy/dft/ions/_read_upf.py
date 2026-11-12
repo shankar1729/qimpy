@@ -48,7 +48,7 @@ def read_upf(ps: ions.Pseudopotential, filename: str) -> None:
     # --- Non essential info:
     def optional_attrib(name, prefix="  ", suffix="\n"):
         attrib = section.attrib.get(name, None)
-        return (prefix + attrib + suffix) if attrib else ""
+        return ((prefix + attrib + suffix) if attrib else "").replace("&quot;", "'")
 
     optionals = (
         optional_attrib("generated")

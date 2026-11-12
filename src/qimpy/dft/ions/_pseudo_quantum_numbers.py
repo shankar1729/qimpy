@@ -1,4 +1,4 @@
-import functools
+from functools import cache
 
 import torch
 import numpy as np
@@ -111,38 +111,54 @@ class PseudoQuantumNumbers:
         i_ljms[sel_plus] += 2 * (2 * l[sel_plus] + 1)  # offset from j = l-1/2
         return i_ljms.flatten()
 
-    def expand_matrix(self, D: torch.Tensor, n_spinor: int) -> torch.Tensor:
-        """Expand matrix `D` from (n, l) basis to include m and s.
+    @cache
+    def overlaps_lj(self, diagonal_only: bool = False) -> torch.Tensor:
+        """Spin-angle overlaps expanded to pseudopotential projectors + spinors."""
+        f_lj = rc.from_np(get_Ylm_overlaps(self.l_max))  # in (l, m, s) basis
+        result = f_lj[self.i_ljms][:, self.i_ljms]  # expand to projectors
+        if diagonal_only:
+            # Keep only (n,l) = (n'l') blocks:
+            n = self.n.repeat_interleave(2)
+            l = self.l.repeat_interleave(2)
+            result[n[:, None] != n] = 0.0
+            result[l[:, None] != l] = 0.0
+        return result
+
+    def expand_m_s(self, M: torch.Tensor, n_spinor: int, mode: str) -> torch.Tensor:
+        """Expand matrix `M` from (n, l) basis to include m and s.
         Spin s is included explicitly only if `n_spinor` is 2.
         Additionally, if pseudopotential is relativistic, the expanded matrix
-        includes spin-angle overlap factors; n_spinor must be 2 for this mode.
-        """
-        if self.is_relativistic:
+        includes spin-angle overlap factors (and `n_spinor` must be 2).
+        Here, `mode` is `D` for the potential matrix which contains the overlap factors
+        along the diagonal blocks, and 'q' for the overlap matrix which is off-diagonal
+        in l and is instead pre- and post-multiplied by the spin-overlap matrix."""
+        if self.is_relativistic and mode == "M":
             if n_spinor != 2:
                 raise ValueError(
-                    "Relativistic pseudopotentials require" " spinorial calculation"
+                    "Relativistic pseudopotentials require spinorial calculation"
                 )
             # Collect matrix with spinor repetition:
             i_rf = self.i_rf[:, None].tile((1, 2)).flatten()  # spinor repeat
-            D_nljms = D[i_rf][:, i_rf].contiguous()
-            # Apply spin-angle overlaps (akin to delta_{lm,lm'} above):
-            f_lj = rc.from_np(get_Ylm_overlaps(self.l_max))
-            return D_nljms * f_lj[self.i_ljms][:, self.i_ljms]
+            M_nljms = M[i_rf][:, i_rf].contiguous()
+            return M_nljms * self.overlaps_lj()  # instead of delta_{lm,lm'} below
         else:
             # Non-relativistic pseuodopotential:
-            D_nlm = D[self.i_rf][:, self.i_rf].contiguous()
-            D_nlm[self.i_lm[None] != self.i_lm[:, None]] = 0.0  # delta_{lm,lm'}
+            M_nlm = M[self.i_rf][:, self.i_rf].contiguous()
+            M_nlm[self.i_lm[None] != self.i_lm[:, None]] = 0.0  # delta_{lm,lm'}
             if n_spinor == 1:
-                return D_nlm
+                return M_nlm
             else:  # n_spinor == 2
                 # Repeat for spinor component:
-                n_nlms = D_nlm.shape[0] * n_spinor
-                D_nlms = torch.zeros(
-                    (n_nlms, n_nlms), dtype=D_nlm.dtype, device=D_nlm.device
+                n_nlms = M_nlm.shape[0] * n_spinor
+                M_nlms = torch.zeros(
+                    (n_nlms, n_nlms), dtype=M_nlm.dtype, device=M_nlm.device
                 )
                 for i_spinor in range(n_spinor):
-                    D_nlms[i_spinor::n_spinor, i_spinor::n_spinor] = D_nlm
-                return D_nlms
+                    M_nlms[i_spinor::n_spinor, i_spinor::n_spinor] = M_nlm
+                if self.is_relativistic and mode == "q":
+                    overlaps_lj = self.overlaps_lj(diagonal_only=True)
+                    return overlaps_lj @ M_nlms.to(torch.cdouble) @ overlaps_lj
+                return M_nlms
 
     def get_spin_angle_transform(self) -> torch.Tensor:
         """Return transformation matrix from (l, j, m_l), s to (l, j, m_j).
@@ -180,32 +196,39 @@ class PseudoQuantumNumbers:
         """Pauli-matrix expectation values in orbital basis (spinorial case only).
         The result is 4 x n_tot_s x n_tot_s for relativistic pseudopotentials,
         and 4 x (2 n_tot) x (2 n_tot) for non-relativistic pseudopotentials,
-        where the first dimension of 4 corresponds to identity, x, y and z."""
-        pauli = torch.tensor(
+        where the first dimension of 4 corresponds to identity, x, y and z.
+
+        If `transform_spin_angle` is False, then this returns the expectation value
+        in the projector x n_spinor basis (and not the (j, mj) basis) regardless of
+        whether the pseudopotential is relativistic, which is used when the spin
+        angle transform is handled separately, e.g., during density augmentation."""
+        # Repeat Pauli matrices for each (n, l, m):
+        eye_nlm = torch.eye(self.n_tot, device=self.n.device)
+        pauli = torch.einsum("ab, dsS -> dasbS", eye_nlm, self.PAULI())
+        # Transform to spin-angle basis if needed:
+        if self.is_relativistic:
+            C = self.get_spin_angle_transform()
+            return torch.einsum("dasbS, asA, bSB -> dAB", pauli, C.conj(), C)
+        else:
+            return pauli.flatten(3, 4).flatten(1, 2)  # just combine as, bS indices
+
+    @staticmethod
+    @cache
+    def PAULI() -> torch.Tensor:
+        """Get the identity and Pauli matrices (identity, sigma_x, sigma_y, sigma_z),
+        useful for switching between spin density matrix and magnetization bases."""
+        return torch.tensor(
             [
                 [[1.0, 0.0], [0.0, 1.0]],  # identity
                 [[0.0, 1.0], [1.0, 0.0]],  # sigma_x
                 [[0.0, -1.0j], [1.0j, 0.0]],  # sigma_y
                 [[1.0, 0.0], [0.0, -1.0]],  # sigma_z
             ],
-            device=self.n.device,
+            device=rc.device,
         )
-        # Repeat for each (n, l, m):
-        eye_nlm = torch.eye(self.n_tot, device=self.n.device)
-        pauli = torch.einsum("ab, dsS -> dasbS", eye_nlm, pauli)
-        # Transform to spin-angle basis if needed:
-        if self.is_relativistic:
-            C = self.get_spin_angle_transform()
-            return torch.einsum(
-                "dAbS, bSB -> dAB",
-                torch.einsum("dasbS, asA -> dAbS", pauli, C.conj()),
-                C,
-            )
-        else:
-            return pauli.flatten(3, 4).flatten(1, 2)  # just combine as, bS indices
 
 
-@functools.cache
+@cache
 def get_Ylm_to_spin_angle(l: int) -> np.ndarray:
     """Create 2(2l+1) x 2(2l+1) matrix transforming from (m, s) to (j, mj).
     The (m, s) indices are along the first dimension, with inner s index.
@@ -243,7 +266,7 @@ def get_Ylm_to_spin_angle(l: int) -> np.ndarray:
     )  # s, m -> combined (m, s)
 
 
-@functools.cache
+@cache
 def get_Ylm_to_spin_angle_all(l_max: int) -> np.ndarray:
     """Cumulative spin angle transformation matrix up to l = `l_max`.
     Result is block-diagonal with dimension (4(l_max+1)^2 - 2) x 2(l_max+1)^2,
@@ -270,7 +293,7 @@ def get_Ylm_to_spin_angle_all(l_max: int) -> np.ndarray:
         return C_tot
 
 
-@functools.cache
+@cache
 def get_Ylm_overlaps(l_max: int) -> np.ndarray:
     """Compute spin-angle overlap matrix of Ylm up to `l_max`.
     Contains overlaps for (l=0, j=1/2), (l=1, j=1/2), (l=1, j=3/2) etc.,
