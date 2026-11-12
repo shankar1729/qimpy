@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Optional
 import argparse
 import glob
 
@@ -35,8 +34,8 @@ def run(
     checkpoints: str,
     output: str,
     probes: str,
-    density: Optional[dict] = None,
-    streamlines: Optional[dict] = None,
+    density: dict | None = None,
+    streamlines: dict | None = None,
     dpi: int = 200,
 ) -> None:
     """Plot cell-centered scalars as color map and optionally face-centered fluxes
