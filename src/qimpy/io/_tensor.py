@@ -16,7 +16,7 @@ def cast_tensor(t: TensorCompatible) -> torch.Tensor:
     if isinstance(t, torch.Tensor):
         return t.to(rc.device)
     if isinstance(t, np.ndarray):
-        return torch.from_numpy(t).to(rc.device)
+        return rc.from_np(t)
     try:
         return torch.tensor(t, device=rc.device)
     except ValueError:

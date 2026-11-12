@@ -145,9 +145,9 @@ class Mesh(TreeNode):
             partition = rank_remap[partition]
 
         # Synchronize partition across all processes:
-        partition_t = torch.from_numpy(partition).to(rc.device)
+        partition_t = rc.from_np(partition)
         dist.broadcast(partition_t, src=0)  # on world, not just on group
-        partition = partition_t.to(rc.cpu).numpy()
+        partition = rc.to_np(partition_t)
 
         # Determine permutation and bounds:
         permutation = np.argsort(partition, kind="stable")  # group cells by rank
@@ -372,8 +372,8 @@ class CellDivision(TaskDivisionCustom):
                 ring2_q = ring(ring(owned_q, adj_face), adj_vert)
                 ghost_q = ring2_q[~self.belongs(j_proc, ring2_q)]
                 send.append(self.local_index[owned[np.isin(owned, ghost_q)]])
-        self._recv_index = torch.from_numpy(np.concatenate(recv)).to(rc.device)
-        self._send_index = torch.from_numpy(np.concatenate(send)).to(rc.device)
+        self._recv_index = rc.from_np(np.concatenate(recv))
+        self._send_index = rc.from_np(np.concatenate(send))
         self._recv_counts = [len(idx) for idx in recv]
         self._send_counts = [len(idx) for idx in send]
 

@@ -26,9 +26,7 @@ def test_ylm(r_ylm: tuple[torch.Tensor, torch.Tensor]) -> None:
     log.info("Testing spherical harmonics:")
     r, ylm = r_ylm
     rel_err_all = []
-    ylm_ref = torch.from_numpy(get_harmonics_ref(sh.L_MAX, r.to(rc.cpu).numpy())).to(
-        rc.device
-    )
+    ylm_ref = rc.from_np(get_harmonics_ref(sh.L_MAX, rc.to_np(r)))
     for l in range(sh.L_MAX + 1):
         l_slice = slice(l**2, (l + 1) ** 2)
         err = (ylm[l_slice] - ylm_ref[l_slice]).norm().item()
@@ -61,7 +59,7 @@ def test_ylm_prime(r_ylm: tuple[torch.Tensor, torch.Tensor]) -> None:
         err_den_sq += ylm_prime_num.flatten(1).norm(dim=1).square()
     err[1:] *= 1.0 / err_den_sq.sqrt()[1:, None]  # to relative error
     # Report:
-    err_np = err.to(rc.cpu).numpy()
+    err_np = rc.to_np(err)
     for l in range(sh.L_MAX + 1):
         for m in range(-l, l + 1):
             err_x, err_y, err_z = err_np[l * (l + 1) + m]

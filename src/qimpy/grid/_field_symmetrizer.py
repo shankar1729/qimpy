@@ -69,7 +69,7 @@ class FieldSymmetrizer:
 
             # Identify what grid data to send from this process and to whom:
             mine_src = torch.where(whose_src == grid.i_proc)
-            dest_n_prev = torch.from_numpy(div_dest.n_prev).to(rc.device)
+            dest_n_prev = rc.from_np(div_dest.n_prev)
             send_prev = torch.searchsorted(mine_src[0].contiguous(), dest_n_prev)
             iH_local = iH[index[mine_src]] % shapeR  # wrap to positive
             iH_local[..., 2] -= div_src.i_start  # now local H-space index
@@ -95,8 +95,8 @@ class FieldSymmetrizer:
             )
 
             # Store required indexing arrays:
-            self.send_prev = send_prev.to(rc.cpu).numpy()
-            self.recv_prev = recv_prev.to(rc.cpu).numpy()
+            self.send_prev = rc.to_np(send_prev)
+            self.recv_prev = rc.to_np(recv_prev)
             self.grid_index = grid_index
             self.recv_index = recv_index
             self.orbit_index = torch.empty_like(local_index)

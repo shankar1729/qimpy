@@ -46,7 +46,7 @@ def all_gather_scalars(
     send_buf = torch.tensor(send, device=rc.device)
     recv = torch.empty(group.size(), dtype=send_buf.dtype, device=rc.device)
     dist.all_gather(list(recv), send_buf, group=group)
-    return recv.to(rc.cpu).numpy()
+    return rc.to_np(recv)
 
 
 def all_reduce_scalars(

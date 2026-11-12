@@ -3,6 +3,8 @@ import functools
 import torch
 import numpy as np
 
+from qimpy import rc
+
 
 class PseudoQuantumNumbers:
     """Quantum numbers of pseudo-atom in projector or orbital order."""
@@ -124,7 +126,7 @@ class PseudoQuantumNumbers:
             i_rf = self.i_rf[:, None].tile((1, 2)).flatten()  # spinor repeat
             D_nljms = D[i_rf][:, i_rf].contiguous()
             # Apply spin-angle overlaps (akin to delta_{lm,lm'} above):
-            f_lj = torch.from_numpy(get_Ylm_overlaps(self.l_max)).to(D.device)
+            f_lj = rc.from_np(get_Ylm_overlaps(self.l_max))
             return D_nljms * f_lj[self.i_ljms][:, self.i_ljms]
         else:
             # Non-relativistic pseuodopotential:
@@ -146,7 +148,7 @@ class PseudoQuantumNumbers:
         """Return transformation matrix from (l, j, m_l), s to (l, j, m_j).
         Only for relativistic cases, with output shape n_tot x 2 x n_tot_s.
         """
-        C = torch.from_numpy(get_Ylm_to_spin_angle_all(self.l_max)).to(self.l.device)
+        C = rc.from_np(get_Ylm_to_spin_angle_all(self.l_max))
         C_out = C[self.i_ljms][:, self.i_ljm].reshape((self.n_tot, 2, self.n_tot_s))
         # Project out contributions between different shells:
         sel = torch.where(self.n[:, None] != self.ns[None, :])

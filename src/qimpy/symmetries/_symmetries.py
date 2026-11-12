@@ -177,7 +177,7 @@ class Symmetries(TreeNode):
         """Reduce lattice (point group) symmetries by any global `axes`."""
         sym_axis = (lattice.Rbasis @ lattice_sym) @ lattice.invRbasis
         for axis_name, axis_np in axes.items():
-            axis = torch.from_numpy(axis_np).to(rc.device)
+            axis = rc.from_np(axis_np)
             sel = torch.where((sym_axis @ axis - axis).norm(dim=-1) < tolerance)[0]
             lattice_sym = lattice_sym[sel]
             sym_axis = sym_axis[sel]

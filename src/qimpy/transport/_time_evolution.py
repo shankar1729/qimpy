@@ -154,7 +154,7 @@ class TimeEvolution(TreeNode):
             cp_quad = cp_geom["quad0"]
             rho_f = np.array(cp_quad["rho"])
             t_f = cp["/time_evolution"].attrs["t"]
-        rho_f = torch.from_numpy(rho_f).to(rc.device)
+        rho_f = rc.from_np(rho_f)
         if isinstance(transport.material, qimpy.transport.material.ab_initio.AbInitio):
             ph = transport.material.packed_hermitian
             phase = transport.material.schrodingerV(t_f)
@@ -169,7 +169,7 @@ class TimeEvolution(TreeNode):
             rho0_I = ph.unpack(rho_f)  # interaction picture, unpacked to complex
             rho0_S = rho0_I * phase
             rho0 = ph.pack(rho0_S).flatten(-3, -1)
-            rho0 = rho0.to(rc.cpu).numpy()
+            rho0 = rc.to_np(rho0)
             rho0 = rho0.flatten()
 
         rho_shape = geometry.patches[0].rho_shape

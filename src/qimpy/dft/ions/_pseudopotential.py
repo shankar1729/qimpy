@@ -124,12 +124,12 @@ class Pseudopotential:
         r_inner, Q_taylor
             Optional inner pseudization radii and Taylor coefficients (USPP scheme).
         """
-        r = self.r.to(rc.cpu).numpy()
+        r = rc.to_np(self.r)
         r_sq = r**2
         l_beta = self.beta.l.tolist()
         n_beta = len(l_beta)
         # Integration weights for r^2 dr, matching RadialFunction.transform:
-        w = (2.0 / 3) * (r**2) * self.dr.to(rc.cpu).numpy()
+        w = (2.0 / 3) * (r**2) * rc.to_np(self.dr)
         w[1::2] *= 2.0
         w[[0, -1]] *= 0.5
 

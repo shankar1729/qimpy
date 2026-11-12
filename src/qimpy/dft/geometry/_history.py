@@ -52,7 +52,7 @@ class History(TreeNode):
 
     def add(self, name: str, value: float | torch.Tensor) -> None:
         """Add current `value` for variable `name` to history."""
-        data = np.array(value) if isinstance(value, float) else value.to(rc.cpu).numpy()
+        data = np.array(value) if isinstance(value, float) else rc.to_np(value)
         if name not in self.save_map:
             assert self.i_iter == 0  # if not, previous history must have been read in
             self.save_map[name] = np.empty(

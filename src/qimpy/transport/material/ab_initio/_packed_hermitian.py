@@ -15,20 +15,18 @@ class PackedHermitian:
         i2 = j * N + i  # swapped entry
 
         # Separate real / imaginary part from complex:
-        self.pack_index = torch.from_numpy(+np.where(i >= j, 2 * i1, 2 * i2 + 1)).to(
-            device=rc.device
-        )
+        self.pack_index = rc.from_np(np.where(i >= j, 2 * i1, 2 * i2 + 1))
 
         # Reconstruct complex hermitian version:
         unpack_real = np.where(i >= j, i1, i2)
         unpack_imag = np.where(i >= j, i2, i1)
         unpack_imag_sign = np.sign(i - j)
-        self.unpack_index = torch.from_numpy(
+        self.unpack_index = rc.from_np(
             np.stack((unpack_real, unpack_imag), axis=-1).flatten()
-        ).to(device=rc.device)
-        self.unpack_sign = torch.from_numpy(
+        )
+        self.unpack_sign = rc.from_np(
             np.stack((np.ones_like(i1), unpack_imag_sign), axis=-1).flatten()
-        ).to(device=rc.device)
+        )
 
         # Construct matrices for transforming super-operators to packed form:
         R = np.zeros((N * N, N * N), dtype=complex)
@@ -50,12 +48,10 @@ class PackedHermitian:
         Rinv[o1, o2] = +0.5
         Rinv[o2, o1] = -0.5j
         Rinv[o2, o2] = +0.5j
-        self.R = torch.from_numpy(R).to(rc.device)
-        self.Rinv = torch.from_numpy(Rinv).to(rc.device)
+        self.R = rc.from_np(R)
+        self.Rinv = rc.from_np(Rinv)
         self.N = N
-        self.w_overlap = torch.from_numpy(
-            np.where(i == j, 1.0, 2.0).reshape((N, N))
-        ).to(rc.device)
+        self.w_overlap = rc.from_np(np.where(i == j, 1.0, 2.0).reshape((N, N)))
 
     def pack(self, m: torch.Tensor) -> torch.Tensor:
         """Pack ... x N x N complex hermitian tensor to real version."""

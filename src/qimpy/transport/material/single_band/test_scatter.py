@@ -49,8 +49,8 @@ def test_scatter():
     # Plot carrier scattering rate vs energy:
     from matplotlib import pyplot as plt
 
-    Ediff = material.E.to(rc.cpu).numpy().flatten() - material.mu
-    tau_inv_ee = tau_inv_ee.to(rc.cpu).numpy().flatten()
+    Ediff = rc.to_np(material.E).flatten() - material.mu
+    tau_inv_ee = rc.to_np(tau_inv_ee).flatten()
     quadratic_model = Ediff**2 + (np.pi * material.T) ** 2
     D_ee = np.linalg.lstsq(quadratic_model[:, None], tau_inv_ee, rcond=None)[0][0]
     log.info(f"Lifetime fit parameter, D_ee = {D_ee:.3e}")
@@ -68,10 +68,10 @@ def test_scatter():
 
     plt.figure()
     i_k = torch.argmax((material.E.flatten() - material.mu).abs()).item()
-    f_dot_i = f_dot[i_k].to(rc.cpu).numpy()
+    f_dot_i = rc.to_np(f_dot[i_k])
     f_dot_i[i_k] = 0.0
     cmax = np.max(np.abs(f_dot_i))
-    kx, ky, _ = (material.k @ material.lattice.Gbasis.T).to(rc.cpu).numpy().T
+    kx, ky, _ = rc.to_np(material.k @ material.lattice.Gbasis.T).T
     plt.scatter(kx, ky, c=f_dot_i, cmap="RdBu", vmin=-cmax, vmax=cmax)
     plt.colorbar(label="df/dt")
     plt.scatter(kx[i_k], ky[i_k], marker="+", color="k")

@@ -249,8 +249,8 @@ class FunctionalsLibxc(Functional):
         """Convert data array from XC to internal form.
         `v_ref` provides the reference shape for the output."""
         in_shape = v_ref.shape[1:] + v_ref.shape[:1]  # spin dim last in XC
-        out = torch.from_numpy(v).contiguous().view(in_shape)
-        return out.permute(3, 0, 1, 2).to(rc.device)  # spin first now
+        out = rc.from_np(v).contiguous().view(in_shape)
+        return out.permute(3, 0, 1, 2)  # spin first now
 
     def __call__(
         self,

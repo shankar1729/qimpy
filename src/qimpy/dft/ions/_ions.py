@@ -225,19 +225,15 @@ class Ions(TreeNode):
             f"  # in {'fractional' if self.fractional else 'Cartesian [a0]'} coordinates"
         )
         # Fetch to CPU in required coordinate system for reporting:
-        positions = (
-            (
-                self.positions
-                if self.fractional
-                else self.positions @ self.lattice.Rbasis.T
-            )
-            .to(rc.cpu)
-            .numpy()
+        positions = rc.to_np(
+            self.positions
+            if self.fractional
+            else self.positions @ self.lattice.Rbasis.T
         )
-        types = self.types.to(rc.cpu).numpy()
-        v = None if (self.velocities is None) else self.velocities.to(rc.cpu).numpy()
-        Q = None if (self.Q is None) else self.Q.to(rc.cpu).numpy()
-        M = None if (self.M is None) else self.M.to(rc.cpu).numpy()
+        types = rc.to_np(self.types)
+        v = None if (self.velocities is None) else rc.to_np(self.velocities)
+        Q = None if (self.Q is None) else rc.to_np(self.Q)
+        M = None if (self.M is None) else rc.to_np(self.M)
         any_attribs = not ((v is None) and (Q is None) and (M is None))
         for i_ion, (pos_x, pos_y, pos_z) in enumerate(positions):
             if any_attribs:
@@ -262,9 +258,8 @@ class Ions(TreeNode):
 
         # Report forces / stresses if requested:
         if report_grad:
-            forces = self.forces.detach().to(rc.cpu).numpy()
             log.info("\nforces:  # in Cartesian [Eh/a0] coordinates")
-            for type_i, (fx, fy, fz) in zip(types, forces):
+            for type_i, (fx, fy, fz) in zip(types, rc.to_np(self.forces)):
                 log.info(
                     f"- [{self.symbols[type_i]}, {fx:11.8f}, {fy:11.8f}, {fz:11.8f}]"
                 )

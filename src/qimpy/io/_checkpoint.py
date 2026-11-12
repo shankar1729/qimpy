@@ -86,7 +86,7 @@ class Checkpoint(h5py.File):
         assert len(offset) == len(dset.shape)
         if self.write_from_head:
             # TODO: improve/bypass this logic to not use object communication
-            payloads = rc.comm.gather((tuple(offset), data.to(rc.cpu).numpy()), root=0)
+            payloads = rc.comm.gather((tuple(offset), rc.to_np(data)), root=0)
             if rc.is_head:
                 for off, arr in payloads:
                     dset[
@@ -98,7 +98,7 @@ class Checkpoint(h5py.File):
         index = tuple(
             slice(offset[i], offset[i] + s_i) for i, s_i in enumerate(data.shape)
         )
-        dset[index] = data.to(rc.cpu).numpy()
+        dset[index] = rc.to_np(data)
 
     def read_slice(
         self, dset: Any, offset: tuple[int, ...], size: tuple[int, ...]
@@ -112,7 +112,7 @@ class Checkpoint(h5py.File):
         index = tuple(
             slice(offset[i], offset[i] + size[i]) for i, s_i in enumerate(dset.shape)
         )
-        return torch.from_numpy(dset[index]).to(rc.device)
+        return rc.from_np(dset[index])
 
     def create_dataset_real(
         self,
@@ -234,9 +234,7 @@ class CheckpointPath(NamedTuple):
         assert checkpoint is not None
         dset = checkpoint.create_dataset_real(path, data.shape, data.dtype)
         if rc.is_head:
-            dset[...] = (
-                data.to(rc.cpu).numpy() if isinstance(data, torch.Tensor) else data
-            )
+            dset[...] = rc.to_np(data) if isinstance(data, torch.Tensor) else data
         return name
 
     def read(self, name: str, report: bool = True) -> torch.Tensor:
@@ -247,7 +245,7 @@ class CheckpointPath(NamedTuple):
         if report:
             log.info(f"Loading {name}")
         dset = checkpoint[path]
-        return torch.from_numpy(dset[...]).to(rc.device)
+        return rc.from_np(dset[...])
 
     def read_np(self, name: str, report: bool = True) -> np.ndarray:
         """Read entire dataset from `name`, reporting to log if `report`."""

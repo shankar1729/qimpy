@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
+from qimpy import rc
 from qimpy.profiler import stopwatch
 from qimpy.mpi import Waitable
 
@@ -60,7 +61,7 @@ def accum_norm_(
     assert f.shape == x.shape[:stop_dim]
     assert f.shape[:start_dim] == out.shape[:start_dim]
     assert x.shape[stop_dim:] == out.shape[start_dim:]
-    f_np = f.cpu().numpy()
+    f_np = rc.to_np(f)
     for index_in in np.argwhere(f_np):
         index = tuple(index_in)
         f_cur = f_np[index]  # this is a scalar
@@ -96,7 +97,7 @@ def accum_prod_(
     assert f.shape[:start_dim] == out.shape[:start_dim]
     assert x.shape[stop_dim:] == out.shape[start_dim:]
     assert x.shape == y.shape
-    f_np = f.cpu().numpy()
+    f_np = rc.to_np(f)
     for index_in in np.argwhere(f_np):
         index = tuple(index_in)
         f_cur = f_np[index]  # this is a scalar

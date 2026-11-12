@@ -131,13 +131,13 @@ class Lindblad(TreeNode):
         cp_omega_ph = data_file["omega_ph"]
         cp_G = data_file["G"]
         if detailed_balance == "emission":
-            cp_E = torch.from_numpy(np.array(data_file["E"])).to(rc.device)
+            cp_E = rc.from_np(np.array(data_file["E"]))
         for block_start, block_stop in zip(block_lims[:-1], block_lims[1:]):
             # Read current slice of data:
             cur = slice(block_start, block_stop)
-            ik, jk = torch.from_numpy(cp_ikpair[cur]).to(rc.device).T
-            omega_ph = torch.from_numpy(cp_omega_ph[cur]).to(rc.device)
-            G = torch.from_numpy(cp_G[cur]).to(rc.device)
+            ik, jk = rc.from_np(cp_ikpair[cur]).T
+            omega_ph = rc.from_np(cp_omega_ph[cur])
+            G = rc.from_np(cp_G[cur])
             if evecs is not None:
                 G = torch.einsum("kba, kbc, kcd -> kad", evecs[ik].conj(), G, evecs[jk])
             bose_occ = bose(omega_ph, ab_initio.T)[:, None, None]

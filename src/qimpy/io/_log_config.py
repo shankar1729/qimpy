@@ -77,12 +77,7 @@ def fmt(tensor: torch.Tensor | np.ndarray, **kwargs) -> str:
     kwargs.setdefault("suppress_small", True)
     kwargs.setdefault("separator", ", ")
     return np.array2string(
-        (
-            tensor.detach().to(rc.cpu).numpy()
-            if isinstance(tensor, torch.Tensor)
-            else tensor
-        ),
-        **kwargs,
+        rc.to_np(tensor) if isinstance(tensor, torch.Tensor) else tensor, **kwargs
     )
 
 

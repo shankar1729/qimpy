@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from qimpy import rc, MPI
+from qimpy import rc
 from qimpy.lattice import Lattice
 from qimpy.grid import Grid, FieldR
 from qimpy.symmetries import Symmetries
@@ -36,8 +36,8 @@ def check_embed(grid: Grid) -> None:
         err = torch.abs(field1.data - field3.data)
         perr = torch.abs(field1.data - field3.data) / field1.data
         print("max abs|% error:", err.max(), perr.max())
-        #print("sum % error:", (err / field1.data).sum() / np.prod(err.shape))
-        #print(err.shape, len(err))
+        # print("sum % error:", (err / field1.data).sum() / np.prod(err.shape))
+        # print(err.shape, len(err))
 
 
 def extend_grid(
@@ -115,7 +115,7 @@ def show(ax, data, title=None):
     # ax.plot(center[1] * data.shape[0], center[2] * data.shape[1], 'rx')
     if title:
         ax.set_title(title)
-    return ax.imshow(data.to(rc.cpu).numpy(), origin="lower")
+    return ax.imshow(rc.to_np(data), origin="lower")
 
 
 def main():

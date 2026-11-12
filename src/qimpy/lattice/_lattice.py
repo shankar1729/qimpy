@@ -296,7 +296,7 @@ def check_perpendicular(
 ) -> None:
     """Check and raise error if lattice diretcions in `Rbasis` with differing
     `periodic` are not perpendicular to each other beyond tolerance `ORTHO_TOL`."""
-    metric = (Rbasis.T @ Rbasis).to(rc.cpu).numpy()
+    metric = rc.to_np(Rbasis.T @ Rbasis)
     inv_lengths = 1.0 / np.sqrt(np.diag(metric))
     cos_theta = inv_lengths * metric * inv_lengths[:, None]
     violations = []

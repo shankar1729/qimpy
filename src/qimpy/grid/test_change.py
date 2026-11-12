@@ -86,7 +86,7 @@ def get_plot_slice(v: Field) -> tuple[np.ndarray, np.ndarray]:
     Lz = v.grid.lattice.Rbasis[:, 2].norm().item()
     Nz = v.grid.shape[2]
     z = np.arange(Nz) * (Lz / Nz)
-    return z, v.data[0, 0].to(rc.cpu).numpy()
+    return z, rc.to_np(v.data[0, 0])
 
 
 def main() -> None:

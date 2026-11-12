@@ -332,10 +332,8 @@ class Fillings(TreeNode):
                     2, 2, 1, 1
                 )
                 M_len = 1
-            NM_target = np.concatenate(
-                (np.full(1, self.n_electrons), self.M.to(rc.cpu).numpy())
-            )
-            mu_B = np.concatenate((np.full(1, self.mu), self.B.to(rc.cpu).numpy()))
+            NM_target = np.concatenate((np.full(1, self.n_electrons), rc.to_np(self.M)))
+            mu_B = np.concatenate((np.full(1, self.mu), rc.to_np(self.B)))
             i_free = np.where([not self.mu_constrain] + [self.M_constrain] * M_len)[0]
         else:
             w_NM = torch.ones((1, 1, 1, 1), device=rc.device)
@@ -369,8 +367,8 @@ class Fillings(TreeNode):
             results["NM"] = NM
             results["S"] = S
             # Compute errors:
-            NM_err = NM.to(rc.cpu).numpy() - NM_target
-            NM_err_mu_B = NM_mu_B.to(rc.cpu).numpy()
+            NM_err = rc.to_np(NM) - NM_target
+            NM_err_mu_B = rc.to_np(NM_mu_B)
             return NM_err[i_free], NM_err_mu_B[i_free][:, i_free]
 
         if len(i_free) == 0:
@@ -434,7 +432,7 @@ class Fillings(TreeNode):
         if el.spin_polarized:
             M = results["NM"][1:]
             if self.M_constrain:
-                self.B = torch.from_numpy(mu_B[1:]).to(rc.device)
+                self.B = rc.from_np(mu_B[1:])
             else:
                 self.M = M
             M_str = f'  M: {fmt(M, floatmode="fixed", precision=5)}'

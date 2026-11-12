@@ -69,8 +69,8 @@ class Geometry(TreeNode):
         # Initialize cell to face reconstruction operator:
         neighbors, reconstruct = self.mesh.get_face_reconstruction_op()
         self.is_spatial = neighbors.shape[1] > 0  # else, pure dynamics
-        self.neighbors = torch.from_numpy(neighbors).to(rc.device)
-        self.reconstruct = torch.from_numpy(reconstruct).to(rc.device)
+        self.neighbors = rc.from_np(neighbors)
+        self.reconstruct = rc.from_np(reconstruct)
         if compile:
             mode = os.environ.get("QIMPY_COMPILE_MODE", "max-autotune")
             if mode == "jit-script":
@@ -93,7 +93,7 @@ class Geometry(TreeNode):
         boundary_cf = boundary_map[:, 0] * n_faces + boundary_map[:, 1]
         interior_cf = interior_map[..., 0] * n_faces + interior_map[..., 1]
         # --- further flattened indices including kbb dimension as well:
-        v = material.transport_velocity.cpu().numpy()
+        v = rc.to_np(material.transport_velocity)
         n_kbb_mine = v.shape[0]
         i_kbb = np.arange(n_kbb_mine)
         boundary_cfk = (i_kbb + n_kbb_mine * boundary_cf[:, None]).flatten()
