@@ -97,7 +97,7 @@ class Augmentation:
     ) -> FieldH:
         """Compute density augmentation from wavefunction projections `beta_C`
         and weighted occupations `wf`, with k-point reduction over `group_k`.
-        Return 4 components inlcluding magnetization if `need_Mvec` (spinor case)."""
+        Return 4 components including magnetization if `need_Mvec` (spinor case)."""
         beta_C = C.proj
         basis = C.basis
         wf = f * basis.w_sk
@@ -242,7 +242,7 @@ class Species:
         """Set atomic density matrix from wavefunction projections `beta_C`
         and weighted occupations `wf`."""
         proj = beta_C[:, :, self.proj_slice].unflatten(2, (self.n_atoms, self.n_proj_s))
-        self.rho = torch.einsum("skain, skn, skajn -> saij", proj.conj(), wf, proj)
+        self.rho = torch.einsum("skain, skn, skajn -> saij", proj, wf, proj.conj())
         dist.all_reduce(self.rho, group=group_k)
 
     def radial_coefficients(self, n_densities: int) -> torch.Tensor:

@@ -132,13 +132,13 @@ class PseudoQuantumNumbers:
         Here, `mode` is `D` for the potential matrix which contains the overlap factors
         along the diagonal blocks, and 'q' for the overlap matrix which is off-diagonal
         in l and is instead pre- and post-multiplied by the spin-overlap matrix."""
-        if self.is_relativistic and mode == "M":
+        if self.is_relativistic and mode == "D":
             if n_spinor != 2:
                 raise ValueError(
                     "Relativistic pseudopotentials require spinorial calculation"
                 )
             # Collect matrix with spinor repetition:
-            i_rf = self.i_rf[:, None].tile((1, 2)).flatten()  # spinor repeat
+            i_rf = self.i_rf.repeat_interleave(2)  # spinor repeat
             M_nljms = M[i_rf][:, i_rf].contiguous()
             return M_nljms * self.overlaps_lj()  # instead of delta_{lm,lm'} below
         else:

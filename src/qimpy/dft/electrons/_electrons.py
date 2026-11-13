@@ -349,9 +349,6 @@ class Electrons(TreeNode):
         if (augmentation := system.ions.augmentation) is not None:
             self.n_tilde += augmentation.density(C, f, need_Mvec)
         self.n_tilde.symmetrize()
-
-        log.info(f"{self.n_tilde.integral()=}")
-
         if self.xc.need_tau:
             self.tau_tilde = self.n_tilde.zeros_like()
             for i_dir in range(3):
