@@ -253,7 +253,7 @@ class Species:
             if self.ps.is_relativistic:
                 rho = self.overlaps_lj @ rho @ self.overlaps_lj
             rho = rho.reshape(self.n_atoms, self.n_proj, 2, self.n_proj, 2)
-            rho = torch.einsum("dsS, aisjS -> daij", self.PAULI[:n_densities], rho)
+            rho = torch.einsum("dsS, aiSjs -> daij", self.PAULI[:n_densities], rho)
         elif self.augmentation.n_spins == 2:
             rho = torch.einsum("ds, saij -> daij", spin_map(), rho)
         Q_coeff = self.ps.Q.f_tilde_coeff
@@ -265,6 +265,7 @@ class Species:
         Q_coeff = self.ps.Q.f_tilde_coeff[: coeff_grad.shape[0]]  # rows used by Ginterp
         V_rho = torch.einsum("qLij, cq, cdaL -> daij", self.gaunt, Q_coeff, coeff_grad)
         if self.augmentation.n_spinor == 2:
+            V_rho = V_rho.to(self.PAULI.dtype)
             V_rho = torch.einsum("dsS, daij -> aisjS", self.PAULI[: len(V_rho)], V_rho)
             V_rho = V_rho.reshape(1, self.n_atoms, self.n_proj_s, self.n_proj_s)
             if self.ps.is_relativistic:

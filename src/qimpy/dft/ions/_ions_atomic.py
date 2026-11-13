@@ -117,7 +117,7 @@ def get_atomic_density(
                         "Per-ion magnetization must be a scalar in non-spinorial mode"
                     )
             else:  # n_mag == 3:
-                if len(self.M.shape) != 3:
+                if (len(self.M.shape) != 2) or (self.M.shape[1] != 3):
                     raise ValueError(
                         "Per-ion magnetization must be a 3-vector in spinorial mode"
                     )

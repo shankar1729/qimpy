@@ -63,7 +63,7 @@ def get_space_group(
             err = (vectors0[:, None] - vectors[:, :, None]).norm(dim=(0, 3))
             mask = torch.logical_and(err < tolerance, mask)
         if pseudovectors0 is not None:
-            pseudovectors = vectors0 @ sym_pseudovectors[i_sym].T
+            pseudovectors = pseudovectors0 @ sym_pseudovectors[i_sym].T
             err = (pseudovectors0[:, None] - pseudovectors[:, :, None]).norm(dim=(0, 3))
             mask = torch.logical_and(err < tolerance, mask)
 

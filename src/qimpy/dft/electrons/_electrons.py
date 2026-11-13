@@ -255,7 +255,6 @@ class Electrons(TreeNode):
         # Check for unsupported feature combinations:
         if any(ps.is_ultrasoft for ps in ions.pseudopotentials):
             unsupported = {
-                # "spinorial calculations": self.spinorial,
                 "CheFSI": isinstance(self.diagonalize, CheFSI),
                 "DFT+U": bool(self.xc.plus_U),
                 "meta-GGA functionals": self.xc.need_tau,

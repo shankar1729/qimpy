@@ -254,9 +254,10 @@ class Wavefunction(Gradable["Wavefunction"]):
         assert not self.band_division
         assert self.spinorial
         rho_s = torch.einsum("skbxg, skbyg -> skbxy", self.coeff, self.coeff.conj())
+        # TODO: ultrasoft augmentation
         if self.basis.group.size() > 1:
             dist.all_reduce(rho_s, group=self.basis.group)
-        return torch.cat(
+        return torch.stack(
             (
                 2.0 * rho_s[..., 1, 0].real,  # Sx
                 2.0 * rho_s[..., 1, 0].imag,  # Sy
