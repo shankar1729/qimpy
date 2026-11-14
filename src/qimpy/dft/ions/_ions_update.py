@@ -55,10 +55,8 @@ def update(self: ions.Ions, system: dft.System) -> None:
     _LocalTerms(self, system).update()
 
     # Update pseudopotential matrix, augmentation and projectors:
-    if (q_all := self._collect_ps_matrix(system.electrons.n_spinor)) is None:
-        self.augmentation = None
-    else:
-        self.augmentation = Augmentation(system, q_all)
+    self._collect_ps_matrix(system.electrons.n_spinor)
+    self.augmentation = Augmentation(system) if self.has_ultrasoft else None
     if system.electrons.need_full_projectors:
         beta_full = self._get_projectors(system.electrons.basis, full_basis=True)
         self.beta_full = beta_full
@@ -240,27 +238,21 @@ class _LocalTerms:
             pos_grad[slice_i] += FieldH(grid, data=SF_grad_i) ^ dphase_by_dpos
 
 
-def collect_ps_matrix(self: ions.Ions, n_spinor: int) -> torch.Tensor | None:
-    """Collect pseudopotential matrices across species and atoms.
-    Initializes `D_all`, and returns `q_all` if any pseudopotential is ultrasoft."""
+def collect_ps_matrix(self: ions.Ions, n_spinor: int) -> None:
+    """Collect pseudopotential matrix `D_all` across species and atoms."""
     n_proj = self.n_projectors * n_spinor
     self.D_all = torch.zeros((n_proj, n_proj), device=rc.device, dtype=torch.complex128)
-    ultrasoft = any((ps.q is not None) for ps in self.pseudopotentials)
-    q_all = torch.zeros_like(self.D_all) if ultrasoft else None
     i_proj_start = 0
     for i_ps, ps in enumerate(self.pseudopotentials):
         D_nlms = ps.pqn_beta.expand_m_s(ps.D, n_spinor, "D")
-        q_nlms = None if (ps.q is None) else ps.pqn_beta.expand_m_s(ps.q, n_spinor, "q")
         n_proj_atom = D_nlms.shape[0]
+        n_atoms = self.n_ions_type[i_ps]
+        proj_slice = slice(i_proj_start, i_proj_start + n_atoms * n_proj_atom)
+        i_proj_start = proj_slice.stop
         # Set diagonal block for each atom:
-        for i_atom in range(self.n_ions_type[i_ps]):
-            i_proj_stop = i_proj_start + n_proj_atom
-            slice_cur = slice(i_proj_start, i_proj_stop)
-            self.D_all[slice_cur, slice_cur] = D_nlms
-            if q_nlms is not None:
-                q_all[slice_cur, slice_cur] = q_nlms
-            i_proj_start = i_proj_stop
-    return q_all
+        shape = (n_atoms, n_proj_atom, n_atoms, n_proj_atom)
+        block = self.D_all[proj_slice, proj_slice].view(shape)
+        block.diagonal(dim1=0, dim2=2).copy_(D_nlms[..., None])
 
 
 def _update_pulay(ions: ions.Ions, basis: dft.electrons.Basis) -> torch.Tensor:

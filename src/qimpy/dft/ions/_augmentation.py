@@ -20,10 +20,8 @@ class Augmentation:
 
     ions: dft.ions.Ions  #: Ions whose augmentation charges these are
     grid: Grid  #: Density grid (local half-space portion used)
-    q_all: torch.Tensor  #: Overlap augmentation
     n_spins: int  #: Number of spin channels
     n_spinor: int  #: Number of spinor components
-    D_aug: torch.Tensor  #: Augmentation of `Ions.D_all`
     indexH: torch.Tensor  #: Non-zero indices into FieldH data for ke-cutoff sphere
     iG: torch.Tensor  #: Local reciprocal lattice vectors (integer coordinates)
     G: torch.Tensor  #: Local reciprocal lattice vectors (Cartesian)
@@ -33,16 +31,15 @@ class Augmentation:
     L_max: int  #: Largest L of all augmentation functions
     Y: tuple[torch.Tensor, torch.Tensor]  #: Even and odd signed harmonics
     species: list[Species]  #: Data of each ultrasoft species
+    q_all: torch.Tensor  #: Overlap augmentation
+    D_aug: torch.Tensor  #: Augmentation of `Ions.D_all`
 
-    def __init__(self, system: dft.System, q_all: torch.Tensor) -> None:
+    def __init__(self, system: dft.System) -> None:
         """Prepare density augmentation for specified dft `system`."""
         self.ions = system.ions
         self.grid = system.grid
-        self.q_all = q_all
         self.n_spins = system.electrons.n_spins
         self.n_spinor = system.electrons.n_spinor
-        D_shape = (self.n_spins, 1) + q_all.shape
-        self.D_aug = torch.zeros(D_shape, dtype=q_all.dtype, device=rc.device)
 
         # Augment only within the density cutoff sphere, |G|^2 <= 2 grid.ke_cutoff
         R_lengths = system.lattice.Rbasis.norm(dim=0)
@@ -66,16 +63,26 @@ class Augmentation:
         )
         self.Y = self._get_harmonics()
 
-        # Collect data of ultrasoft species, locating their atoms and projectors:
+        # Initialize ultrasoft species and assemble q_all overlap augmentation matrix:
         self.species = []
+        self.q_all = torch.zeros_like(self.ions.D_all)
         i_proj_start = 0
         for ps, atom_slice in zip(self.ions.pseudopotentials, self.ions.slices):
             n_atoms = atom_slice.stop - atom_slice.start
             n_proj_s = ps.n_projectors * self.n_spinor
             proj_slice = slice(i_proj_start, i_proj_start + n_atoms * n_proj_s)
             i_proj_start = proj_slice.stop
-            if ps.Q is not None:
+            if ps.q is not None:
                 self.species.append(Species(atom_slice, proj_slice, ps, self))
+                # Set overlap augmentation in diagonal blocks:
+                q_nlms = ps.pqn_beta.expand_m_s(ps.q, self.n_spinor, "q")
+                shape = (n_atoms, n_proj_s, n_atoms, n_proj_s)
+                block = self.q_all[proj_slice, proj_slice].view(shape)
+                block.diagonal(dim1=0, dim2=2).copy_(q_nlms[..., None])
+
+        # Initialize augmentation potential matrix:
+        D_shape = (self.n_spins, 1) + self.q_all.shape
+        self.D_aug = torch.zeros(D_shape, dtype=self.q_all.dtype, device=rc.device)
 
     def _get_harmonics(self, prime: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
         """Get harmonics sorted by even and odd, and with i^(L - L%2) sign."""

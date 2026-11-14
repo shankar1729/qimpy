@@ -253,7 +253,7 @@ class Electrons(TreeNode):
         self.add_child("scf", SCF, scf, checkpoint_in, group=self.group)
 
         # Check for unsupported feature combinations:
-        if any(ps.is_ultrasoft for ps in ions.pseudopotentials):
+        if ions.has_ultrasoft:
             unsupported = {
                 "CheFSI": isinstance(self.diagonalize, CheFSI),
                 "DFT+U": bool(self.xc.plus_U),

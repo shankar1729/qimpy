@@ -1,4 +1,5 @@
 from __future__ import annotations
+from functools import cached_property
 
 import numpy as np
 import torch
@@ -297,6 +298,10 @@ class Ions(TreeNode):
             (ps.n_atomic_orbitals(n_spinor) * self.n_ions_type[i_ps])
             for i_ps, ps in enumerate(self.pseudopotentials)
         )
+
+    @cached_property
+    def has_ultrasoft(self) -> bool:
+        return any(ps.is_ultrasoft for ps in self.pseudopotentials)
 
     @property
     def forces(self) -> torch.Tensor:
