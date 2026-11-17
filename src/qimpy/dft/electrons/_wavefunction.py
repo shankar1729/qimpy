@@ -8,6 +8,7 @@ from qimpy.io import CheckpointPath
 from qimpy.mpi import TaskDivision
 from qimpy.algorithms import Gradable
 from qimpy.math import abs_squared
+from ..ions import PseudoQuantumNumbers
 from . import Basis
 from ._wavefunction_init import _randomize, _randomize_selected
 from ._wavefunction_split import _split_bands, _split_basis
@@ -253,17 +254,20 @@ class Wavefunction(Gradable["Wavefunction"]):
         Result dimensions are 3 x 1 x nk x n_bands."""
         assert not self.band_division
         assert self.spinorial
-        rho_s = torch.einsum("skbxg, skbyg -> skbxy", self.coeff, self.coeff.conj())
-        # TODO: ultrasoft augmentation
+        PAULI = PseudoQuantumNumbers.PAULI()[1:]
+        result = torch.einsum(
+            "dyx, skbxg, skbyg -> dskb", PAULI, self.coeff, self.coeff.conj()
+        ).real
         if self.basis.group.size() > 1:
-            dist.all_reduce(rho_s, group=self.basis.group)
-        return torch.stack(
-            (
-                2.0 * rho_s[..., 1, 0].real,  # Sx
-                2.0 * rho_s[..., 1, 0].imag,  # Sy
-                rho_s[..., 0, 0].real - rho_s[..., 1, 1].real,  # Sz
-            )
-        )  # Convert spin density matrix per band (rho_s) to spin vector per band
+            result = result.contiguous()
+            dist.all_reduce(result, group=self.basis.group)
+        if (augmentation := self.basis.ions.augmentation) is not None:
+            beta_C = self.proj
+            aug = torch.einsum(
+                "skib, dij, skjb -> dskb", beta_C.conj(), augmentation.q_spin, beta_C
+            ).real
+            result += aug
+        return result
 
     def constrain(self: Wavefunction) -> None:
         """Enforce basis constraints on wavefunction coefficients.

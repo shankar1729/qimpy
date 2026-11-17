@@ -31,8 +31,9 @@ class Augmentation:
     L_max: int  #: Largest L of all augmentation functions
     Y: tuple[torch.Tensor, torch.Tensor]  #: Even and odd signed harmonics
     species: list[Species]  #: Data of each ultrasoft species
-    q_all: torch.Tensor  #: Overlap augmentation
-    D_aug: torch.Tensor  #: Augmentation of `Ions.D_all`
+    q_all: torch.Tensor  #: Overlap augmentation (n_proj x n_proj)
+    q_spin: torch.Tensor  #: Spin augmentation (3 x n_proj x n_proj), if spinorial
+    D_aug: torch.Tensor  #: Augmentation of `Ions.D_all` (n_spins x 1 x n_proj x n_proj)
 
     def __init__(self, system: dft.System) -> None:
         """Prepare density augmentation for specified dft `system`."""
@@ -66,6 +67,8 @@ class Augmentation:
         # Initialize ultrasoft species and assemble q_all overlap augmentation matrix:
         self.species = []
         self.q_all = torch.zeros_like(self.ions.D_all)
+        self.q_spin = self.q_all.tile((3, 1, 1))
+        self.D_aug = self.q_all.tile((self.n_spins, 1, 1, 1))
         i_proj_start = 0
         for ps, atom_slice in zip(self.ions.pseudopotentials, self.ions.slices):
             n_atoms = atom_slice.stop - atom_slice.start
@@ -79,10 +82,11 @@ class Augmentation:
                 shape = (n_atoms, n_proj_s, n_atoms, n_proj_s)
                 block = self.q_all[proj_slice, proj_slice].view(shape)
                 block.diagonal(dim1=0, dim2=2).copy_(q_nlms[..., None])
-
-        # Initialize augmentation potential matrix:
-        D_shape = (self.n_spins, 1) + self.q_all.shape
-        self.D_aug = torch.zeros(D_shape, dtype=self.q_all.dtype, device=rc.device)
+                # Set spin augmentation for spinorial case (for magnetization report):
+                if self.n_spinor == 2:
+                    q_spin_nlms = ps.pqn_beta.expand_m_s(ps.q, self.n_spinor, "q_spin")
+                    block = self.q_spin[:, proj_slice, proj_slice].view((3,) + shape)
+                    block.diagonal(dim1=1, dim2=3).copy_(q_spin_nlms[..., None])
 
     def _get_harmonics(self, prime: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
         """Get harmonics sorted by even and odd, and with i^(L - L%2) sign."""

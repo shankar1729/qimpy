@@ -130,8 +130,9 @@ class PseudoQuantumNumbers:
         Additionally, if pseudopotential is relativistic, the expanded matrix
         includes spin-angle overlap factors (and `n_spinor` must be 2).
         Here, `mode` is `D` for the potential matrix which contains the overlap factors
-        along the diagonal blocks, and 'q' for the overlap matrix which is off-diagonal
-        in l and is instead pre- and post-multiplied by the spin-overlap matrix."""
+        along the diagonal blocks. Mode shoud be 'q' for the overlap matrix
+        (off-diagonal in l; pre- and post-multiplied by the spin-overlap matrix), and
+        'q_spin' for the corresponding overlap matrix for spin expectation values."""
         if self.is_relativistic and mode == "D":
             if n_spinor != 2:
                 raise ValueError(
@@ -149,15 +150,19 @@ class PseudoQuantumNumbers:
                 return M_nlm
             else:  # n_spinor == 2
                 # Repeat for spinor component:
-                n_nlms = M_nlm.shape[0] * n_spinor
-                M_nlms = torch.zeros(
-                    (n_nlms, n_nlms), dtype=M_nlm.dtype, device=M_nlm.device
-                )
-                for i_spinor in range(n_spinor):
-                    M_nlms[i_spinor::n_spinor, i_spinor::n_spinor] = M_nlm
-                if self.is_relativistic and mode == "q":
+                shape = (M_nlm.shape[0], n_spinor) * 2
+                M_nlms = torch.zeros(shape, dtype=M_nlm.dtype, device=M_nlm.device)
+                M_nlms.diagonal(dim1=1, dim2=3).copy_(M_nlm[..., None])
+                if mode == "q_spin":
+                    # Multiply identity in spinors above by each Pauli matrix:
+                    M_nlms = torch.einsum(
+                        "iajb, dbc -> diajc", M_nlms.to(torch.cdouble), self.PAULI()[1:]
+                    )
+                M_nlms = M_nlms.flatten(-4, -3).flatten(-2, -1)
+                if self.is_relativistic and mode in ("q", "q_spin"):
+                    # Apply spin-angle overlaps:
                     overlaps_lj = self.overlaps_lj(diagonal_only=True)
-                    return overlaps_lj @ M_nlms.to(torch.cdouble) @ overlaps_lj
+                    M_nlms = overlaps_lj @ M_nlms.to(torch.cdouble) @ overlaps_lj
                 return M_nlms
 
     def get_spin_angle_transform(self) -> torch.Tensor:
