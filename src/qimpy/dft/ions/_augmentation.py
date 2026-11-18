@@ -238,10 +238,11 @@ class Species:
         self.n_odd_LM = gaunt[1].shape[1]
         self.gaunt = torch.cat(gaunt, dim=1)
 
-        # Extra transformations for relativistic case:
+        # Extra transformations for spinorial and relativistic cases:
         if augmentation.n_spinor == 2:
             self.PAULI = ps.pqn_beta.PAULI()  # 4 x 2 x 2
-            self.overlaps_lj = ps.pqn_beta.overlaps_lj(diagonal_only=True)
+            if ps.is_relativistic:
+                self.overlaps_lj = ps.pqn_beta.overlaps_lj(diagonal_only=True)
 
     @property
     def n_atoms(self) -> int:

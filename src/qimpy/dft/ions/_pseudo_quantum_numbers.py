@@ -201,12 +201,7 @@ class PseudoQuantumNumbers:
         """Pauli-matrix expectation values in orbital basis (spinorial case only).
         The result is 4 x n_tot_s x n_tot_s for relativistic pseudopotentials,
         and 4 x (2 n_tot) x (2 n_tot) for non-relativistic pseudopotentials,
-        where the first dimension of 4 corresponds to identity, x, y and z.
-
-        If `transform_spin_angle` is False, then this returns the expectation value
-        in the projector x n_spinor basis (and not the (j, mj) basis) regardless of
-        whether the pseudopotential is relativistic, which is used when the spin
-        angle transform is handled separately, e.g., during density augmentation."""
+        where the first dimension of 4 corresponds to identity, x, y and z."""
         # Repeat Pauli matrices for each (n, l, m):
         eye_nlm = torch.eye(self.n_tot, device=self.n.device)
         pauli = torch.einsum("ab, dsS -> dasbS", eye_nlm, self.PAULI())
