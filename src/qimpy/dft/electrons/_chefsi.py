@@ -110,7 +110,7 @@ class CheFSI(Davidson):
             self._report(inner_loop=inner_loop)
 
         KEmax = el.basis.ke_cutoff  # upper bound on KE
-        PEmax = globalreduce.max((~el.n_tilde.grad).data, el.comm)
+        PEmax = globalreduce.max((~el.n_tilde.grad).data, el.group)
         n_eigs_done = 0
 
         # Subspace iteration loop:
@@ -132,22 +132,20 @@ class CheFSI(Davidson):
             b_mid = 0.5 * (b_lo + b_up).view(b_shape)
             sigma = b_diff / (b_mid - a_lo.view(b_shape))
             tau = 2 / sigma
-            Y = (HC - b_mid * el.C) * (sigma / b_diff)
+            Y = (HC.overlap_inv() - b_mid * el.C) * (sigma / b_diff)
             del HC
             Y = Y.split_bands().wait()  # start of operations in band-split mode
             el.C = el.C.split_bands().wait()
             for i_filter in range(self.filter_order - 2):
                 sigma_new = 1 / (tau - sigma)
-                HY = el.hamiltonian(Y)
-                Yt = HY - b_mid * Y
+                Yt = el.hamiltonian(Y).overlap_inv() - b_mid * Y
                 Yt *= 2 * sigma_new / b_diff
                 Yt -= (sigma * sigma_new) * el.C
                 # cycle for next filter iteration:
-                HC = HY
                 el.C = Y
                 Y = Yt
                 sigma = sigma_new
-            del Yt, HY, HC, el.C
+            del Yt, el.C
             # Note that Y is the highest order of the filter above
             # Return to basis-split mode here
             HC = el.hamiltonian(Y).split_basis().wait()

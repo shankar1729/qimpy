@@ -255,7 +255,6 @@ class Electrons(TreeNode):
         # Check for unsupported feature combinations:
         if ions.has_ultrasoft:
             unsupported = {
-                "CheFSI": isinstance(self.diagonalize, CheFSI),
                 "DFT+U": bool(self.xc.plus_U),
                 "meta-GGA functionals": self.xc.need_tau,
             }
