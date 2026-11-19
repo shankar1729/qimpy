@@ -203,14 +203,26 @@ class PseudoQuantumNumbers:
         and 4 x (2 n_tot) x (2 n_tot) for non-relativistic pseudopotentials,
         where the first dimension of 4 corresponds to identity, x, y and z."""
         # Repeat Pauli matrices for each (n, l, m):
-        eye_nlm = torch.eye(self.n_tot, device=self.n.device)
+        n_nlm = self.n_tot_s // 2 if self.is_relativistic else self.n_tot
+        eye_nlm = torch.eye(n_nlm, device=self.n.device)
         pauli = torch.einsum("ab, dsS -> dasbS", eye_nlm, self.PAULI())
-        # Transform to spin-angle basis if needed:
+        pauli = pauli.flatten(3, 4).flatten(1, 2)
         if self.is_relativistic:
-            C = self.get_spin_angle_transform()
-            return torch.einsum("dasbS, asA, bSB -> dAB", pauli, C.conj(), C)
-        else:
-            return pauli.flatten(3, 4).flatten(1, 2)  # just combine as, bS indices
+            # Orbital ordering by n, l, j (can vary in pseudopotential):
+            order = (100 * self.ns + 10 * self.ls + self.j).argsort(stable=True)
+            # Transform to spin-angle basis if needed:
+            ls = rc.to_np(self.ls[order])
+            C = torch.zeros_like(pauli[0])
+            i_start = 0
+            while i_start < self.n_tot_s:
+                l = ls[i_start]
+                i_stop = i_start + 2 * (2 * l + 1)
+                assert np.all(l == ls[i_start:i_stop])
+                C_block = rc.from_np(get_Ylm_to_spin_angle(l).T.conj())
+                C[order[i_start:i_stop], i_start:i_stop] = C_block
+                i_start = i_stop
+            pauli = C @ pauli @ C.T.conj()
+        return pauli
 
     @staticmethod
     @cache
