@@ -1,5 +1,5 @@
 from __future__ import annotations
-from functools import cache
+from functools import cache, cached_property
 
 import numpy as np
 import torch
@@ -87,6 +87,15 @@ class Augmentation:
                     q_spin_nlms = ps.pqn_beta.expand_m_s(ps.q, self.n_spinor, "q_spin")
                     block = self.q_spin[:, proj_slice, proj_slice].view((3,) + shape)
                     block.diagonal(dim1=1, dim2=3).copy_(q_spin_nlms[..., None])
+
+    @cached_property
+    def q_inv(self) -> torch.Tensor:
+        """Augmentation matrix for inverse overlap operator."""
+        # Invert I + beta q dagger(beta) using the Woodbury identity:
+        beta = self.ions.beta
+        Q = self.q_all
+        I = torch.eye(Q.shape[0], dtype=Q.dtype, device=rc.device)
+        return -torch.linalg.inv(I + Q @ (beta ^ beta).wait()) @ Q
 
     def _get_harmonics(self, prime: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
         """Get harmonics sorted by even and odd, and with i^(L - L%2) sign."""
