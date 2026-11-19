@@ -145,6 +145,20 @@ def _overlap(self: electrons.Wavefunction) -> electrons.Wavefunction:
     return self + beta @ (augmentation.q_all @ self.proj)
 
 
+def _overlap_inv(self: electrons.Wavefunction) -> electrons.Wavefunction:
+    """Return wavefunction with inverse overlap operator applied.
+    This is identity and returns a view of the original wavefunction
+    for norm-conserving pseudopotentials, but includes augmentation terms
+    for ultrasoft and PAW pseudopotentials"""
+    ions = self.basis.ions
+    if (augmentation := ions.augmentation) is None:
+        return self  # norm-conserving: O = 1
+    # Augment overlap:
+    beta = ions.beta_full if self.band_division else ions.beta
+    assert beta is not None
+    return self + beta @ (augmentation.q_inv @ self.proj)
+
+
 @stopwatch(name="Wavefunction.matmul")
 def _matmul(self: electrons.Wavefunction, mat: torch.Tensor) -> electrons.Wavefunction:
     """Compute a matrix transformation (such as rotation) along the band

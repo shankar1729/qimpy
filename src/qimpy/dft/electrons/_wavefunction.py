@@ -14,7 +14,15 @@ from ._wavefunction_init import _randomize, _randomize_selected
 from ._wavefunction_split import _split_bands, _split_basis
 from ._wavefunction_arithmetic import _mul, _imul, _add, _iadd, _sub, _isub
 from ._wavefunction_slice import _getitem, _setitem, _cat
-from ._wavefunction_dot import _norm, _dot, _dot_O, _overlap, _matmul, _orthonormalize
+from ._wavefunction_dot import (
+    _norm,
+    _dot,
+    _dot_O,
+    _overlap,
+    _overlap_inv,
+    _matmul,
+    _orthonormalize,
+)
 
 
 class Wavefunction(Gradable["Wavefunction"]):
@@ -291,6 +299,7 @@ class Wavefunction(Gradable["Wavefunction"]):
     dot = _dot  # bare dot product
     __xor__ = _dot  # convenient shorthand C1 ^ C2 for dot product
     overlap = _overlap  # apply overlap operator to wavefunction
+    overlap_inv = _overlap_inv  # apply inverse overlap operator to wavefunction
     matmul = _matmul  # transform by a matrix in band space
     __matmul__ = _matmul  # shorthand C @ M for matmul
     orthonormalize = _orthonormalize

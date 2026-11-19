@@ -6,7 +6,7 @@ from qimpy.math import dagger
 
 def test_overlap(system_Si) -> None:
     """Check Hermitian, positive definite, dot_O agrees with applying O,
-    and that orthonormalize works with an augmented overlap."""
+    orthonormalize works with an augmented overlap, and that overlap_inverse works."""
     el = system_Si.electrons
     assert el.basis.ions.augmentation is not None
     C = el.C.clone()
@@ -16,6 +16,9 @@ def test_overlap(system_Si) -> None:
     assert torch.allclose(O12, dagger(C2.dot_O(C1).wait()))
     assert torch.allclose(O12, (C1 ^ C2.overlap()).wait())
     assert torch.linalg.eigvalsh(C.dot_O(C).wait()).min() > 0.0
+    # Inverse:
+    Oinv_OC = C.overlap().overlap_inv()
+    assert torch.allclose(C.coeff, Oinv_OC.coeff)
     # Orthonormalization with augmented overlap:
     C_ortho = C.orthonormalize()
     eye = torch.eye(C.n_bands(), device=rc.device, dtype=O12.dtype)
